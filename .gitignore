@@ -1,0 +1,30 @@
+.env
+
+# Runtime state
+.tasks/
+.worktrees/
+.mailboxes/
+.memory/
+.transcripts/
+.task_outputs/
+.scheduled_tasks.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
