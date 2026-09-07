@@ -28,4 +28,8 @@ def build_provider(settings: Settings) -> Provider:
         from nexus_agent.providers.openai_compatible import OpenAICompatibleProvider
 
         return OpenAICompatibleProvider(settings)
+    if name == "openai_responses":
+        from nexus_agent.providers.openai_responses import OpenAIResponsesProvider
+
+        return OpenAIResponsesProvider(settings)
     raise ValueError(f"Unsupported provider '{settings.provider}'")

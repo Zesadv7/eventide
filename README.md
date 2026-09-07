@@ -11,10 +11,10 @@ Nexus Agent 是一个可运行、可评测、可追踪、可演示的 coding-age
 ## 能力
 
 - `AgentRuntime.run`：async-first agent loop；同一 session 串行，不同 session 并发且历史隔离。
-- `Provider.complete`：Anthropic Messages 与 OpenAI-compatible 适配器；国内兼容服务仅配置 URL、model、key。
+- `Provider.complete`：Anthropic Messages、OpenAI-compatible Chat Completions 与 OpenAI Responses API 三类适配器。
 - `ToolExecutor.execute`：所有入口共享 `ALLOW / ASK / DENY`；越界访问硬拒绝，危险操作需要一次性审批。
 - MCP：官方 Python SDK，支持 stdio 和 Streamable HTTP，统一命名 `mcp__server__tool`，环境变量显式白名单。
-- Trace：SQLite 保存 session/run/event，可导出 JSONL；密钥脱敏，大结果截断。
+- Trace/配置：SQLite 保存 session/run/event，可导出 JSONL；模型 Key 使用独立主密钥加密持久化。
 - Eval：scripted provider 离线确定性执行；live 模式复用真实 provider。
 - API/UI：FastAPI、SSE 时间线、审批按钮和运行指标；原生 HTML/CSS/JS，无 npm。
 
@@ -25,7 +25,8 @@ flowchart LR
     U[CLI / Web / API] --> R[AgentRuntime]
     R --> P[Provider boundary]
     P --> A[Anthropic]
-    P --> O[OpenAI-compatible]
+    P --> O[OpenAI Chat Completions]
+    P --> V[OpenAI Responses]
     R --> X[ToolExecutor]
     X --> G{PolicyDecision}
     G -->|ALLOW| T[Built-in tools]
@@ -62,9 +63,9 @@ nexus-agent chat
 nexus-agent eval evals/smoke.yaml --live
 ```
 
-也可以在 Web 控制台右上角点击 `MODEL / CONFIGURE`，直接填写 provider、模型、Base URL 和 API Key。Web 配置只驻留当前服务进程，不写入浏览器存储、SQLite 或项目文件，重启后自动清除。
+也可以在 Web 控制台右上角点击“模型 / 需要配置”，直接填写 Provider、模型、Base URL 和 API Key。点击“检查连接”会执行一次最小真实推理并显示延迟；点击“保存并应用”后，非密钥配置和加密后的 Key 写入 `.nexus/nexus.db`，服务重启后自动恢复。主密钥优先读取 `NEXUS_SECRET_KEY`，否则首次保存时生成 `.nexus/secret.key`；两者均默认不提交 Git。
 
-`openai_compatible` 面向实现 Chat Completions tool calling 的兼容服务；不要把 API Key 写进 `mcp.json`、命令行或提交记录。
+`openai_compatible` 面向实现 Chat Completions tool calling 的兼容服务；`openai_responses` 使用 Responses API，并在 `store=False` 模式下回传加密 reasoning item 以支持推理模型的多步工具调用。不要把 API Key 写进 `mcp.json`、命令行或提交记录。
 
 ## MCP
 
@@ -80,23 +81,24 @@ nexus-agent run "调用 demo MCP echo 工具"
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `POST` | `/api/sessions` | 创建隔离会话 |
-| `GET/PUT` | `/api/config/provider` | 查询或配置进程内模型连接（不回显 Key） |
+| `GET/PUT/DELETE` | `/api/config/provider` | 查询、加密保存或恢复模型配置（不回显 Key） |
+| `POST` | `/api/config/provider/test` | 用当前表单配置执行最小推理并返回连接状态与延迟 |
 | `POST` | `/api/sessions/{id}/runs` | 异步提交任务 |
 | `GET` | `/api/runs/{id}` | 查询状态和指标 |
 | `GET` | `/api/runs/{id}/events` | SSE 事件流 |
 | `POST` | `/api/runs/{id}/approvals/{approval_id}` | 批准/拒绝危险操作 |
 | `GET` | `/healthz` | 健康检查 |
 
-![Web 模型 API 配置面板](docs/assets/model-config.png)
+Web UI 已通过真实浏览器复验；连接页会显示当前配置来源、密钥状态以及“检查连接”的端到端延迟。包含真实模型输出的截图与演示 GIF 将随 live 验收报告一并录制，避免用模拟结果冒充线上能力。
 
 ## 已验证指标
 
-以下是 2026-09-07 在 Windows、Python 3.14 本机的离线结果；延迟只用于本地回归，不代表线上模型性能。
+以下是 2026-09-08 在 Windows、Python 3.14 本机的离线结果；延迟只用于本地回归，不代表线上模型性能。
 
 | 指标 | 结果 |
 |---|---:|
-| 测试 | 68 passed |
-| 生产 Runtime 覆盖率 | 87.49% |
+| 测试 | 80 passed |
+| 生产 Runtime 覆盖率 | 87.21% |
 | 离线评测 | 10 / 10 |
 | 平均用例延迟 | 49.40 ms |
 | 工具成功率 | 85.71% |
@@ -107,7 +109,7 @@ nexus-agent run "调用 demo MCP echo 工具"
 ## 设计边界
 
 - 本地 shell 是能力边界，不是安全沙箱；本期不宣称 Docker 级隔离。
-- API 无账号系统，只适合本机或受信网络。
+- API 无账号系统；模型配置写入、清除和连接检查仅允许本机回环请求。
 - SQLite 适合单机演示，不是分布式队列。
 - live CLI/Web 验收需要用户提供一个支持工具调用的真实 Key；离线交付不依赖它。
 

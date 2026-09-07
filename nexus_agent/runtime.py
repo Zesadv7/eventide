@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 from collections import defaultdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -18,6 +19,7 @@ from nexus_agent.models import ModelRequest, ModelResponse, RunRequest, RunResul
 from nexus_agent.observability import TraceStore
 from nexus_agent.policy import PolicyEngine
 from nexus_agent.providers import Provider, ProviderError, build_provider
+from nexus_agent.secrets import SecretBox, SecretKeyError
 from nexus_agent.tools.registry import BUILTIN_HANDLERS, BUILTIN_TOOLS
 
 
@@ -37,9 +39,13 @@ class AgentRuntime:
         handlers: dict[str, Any] | None = None,
     ):
         self.settings = settings or Settings.from_env()
+        self._startup_settings = self.settings
         self.provider = provider
         self._owns_store = store is None
         self.store = store or TraceStore(self.settings.state_dir / "nexus.db")
+        self._secret_box = SecretBox(self.settings.state_dir)
+        self._provider_secret_error: str | None = None
+        self._load_persisted_provider()
         self.tools = list(tools or BUILTIN_TOOLS)
         self.handlers = dict(handlers or BUILTIN_HANDLERS)
         self.policy = PolicyEngine()
@@ -85,6 +91,51 @@ class AgentRuntime:
             if inspect.isawaitable(result):
                 await result
 
+    def _load_persisted_provider(self) -> None:
+        record = self.store.get_provider_config()
+        if not record:
+            return
+        api_key = self._startup_settings.api_key
+        encrypted = record.get("api_key_ciphertext")
+        self._provider_secret_error = None
+        if encrypted:
+            try:
+                api_key = self._secret_box.decrypt(str(encrypted))
+            except SecretKeyError as exc:
+                api_key = None
+                self._provider_secret_error = str(exc)
+        self.settings = replace(
+            self._startup_settings,
+            provider=str(record["provider"]),
+            base_url=str(record["base_url"]) if record["base_url"] else None,
+            model=str(record["model"]),
+            api_key=api_key,
+        )
+
+    def provider_config_status(self) -> dict[str, Any]:
+        record = self.store.get_provider_config()
+        encrypted = bool(record and record.get("api_key_ciphertext"))
+        if self._provider_secret_error:
+            key_status = "decrypt_error"
+            key_source = "decrypt_error"
+        elif self.settings.api_key:
+            key_status = "configured"
+            key_source = "sqlite_encrypted" if encrypted else "environment"
+        else:
+            key_status = "missing"
+            key_source = "none"
+        return {
+            "provider": self.settings.provider,
+            "base_url": self.settings.base_url,
+            "model": self.settings.model,
+            "api_key_configured": key_status == "configured",
+            "api_key_status": key_status,
+            "api_key_source": key_source,
+            "persistence": "sqlite_encrypted" if record else "environment",
+            "updated_at": record.get("updated_at") if record else None,
+            "configuration_error": self._provider_secret_error,
+        }
+
     async def configure_provider(
         self,
         *,
@@ -92,28 +143,91 @@ class AgentRuntime:
         api_key: str | None,
         base_url: str | None,
         model: str,
+        persist: bool = False,
+        clear_api_key: bool = False,
     ) -> None:
-        """Replace live provider settings without persisting the API key."""
+        """Replace live provider settings and optionally persist an encrypted credential."""
         normalized = provider.strip().lower().replace("-", "_")
-        if normalized not in {"anthropic", "openai_compatible"}:
+        if normalized not in {"anthropic", "openai_compatible", "openai_responses"}:
             raise ValueError(f"Unsupported provider '{provider}'")
         if not model.strip():
             raise ValueError("Model cannot be empty")
+        normalized_url = base_url.strip() if base_url else None
+        selected_key = api_key.strip() if api_key and api_key.strip() else self.settings.api_key
+        if persist:
+            current = self.store.get_provider_config() or {}
+            encrypted = current.get("api_key_ciphertext")
+            if self._provider_secret_error and encrypted and not api_key and not clear_api_key:
+                raise SecretKeyError(
+                    "已保存的 API Key 无法解密；请输入新密钥覆盖，或先清除旧密钥"
+                )
+            if clear_api_key:
+                encrypted = None
+                selected_key = self._startup_settings.api_key
+            elif api_key and api_key.strip():
+                encrypted = self._secret_box.encrypt(api_key.strip())
+            self.store.save_provider_config(
+                provider=normalized,
+                base_url=normalized_url,
+                model=model.strip(),
+                api_key_ciphertext=encrypted,
+            )
         await self._close_provider()
-        self.settings = Settings(
-            workdir=self.settings.workdir,
-            state_dir=self.settings.state_dir,
+        self.settings = replace(
+            self.settings,
             provider=normalized,
-            api_key=api_key or self.settings.api_key,
+            api_key=selected_key,
+            base_url=normalized_url,
+            model=model.strip(),
+        )
+        self._provider_secret_error = None
+        self.provider = None
+
+    async def reset_provider_configuration(self) -> None:
+        await self._close_provider()
+        self.store.delete_provider_config()
+        self.settings = self._startup_settings
+        self._provider_secret_error = None
+        self.provider = None
+
+    async def probe_provider(
+        self,
+        *,
+        provider: str,
+        api_key: str | None,
+        base_url: str | None,
+        model: str,
+    ) -> ModelResponse:
+        normalized = provider.strip().lower().replace("-", "_")
+        if normalized not in {"anthropic", "openai_compatible", "openai_responses"}:
+            raise ValueError(f"Unsupported provider '{provider}'")
+        selected_key = api_key.strip() if api_key and api_key.strip() else self.settings.api_key
+        if not selected_key and self._provider_secret_error:
+            raise SecretKeyError(self._provider_secret_error)
+        probe_settings = replace(
+            self.settings,
+            provider=normalized,
+            api_key=selected_key,
             base_url=base_url.strip() if base_url else None,
             model=model.strip(),
-            fallback_model=self.settings.fallback_model,
-            max_tokens=self.settings.max_tokens,
-            max_steps=self.settings.max_steps,
-            context_limit=self.settings.context_limit,
-            approval_timeout=self.settings.approval_timeout,
         )
-        self.provider = None
+        probe = build_provider(probe_settings)
+        try:
+            return await probe.complete(
+                ModelRequest(
+                    system="你是连接检查助手。",
+                    messages=[{"role": "user", "content": "请只回复：连接成功"}],
+                    tools=[],
+                    model=probe_settings.model,
+                    max_tokens=32,
+                )
+            )
+        finally:
+            closer = getattr(probe, "close", None) or getattr(probe, "aclose", None)
+            if closer:
+                result = closer()
+                if inspect.isawaitable(result):
+                    await result
 
     async def _emit(
         self, run_id: str, event_type: str, payload: dict[str, Any], sink: EventSink | None

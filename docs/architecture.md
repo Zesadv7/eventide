@@ -61,10 +61,19 @@ sequenceDiagram
 
 - Anthropic adapter 把统一消息直接映射到 Messages API。
 - OpenAI-compatible adapter 把统一的 `tool_use/tool_result` 往返转换为 Chat Completions tool calls。
+- OpenAI Responses adapter 使用 `store=False`，转换函数调用，并保存加密 reasoning item 供下一轮无状态回放；切换到其他 Provider 时忽略该私有状态。
 - 429/5xx 等可恢复错误转成带 `retryable` 标记的 `ProviderError`，Runtime 指数退避，最多三次。
 - 客户端惰性创建；帮助、单测和离线评测不需要 Key。
 
 Provider 不负责策略、持久化或重试循环，这使模型 SDK 的变化不会扩散到执行层。
+
+## 模型配置与密钥
+
+- `provider_config` 单行表保存 Provider、Base URL、模型、Fernet 密文和更新时间。
+- 主密钥优先来自 `NEXUS_SECRET_KEY`；没有时生成 `.nexus/secret.key`，数据库和主密钥均默认忽略提交。
+- 持久化配置覆盖普通模型环境变量；数据库无密钥时回退到环境变量 Key。
+- API 和 UI 从不回传明文或密文；主密钥不匹配时显示可恢复错误，不降级明文。
+- 配置写入、清除和真实连接检查仅接受回环请求；连接检查使用临时 Provider，不修改正在运行的 Runtime。
 
 ## MCP 生命周期
 

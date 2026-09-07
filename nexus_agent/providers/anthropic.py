@@ -9,6 +9,20 @@ from nexus_agent.models import ModelRequest, ModelResponse, ToolCall
 from nexus_agent.providers.base import ProviderError
 
 
+def _without_provider_state(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            content = [
+                block
+                for block in content
+                if not isinstance(block, dict) or block.get("type") != "provider_state"
+            ]
+        cleaned.append({**message, "content": content})
+    return cleaned
+
+
 class AnthropicProvider:
     def __init__(self, settings: Settings):
         try:
@@ -20,12 +34,15 @@ class AnthropicProvider:
             base_url=settings.base_url,
         )
 
+    async def close(self) -> None:
+        await self._client.close()
+
     async def complete(self, request: ModelRequest) -> ModelResponse:
         try:
             response = await self._client.messages.create(
                 model=request.model,
                 system=request.system,
-                messages=cast(Any, request.messages),
+                messages=cast(Any, _without_provider_state(request.messages)),
                 tools=cast(Any, request.tools),
                 max_tokens=request.max_tokens,
             )

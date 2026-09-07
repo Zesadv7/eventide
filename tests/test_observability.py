@@ -4,9 +4,17 @@ from nexus_agent.observability import TraceStore, redact
 
 
 def test_redact_secrets_and_large_values():
-    result = redact({"api_key": "secret", "nested": {"token": "abc"}, "text": "x" * 5000})
+    result = redact(
+        {
+            "api_key": "secret",
+            "nested": {"token": "abc"},
+            "usage": {"input_tokens": 12, "output_tokens": 3},
+            "text": "x" * 5000,
+        }
+    )
     assert result["api_key"] == "[REDACTED]"
     assert result["nested"]["token"] == "[REDACTED]"
+    assert result["usage"] == {"input_tokens": 12, "output_tokens": 3}
     assert "truncated" in result["text"]
 
 

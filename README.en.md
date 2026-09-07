@@ -11,10 +11,10 @@ The project originates from shareAI Lab's MIT-licensed [learn-claude-code](https
 ## Capabilities
 
 - `AgentRuntime.run`: async-first loop; one session is serialized while separate sessions run concurrently with isolated history.
-- `Provider.complete`: Anthropic Messages and OpenAI-compatible adapters. Compatible domestic services need only URL, model, and key configuration.
+- `Provider.complete`: adapters for Anthropic Messages, OpenAI-compatible Chat Completions, and the OpenAI Responses API.
 - `ToolExecutor.execute`: every entry point shares `ALLOW / ASK / DENY`; workspace escape is denied and risky actions need one-time approval.
 - MCP: official Python SDK, stdio and Streamable HTTP, `mcp__server__tool` names, and an explicit environment allowlist.
-- Tracing: sessions, runs, and events in SQLite with JSONL export, secret redaction, and result truncation.
+- Tracing/config: sessions, runs, and events in SQLite with JSONL export; model keys are encrypted at rest with a separate installation key.
 - Evaluation: deterministic offline scripted provider and opt-in live mode.
 - API/UI: FastAPI, SSE timeline, approval controls, and run metrics in native HTML/CSS/JS with no npm dependency.
 
@@ -25,7 +25,8 @@ flowchart LR
     U[CLI / Web / API] --> R[AgentRuntime]
     R --> P[Provider boundary]
     P --> A[Anthropic]
-    P --> O[OpenAI-compatible]
+    P --> O[OpenAI Chat Completions]
+    P --> V[OpenAI Responses]
     R --> X[ToolExecutor]
     X --> G{PolicyDecision}
     G -->|ALLOW| T[Built-in tools]
@@ -60,9 +61,9 @@ nexus-agent chat
 nexus-agent eval evals/smoke.yaml --live
 ```
 
-Alternatively, click `MODEL / CONFIGURE` in the Web console and enter the provider, model, base URL, and API key. Web configuration lives only in the current service process; it is never written to browser storage, SQLite, or project files and disappears on restart.
+Alternatively, open the model panel in the Web console. **Check connection** performs one minimal live inference and reports latency. **Save and apply** stores non-secret fields plus the encrypted API key in `.nexus/nexus.db`, and restores them after restart. The installation key comes from `NEXUS_SECRET_KEY` or is generated as `.nexus/secret.key`; both locations are ignored by Git.
 
-`openai_compatible` targets providers implementing Chat Completions tool calling. Never place an API key in `mcp.json`, a command line, or version control.
+`openai_compatible` targets Chat Completions tool calling. `openai_responses` uses the Responses API and carries encrypted reasoning items between `store=False` tool-calling turns. Never place an API key in `mcp.json`, a command line, or version control.
 
 ## MCP
 
@@ -78,23 +79,24 @@ The example starts a real Python subprocess; `mcp.json` is ignored by default. S
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/sessions` | Create an isolated session |
-| `GET/PUT` | `/api/config/provider` | Read or configure the in-process model connection; never echoes the key |
+| `GET/PUT/DELETE` | `/api/config/provider` | Read, encrypt and save, or reset model configuration; never echoes the key |
+| `POST` | `/api/config/provider/test` | Run a minimal inference with the candidate configuration and report latency |
 | `POST` | `/api/sessions/{id}/runs` | Submit an asynchronous run |
 | `GET` | `/api/runs/{id}` | Read status and metrics |
 | `GET` | `/api/runs/{id}/events` | Stream SSE events |
 | `POST` | `/api/runs/{id}/approvals/{approval_id}` | Approve or reject a risky action |
 | `GET` | `/healthz` | Health check |
 
-![Web model API configuration panel](docs/assets/model-config.png)
+The Web UI has been verified in a real browser. The connection panel reports the active configuration source, key status, and end-to-end latency from **Test connection**. Screenshots and a demo GIF containing real model output will be recorded with the live acceptance report rather than presenting scripted output as a live result.
 
 ## Verified metrics
 
-Offline results measured on 2026-09-07 with Windows and Python 3.14. Latency is a local regression signal, not a live-model benchmark.
+Offline results measured on 2026-09-08 with Windows and Python 3.14. Latency is a local regression signal, not a live-model benchmark.
 
 | Metric | Result |
 |---|---:|
-| Tests | 68 passed |
-| Production-runtime coverage | 87.49% |
+| Tests | 80 passed |
+| Production-runtime coverage | 87.21% |
 | Offline evaluation | 10 / 10 |
 | Mean case latency | 49.40 ms |
 | Tool success rate | 85.71% |
@@ -105,7 +107,7 @@ Expected safety blocks are excluded from the tool-success denominator; the only 
 ## Design boundaries
 
 - The local shell is a capability boundary, not a security sandbox; this release makes no Docker-sandbox claim.
-- The API has no account system and is intended for local or trusted-network use.
+- The API has no account system; provider save/reset/probe operations accept loopback requests only.
 - SQLite is suitable for a single-node demo, not a distributed queue.
 - Live CLI/Web acceptance requires a real tool-capable model key supplied by the user; offline delivery does not.
 

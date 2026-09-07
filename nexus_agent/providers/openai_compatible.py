@@ -73,6 +73,9 @@ class OpenAICompatibleProvider:
             raise RuntimeError("The openai package is required for OpenAI-compatible use") from exc
         self._client = AsyncOpenAI(api_key=settings.require_api_key(), base_url=settings.base_url)
 
+    async def close(self) -> None:
+        await self._client.close()
+
     async def complete(self, request: ModelRequest) -> ModelResponse:
         try:
             response = await self._client.chat.completions.create(

@@ -11,12 +11,30 @@ from pathlib import Path
 from typing import Any
 
 _SECRET_KEY = re.compile(r"(api[_-]?key|authorization|token|secret|password)", re.I)
+_USAGE_KEYS = frozenset(
+    {
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "cached_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    }
+)
+
+
+def _is_secret_key(key: Any) -> bool:
+    normalized = str(key).lower().replace("-", "_")
+    return normalized not in _USAGE_KEYS and bool(_SECRET_KEY.search(normalized))
 
 
 def redact(value: Any, *, max_text: int = 4_000) -> Any:
     if isinstance(value, dict):
+        nested_limit = 200_000 if value.get("type") == "provider_state" else max_text
         return {
-            key: "[REDACTED]" if _SECRET_KEY.search(str(key)) else redact(item, max_text=max_text)
+            key: "[REDACTED]"
+            if _is_secret_key(key)
+            else redact(item, max_text=nested_limit)
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -69,7 +87,49 @@ class TraceStore:
                     type TEXT NOT NULL, payload_json TEXT NOT NULL,
                     PRIMARY KEY (run_id, seq)
                 );
+                CREATE TABLE IF NOT EXISTS provider_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    provider TEXT NOT NULL,
+                    base_url TEXT,
+                    model TEXT NOT NULL,
+                    api_key_ciphertext TEXT,
+                    updated_at REAL NOT NULL
+                );
             """)
+
+    def get_provider_config(self) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT provider, base_url, model, api_key_ciphertext, updated_at "
+                "FROM provider_config WHERE id=1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    def save_provider_config(
+        self,
+        *,
+        provider: str,
+        base_url: str | None,
+        model: str,
+        api_key_ciphertext: str | None,
+    ) -> dict[str, Any]:
+        updated_at = time.time()
+        with self._lock, self._connection:
+            self._connection.execute(
+                "INSERT INTO provider_config"
+                "(id, provider, base_url, model, api_key_ciphertext, updated_at) "
+                "VALUES (1, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, "
+                "base_url=excluded.base_url, model=excluded.model, "
+                "api_key_ciphertext=excluded.api_key_ciphertext, "
+                "updated_at=excluded.updated_at",
+                (provider, base_url, model, api_key_ciphertext, updated_at),
+            )
+        return self.get_provider_config() or {}
+
+    def delete_provider_config(self) -> None:
+        with self._lock, self._connection:
+            self._connection.execute("DELETE FROM provider_config WHERE id=1")
 
     def create_session(self, session_id: str) -> None:
         now = time.time()

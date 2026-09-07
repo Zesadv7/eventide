@@ -31,9 +31,18 @@ class ModelResponse:
     tool_calls: tuple[ToolCall, ...] = ()
     stop_reason: str = "end_turn"
     usage: dict[str, int] = field(default_factory=dict)
+    provider_items: tuple[dict[str, Any], ...] = ()
 
     def content_blocks(self) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
+        if self.provider_items:
+            blocks.append(
+                {
+                    "type": "provider_state",
+                    "provider": "openai_responses",
+                    "items": list(self.provider_items),
+                }
+            )
         if self.text:
             blocks.append({"type": "text", "text": self.text})
         blocks.extend(call.as_block() for call in self.tool_calls)

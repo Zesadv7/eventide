@@ -1,7 +1,7 @@
 # Nexus Agent 应用面与技术演进说明
 
 > 文档版本：v0.2  
-> 更新时间：2026-09-07  
+> 更新时间：2026-09-08
 > 适用读者：Agent 工程师、技术面试官、项目维护者和希望基于本项目继续开发的学习者
 
 ## 1. 文档目的
@@ -87,10 +87,11 @@ Nexus 使用官方 MCP Python SDK，可作为 MCP client/host：
 
 ### 3.4 国内兼容模型接入与横向评测
 
-Nexus 提供两类 provider adapter：
+Nexus 提供三类 provider adapter：
 
 - Anthropic Messages；
 - OpenAI-compatible Chat Completions tool calling。
+- OpenAI Responses API，包括 `store=False` 下的加密 reasoning state 回放。
 
 国内模型服务只要实现相应兼容协议，原则上可以通过以下配置接入，而不需要在 Runtime 内增加厂商分支：
 
@@ -200,7 +201,7 @@ web/
 |---|---|---|---|
 | 初始化 | import 时创建 Anthropic 客户端 | Settings 与客户端惰性初始化 | `--help`、测试和离线 eval 不再需要 Key |
 | Agent loop | 同步函数和全局锁 | async-first `AgentRuntime.run` | FastAPI 可直接 await，不阻塞整个服务 |
-| 模型边界 | 直接调用 Anthropic SDK | `Provider.complete` 统一协议 | 可替换 Anthropic/OpenAI-compatible provider |
+| 模型边界 | 直接调用 Anthropic SDK | `Provider.complete` 统一协议 | 可替换 Anthropic/Chat Completions/Responses provider |
 | 消息格式 | 与 Anthropic block 耦合 | `ModelRequest/ModelResponse/ToolCall` | 协议转换集中在 adapter 中 |
 | 工具执行 | handler 分散调用 | `ToolExecutor.execute` | CLI、API 和 Agent 共用一个执行边界 |
 | 命令执行 | Bash handler 直接启动宿主进程 | `CommandExecutor` Protocol + Local 实现 | 为 Docker/微虚拟机执行器预留替换点 |
@@ -323,10 +324,10 @@ flowchart TB
 
 | 验证项 | 当前结果 |
 |---|---:|
-| pytest | 68 passed |
-| 生产 Runtime 覆盖率 | 87.49% |
+| pytest | 80 passed |
+| 生产 Runtime 覆盖率 | 87.21% |
 | Ruff | passed |
-| mypy | 43 source files, no issues |
+| mypy | 45 source files, no issues |
 | offline smoke eval | 10 / 10 |
 | 平均离线用例耗时 | 49.40 ms |
 | 工具成功率 | 85.71% |

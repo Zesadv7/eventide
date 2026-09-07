@@ -5,6 +5,7 @@ import time
 from fastapi.testclient import TestClient
 
 from nexus_agent.api import create_app
+from nexus_agent.models import ModelResponse
 from nexus_agent.providers import ScriptedProvider
 from nexus_agent.runtime import AgentRuntime
 from tests.test_runtime import settings_for
@@ -25,7 +26,11 @@ def test_api_run_and_console(isolated_workspace):
     )
     with TestClient(create_app(runtime)) as client:
         assert client.get("/healthz").json()["status"] == "ok"
-        assert "NEXUS" in client.get("/").text
+        console = client.get("/").text
+        assert "NEXUS" in console
+        assert "配置大模型" in console
+        assert 'value="openai_responses"' in console
+        assert "检查连接" in console
         session = client.post("/api/sessions").json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
         assert accepted.status_code == 202
@@ -110,6 +115,107 @@ def test_api_configures_provider_without_echoing_secret(isolated_workspace):
         assert response.status_code == 200
         configured = response.json()
         assert configured["api_key_configured"] is True
-        assert configured["persistence"] == "process_memory_only"
+        assert configured["persistence"] == "sqlite_encrypted"
         assert "local-test-secret" not in response.text
         assert runtime.settings.api_key == "local-test-secret"
+        assert configured["api_key_status"] == "configured"
+        assert configured["api_key_source"] == "sqlite_encrypted"
+        assert configured["updated_at"] is not None
+
+
+def test_api_tests_candidate_config_and_returns_latency(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    captured = {}
+
+    async def probe_provider(**kwargs):
+        captured.update(kwargs)
+        return ModelResponse("连接成功")
+
+    runtime.probe_provider = probe_provider
+    with TestClient(create_app(runtime)) as client:
+        response = client.post(
+            "/api/config/provider/test",
+            json={
+                "provider": "openai_responses",
+                "api_key": "candidate-secret",
+                "base_url": "https://model.example/v1",
+                "model": "response-model",
+            },
+        )
+        result = response.json()
+        assert response.status_code == 200
+        assert result["success"] is True
+        assert result["provider"] == "openai_responses"
+        assert result["latency_ms"] >= 0
+        assert result["message"] == "连接成功"
+        assert captured["api_key"] == "candidate-secret"
+        assert "candidate-secret" not in response.text
+
+
+def test_api_probe_failure_is_stable_and_redacted(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+
+    async def probe_provider(**_kwargs):
+        raise RuntimeError("401 invalid api key: highly-secret-value")
+
+    runtime.probe_provider = probe_provider
+    with TestClient(create_app(runtime)) as client:
+        response = client.post(
+            "/api/config/provider/test",
+            json={"provider": "anthropic", "model": "model", "api_key": "highly-secret-value"},
+        )
+        result = response.json()
+        assert result["success"] is False
+        assert result["error_type"] == "authentication"
+        assert "highly-secret-value" not in response.text
+
+
+def test_api_clear_and_reset_persisted_config(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    with TestClient(create_app(runtime)) as client:
+        saved = client.put(
+            "/api/config/provider",
+            json={"provider": "openai_responses", "model": "model", "api_key": "secret"},
+        )
+        assert saved.status_code == 200
+        cleared = client.put(
+            "/api/config/provider",
+            json={
+                "provider": "openai_responses",
+                "model": "model",
+                "clear_api_key": True,
+            },
+        )
+        assert cleared.json()["api_key_configured"] is False
+        reset = client.delete("/api/config/provider")
+        assert reset.status_code == 200
+        assert reset.json()["persistence"] == "environment"
+
+
+def test_provider_mutations_are_loopback_only(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    with TestClient(create_app(runtime), client=("203.0.113.10", 50000)) as client:
+        body = {"provider": "anthropic", "model": "model", "api_key": "secret"}
+        assert client.put("/api/config/provider", json=body).status_code == 403
+        assert client.post("/api/config/provider/test", json=body).status_code == 403
+        assert client.delete("/api/config/provider").status_code == 403
+
+
+def test_provider_save_waits_for_active_run(isolated_workspace):
+    class SlowProvider:
+        async def complete(self, _request):
+            import asyncio
+
+            await asyncio.sleep(0.2)
+            return ModelResponse("done")
+
+    runtime = AgentRuntime(settings_for(isolated_workspace), SlowProvider())
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "wait"})
+        response = client.put(
+            "/api/config/provider",
+            json={"provider": "anthropic", "model": "model", "api_key": "secret"},
+        )
+        assert response.status_code == 409
+        wait_for_run(client, accepted.json()["run_id"])
