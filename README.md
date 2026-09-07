@@ -106,7 +106,7 @@ nexus-agent run "调用 demo MCP echo 工具"
 - SQLite 适合单机演示，不是分布式队列。
 - live CLI/Web 验收需要用户提供一个支持工具调用的真实 Key；离线交付不依赖它。
 
-深入阅读：[架构](docs/architecture.md) · [面试说明](docs/interview-guide.zh-CN.md) · [简历素材](docs/resume-notes.zh-CN.md) · [当前状态](docs/progress.md)。
+深入阅读：[应用面与技术演进](docs/nexus-applications-and-evolution.zh-CN.md) · [架构](docs/architecture.md) · [面试说明](docs/interview-guide.zh-CN.md) · [简历素材](docs/resume-notes.zh-CN.md) · [当前状态](docs/progress.md)。
 
 ## License
 

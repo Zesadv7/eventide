@@ -104,7 +104,7 @@ Expected safety blocks are excluded from the tool-success denominator; the only 
 - SQLite is suitable for a single-node demo, not a distributed queue.
 - Live CLI/Web acceptance requires a real tool-capable model key supplied by the user; offline delivery does not.
 
-Read more: [architecture](docs/architecture.md) · [interview guide (Chinese)](docs/interview-guide.zh-CN.md) · [resume notes (Chinese)](docs/resume-notes.zh-CN.md) · [status](docs/progress.md).
+Read more: [applications and evolution (Chinese)](docs/nexus-applications-and-evolution.zh-CN.md) · [architecture](docs/architecture.md) · [interview guide (Chinese)](docs/interview-guide.zh-CN.md) · [resume notes (Chinese)](docs/resume-notes.zh-CN.md) · [status](docs/progress.md).
 
 ## License
 
