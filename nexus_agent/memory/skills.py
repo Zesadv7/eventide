@@ -4,7 +4,6 @@ import yaml
 
 from nexus_agent.config import SKILLS_DIR
 
-
 SKILL_REGISTRY: dict[str, dict] = {}
 
 
@@ -47,8 +46,7 @@ def list_skills() -> str:
     if not SKILL_REGISTRY:
         return "(no skills found)"
     return "\n".join(
-        f"- {skill['name']}: {skill['description']}"
-        for skill in SKILL_REGISTRY.values()
+        f"- {skill['name']}: {skill['description']}" for skill in SKILL_REGISTRY.values()
     )
 
 

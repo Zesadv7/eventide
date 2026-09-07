@@ -8,6 +8,8 @@
 .transcripts/
 .task_outputs/
 .scheduled_tasks.json
+.nexus/
+mcp.json
 
 # Python
 __pycache__/

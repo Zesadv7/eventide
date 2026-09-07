@@ -1,12 +1,12 @@
 """Tests for the task graph."""
 
 from nexus_agent.tasks.store import (
-    create_task,
-    load_task,
-    list_tasks,
+    can_start,
     claim_task,
     complete_task,
-    can_start,
+    create_task,
+    list_tasks,
+    load_task,
 )
 
 

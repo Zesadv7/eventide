@@ -6,8 +6,7 @@ from pathlib import Path
 from nexus_agent.config import WORKDIR
 
 
-def run_bash(command: str, cwd: Path | None = None,
-             run_in_background: bool = False) -> str:
+def run_bash(command: str, cwd: Path | None = None, run_in_background: bool = False) -> str:
     """Run a shell command and return its output.
 
     The `run_in_background` flag is consumed by the dispatcher; direct calls

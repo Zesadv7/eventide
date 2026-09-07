@@ -1,0 +1,15 @@
+{
+  "servers": {
+    "demo": {
+      "transport": "stdio",
+      "command": "python",
+      "args": ["examples/mcp_echo_server.py"],
+      "env": []
+    },
+    "remote-example": {
+      "transport": "streamable-http",
+      "url": "https://example.com/mcp",
+      "headers": {}
+    }
+  }
+}

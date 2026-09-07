@@ -4,10 +4,10 @@ import time
 from types import SimpleNamespace
 
 from nexus_agent.scheduling.background import (
+    collect_background_results,
     is_slow_operation,
     should_run_background,
     start_background_task,
-    collect_background_results,
 )
 
 

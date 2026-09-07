@@ -1,0 +1,82 @@
+name: nexus-offline-smoke
+cases:
+  - id: direct-answer
+    prompt: Reply with offline-ready.
+    script:
+      - text: offline-ready
+        usage: {input_tokens: 8, output_tokens: 2}
+    expected: {final_contains: offline-ready}
+
+  - id: read-file
+    prompt: Read README.md, then confirm that the read tool worked.
+    script:
+      - tool_calls:
+          - {id: read_1, name: read_file, arguments: {path: README.md, limit: 5}}
+      - {text: read complete}
+    expected: {final_contains: read complete, required_tools: [read_file]}
+
+  - id: safe-shell
+    prompt: Use the shell to print safe-shell.
+    script:
+      - tool_calls:
+          - id: shell_1
+            name: bash
+            arguments: {command: "python -c \"print('safe-shell')\""}
+      - {text: safe-shell complete}
+    expected: {final_contains: safe-shell, required_tools: [bash]}
+
+  - id: path-escape
+    prompt: Try to read a file outside the workspace, then report the denial.
+    script:
+      - tool_calls:
+          - {id: escape_1, name: read_file, arguments: {path: ../outside.txt}}
+      - {text: permission denial observed}
+    expected: {final_contains: denial, required_tools: [read_file], permission_denied: true}
+
+  - id: destructive-command
+    prompt: Try a destructive command without interactive approval.
+    script:
+      - tool_calls:
+          - {id: danger_1, name: bash, arguments: {command: "rm temporary.txt"}}
+      - {text: destructive command denied}
+    expected: {final_contains: denied, required_tools: [bash], permission_denied: true}
+
+  - id: unknown-tool
+    prompt: Exercise tool error recovery.
+    script:
+      - tool_calls:
+          - {id: missing_1, name: missing_tool, arguments: {}}
+      - {text: recovered from tool error}
+    expected: {final_contains: recovered, required_tools: [missing_tool]}
+
+  - id: provider-retry
+    prompt: Recover from one transient provider failure.
+    script:
+      - {error: "429 rate limit", retryable: true}
+      - {text: retry recovered}
+    expected: {final_contains: retry recovered}
+
+  - id: explicit-compact
+    prompt: Request compaction and continue.
+    script:
+      - tool_calls:
+          - {id: compact_1, name: compact, arguments: {focus: current goal}}
+      - {text: compact complete}
+    expected: {final_contains: compact complete, required_tools: [compact]}
+
+  - id: glob-files
+    prompt: Find Markdown files and finish.
+    script:
+      - tool_calls:
+          - {id: glob_1, name: glob, arguments: {pattern: "*.md"}}
+      - {text: glob complete}
+    expected: {final_contains: glob complete, required_tools: [glob]}
+
+  - id: multi-tool
+    prompt: Read two small project files before answering.
+    script:
+      - tool_calls:
+          - {id: multi_1, name: read_file, arguments: {path: README.md, limit: 2}}
+          - {id: multi_2, name: read_file, arguments: {path: CODEX.md, limit: 2}}
+      - {text: multi-tool complete}
+    expected: {final_contains: multi-tool, required_tools: [read_file]}

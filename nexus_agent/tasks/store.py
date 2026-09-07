@@ -3,11 +3,10 @@
 import json
 import random
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from nexus_agent.config import TASKS_DIR
-
 
 TASKS_DIR.mkdir(exist_ok=True)
 
@@ -27,8 +26,7 @@ def _task_path(task_id: str) -> Path:
     return TASKS_DIR / f"{task_id}.json"
 
 
-def create_task(subject: str, description: str = "",
-                blocked_by: list[str] | None = None) -> Task:
+def create_task(subject: str, description: str = "", blocked_by: list[str] | None = None) -> Task:
     """Create a new pending task and persist it."""
     task = Task(
         id=f"task_{int(time.time())}_{random.randint(0, 9999):04d}",
@@ -51,10 +49,7 @@ def load_task(task_id: str) -> Task:
 
 
 def list_tasks() -> list[Task]:
-    return [
-        Task(**json.loads(path.read_text()))
-        for path in sorted(TASKS_DIR.glob("task_*.json"))
-    ]
+    return [Task(**json.loads(path.read_text())) for path in sorted(TASKS_DIR.glob("task_*.json"))]
 
 
 def get_task_json(task_id: str) -> str:
@@ -80,7 +75,8 @@ def claim_task(task_id: str, owner: str = "agent") -> str:
         return f"Task {task_id} already owned by {task.owner}"
     if not can_start(task_id):
         deps = [
-            d for d in task.blockedBy
+            d
+            for d in task.blockedBy
             if _task_path(d).exists() and load_task(d).status != "completed"
         ]
         missing = [d for d in task.blockedBy if not _task_path(d).exists()]
@@ -103,8 +99,7 @@ def complete_task(task_id: str) -> str:
     task.status = "completed"
     save_task(task)
     unblocked = [
-        t.subject for t in list_tasks()
-        if t.status == "pending" and t.blockedBy and can_start(t.id)
+        t.subject for t in list_tasks() if t.status == "pending" and t.blockedBy and can_start(t.id)
     ]
     msg = f"Completed {task.id} ({task.subject})"
     if unblocked:

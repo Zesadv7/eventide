@@ -1,60 +1,41 @@
-# Nexus Agent — Project Progress
+# 当前交付状态
 
-## Project Overview
+更新时间：2026-09-07。
 
-Nexus Agent is a modular, runnable Agent Harness extracted from `learn-claude-code/s20_comprehensive/code.py`.
-It keeps the original MIT license and attribution to shareAI Lab.
+## 已完成
 
-Repository: `e:\projects\nexus-agent`  
-Package name: `nexus_agent`  
-Python version required: `>=3.10`
+- 惰性配置与客户端初始化；`--help`、单测、离线 eval 无 Key 可运行。
+- async-first `AgentRuntime`、provider、tool executor 三个稳定边界。
+- Anthropic Messages 与 OpenAI-compatible provider。
+- 统一 `ALLOW / ASK / DENY` 权限、CLI/API 审批、超时拒绝。
+- 文件工具内生路径校验、agent 名称校验、worktree 基线提交检测。
+- 官方 MCP SDK 的 stdio 与 Streamable HTTP 生产路径；真实 stdio 子进程集成测试。
+- SQLite session/run/event、JSONL 导出、脱敏和截断。
+- scripted provider、10 用例 smoke eval、live eval 开关。
+- FastAPI 六个公开接口、SSE 和无 npm Web 控制台。
+- `pyproject.toml`、跨平台 `uv.lock`、Ruff、mypy、pytest、coverage、GitHub Actions。
+- 中文 README、同步英文 README、架构/面试/简历文档。
 
-## Completion Status
+## 本机验证
 
-### ✅ Done
+| 检查 | 结果 |
+|---|---|
+| Python | 3.14.2 / Windows |
+| pytest | 66 passed |
+| production runtime coverage | 87.47% |
+| Ruff | passed |
+| mypy | 43 source files, no issues |
+| offline eval | 10/10, mean 49.40 ms |
+| real MCP | stdio subprocess + local Streamable HTTP passed |
+| FastAPI | health/session/run/SSE/error paths passed |
 
-| Module | Files | Status |
-|---|---|---|
-| Project scaffold | `pyproject.toml`, `.gitignore`, `LICENSE`, `README.md` | ✅ |
-| Configuration | `nexus_agent/config.py` | ✅ |
-| Basic tools | `nexus_agent/tools/bash.py`, `filesystem.py`, `registry.py`, `built_ins.py`, `dispatch.py` | ✅ |
-| Task system | `nexus_agent/tasks/store.py` | ✅ |
-| Worktree isolation | `nexus_agent/tasks/worktree.py` | ✅ |
-| Hooks + permissions | `nexus_agent/hooks.py` | ✅ |
-| LLM client + recovery | `nexus_agent/llm.py` | ✅ |
-| Context compaction | `nexus_agent/context.py` | ✅ |
-| MessageBus | `nexus_agent/teams/bus.py` | ✅ |
-| Protocol state | `nexus_agent/teams/protocol.py` | ✅ |
-| Subagent | `nexus_agent/teams/subagent.py` | ✅ |
-| Teammate threads | `nexus_agent/teams/teammate.py` | ✅ |
-| Background tasks | `nexus_agent/scheduling/background.py` | ✅ |
-| Cron scheduler | `nexus_agent/scheduling/cron.py` | ✅ |
-| Skills | `nexus_agent/memory/skills.py` | ✅ |
-| Context memory | `nexus_agent/memory/context_memory.py` | ✅ |
-| MCP client | `nexus_agent/mcp/client.py` | ✅ |
-| Agent loop | `nexus_agent/agent.py` | ✅ |
-| Interactive CLI | `nexus_agent/cli.py` | ✅ |
-| Tests | `tests/test_*.py` (37 tests) | ✅ |
-| Documentation | `README.md`, `docs/architecture.md` | ✅ |
+## 尚需用户输入的验收
 
-### ✅ Verification Results
+- 使用用户提供的真实、支持工具调用的国内兼容 API Key，各完成一次 CLI 与 Web 对话。
+- 生成该真实运行的脱敏 trace 和 live eval 报告。
+- GitHub remote、push、公开发布和 CI 云端矩阵结果需用户明确授权后执行。
+- Web 空闲态实机截图已加入 README；CLI/Web 的 live 运行截图与演示 GIF 应在真实模型验收时录制，不用模拟输出冒充 live 结果。
 
-- `python -m pytest -q` → **37 passed**
-- `echo "q" | python -m nexus_agent` → starts and exits cleanly
-- `git log --oneline` → 3 commits, clean history
+## 指标口径
 
-## Known Limitations
-
-1. **No real API key configured yet.** `.env.example` exists but `.env` is not committed. The user must copy it and fill in `ANTHROPIC_API_KEY` + `MODEL_ID`.
-2. **MCP is mocked.** `connect_mcp` only supports `docs` and `deploy` mock servers. Real MCP server integration is a future extension.
-3. **Tests run in the project root.** Some tests write temporary files to the project root; they are cleaned up but could be improved to use isolated temp dirs.
-4. **No CI yet.** No GitHub Actions workflow.
-5. **No real subagent/teammate tests.** Tests mock the Anthropic client but do not exercise real multi-agent coordination end-to-end.
-6. **Windows line-ending warnings.** Git warns about LF → CRLF conversion; harmless but can be normalized with `git config core.autocrlf`.
-
-## Files Added to `.gitignore`
-
-- `.env`
-- Runtime state: `.tasks/`, `.worktrees/`, `.mailboxes/`, `.memory/`, `.transcripts/`, `.task_outputs/`, `.scheduled_tasks.json`
-- Python artifacts: `__pycache__/`, `.pytest_cache/`, `.coverage`
-- IDE/OS files: `.vscode/`, `.idea/`, `.DS_Store`
+覆盖率门禁统计 v0.2 生产 Runtime；从教学示例保留的 v0.1 兼容层在 `pyproject.toml` 明示排除。离线工具成功率排除 2 次预期安全拦截，唯一工具错误是用于验证恢复的未知工具注入。

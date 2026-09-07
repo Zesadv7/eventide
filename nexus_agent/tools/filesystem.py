@@ -3,15 +3,15 @@
 from pathlib import Path
 
 from nexus_agent.config import WORKDIR
+from nexus_agent.policy import resolve_scoped_path
 
 
-def run_read(path: str, limit: int | None = None,
-             offset: int = 0, cwd: Path | None = None) -> str:
+def run_read(path: str, limit: int | None = None, offset: int = 0, cwd: Path | None = None) -> str:
     """Read a text file with optional offset/limit."""
     try:
         base = cwd or WORKDIR
-        file_path = (base / path).resolve()
-        lines = file_path.read_text().splitlines()
+        file_path = resolve_scoped_path(base, path)
+        lines = file_path.read_text(encoding="utf-8").splitlines()
         offset = max(int(offset or 0), 0)
         limit = int(limit) if limit is not None else None
         lines = lines[offset:]
@@ -26,24 +26,23 @@ def run_write(path: str, content: str, cwd: Path | None = None) -> str:
     """Write content to a file, creating parent directories if needed."""
     try:
         base = cwd or WORKDIR
-        file_path = (base / path).resolve()
+        file_path = resolve_scoped_path(base, path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content)
+        file_path.write_text(content, encoding="utf-8")
         return f"Wrote {len(content)} bytes to {path}"
     except Exception as exc:
         return f"Error: {exc}"
 
 
-def run_edit(path: str, old_text: str, new_text: str,
-             cwd: Path | None = None) -> str:
+def run_edit(path: str, old_text: str, new_text: str, cwd: Path | None = None) -> str:
     """Replace the first occurrence of old_text with new_text in a file."""
     try:
         base = cwd or WORKDIR
-        file_path = (base / path).resolve()
-        text = file_path.read_text()
+        file_path = resolve_scoped_path(base, path)
+        text = file_path.read_text(encoding="utf-8")
         if old_text not in text:
             return f"Error: text not found in {path}"
-        file_path.write_text(text.replace(old_text, new_text, 1))
+        file_path.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
         return f"Edited {path}"
     except Exception as exc:
         return f"Error: {exc}"
@@ -52,6 +51,7 @@ def run_edit(path: str, old_text: str, new_text: str,
 def run_glob(pattern: str, cwd: Path | None = None) -> str:
     """Return matching paths relative to the working directory."""
     import glob as g
+
     try:
         base = cwd or WORKDIR
         results = []

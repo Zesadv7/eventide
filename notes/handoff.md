@@ -1,78 +1,24 @@
-# Handoff Notes for the Next Agent
+# Agent 接手说明
 
-## What This Project Is
+Nexus Agent v0.2 是生产化 runtime；`nexus_agent/agent.py` 等 v0.1 教学 harness 只作为兼容层保留。新功能应优先接入 `runtime.py`、`providers/`、`executor.py`、`policy.py` 和 `observability.py`。
 
-Nexus Agent is a modular Python implementation of an Agent Harness.
-It was built by extracting and refactoring the 2120-line `s20_comprehensive/code.py`
-from `learn-claude-code` into a multi-file package.
+## 接手顺序
 
-Core idea: **the model makes decisions; the harness provides the environment.**
+1. 阅读 `README.md` 和 `docs/architecture.md`。
+2. 运行 `uv sync --extra dev`。
+3. 运行 `uv run pytest -q`、`uv run ruff check nexus_agent tests examples`、`uv run mypy nexus_agent`。
+4. 运行 `uv run nexus-agent eval evals/smoke.yaml`。
 
-## Quick Start
+## 关键约束
 
-```bash
-cd e:\projects\nexus-agent
-pip install -r requirements.txt
-cp .env.example .env
-# fill in ANTHROPIC_API_KEY and MODEL_ID
-python -m nexus_agent
-```
+- 不在 import 时创建模型客户端或要求 API Key。
+- 所有执行入口必须经过 `ToolExecutor` 和 `PolicyEngine`；文件工具仍需自校验。
+- 同一 session 必须串行，不同 session 不共享历史或审批。
+- 新事件写入 SQLite 前必须经过 `redact`。
+- MCP 生产功能使用官方 SDK；mock 只供旧测试。
+- 不声称本地 shell 是安全沙箱。
+- 不提交 `.env`、`mcp.json`、`.nexus/`、数据库、trace 原文或 live 报告。
 
-Run tests:
+## 当前验证
 
-```bash
-python -m pytest -q
-```
-
-## Key Files to Know
-
-| File | What it does |
-|---|---|
-| `nexus_agent/config.py` | Loads `.env`, creates Anthropic client, defines paths/constants. |
-| `nexus_agent/agent.py` | Main loop: LLM call → tool dispatch → result → repeat. |
-| `nexus_agent/cli.py` | Interactive prompt + cron auto-run thread. |
-| `nexus_agent/tools/registry.py` | Lists all 27 tool schemas and their handler mappings. |
-| `nexus_agent/hooks.py` | Permission hooks + hook registry. |
-| `nexus_agent/context.py` | Context compaction pipeline. |
-| `nexus_agent/llm.py` | Retry/fallback/error-recovery wrapper. |
-| `nexus_agent/tasks/` | Task graph + git worktree isolation. |
-| `nexus_agent/teams/` | MessageBus, subagents, teammates, protocol. |
-| `nexus_agent/scheduling/` | Cron + background tasks. |
-| `nexus_agent/memory/` | Skills + MEMORY.md. |
-| `nexus_agent/mcp/` | Mock MCP client + tool pool assembly. |
-
-## Common Tasks
-
-### Add a new tool
-
-1. Implement handler in `nexus_agent/tools/<module>.py`.
-2. Add schema to `BUILTIN_TOOLS` in `nexus_agent/tools/registry.py`.
-3. Add handler to `BUILTIN_HANDLERS` in `nexus_agent/tools/registry.py`.
-4. Add a test in `tests/`.
-
-### Change the system prompt
-
-Edit `assemble_system_prompt()` in `nexus_agent/agent.py`.
-
-### Add a new skill
-
-Create `skills/<skill-name>/SKILL.md` with YAML frontmatter (`name`, `description`).
-Restart the agent to pick it up.
-
-### Connect a real MCP server
-
-Currently only `docs` and `deploy` mock servers exist in `nexus_agent/mcp/client.py`.
-To add a real server, extend `MCPClient` or replace the mock registry with stdio/SSE transport.
-
-## Current State
-
-- All 37 tests pass.
-- CLI starts and exits cleanly.
-- No `.env` is committed; user must create one.
-- Project is ready for GitHub upload.
-
-## Open Questions for the User
-
-1. Do they want to keep the coding-agent domain or pivot to another domain?
-2. Which model provider do they want to support next (Anthropic only, or also DeepSeek/OpenAI)?
-3. Do they want a web UI before uploading to GitHub?
+66 tests，生产 Runtime 覆盖率 87.47%，Ruff/mypy 通过，offline eval 10/10，真实 stdio/HTTP MCP 通过。真实国内模型和 GitHub 发布尚未执行，因为需要用户凭证与明确授权。

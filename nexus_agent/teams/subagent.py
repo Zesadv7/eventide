@@ -1,12 +1,11 @@
 """One-shot subagent with isolated context."""
 
-from nexus_agent.config import WORKDIR, client, MODEL
+from nexus_agent.config import MODEL, WORKDIR, client
 from nexus_agent.hooks import trigger_hooks
 from nexus_agent.tools.bash import run_bash
-from nexus_agent.tools.filesystem import run_read, run_write, run_edit, run_glob
 from nexus_agent.tools.dispatch import call_tool_handler
+from nexus_agent.tools.filesystem import run_edit, run_glob, run_read, run_write
 from nexus_agent.utils import extract_text, has_tool_use
-
 
 SUB_SYSTEM = (
     f"You are a coding subagent at {WORKDIR}. "
@@ -15,31 +14,59 @@ SUB_SYSTEM = (
 )
 
 SUB_TOOLS = [
-    {"name": "bash", "description": "Run a shell command.",
-     "input_schema": {"type": "object",
-                      "properties": {"command": {"type": "string"}},
-                      "required": ["command"]}},
-    {"name": "read_file", "description": "Read file contents.",
-     "input_schema": {"type": "object",
-                      "properties": {"path": {"type": "string"},
-                                     "limit": {"type": "integer"},
-                                     "offset": {"type": "integer"}},
-                      "required": ["path"]}},
-    {"name": "write_file", "description": "Write content to a file.",
-     "input_schema": {"type": "object",
-                      "properties": {"path": {"type": "string"},
-                                     "content": {"type": "string"}},
-                      "required": ["path", "content"]}},
-    {"name": "edit_file", "description": "Replace exact text in a file once.",
-     "input_schema": {"type": "object",
-                      "properties": {"path": {"type": "string"},
-                                     "old_text": {"type": "string"},
-                                     "new_text": {"type": "string"}},
-                      "required": ["path", "old_text", "new_text"]}},
-    {"name": "glob", "description": "Find files matching a glob pattern.",
-     "input_schema": {"type": "object",
-                      "properties": {"pattern": {"type": "string"}},
-                      "required": ["pattern"]}},
+    {
+        "name": "bash",
+        "description": "Run a shell command.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "read_file",
+        "description": "Read file contents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write_file",
+        "description": "Write content to a file.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "edit_file",
+        "description": "Replace exact text in a file once.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "old_text": {"type": "string"},
+                "new_text": {"type": "string"},
+            },
+            "required": ["path", "old_text", "new_text"],
+        },
+    },
+    {
+        "name": "glob",
+        "description": "Find files matching a glob pattern.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"pattern": {"type": "string"}},
+            "required": ["pattern"],
+        },
+    },
 ]
 
 SUB_HANDLERS = {
@@ -76,11 +103,13 @@ def spawn_subagent(description: str) -> str:
                 handler = SUB_HANDLERS.get(block.name)
                 output = call_tool_handler(handler, block.input, block.name)
                 trigger_hooks("PostToolUse", block, output)
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": str(output),
-            })
+            results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": str(output),
+                }
+            )
         messages.append({"role": "user", "content": results})
     for msg in reversed(messages):
         if msg["role"] == "assistant":

@@ -4,12 +4,10 @@ import json
 import random
 import threading
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from pathlib import Path
 
 from nexus_agent.config import WORKDIR
-
 
 DURABLE_PATH = WORKDIR / ".scheduled_tasks.json"
 
@@ -37,8 +35,7 @@ def _cron_field_matches(field: str, value: int) -> bool:
         step = int(field[2:])
         return step > 0 and value % step == 0
     if "," in field:
-        return any(_cron_field_matches(part.strip(), value)
-                   for part in field.split(","))
+        return any(_cron_field_matches(part.strip(), value) for part in field.split(","))
     if "-" in field:
         lo, hi = field.split("-", 1)
         return int(lo) <= value <= int(hi)
@@ -105,7 +102,7 @@ def validate_cron(cron_expr: str) -> str | None:
         return f"Expected 5 fields, got {len(fields)}"
     bounds = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 6)]
     names = ["minute", "hour", "day-of-month", "month", "day-of-week"]
-    for field, (lo, hi), name in zip(fields, bounds, names):
+    for field, (lo, hi), name in zip(fields, bounds, names, strict=True):
         err = _validate_cron_field(field, lo, hi)
         if err:
             return f"{name}: {err}"
@@ -129,8 +126,9 @@ def load_durable_jobs() -> None:
         pass
 
 
-def schedule_job(cron: str, prompt: str,
-                 recurring: bool = True, durable: bool = True) -> CronJob | str:
+def schedule_job(
+    cron: str, prompt: str, recurring: bool = True, durable: bool = True
+) -> CronJob | str:
     err = validate_cron(cron)
     if err:
         return err
@@ -194,8 +192,7 @@ def consume_cron_queue() -> list[CronJob]:
     return fired
 
 
-def run_schedule_cron(cron: str, prompt: str,
-                      recurring: bool = True, durable: bool = True) -> str:
+def run_schedule_cron(cron: str, prompt: str, recurring: bool = True, durable: bool = True) -> str:
     result = schedule_job(cron, prompt, recurring, durable)
     if isinstance(result, str):
         return f"Error: {result}"
@@ -211,7 +208,8 @@ def run_list_crons() -> str:
         f"  {job.id}: '{job.cron}' -> {job.prompt[:40]} "
         f"[{'recurring' if job.recurring else 'one-shot'}, "
         f"{'durable' if job.durable else 'session'}]"
-        for job in jobs)
+        for job in jobs
+    )
 
 
 def run_cancel_cron(job_id: str) -> str:

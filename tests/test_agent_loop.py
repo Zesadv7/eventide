@@ -2,8 +2,6 @@
 
 from types import SimpleNamespace
 
-import pytest
-
 from nexus_agent import agent as agent_module
 
 

@@ -4,8 +4,8 @@ import json
 import threading
 import time
 
-from nexus_agent.config import MAILBOX_DIR, PROMPT, CLI_ACTIVE
-
+from nexus_agent.config import CLI_ACTIVE, MAILBOX_DIR, PROMPT
+from nexus_agent.policy import validate_agent_name
 
 MAILBOX_DIR.mkdir(exist_ok=True)
 _mailbox_lock = threading.Lock()
@@ -19,6 +19,7 @@ def _terminal_print(text: str) -> None:
     line = ""
     try:
         import readline
+
         line = readline.get_line_buffer()
     except Exception:
         pass
@@ -29,8 +30,18 @@ def _terminal_print(text: str) -> None:
 class MessageBus:
     """Simple append-only inbox store backed by JSONL files."""
 
-    def send(self, from_agent: str, to_agent: str, content: str,
-             msg_type: str = "message", metadata: dict | None = None) -> None:
+    def send(
+        self,
+        from_agent: str,
+        to_agent: str,
+        content: str,
+        msg_type: str = "message",
+        metadata: dict | None = None,
+    ) -> None:
+        for value in (from_agent, to_agent):
+            error = validate_agent_name(value)
+            if error:
+                raise ValueError(error)
         msg = {
             "from": from_agent,
             "to": to_agent,
@@ -40,12 +51,10 @@ class MessageBus:
             "metadata": metadata or {},
         }
         inbox = MAILBOX_DIR / f"{to_agent}.jsonl"
-        with _mailbox_lock:
-            with open(inbox, "a") as f:
-                f.write(json.dumps(msg) + "\n")
+        with _mailbox_lock, open(inbox, "a") as f:
+            f.write(json.dumps(msg) + "\n")
         _terminal_print(
-            f"  \033[33m[bus] {from_agent} → {to_agent}: "
-            f"({msg_type}) {content[:50]}\033[0m"
+            f"  \033[33m[bus] {from_agent} → {to_agent}: ({msg_type}) {content[:50]}\033[0m"
         )
 
     def read_inbox(self, agent: str) -> list[dict]:
@@ -53,11 +62,7 @@ class MessageBus:
         with _mailbox_lock:
             if not inbox.exists():
                 return []
-            msgs = [
-                json.loads(line)
-                for line in inbox.read_text().splitlines()
-                if line.strip()
-            ]
+            msgs = [json.loads(line) for line in inbox.read_text().splitlines() if line.strip()]
             inbox.unlink()
         return msgs
 

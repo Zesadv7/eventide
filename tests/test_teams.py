@@ -2,11 +2,11 @@
 
 from nexus_agent.teams.bus import BUS, MessageBus
 from nexus_agent.teams.protocol import (
-    pending_requests,
-    new_request_id,
-    match_response,
-    consume_lead_inbox,
     ProtocolState,
+    consume_lead_inbox,
+    match_response,
+    new_request_id,
+    pending_requests,
 )
 
 
@@ -49,7 +49,8 @@ def test_consume_lead_inbox_routes_protocol():
         status="pending",
         payload="plan",
     )
-    BUS.send("alice", "lead", "ok", "plan_approval_response",
-             {"request_id": req_id, "approve": True})
+    BUS.send(
+        "alice", "lead", "ok", "plan_approval_response", {"request_id": req_id, "approve": True}
+    )
     consume_lead_inbox()
     assert pending_requests[req_id].status == "approved"

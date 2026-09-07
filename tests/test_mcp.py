@@ -1,6 +1,6 @@
 """Tests for MCP client and tool pool assembly."""
 
-from nexus_agent.mcp.client import connect_mcp, assemble_tool_pool, mcp_clients
+from nexus_agent.mcp.client import assemble_tool_pool, connect_mcp, mcp_clients
 
 
 def test_connect_mcp_docs():

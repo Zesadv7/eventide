@@ -1,97 +1,102 @@
-"""Interactive CLI entry point for Nexus Agent."""
+"""Command-line entry points for chat, one-shot runs, evals, and the API."""
 
-import threading
-import time
+from __future__ import annotations
 
-from nexus_agent.agent import agent_loop
-from nexus_agent.config import CLI_ACTIVE, PROMPT, WORKDIR
-from nexus_agent.hooks import trigger_hooks
-from nexus_agent.memory.context_memory import update_context
-from nexus_agent.scheduling.cron import start_cron_scheduler, consume_cron_queue
-from nexus_agent.teams.protocol import consume_lead_inbox
-from nexus_agent.utils import extract_text, has_tool_use
+import argparse
+import asyncio
+import json
+from dataclasses import asdict
+from pathlib import Path
 
-
-def _block_type(block):
-    return block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+from nexus_agent.config import Settings
+from nexus_agent.evaluation import run_evaluations
+from nexus_agent.models import RunRequest, ToolCall
+from nexus_agent.runtime import AgentRuntime
 
 
-def print_turn_assistants(messages: list, turn_start: int) -> None:
-    """Print assistant text blocks produced since turn_start."""
-    for msg in messages[turn_start:]:
-        if msg.get("role") != "assistant":
-            continue
-        for block in msg.get("content", []):
-            if _block_type(block) == "text":
-                text = block["text"] if isinstance(block, dict) else block.text
-                print(text)
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="nexus-agent",
+        description="A traceable, policy-aware runtime for tool-using AI agents.",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("chat", help="Start an interactive terminal session")
+    run = subparsers.add_parser("run", help="Run one prompt and exit")
+    run.add_argument("prompt", help="Task for the agent")
+    run.add_argument("--json", action="store_true", help="Print structured RunResult JSON")
+    evaluate = subparsers.add_parser("eval", help="Run an offline or live evaluation suite")
+    evaluate.add_argument("suite", type=Path, help="YAML evaluation suite")
+    evaluate.add_argument("--live", action="store_true", help="Use the configured live provider")
+    serve = subparsers.add_parser("serve", help="Run the FastAPI service and Web console")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    return parser
 
 
-def _inbox_label(msg: dict) -> str:
-    req_id = msg.get("metadata", {}).get("request_id", "")
-    return f"{msg.get('type', 'message')}{f' req:{req_id}' if req_id else ''}"
+async def _terminal_approval(_approval_id: str, call: ToolCall, reason: str) -> bool:
+    print(f"\n[approval required] {call.name}: {reason}")
+    print(json.dumps(call.arguments, ensure_ascii=False, indent=2))
+    answer = await asyncio.to_thread(input, "Allow once? [y/N] ")
+    return answer.strip().lower() in {"y", "yes"}
 
 
-def _maybe_inject_inbox(history: list) -> None:
-    inbox = consume_lead_inbox(route_protocol=True)
-    if inbox:
-        inbox_text = "\n".join(
-            f"From {m['from']} [{_inbox_label(m)}]: {m['content'][:200]}"
-            for m in inbox
+async def _run_once(args: argparse.Namespace) -> int:
+    runtime = AgentRuntime(Settings.from_env())
+    try:
+        result = await runtime.run(RunRequest(args.prompt), approval_handler=_terminal_approval)
+        print(
+            json.dumps(asdict(result), ensure_ascii=False, indent=2) if args.json else result.output
         )
-        history.append({"role": "user", "content": f"[Inbox]\n{inbox_text}"})
+        return 0 if result.status == "completed" else 1
+    finally:
+        await runtime.close()
 
 
-def cron_autorun_loop(history: list, context: dict) -> None:
-    """Daemon thread that runs the agent on scheduled cron jobs."""
-    from nexus_agent.agent import agent_lock
-    while True:
-        time.sleep(1)
-        fired = consume_cron_queue()
-        if not fired:
-            continue
-        with agent_lock:
-            turn_start = len(history)
-            for job in fired:
-                history.append({"role": "user",
-                                "content": f"[Scheduled] {job.prompt}"})
-                print(f"  \033[35m[cron auto] {job.prompt[:60]}\033[0m")
-            agent_loop(history, context)
-            context.update(update_context(context, history))
-            print_turn_assistants(history, turn_start)
+async def _chat() -> int:
+    settings = Settings.from_env()
+    runtime = AgentRuntime(settings)
+    session_id = runtime.create_session()
+    print("Nexus Agent · policy-aware runtime")
+    print("Type q to quit. Runtime traces are stored under .nexus/.\n")
+    try:
+        while True:
+            try:
+                prompt = (await asyncio.to_thread(input, "nexus >> ")).strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if prompt.lower() in {"", "q", "quit", "exit"}:
+                break
+            result = await runtime.run(
+                RunRequest(prompt, session_id=session_id), approval_handler=_terminal_approval
+            )
+            print(result.output, "\n")
+        return 0
+    finally:
+        await runtime.close()
 
 
-def main() -> None:
-    """Run the interactive Nexus Agent CLI."""
-    global CLI_ACTIVE
-    CLI_ACTIVE = True
-    print("Nexus Agent")
-    print("Enter a question, press Enter to send. Type q to quit.\n")
+async def _eval(args: argparse.Namespace) -> int:
+    report = await run_evaluations(args.suite, live=args.live)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["passed"] == report["total"] else 1
 
-    history: list = []
-    context = update_context({"workdir": str(WORKDIR)}, history)
 
-    start_cron_scheduler()
-    threading.Thread(target=cron_autorun_loop,
-                     args=(history, context), daemon=True).start()
-
-    while True:
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command in {None, "chat"}:
+        return asyncio.run(_chat())
+    if args.command == "run":
+        return asyncio.run(_run_once(args))
+    if args.command == "eval":
+        return asyncio.run(_eval(args))
+    if args.command == "serve":
         try:
-            query = input(PROMPT)
-        except (EOFError, KeyboardInterrupt):
-            break
-        if query.strip().lower() in ("q", "exit", ""):
-            break
-
-        trigger_hooks("UserPromptSubmit", query)
-        turn_start = len(history)
-        history.append({"role": "user", "content": query})
-
-        from nexus_agent.agent import agent_lock
-        with agent_lock:
-            agent_loop(history, context)
-            context = update_context(context, history)
-            print_turn_assistants(history, turn_start)
-
-        _maybe_inject_inbox(history)
-        print()
+            import uvicorn
+        except ImportError as exc:
+            parser.error("Install the 'web' dependencies to use serve")
+            raise AssertionError from exc
+        uvicorn.run("nexus_agent.api:create_app", factory=True, host=args.host, port=args.port)
+        return 0
+    parser.print_help()
+    return 0

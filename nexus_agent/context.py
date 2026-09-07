@@ -5,12 +5,12 @@ import time
 from pathlib import Path
 
 from nexus_agent.config import (
-    client,
-    MODEL,
     KEEP_RECENT_TOOL_RESULTS,
+    MODEL,
     PERSIST_THRESHOLD,
     TOOL_RESULTS_DIR,
     TRANSCRIPT_DIR,
+    client,
 )
 
 
@@ -55,10 +55,7 @@ def is_tool_result_message(message: dict) -> bool:
     content = message.get("content")
     if not isinstance(content, list):
         return False
-    return any(
-        isinstance(block, dict) and block.get("type") == "tool_result"
-        for block in content
-    )
+    return any(isinstance(block, dict) and block.get("type") == "tool_result" for block in content)
 
 
 def collect_tool_results(messages: list):
@@ -81,8 +78,7 @@ def persist_large_output(tool_use_id: str, output: str) -> str:
     if not path.exists():
         path.write_text(output)
     return (
-        f"<persisted-output>\nFull output: {path}\n"
-        f"Preview:\n{output[:2000]}\n</persisted-output>"
+        f"<persisted-output>\nFull output: {path}\nPreview:\n{output[:2000]}\n</persisted-output>"
     )
 
 
@@ -94,7 +90,8 @@ def tool_result_budget(messages: list, max_bytes: int = 200_000) -> list:
     if last.get("role") != "user" or not isinstance(content, list):
         return messages
     blocks = [
-        (i, b) for i, b in enumerate(content)
+        (i, b)
+        for i, b in enumerate(content)
         if isinstance(b, dict) and b.get("type") == "tool_result"
     ]
     total = sum(len(str(b.get("content", ""))) for _, b in blocks)
@@ -108,9 +105,7 @@ def tool_result_budget(messages: list, max_bytes: int = 200_000) -> list:
         if total <= max_bytes:
             break
         text = str(block.get("content", ""))
-        block["content"] = persist_large_output(
-            block.get("tool_use_id", "unknown"), text
-        )
+        block["content"] = persist_large_output(block.get("tool_use_id", "unknown"), text)
         total = sum(len(str(b.get("content", ""))) for _, b in blocks)
     return messages
 
@@ -122,9 +117,12 @@ def snip_compact(messages: list, max_messages: int = 50) -> list:
     if head_end > 0 and message_has_tool_use(messages[head_end - 1]):
         while head_end < len(messages) and is_tool_result_message(messages[head_end]):
             head_end += 1
-    if (tail_start > 0 and tail_start < len(messages)
-            and is_tool_result_message(messages[tail_start])
-            and message_has_tool_use(messages[tail_start - 1])):
+    if (
+        tail_start > 0
+        and tail_start < len(messages)
+        and is_tool_result_message(messages[tail_start])
+        and message_has_tool_use(messages[tail_start - 1])
+    ):
         tail_start -= 1
     if head_end >= tail_start:
         return messages
@@ -181,9 +179,12 @@ def reactive_compact(messages: list, model: str | None = None) -> list:
     transcript = write_transcript(messages)
     print(f"  \033[31m[reactive compact] transcript saved: {transcript}\033[0m")
     tail_start = max(0, len(messages) - 5)
-    if (tail_start > 0 and tail_start < len(messages)
-            and is_tool_result_message(messages[tail_start])
-            and message_has_tool_use(messages[tail_start - 1])):
+    if (
+        tail_start > 0
+        and tail_start < len(messages)
+        and is_tool_result_message(messages[tail_start])
+        and message_has_tool_use(messages[tail_start - 1])
+    ):
         tail_start -= 1
     try:
         summary = summarize_history(messages[:tail_start], model=model)

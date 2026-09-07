@@ -1,59 +1,21 @@
-# Nexus Agent — Development Plan
+# 后续计划
 
-## Goal
+本轮作品集升级的代码范围已完成。以下事项不是遗留实现缺陷，而是需要外部凭证、平台或后续版本授权的工作。
 
-Turn Nexus Agent into a resume-worthy, demonstrable Agent Harness project.
-The core harness is already complete and tested. The next phase is polish,
-extension, and packaging for GitHub.
+## 发布前
 
-## Phase 1: Hardening (Priority: High)
+1. 用户提供一个真实工具调用模型 Key，运行 CLI/Web/live eval 验收。
+2. 从真实运行录制截图与短 GIF，更新 README；不使用模拟图冒充 live 结果。
+3. 用户确认仓库名称和可见性后创建 remote、推送并观察 CI 矩阵。
+4. 只把 live 报告中的脱敏聚合数字写入简历。
 
-| Task | Why | Files likely touched |
-|---|---|---|
-| Move test temp files to isolated dirs | Avoid polluting project root | `tests/test_tools.py`, `tests/conftest.py` |
-| Add CI via GitHub Actions | Resume credibility | `.github/workflows/ci.yml` |
-| Pin dependency versions | Reproducibility | `requirements.txt`, `pyproject.toml` |
-| Add CLI `--help` and non-interactive mode | Easier demos | `nexus_agent/cli.py` |
-| Improve error messages when API key is missing | Better UX | `nexus_agent/config.py` |
+## 可选 v0.3
 
-## Phase 2: Resume Polish (Priority: High)
+- Docker/微虚拟机 `CommandExecutor`，把策略层升级为真正的进程隔离。
+- SQLite 事件迁移与 trace replay CLI。
+- HTTP MCP 本地服务的端到端进程测试和 OAuth 流程。
+- 结构化 provider capability negotiation，明确不同模型的 tool/vision/context 能力。
 
-| Task | Why | Files likely touched |
-|---|---|---|
-| Add architecture diagram | README visual appeal | `docs/architecture.md`, `README.md` |
-| Record a short demo GIF/asciinema | Shows it actually runs | `README.md` |
-| Write a "Why this project" section | Interview storytelling | `README.md` |
-| Add GitHub issue templates | Open-source polish | `.github/ISSUE_TEMPLATE/` |
-| Add a `CONTRIBUTING.md` | Looks professional | `CONTRIBUTING.md` |
+## 非目标
 
-## Phase 3: Feature Extensions (Priority: Medium)
-
-| Task | Why | Files likely touched |
-|---|---|---|
-| Real MCP server support | Move beyond mocks | `nexus_agent/mcp/client.py` |
-| SQLite / vector memory backend | More robust than MEMORY.md | `nexus_agent/memory/` |
-| Web UI (Gradio/Streamlit) | Easier demo | new `web/` or `ui/` package |
-| Support multiple model providers | Shows provider-agnostic design | `nexus_agent/llm.py` |
-| Persistent transcript replay | Debugging and transparency | `nexus_agent/context.py` |
-
-## Phase 4: Domain Pivot (Optional)
-
-Pick one concrete domain to prove the harness generalizes beyond coding:
-
-- **Research Assistant**: PDF reading, web search, citation tracking.
-- **Data Analyst**: CSV/Excel tools, matplotlib charts, SQL queries.
-- **DevOps Agent**: Docker, kubectl, Terraform wrappers.
-
-This would involve adding new tools in `nexus_agent/tools/` and domain skills in `skills/`.
-
-## Suggested Next Immediate Step
-
-1. Add `.github/workflows/ci.yml` running `python -m pytest -q` on Python 3.10/3.11/3.12.
-2. Clean up `tests/test_tools.py` to use temporary directories.
-3. Push to GitHub.
-
-## Decision Log
-
-- **Project name**: `nexus-agent` (codename; can be renamed later based on final features).
-- **License**: MIT, with shareAI Lab attribution preserved.
-- **Scope**: Keep it a harness, not a workflow orchestrator. The model decides; the harness executes.
+不在当前版本加入分布式队列、账号体系、云部署或前端框架。项目继续保持 coding-agent/runtime 定位，不转向单一业务领域。

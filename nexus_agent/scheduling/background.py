@@ -5,7 +5,6 @@ import threading
 from nexus_agent.hooks import trigger_hooks
 from nexus_agent.tools.dispatch import call_tool_handler
 
-
 _bg_counter = 0
 background_tasks: dict[str, dict] = {}
 background_results: dict[str, str] = {}
@@ -13,9 +12,17 @@ background_lock = threading.Lock()
 
 
 SLOW_KEYWORDS = [
-    "install", "build", "test", "deploy", "compile",
-    "docker build", "pip install", "npm install",
-    "cargo build", "pytest", "make",
+    "install",
+    "build",
+    "test",
+    "deploy",
+    "compile",
+    "docker build",
+    "pip install",
+    "npm install",
+    "cargo build",
+    "pytest",
+    "make",
 ]
 
 
@@ -61,10 +68,7 @@ def start_background_task(block, handlers: dict) -> str:
 def collect_background_results() -> list[str]:
     """Return and clear completed background task notifications."""
     with background_lock:
-        ready = [
-            bg_id for bg_id, task in background_tasks.items()
-            if task["status"] == "completed"
-        ]
+        ready = [bg_id for bg_id, task in background_tasks.items() if task["status"] == "completed"]
     notifications = []
     for bg_id in ready:
         with background_lock:

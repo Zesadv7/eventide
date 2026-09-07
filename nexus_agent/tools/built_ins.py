@@ -3,10 +3,8 @@
 import ast
 import json
 
-from nexus_agent.context import compact_history
 from nexus_agent.memory.skills import load_skill
 from nexus_agent.teams.subagent import spawn_subagent
-
 
 CURRENT_TODOS: list[dict] = []
 

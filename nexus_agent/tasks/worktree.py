@@ -9,10 +9,9 @@ from pathlib import Path
 from nexus_agent.config import WORKDIR, WORKTREES_DIR
 from nexus_agent.tasks.store import load_task, save_task
 
-
 WORKTREES_DIR.mkdir(exist_ok=True)
 
-VALID_WT_NAME = re.compile(r'^[A-Za-z0-9._-]{1,64}$')
+VALID_WT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 def validate_worktree_name(name: str) -> str | None:
@@ -67,11 +66,18 @@ def create_worktree(name: str, task_id: str = "") -> str:
     path = WORKTREES_DIR / name
     if path.exists():
         return f"Worktree '{name}' already exists at {path}"
+    base_ok, base_commit = run_git(["rev-parse", "HEAD"])
+    if not base_ok:
+        return f"Git error: {base_commit}"
     ok, result = run_git(["worktree", "add", str(path), "-b", f"wt/{name}", "HEAD"])
     if not ok:
         return f"Git error: {result}"
     if task_id:
         bind_task_to_worktree(task_id, name)
+    (WORKTREES_DIR / f"{name}.meta.json").write_text(
+        json.dumps({"base_commit": base_commit.strip(), "branch": f"wt/{name}"}),
+        encoding="utf-8",
+    )
     log_event("create", name, task_id)
     return f"Worktree '{name}' created at {path}"
 
@@ -82,7 +88,7 @@ def bind_task_to_worktree(task_id: str, worktree_name: str) -> None:
     save_task(task)
 
 
-def _count_worktree_changes(path: Path) -> tuple[int, int]:
+def _count_worktree_changes(path: Path, base_commit: str) -> tuple[int, int]:
     try:
         r1 = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -93,13 +99,15 @@ def _count_worktree_changes(path: Path) -> tuple[int, int]:
         )
         files = len([line for line in r1.stdout.strip().splitlines() if line.strip()])
         r2 = subprocess.run(
-            ["git", "log", "@{push}..HEAD", "--oneline"],
+            ["git", "rev-list", "--count", f"{base_commit}..HEAD"],
             cwd=path,
             capture_output=True,
             text=True,
             timeout=10,
         )
-        commits = len([line for line in r2.stdout.strip().splitlines() if line.strip()])
+        if r1.returncode != 0 or r2.returncode != 0:
+            return -1, -1
+        commits = int(r2.stdout.strip() or "0")
         return files, commits
     except Exception:
         return -1, -1
@@ -113,7 +121,11 @@ def remove_worktree(name: str, discard_changes: bool = False) -> str:
     if not path.exists():
         return f"Worktree '{name}' not found"
     if not discard_changes:
-        files, commits = _count_worktree_changes(path)
+        metadata_path = WORKTREES_DIR / f"{name}.meta.json"
+        if not metadata_path.exists():
+            return "Cannot verify worktree base. Use discard_changes=true to force."
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        files, commits = _count_worktree_changes(path, metadata["base_commit"])
         if files < 0:
             return "Cannot verify status. Use discard_changes=true to force."
         if files > 0 or commits > 0:
@@ -125,6 +137,9 @@ def remove_worktree(name: str, discard_changes: bool = False) -> str:
     if not ok1:
         return f"Failed to remove worktree '{name}'"
     run_git(["branch", "-D", f"wt/{name}"])
+    metadata_path = WORKTREES_DIR / f"{name}.meta.json"
+    if metadata_path.exists():
+        metadata_path.unlink()
     log_event("remove", name)
     return f"Worktree '{name}' removed"
 

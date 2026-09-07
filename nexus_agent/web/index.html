@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Nexus Agent runtime trace console">
+  <title>Nexus // Runtime Console</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div class="grid-noise" aria-hidden="true"></div>
+  <header class="masthead">
+    <a class="wordmark" href="/" aria-label="Nexus Agent home">
+      <span class="mark">N</span><span>NEXUS</span><small>RUNTIME / 0.2</small>
+    </a>
+    <div class="system-state"><span class="pulse"></span><span id="health">CONNECTING</span></div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">AGENT HARNESS OBSERVATORY</p>
+        <h1>See the model<br><em>become an agent.</em></h1>
+      </div>
+      <p class="lede">每一次推理、工具调用、权限判断和失败恢复，都留下可审计的运行轨迹。</p>
+    </section>
+
+    <section class="console-shell">
+      <aside class="rail" aria-label="Run metrics">
+        <div class="rail-label">RUN TELEMETRY</div>
+        <dl>
+          <div><dt>STATE</dt><dd id="metric-state">IDLE</dd></div>
+          <div><dt>STEPS</dt><dd id="metric-steps">00</dd></div>
+          <div><dt>TOOLS</dt><dd id="metric-tools">00</dd></div>
+          <div><dt>LATENCY</dt><dd id="metric-latency">—</dd></div>
+          <div><dt>TOKENS</dt><dd id="metric-tokens">—</dd></div>
+        </dl>
+        <div class="session-tag"><span>SESSION</span><code id="session-id">UNASSIGNED</code></div>
+      </aside>
+
+      <div class="workspace">
+        <form id="prompt-form" class="prompt-panel">
+          <label for="prompt">MISSION INPUT</label>
+          <textarea id="prompt" rows="4" placeholder="让 Agent 分析 README 并说明这个 harness 的核心设计……" required></textarea>
+          <div class="prompt-actions">
+            <span><kbd>CTRL</kbd> + <kbd>ENTER</kbd> TO RUN</span>
+            <button id="run-button" type="submit"><span>EXECUTE</span><b>↗</b></button>
+          </div>
+        </form>
+
+        <section class="trace-panel" aria-live="polite">
+          <div class="panel-head"><span>EVENT STREAM</span><span id="event-count">000 EVENTS</span></div>
+          <ol id="timeline" class="timeline">
+            <li class="empty-state">
+              <span class="empty-index">00</span>
+              <div><strong>Runtime is standing by.</strong><p>Submit a mission to inspect its execution path.</p></div>
+            </li>
+          </ol>
+        </section>
+
+        <section id="answer-panel" class="answer-panel" hidden>
+          <div class="panel-head"><span>FINAL OUTPUT</span><button id="copy-answer" type="button">COPY</button></div>
+          <pre id="answer"></pre>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <template id="event-template">
+    <li class="event-row">
+      <time></time><span class="event-sigil"></span>
+      <div class="event-body"><div class="event-title"></div><pre class="event-detail"></pre></div>
+    </li>
+  </template>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

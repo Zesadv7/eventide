@@ -3,10 +3,10 @@
 import threading
 
 from nexus_agent.config import (
-    DEFAULT_MAX_TOKENS,
-    ESCALATED_MAX_TOKENS,
     CONTEXT_LIMIT,
     CONTINUATION_PROMPT,
+    DEFAULT_MAX_TOKENS,
+    ESCALATED_MAX_TOKENS,
     client,
 )
 from nexus_agent.context import (
@@ -19,18 +19,16 @@ from nexus_agent.context import (
 )
 from nexus_agent.hooks import trigger_hooks
 from nexus_agent.llm import RecoveryState, is_prompt_too_long_error, with_retry
-from nexus_agent.memory.context_memory import update_context
 from nexus_agent.mcp.client import assemble_tool_pool, mcp_clients
+from nexus_agent.memory.context_memory import update_context
 from nexus_agent.scheduling.background import (
     collect_background_results,
     should_run_background,
     start_background_task,
 )
 from nexus_agent.scheduling.cron import consume_cron_queue
-from nexus_agent.tools.built_ins import CURRENT_TODOS
 from nexus_agent.tools.dispatch import call_tool_handler
 from nexus_agent.utils import has_tool_use
-
 
 rounds_since_todo = 0
 agent_lock = threading.Lock()
@@ -39,6 +37,7 @@ agent_lock = threading.Lock()
 def assemble_system_prompt(context: dict) -> str:
     """Build the system prompt from live context each turn."""
     from datetime import datetime
+
     from nexus_agent.memory.skills import list_skills
 
     sections = [
@@ -53,8 +52,7 @@ def assemble_system_prompt(context: dict) -> str:
         "connect_mcp. MCP tools are prefixed mcp__{server}__{tool}.",
         f"Working directory: {context.get('workdir', '')}",
         f"Current time: {datetime.now().isoformat(timespec='seconds')}",
-        "Skills catalog:\n" + list_skills() +
-        "\nUse load_skill(name) when a skill is relevant.",
+        "Skills catalog:\n" + list_skills() + "\nUse load_skill(name) when a skill is relevant.",
     ]
     if context.get("memories"):
         sections.append(f"Relevant memories:\n{context['memories']}")
@@ -86,12 +84,12 @@ def inject_background_notifications(messages: list) -> None:
     """Append any completed background task notifications to messages."""
     notes = collect_background_results()
     if notes:
-        messages.append({"role": "user", "content": [
-            {"type": "text", "text": note} for note in notes]})
+        messages.append(
+            {"role": "user", "content": [{"type": "text", "text": note} for note in notes]}
+        )
 
 
-def call_llm(messages: list, context: dict, tools: list,
-             state: RecoveryState, max_tokens: int):
+def call_llm(messages: list, context: dict, tools: list, state: RecoveryState, max_tokens: int):
     """Call the LLM through the recovery wrapper."""
     system = assemble_system_prompt(context)
     return with_retry(
@@ -116,15 +114,13 @@ def agent_loop(messages: list, context: dict) -> None:
     while True:
         fired = consume_cron_queue()
         for job in fired:
-            messages.append({"role": "user",
-                             "content": f"[Scheduled] {job.prompt}"})
+            messages.append({"role": "user", "content": f"[Scheduled] {job.prompt}"})
             print(f"  \033[35m[cron inject] {job.prompt[:60]}\033[0m")
 
         inject_background_notifications(messages)
 
         if rounds_since_todo >= 3:
-            messages.append({"role": "user",
-                             "content": "<reminder>Update your todos.</reminder>"})
+            messages.append({"role": "user", "content": "<reminder>Update your todos.</reminder>"})
             rounds_since_todo = 0
 
         prepare_context(messages)
@@ -134,13 +130,16 @@ def agent_loop(messages: list, context: dict) -> None:
         try:
             response = call_llm(messages, context, tools, state, max_tokens)
         except Exception as exc:
-            if (is_prompt_too_long_error(exc)
-                    and not state.has_attempted_reactive_compact):
+            if is_prompt_too_long_error(exc) and not state.has_attempted_reactive_compact:
                 messages[:] = reactive_compact(messages)
                 state.has_attempted_reactive_compact = True
                 continue
-            messages.append({"role": "assistant", "content": [
-                {"type": "text", "text": f"[Error] {type(exc).__name__}: {exc}"}]})
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": f"[Error] {type(exc).__name__}: {exc}"}],
+                }
+            )
             return
 
         if response.stop_reason == "max_tokens":
@@ -172,25 +171,25 @@ def agent_loop(messages: list, context: dict) -> None:
 
             if block.name == "compact":
                 messages[:] = compact_history(messages)
-                messages.append({"role": "user",
-                                 "content": "[Compacted. Continue with summarized context.]"})
+                messages.append(
+                    {"role": "user", "content": "[Compacted. Continue with summarized context.]"}
+                )
                 compacted_now = True
                 break
 
             blocked = trigger_hooks("PreToolUse", block)
             if blocked:
-                results.append({"type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": str(blocked)})
+                results.append(
+                    {"type": "tool_result", "tool_use_id": block.id, "content": str(blocked)}
+                )
                 continue
 
             if should_run_background(block.name, block.input):
                 bg_id = start_background_task(block, handlers)
-                output = (f"[Background task {bg_id} started] "
-                          "Result will arrive as a task_notification.")
-                results.append({"type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": output})
+                output = (
+                    f"[Background task {bg_id} started] Result will arrive as a task_notification."
+                )
+                results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
                 continue
 
             handler = handlers.get(block.name)
@@ -203,8 +202,7 @@ def agent_loop(messages: list, context: dict) -> None:
             else:
                 rounds_since_todo += 1
 
-            results.append({"type": "tool_result",
-                            "tool_use_id": block.id, "content": output})
+            results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
 
         if compacted_now:
             continue

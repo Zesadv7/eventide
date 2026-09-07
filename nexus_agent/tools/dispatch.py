@@ -1,10 +1,9 @@
 """Low-level tool dispatch helper, separated to avoid circular imports."""
 
-from typing import Callable
+from collections.abc import Callable
 
 
-def call_tool_handler(handler: Callable | None, args: dict | None,
-                      name: str) -> str:
+def call_tool_handler(handler: Callable | None, args: dict | None, name: str) -> str:
     """Call a tool handler with uniform error handling."""
     if handler is None:
         return f"Unknown tool: {name}"

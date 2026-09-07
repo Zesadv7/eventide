@@ -1,98 +1,108 @@
-# Nexus Agent Architecture
+# Nexus Agent 架构
 
-## Core Philosophy
+## 稳定边界
 
-Nexus Agent is a **harness**, not the intelligence itself. The model decides what to do; the harness provides the environment in which it can act.
-
-```text
-Agent = Model + Harness
-        |        |
-        |        +-- tools, memory, permissions, tasks, teammates, scheduling
-        +----------- reasoning, planning, natural-language understanding
+```python
+await AgentRuntime.run(request: RunRequest, sink: EventSink) -> RunResult
+await Provider.complete(request: ModelRequest) -> ModelResponse
+await ToolExecutor.execute(call: ToolCall, context: ToolContext) -> ToolResult
 ```
 
-## The Loop
+`AgentRuntime` 是唯一编排核心：加载隔离的 session history，调用 provider，把工具请求交给 policy-aware executor，并把每个阶段写成事件。CLI 与 FastAPI 只是不同的输入、审批和事件输出适配层。
 
-Every turn follows the same pattern:
-
-```text
-user input
-  → cron/background notifications injected
-  → context compaction
-  → system prompt assembled from skills + memory + MCP state
-  → LLM call
-  → if tool_use blocks exist:
-       PreToolUse hooks + permission check
-       dispatch to handler (builtin, MCP, or background)
-       PostToolUse hooks
-       tool_result appended
-       loop again
-     else:
-       Stop hooks
-       return text
+```mermaid
+sequenceDiagram
+    participant C as CLI / API
+    participant R as AgentRuntime
+    participant P as Provider
+    participant X as ToolExecutor
+    participant A as Approval surface
+    participant S as TraceStore
+    C->>R: RunRequest(session_id, prompt)
+    R->>S: run.started
+    loop until final text
+        R->>P: ModelRequest(history, tools)
+        P-->>R: text + ToolCall[] + usage
+        R->>S: model.response
+        alt ToolCall
+            R->>X: execute(call, context)
+            alt ASK
+                X->>A: approval.required
+                A-->>X: approve / reject / timeout
+            end
+            X-->>R: ToolResult
+            R->>S: tool.result
+        end
+    end
+    R->>S: run.completed
+    R-->>C: RunResult
 ```
 
-This loop lives in `nexus_agent/agent.py`.
+## 并发与状态
 
-## Module Map
+- SQLite 保存 session、message、run、event；同一 session 使用 `asyncio.Lock` 串行化。
+- 不同 session 使用不同锁和不同持久化历史，因此可以并发。
+- todo、权限结果、MCP 会话不通过模块全局变量注入新 Runtime。
+- `TraceStore.close()` 显式关闭连接，保证 Windows 临时目录与服务停机能够释放数据库。
 
-| Module | Responsibility |
-|--------|---------------|
-| `config.py` | `.env` loading, Anthropic client, paths, constants. |
-| `tools/` | Tool schemas and handlers. `dispatch.py` avoids circular imports. |
-| `tasks/` | Durable task graph and git worktree isolation. |
-| `teams/` | MessageBus, protocol state, subagents, persistent teammates. |
-| `memory/` | Skill catalog + `MEMORY.md` long-term memory. |
-| `scheduling/` | Cron scheduler and background task dispatch. |
-| `mcp/` | Mock MCP servers and runtime tool-pool merging. |
-| `llm.py` | Retry, model fallback, prompt-too-long detection. |
-| `context.py` | Four-layer compaction: budget → snip → micro → summary. |
-| `hooks.py` | Pre/post tool-use, user-prompt-submit, and stop hooks. |
-| `agent.py` | Main loop wiring everything together. |
-| `cli.py` | Interactive prompt and cron auto-run thread. |
+## 权限模型
 
-## Context Compaction Pipeline
+`PolicyEngine` 在工具实现之前执行，文件工具内部再次调用同一作用域解析器，形成入口防护与工具自防护两层边界。
 
-Before each LLM call, the harness tries the cheapest strategies first:
+| 决策 | 语义 | 默认行为 |
+|---|---|---|
+| `ALLOW` | 低风险且在工作区内 | 执行 |
+| `ASK` | 可能删除/修改数据或未声明只读的外部 MCP | CLI/Web 请求一次性批准 |
+| `DENY` | 越界路径或不可覆盖的危险命令 | 立即拒绝 |
 
-1. **`tool_result_budget`** — persist oversized individual tool outputs to disk.
-2. **`snip_compact`** — drop a middle slice of old messages.
-3. **`micro_compact`** — replace old tool results with a short placeholder.
-4. **`compact_history`** — ask the model to summarize the whole conversation.
+非交互执行、审批超时或无人响应都按拒绝处理。MCP 的只读提示只有在服务端工具 annotations 明确标注时才绕过审批。路径校验位于 `filesystem.py`，因此 CLI、API、subagent 和 teammate 无法通过绕开入口获得不同策略。
 
-If the model still complains the prompt is too long, `reactive_compact` trims the oldest messages and keeps only the most recent tail.
+## Provider boundary
 
-## Permission Model
+- Anthropic adapter 把统一消息直接映射到 Messages API。
+- OpenAI-compatible adapter 把统一的 `tool_use/tool_result` 往返转换为 Chat Completions tool calls。
+- 429/5xx 等可恢复错误转成带 `retryable` 标记的 `ProviderError`，Runtime 指数退避，最多三次。
+- 客户端惰性创建；帮助、单测和离线评测不需要 Key。
 
-Permissions are implemented as `PreToolUse` hooks, not hardcoded inside tools:
+Provider 不负责策略、持久化或重试循环，这使模型 SDK 的变化不会扩散到执行层。
 
-- A deny list blocks commands like `rm -rf /`, `sudo`, `mkfs`.
-- Destructive patterns (`rm `, `> /etc/`, `chmod 777`) trigger interactive approval.
-- File tools that escape the workspace prompt the user.
-- MCP tools containing `deploy` also prompt for approval.
+## MCP 生命周期
 
-## Multi-Agent Coordination
+`MCPManager` 读取本地 `mcp.json`，通过官方 SDK 管理连接和关闭：
 
-- **`task`** — one-shot subagent with isolated `messages[]`; only the final summary returns.
-- **`spawn_teammate`** — persistent daemon thread with its own loop and mailbox.
-- **`MessageBus`** — append-only JSONL mailboxes on disk.
-- **Protocol state** — plan approval and shutdown requests carry `request_id` to prevent mismatched replies.
-- **Worktrees** — tasks can be bound to git worktrees; teammate file tools automatically run in the bound directory.
+1. 校验 transport 和必填配置。
+2. stdio 仅传递显式列入 `env` 的变量；HTTP 通过本地 headers 配置。
+3. 建立 client session，发现工具并规范化为 `mcp__server__tool`。
+4. 把 schema/handler/只读提示注册到 Runtime。
+5. Runtime 关闭时统一退出 async context stack。
 
-## Error Recovery
+mock MCP 只保留为 v0.1 教学测试 fixture，生产路径使用真实 SDK。stdio 已由真实子进程集成测试验证；Streamable HTTP 使用同一官方 transport client。
 
-`llm.with_retry` handles transient failures:
+## Trace 与事件
 
-- `429` / rate limit → exponential backoff.
-- `529` / overloaded → backoff; after repeated failures, switch to `FALLBACK_MODEL_ID`.
-- `max_tokens` → first escalate `max_tokens`, then request a continuation.
-- prompt too long → reactive compact and retry once.
+标准事件包括：
 
-## Adding a New Tool
+- `run.started/completed/failed`
+- `model.request/response/retry`
+- `tool.request/result`
+- `approval.required/resolved`
+- `context.compacted`
 
-1. Implement the handler in the appropriate `tools/` module.
-2. Add the schema to `tools/registry.py` `BUILTIN_TOOLS`.
-3. Add the handler to `tools/registry.py` `BUILTIN_HANDLERS`.
-4. Write a test in `tests/test_*.py`.
+事件含序号、时间、耗时、状态、错误和 token usage。字段名匹配 key/token/authorization/secret/password 的值会被替换，大文本在 4,000 字符截断。SSE 读取已持久化事件而不是依赖进程内消息队列，因此页面短暂重连仍可按序号补读。
 
-No changes to the main loop are required.
+## 上下文压缩
+
+每轮模型调用前对序列化历史做确定性预算检查；超限时保留最近完整交互并写入压缩标记。工具也可显式请求 `compact`。压缩动作记录为事件，方便评测是否发生，而不是让压缩成为不可观测的隐式副作用。
+
+## Worktree 正确性
+
+创建 worktree 时记录基线 commit。删除前同时检查：
+
+- `git status --porcelain`：未提交文件变化；
+- `git rev-list --count base..HEAD`：基线后的本地提交。
+
+因此不依赖是否设置 upstream，也不会把“已提交但未推送”的工作误判为可安全删除。
+
+## 明确不做
+
+本地 shell 不是安全沙箱；没有 Docker 执行器、分布式队列、登录系统、公网部署或复杂前端。这些边界在 README 中公开，避免把策略校验误称为操作系统级隔离。

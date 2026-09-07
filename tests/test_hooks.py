@@ -20,18 +20,19 @@ def test_permission_deny_list(monkeypatch):
     hooks.clear_hooks("PreToolUse")
     hooks.register_hook("PreToolUse", hooks.permission_hook)
     block = SimpleNamespace(name="bash", input={"command": "rm -rf /"})
-    assert "deny list" in hooks.trigger_hooks("PreToolUse", block)
+    assert "Permission denied" in hooks.trigger_hooks("PreToolUse", block)
 
 
 def test_permission_workspace_escape(monkeypatch):
     import tempfile
+
     hooks.clear_hooks("PreToolUse")
     hooks.register_hook("PreToolUse", hooks.permission_hook)
     tmp = tempfile.mkdtemp()
     monkeypatch.setattr("nexus_agent.hooks.WORKDIR", __import__("pathlib").Path(tmp))
     monkeypatch.setattr("builtins.input", lambda _: "n")
     block = SimpleNamespace(name="write_file", input={"path": "../escape.txt"})
-    assert "Permission denied by user" in hooks.trigger_hooks("PreToolUse", block)
+    assert "Path escapes workspace" in hooks.trigger_hooks("PreToolUse", block)
 
 
 def test_permission_allows_safe_bash():
