@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Nexus Agent runtime trace console">
   <title>Nexus // Runtime Console</title>
-  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="/assets/style.css?v=3">
 </head>
 <body>
   <div class="grid-noise" aria-hidden="true"></div>
@@ -13,7 +13,12 @@
     <a class="wordmark" href="/" aria-label="Nexus Agent home">
       <span class="mark">N</span><span>NEXUS</span><small>RUNTIME / 0.2</small>
     </a>
-    <div class="system-state"><span class="pulse"></span><span id="health">CONNECTING</span></div>
+    <div class="masthead-actions">
+      <button id="model-config-button" class="model-config-button" type="button">
+        <span>MODEL</span><strong id="model-state">CHECKING</strong>
+      </button>
+      <div class="system-state"><span class="pulse"></span><span id="health">CONNECTING</span></div>
+    </div>
   </header>
 
   <main>
@@ -72,6 +77,38 @@
       <div class="event-body"><div class="event-title"></div><pre class="event-detail"></pre></div>
     </li>
   </template>
-  <script src="/assets/app.js" defer></script>
+
+  <dialog id="model-dialog" class="model-dialog">
+    <form id="model-form" class="model-form">
+      <div class="config-head">
+        <div><p class="eyebrow">RUNTIME LINK</p><h2>Configure model.</h2></div>
+        <button id="close-model-dialog" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <p class="config-note">密钥只保存在当前服务进程内，不写入浏览器存储、SQLite 或项目文件。服务重启后需要重新配置。</p>
+      <div class="config-grid">
+        <label>PROVIDER
+          <select id="provider" name="provider">
+            <option value="openai_compatible">OpenAI-compatible</option>
+            <option value="anthropic">Anthropic Messages</option>
+          </select>
+        </label>
+        <label>MODEL
+          <input id="model" name="model" autocomplete="off" placeholder="tool-capable-model" required>
+        </label>
+        <label class="wide">BASE URL
+          <input id="base-url" name="base_url" type="url" autocomplete="url" placeholder="https://provider.example/v1">
+        </label>
+        <label class="wide">API KEY
+          <span class="secret-field"><input id="api-key" name="api_key" type="password" autocomplete="off" placeholder="留空则保留当前进程中的 Key"><button id="toggle-key" type="button">SHOW</button></span>
+        </label>
+      </div>
+      <div id="config-message" class="config-message" role="status"></div>
+      <div class="config-actions">
+        <span>LOCAL PROCESS CONFIG</span>
+        <button id="save-model-config" type="submit"><span>SAVE LINK</span><b>↗</b></button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/assets/app.js?v=3" defer></script>
 </body>
 </html>

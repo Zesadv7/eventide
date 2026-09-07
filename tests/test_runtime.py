@@ -111,3 +111,26 @@ async def test_sessions_are_isolated_and_can_run_concurrently(isolated_workspace
     assert store.load_messages("b")[0]["content"] == "beta"
     await runtime.close()
     store.close()
+
+
+async def test_runtime_reconfigures_and_closes_previous_provider(isolated_workspace):
+    class ClosableProvider:
+        def __init__(self):
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    provider = ClosableProvider()
+    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    await runtime.configure_provider(
+        provider="openai-compatible",
+        api_key="new-key",
+        base_url="https://model.example/v1",
+        model="new-model",
+    )
+    assert provider.closed
+    assert runtime.provider is None
+    assert runtime.settings.provider == "openai_compatible"
+    assert runtime.settings.model == "new-model"
+    await runtime.close()

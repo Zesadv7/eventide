@@ -62,6 +62,8 @@ nexus-agent chat
 nexus-agent eval evals/smoke.yaml --live
 ```
 
+也可以在 Web 控制台右上角点击 `MODEL / CONFIGURE`，直接填写 provider、模型、Base URL 和 API Key。Web 配置只驻留当前服务进程，不写入浏览器存储、SQLite 或项目文件，重启后自动清除。
+
 `openai_compatible` 面向实现 Chat Completions tool calling 的兼容服务；不要把 API Key 写进 `mcp.json`、命令行或提交记录。
 
 ## MCP
@@ -78,11 +80,14 @@ nexus-agent run "调用 demo MCP echo 工具"
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `POST` | `/api/sessions` | 创建隔离会话 |
+| `GET/PUT` | `/api/config/provider` | 查询或配置进程内模型连接（不回显 Key） |
 | `POST` | `/api/sessions/{id}/runs` | 异步提交任务 |
 | `GET` | `/api/runs/{id}` | 查询状态和指标 |
 | `GET` | `/api/runs/{id}/events` | SSE 事件流 |
 | `POST` | `/api/runs/{id}/approvals/{approval_id}` | 批准/拒绝危险操作 |
 | `GET` | `/healthz` | 健康检查 |
+
+![Web 模型 API 配置面板](docs/assets/model-config.png)
 
 ## 已验证指标
 
@@ -90,8 +95,8 @@ nexus-agent run "调用 demo MCP echo 工具"
 
 | 指标 | 结果 |
 |---|---:|
-| 测试 | 66 passed |
-| 生产 Runtime 覆盖率 | 87.47% |
+| 测试 | 68 passed |
+| 生产 Runtime 覆盖率 | 87.49% |
 | 离线评测 | 10 / 10 |
 | 平均用例延迟 | 49.40 ms |
 | 工具成功率 | 85.71% |

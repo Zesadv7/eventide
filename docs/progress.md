@@ -21,8 +21,8 @@
 | 检查 | 结果 |
 |---|---|
 | Python | 3.14.2 / Windows |
-| pytest | 66 passed |
-| production runtime coverage | 87.47% |
+| pytest | 68 passed |
+| production runtime coverage | 87.49% |
 | Ruff | passed |
 | mypy | 43 source files, no issues |
 | offline eval | 10/10, mean 49.40 ms |

@@ -21,4 +21,4 @@ Nexus Agent v0.2 是生产化 runtime；`nexus_agent/agent.py` 等 v0.1 教学 h
 
 ## 当前验证
 
-66 tests，生产 Runtime 覆盖率 87.47%，Ruff/mypy 通过，offline eval 10/10，真实 stdio/HTTP MCP 通过。真实国内模型和 GitHub 发布尚未执行，因为需要用户凭证与明确授权。
+68 tests，生产 Runtime 覆盖率 87.49%，Ruff/mypy 通过，offline eval 10/10，真实 stdio/HTTP MCP 通过。真实国内模型和 GitHub 发布尚未执行，因为需要用户凭证与明确授权。

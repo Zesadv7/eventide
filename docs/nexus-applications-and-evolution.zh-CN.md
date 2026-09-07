@@ -323,8 +323,8 @@ flowchart TB
 
 | 验证项 | 当前结果 |
 |---|---:|
-| pytest | 66 passed |
-| 生产 Runtime 覆盖率 | 87.47% |
+| pytest | 68 passed |
+| 生产 Runtime 覆盖率 | 87.49% |
 | Ruff | passed |
 | mypy | 43 source files, no issues |
 | offline smoke eval | 10 / 10 |

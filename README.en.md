@@ -60,6 +60,8 @@ nexus-agent chat
 nexus-agent eval evals/smoke.yaml --live
 ```
 
+Alternatively, click `MODEL / CONFIGURE` in the Web console and enter the provider, model, base URL, and API key. Web configuration lives only in the current service process; it is never written to browser storage, SQLite, or project files and disappears on restart.
+
 `openai_compatible` targets providers implementing Chat Completions tool calling. Never place an API key in `mcp.json`, a command line, or version control.
 
 ## MCP
@@ -76,11 +78,14 @@ The example starts a real Python subprocess; `mcp.json` is ignored by default. S
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/sessions` | Create an isolated session |
+| `GET/PUT` | `/api/config/provider` | Read or configure the in-process model connection; never echoes the key |
 | `POST` | `/api/sessions/{id}/runs` | Submit an asynchronous run |
 | `GET` | `/api/runs/{id}` | Read status and metrics |
 | `GET` | `/api/runs/{id}/events` | Stream SSE events |
 | `POST` | `/api/runs/{id}/approvals/{approval_id}` | Approve or reject a risky action |
 | `GET` | `/healthz` | Health check |
+
+![Web model API configuration panel](docs/assets/model-config.png)
 
 ## Verified metrics
 
@@ -88,8 +93,8 @@ Offline results measured on 2026-09-07 with Windows and Python 3.14. Latency is 
 
 | Metric | Result |
 |---|---:|
-| Tests | 66 passed |
-| Production-runtime coverage | 87.47% |
+| Tests | 68 passed |
+| Production-runtime coverage | 87.49% |
 | Offline evaluation | 10 / 10 |
 | Mean case latency | 49.40 ms |
 | Tool success rate | 85.71% |

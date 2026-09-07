@@ -8,12 +8,12 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from nexus_agent.config import Settings
 from nexus_agent.models import RunRequest, ToolCall
@@ -28,6 +28,13 @@ class RunBody(BaseModel):
 
 class ApprovalBody(BaseModel):
     approved: bool
+
+
+class ProviderConfigBody(BaseModel):
+    provider: Literal["anthropic", "openai_compatible", "openai-compatible"]
+    api_key: SecretStr | None = None
+    base_url: str | None = Field(default=None, max_length=2_048)
+    model: str = Field(min_length=1, max_length=256)
 
 
 class ApprovalBroker:
@@ -84,6 +91,39 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
     @app.post("/api/sessions", status_code=status.HTTP_201_CREATED)
     async def create_session() -> dict[str, str]:
         return {"session_id": agent_runtime.create_session()}
+
+    def provider_status() -> dict[str, Any]:
+        settings = agent_runtime.settings
+        return {
+            "provider": settings.provider,
+            "base_url": settings.base_url,
+            "model": settings.model,
+            "api_key_configured": bool(settings.api_key),
+            "persistence": "process_memory_only",
+        }
+
+    @app.get("/api/config/provider")
+    async def get_provider_config() -> dict[str, Any]:
+        return provider_status()
+
+    @app.put("/api/config/provider")
+    async def set_provider_config(body: ProviderConfigBody) -> dict[str, Any]:
+        if any(not task.done() for task in tasks):
+            raise HTTPException(
+                status_code=409,
+                detail="Wait for active runs to finish before changing provider configuration",
+            )
+        key = body.api_key.get_secret_value() if body.api_key else None
+        try:
+            await agent_runtime.configure_provider(
+                provider=body.provider,
+                api_key=key,
+                base_url=body.base_url,
+                model=body.model,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return provider_status()
 
     @app.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(session_id: str, body: RunBody) -> dict[str, str]:

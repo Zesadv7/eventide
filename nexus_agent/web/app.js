@@ -1,5 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { sessionId: null, runId: null, events: 0, source: null };
+const state = { sessionId: null, runId: null, events: 0, source: null, configured: false };
 
 async function request(url, options = {}) {
   const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
@@ -15,8 +15,53 @@ async function bootstrap() {
     const session = await request("/api/sessions", { method: "POST" });
     state.sessionId = session.session_id;
     $("#session-id").textContent = state.sessionId;
+    await loadProviderConfig();
   } catch (error) {
     $("#health").textContent = "OFFLINE";
+  }
+}
+
+function renderProviderStatus(config) {
+  state.configured = config.api_key_configured;
+  const button = $("#model-config-button");
+  button.classList.toggle("configured", state.configured);
+  $("#model-state").textContent = state.configured ? config.model : "CONFIGURE";
+  $("#provider").value = config.provider;
+  $("#model").value = config.model || "";
+  $("#base-url").value = config.base_url || "";
+}
+
+async function loadProviderConfig() {
+  renderProviderStatus(await request("/api/config/provider"));
+}
+
+async function saveProviderConfig(event) {
+  event.preventDefault();
+  const message = $("#config-message");
+  const button = $("#save-model-config");
+  message.className = "config-message";
+  message.textContent = "SAVING PROCESS CONFIG…";
+  button.disabled = true;
+  const body = {
+    provider: $("#provider").value,
+    model: $("#model").value.trim(),
+    base_url: $("#base-url").value.trim() || null,
+  };
+  const key = $("#api-key").value.trim();
+  if (key) body.api_key = key;
+  try {
+    const config = await request("/api/config/provider", {
+      method: "PUT", body: JSON.stringify(body),
+    });
+    $("#api-key").value = "";
+    renderProviderStatus(config);
+    message.className = "config-message success";
+    message.textContent = "MODEL LINK READY · KEY HELD IN PROCESS MEMORY";
+    setTimeout(() => $("#model-dialog").close(), 700);
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -73,6 +118,11 @@ async function finishRun() {
 
 async function execute(prompt) {
   if (!state.sessionId) await bootstrap();
+  if (!state.configured) {
+    $("#config-message").textContent = "CONFIGURE AN API KEY BEFORE STARTING A RUN";
+    $("#model-dialog").showModal();
+    return;
+  }
   state.events = 0;
   $("#answer-panel").hidden = true;
   $("#metric-state").textContent = "RUNNING";
@@ -102,4 +152,13 @@ $("#prompt").addEventListener("keydown", (event) => {
   if (event.ctrlKey && event.key === "Enter") $("#prompt-form").requestSubmit();
 });
 $("#copy-answer").addEventListener("click", () => navigator.clipboard.writeText($("#answer").textContent));
+$("#model-config-button").addEventListener("click", () => $("#model-dialog").showModal());
+$("#close-model-dialog").addEventListener("click", () => $("#model-dialog").close());
+$("#model-form").addEventListener("submit", saveProviderConfig);
+$("#toggle-key").addEventListener("click", () => {
+  const key = $("#api-key");
+  const visible = key.type === "text";
+  key.type = visible ? "password" : "text";
+  $("#toggle-key").textContent = visible ? "SHOW" : "HIDE";
+});
 bootstrap();

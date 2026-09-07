@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import time
 import uuid
@@ -68,9 +69,51 @@ class AgentRuntime:
         self._initialized = True
 
     async def close(self) -> None:
+        await self._close_provider()
         await self.mcp.close()
         if self._owns_store:
             self.store.close()
+
+    async def _close_provider(self) -> None:
+        if self.provider is None:
+            return
+        closer = getattr(self.provider, "close", None)
+        if closer is None:
+            closer = getattr(self.provider, "aclose", None)
+        if closer is not None:
+            result = closer()
+            if inspect.isawaitable(result):
+                await result
+
+    async def configure_provider(
+        self,
+        *,
+        provider: str,
+        api_key: str | None,
+        base_url: str | None,
+        model: str,
+    ) -> None:
+        """Replace live provider settings without persisting the API key."""
+        normalized = provider.strip().lower().replace("-", "_")
+        if normalized not in {"anthropic", "openai_compatible"}:
+            raise ValueError(f"Unsupported provider '{provider}'")
+        if not model.strip():
+            raise ValueError("Model cannot be empty")
+        await self._close_provider()
+        self.settings = Settings(
+            workdir=self.settings.workdir,
+            state_dir=self.settings.state_dir,
+            provider=normalized,
+            api_key=api_key or self.settings.api_key,
+            base_url=base_url.strip() if base_url else None,
+            model=model.strip(),
+            fallback_model=self.settings.fallback_model,
+            max_tokens=self.settings.max_tokens,
+            max_steps=self.settings.max_steps,
+            context_limit=self.settings.context_limit,
+            approval_timeout=self.settings.approval_timeout,
+        )
+        self.provider = None
 
     async def _emit(
         self, run_id: str, event_type: str, payload: dict[str, Any], sink: EventSink | None

@@ -90,3 +90,26 @@ def test_api_resolves_pending_approval(isolated_workspace):
         )
         assert response.status_code == 200
         assert wait_for_run(client, run_id)["output"] == "denial handled"
+
+
+def test_api_configures_provider_without_echoing_secret(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    with TestClient(create_app(runtime)) as client:
+        initial = client.get("/api/config/provider").json()
+        assert initial["api_key_configured"] is False
+        assert "api_key" not in initial
+        response = client.put(
+            "/api/config/provider",
+            json={
+                "provider": "openai_compatible",
+                "api_key": "local-test-secret",
+                "base_url": "https://model.example/v1",
+                "model": "tool-model",
+            },
+        )
+        assert response.status_code == 200
+        configured = response.json()
+        assert configured["api_key_configured"] is True
+        assert configured["persistence"] == "process_memory_only"
+        assert "local-test-secret" not in response.text
+        assert runtime.settings.api_key == "local-test-secret"
