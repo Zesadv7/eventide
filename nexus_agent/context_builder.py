@@ -18,24 +18,73 @@ class ContextOverflow(RuntimeError):
     pass
 
 
+KEEP_RECENT_TOOL_RESULTS = 3
+
+
+def _tool_result_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return []
+    return [
+        block for block in content if isinstance(block, dict) and block.get("type") == "tool_result"
+    ]
+
+
+def _folded_placeholder(name: str, omitted: int) -> str:
+    return f"[{name} output folded to fit the context budget: {omitted} characters omitted]"
+
+
 def _describe_context(messages: list[dict[str, Any]], budget: int) -> str:
     """Budget breakdown for overflow diagnostics; never includes message text."""
     total = len(json.dumps(messages, ensure_ascii=False))
-    results = [
-        message
-        for message in messages
-        if isinstance(message.get("content"), list)
-        and any(
-            isinstance(block, dict) and block.get("type") == "tool_result"
-            for block in message["content"]
-        )
-    ]
+    results = [message for message in messages if _tool_result_blocks(message)]
     tool_chars = sum(len(json.dumps(message, ensure_ascii=False)) for message in results)
     return (
         f"{total} characters against a {budget} character budget "
         f"({len(messages)} messages, {len(results)} tool-result messages "
         f"totalling {tool_chars} characters)"
     )
+
+
+def _fold_tool_results(
+    messages: list[dict[str, Any]], budget: int, names: dict[str, str]
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Replace older active-turn tool results with placeholders until the budget fits.
+
+    Only the `content` string of a tool_result block is replaced, so tool_use and
+    tool_result stay paired and MessagesProjection keeps working. The newest
+    KEEP_RECENT_TOOL_RESULTS groups stay verbatim, and the event log is never
+    touched: folding is a lossy request-side projection, not a new fact.
+    """
+    groups = [index for index, message in enumerate(messages) if _tool_result_blocks(message)]
+    protected = set(groups[-KEEP_RECENT_TOOL_RESULTS:])
+    working = list(messages)
+    folded: list[str] = []
+    omitted = 0
+    for index in groups:
+        if index in protected:
+            continue
+        original = messages[index]
+        blocks = list(original["content"])
+        for position, block in enumerate(original["content"]):
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            text = block.get("content")
+            if not isinstance(text, str):
+                continue
+            call_id = str(block.get("tool_use_id", ""))
+            placeholder = _folded_placeholder(names.get(call_id, "tool"), len(text))
+            if len(placeholder) >= len(text):
+                continue
+            blocks[position] = {**block, "content": placeholder}
+            working[index] = {**original, "content": blocks}
+            folded.append(call_id)
+            omitted += len(text) - len(placeholder)
+            if len(json.dumps(working, ensure_ascii=False)) <= budget:
+                return working, {"call_ids": folded, "omitted_chars": omitted}
+    if not folded:
+        return messages, None
+    return working, {"call_ids": folded, "omitted_chars": omitted}
 
 
 class ContextBuilder:
@@ -61,7 +110,7 @@ class ContextBuilder:
         budget: int,
         force: bool = False,
         secrets: tuple[str, ...] = (),
-    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
         events = self.store.session_events(session_id)
         checkpoint = None
         for candidate in self.store.checkpoints(session_id):
@@ -91,13 +140,20 @@ class ContextBuilder:
             return len(json.dumps(value, ensure_ascii=False))
 
         if not force and size(messages) <= budget:
-            return messages, None
+            return messages, None, None
+        names = {
+            str(event["payload"].get("call_id")): str(event["payload"].get("name", "tool"))
+            for event in events
+            if event["type"] == "tool.completed"
+        }
+        current = messages
+        pending: dict[str, Any] | None = None
+        failure: str | None = None
         # Only close whole turns. The latest active turn is always retained verbatim,
-        # so a turn that exceeds the budget on its own can never be compacted away.
+        # so a turn that exceeds the budget on its own is folded rather than summarized.
         boundary = max((e["session_seq"] for e in events if e["type"] in TERMINALS), default=0)
         if boundary and (not checkpoint or boundary > checkpoint["covered_seq"]):
             prefix = [e for e in events if e["session_seq"] <= boundary]
-            failure: str | None = None
             try:
                 history = MessagesProjection.project(prefix)
                 response = await provider.complete(
@@ -115,41 +171,51 @@ class ContextBuilder:
                 summary = normalize(redact(response.text), secrets).strip()
                 if not summary or response.tool_calls:
                     raise ValueError("Invalid context summary")
-                proposed = {"covered_seq": boundary, "summary": summary}
-                candidate_messages = materialize(proposed)
-                if size(candidate_messages) > budget:
-                    failure = (
-                        "completed turns were summarized but the active turn still "
-                        "exceeds the budget"
-                    )
-                else:
-                    self.store.save_checkpoint(
-                        session_id,
-                        boundary,
-                        digest(prefix),
-                        summary,
-                        provider_name,
-                        model,
-                    )
-                    return candidate_messages, {
-                        "covered_seq": boundary,
-                        "source_digest": digest(prefix),
-                        "policy_version": 1,
-                        "usage": response.usage,
-                    }
+                candidate_messages = materialize({"covered_seq": boundary, "summary": summary})
+                pending = {
+                    "covered_seq": boundary,
+                    "source_digest": digest(prefix),
+                    "policy_version": 1,
+                    "usage": response.usage,
+                    "summary": summary,
+                }
+                if size(candidate_messages) < size(current):
+                    current = candidate_messages
             except Exception as exc:
                 failure = f"summarizing completed turns failed ({type(exc).__name__}: {exc})"
-            if failure and size(messages) > budget:
-                raise ContextOverflow(
-                    f"context_overflow: {failure}; active context is "
-                    f"{_describe_context(messages, budget)}"
+
+        current, trimmed = (
+            _fold_tool_results(current, budget, names)
+            if size(current) > budget
+            else (current, None)
+        )
+        if size(current) > budget:
+            if failure:
+                reason = failure
+            elif pending:
+                reason = (
+                    "completed turns were summarized but the active turn still exceeds the budget"
                 )
-        if size(messages) > budget:
+            else:
+                reason = (
+                    "active turn exceeds the budget and no completed turn is available to compact"
+                )
             raise ContextOverflow(
-                "context_overflow: active turn exceeds the budget and no completed turn is "
-                f"available to compact; active context is {_describe_context(messages, budget)}"
+                f"context_overflow: {reason}; older tool results were folded but the context "
+                f"is still over budget: {_describe_context(current, budget)}"
             )
-        return messages, {
-            "covered_seq": 0,
-            "reason": "No completed prefix to compact",
-        } if force else None
+
+        compacted = None
+        if pending and current is not messages:
+            self.store.save_checkpoint(
+                session_id,
+                pending["covered_seq"],
+                pending["source_digest"],
+                pending["summary"],
+                provider_name,
+                model,
+            )
+            compacted = {key: value for key, value in pending.items() if key != "summary"}
+        if compacted is None and force:
+            compacted = {"covered_seq": 0, "reason": "No completed prefix to compact"}
+        return current, compacted, trimmed

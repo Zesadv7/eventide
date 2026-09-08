@@ -119,7 +119,7 @@ async def test_summary_failure_uses_valid_checkpoint_or_overflows(isolated_works
         host.store.append_message(session, {"role": "user", "content": "y" * 100})
         host.store.finish_run("next", status="completed", output="done")
         args = dict(provider_name="scripted", model="scripted", budget=500, force=True)
-        messages, _ = await host.context_builder.build(
+        messages, _, _ = await host.context_builder.build(
             session,
             provider=ScriptedProvider([{"error": "summary failure"}]),
             **args,
@@ -159,6 +159,88 @@ async def test_overflow_reports_the_active_turn_not_a_missing_checkpoint(isolate
         assert "context_overflow" in message
         assert "no usable checkpoint" not in message
         assert "1000 character budget" in message
+    finally:
+        await host.close()
+
+
+def _append_tool_group(store, session, run_id, call_id, name, content):
+    store.append_fact(
+        session,
+        "model.response",
+        {
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": call_id, "name": name, "input": {}}],
+            }
+        },
+        run_id=run_id,
+    )
+    store.append_fact(
+        session,
+        "tool.completed",
+        {"call_id": call_id, "name": name, "content": content, "is_error": False},
+        run_id=run_id,
+    )
+
+
+async def test_folding_keeps_pairing_and_recent_results(isolated_workspace):
+    host = RuntimeHost(settings_for(isolated_workspace))
+    try:
+        session = host.create_session()
+        host.store.create_run("r", session)
+        host.store.append_message(session, {"role": "user", "content": "go"})
+        for index in range(5):
+            _append_tool_group(
+                host.store, session, "r", f"call_{index}", "read_file", f"body{index}" + "x" * 3000
+            )
+        before = host.store.session_events(session)
+        messages, compacted, trimmed = await host.context_builder.build(
+            session,
+            provider=ScriptedProvider([]),
+            provider_name="scripted",
+            model="scripted",
+            budget=12000,
+        )
+        assert compacted is None
+        assert trimmed and trimmed["call_ids"]
+        blocks = [
+            block
+            for message in messages
+            if isinstance(message.get("content"), list)
+            for block in message["content"]
+            if isinstance(block, dict) and block.get("type") == "tool_result"
+        ]
+        assert [block["tool_use_id"] for block in blocks] == [f"call_{index}" for index in range(5)]
+        folded = [block["tool_use_id"] for block in blocks if "folded" in str(block["content"])]
+        assert folded == trimmed["call_ids"]
+        assert len(folded) <= 2
+        assert blocks[-1]["content"].startswith("body4")
+        assert blocks[-2]["content"].startswith("body3")
+        assert blocks[-3]["content"].startswith("body2")
+        assert host.store.session_events(session) == before
+    finally:
+        await host.close()
+
+
+async def test_folding_cannot_save_an_oversized_active_turn(isolated_workspace):
+    host = RuntimeHost(settings_for(isolated_workspace))
+    try:
+        session = host.create_session()
+        host.store.create_run("r", session)
+        host.store.append_message(session, {"role": "user", "content": "go"})
+        for index in range(4):
+            _append_tool_group(host.store, session, "r", f"call_{index}", "read_file", "x" * 3000)
+        with pytest.raises(ContextOverflow) as excinfo:
+            await host.context_builder.build(
+                session,
+                provider=ScriptedProvider([]),
+                provider_name="scripted",
+                model="scripted",
+                budget=50,
+            )
+        message = str(excinfo.value)
+        assert "folded" in message
+        assert "50 character budget" in message
     finally:
         await host.close()
 

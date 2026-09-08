@@ -650,7 +650,7 @@ class RuntimeHost:
                 return approved
 
             for steps in range(1, self.settings.max_steps + 1):
-                messages, compacted = await self.context_builder.build(
+                messages, compacted, trimmed = await self.context_builder.build(
                     session_id,
                     provider=self._provider(),
                     provider_name=self.settings.provider,
@@ -664,6 +664,8 @@ class RuntimeHost:
                     await self._emit(run_id, "context.compacted", compacted, sink)
                     for key in usage:
                         usage[key] += int(compacted.get("usage", {}).get(key, 0))
+                if trimmed:
+                    await self._emit(run_id, "context.trimmed", trimmed, sink)
                 await self._emit(
                     run_id,
                     "model.request",

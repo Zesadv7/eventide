@@ -220,6 +220,39 @@ async def test_event_and_model_normalization_are_identical(isolated_workspace):
         await host.close()
 
 
+async def test_long_turn_folds_older_tool_results_instead_of_failing(isolated_workspace):
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    {"id": f"r{index}", "name": "read_file", "arguments": {"path": f"d{index}"}}
+                ]
+            }
+            for index in range(5)
+        ]
+        + [{"text": "done"}]
+    )
+    for index in range(5):
+        (isolated_workspace / f"d{index}").write_text("y" * 3000, encoding="utf-8")
+    host = RuntimeHost(settings_for(isolated_workspace, context_limit=12000), provider)
+    try:
+        result = await host.run(RunRequest("read"))
+        assert result.status == "completed"
+        events = host.store.run_events(result.run_id)
+        trimmed = next(e for e in events if e["type"] == "context.trimmed")
+        assert trimmed["payload"]["call_ids"]
+        blocks = [
+            block
+            for message in provider.requests[-1].messages
+            if isinstance(message.get("content"), list)
+            for block in message["content"]
+            if isinstance(block, dict) and block.get("type") == "tool_result"
+        ]
+        assert any("folded" in str(block["content"]) for block in blocks)
+    finally:
+        await host.close()
+
+
 async def test_cancel_and_close_release_owner(isolated_workspace):
     entered = asyncio.Event()
 
