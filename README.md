@@ -13,7 +13,7 @@ Nexus Agent v0.3 是面向软件工程项目的 Workspace Agent Runtime。Runtim
 - scripted provider 离线评测与真实模型 live eval；
 - FastAPI、SSE 事件流和原生中文 Web 控制台。
 
-![Nexus Agent Web 运行控制台](docs/assets/web-console.png)
+![Nexus Agent Web 工作记录页（离线示例）](docs/assets/web-console.png)
 
 ## 环境要求
 
@@ -59,7 +59,7 @@ uv run nexus-agent eval evals/smoke.yaml
 uv run nexus-agent serve --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 `http://127.0.0.1:8000`。在右上角的模型配置窗口中填写 Provider、模型名称、Base URL 和 API Key，可以先检查连接，再保存并应用。配置写入状态根的 `runtime.sqlite`，API Key 使用同目录 `secret.key` 或 `NEXUS_SECRET_KEY` 加密。
+浏览器打开 `http://127.0.0.1:8000`。通过右上角“设置”填写 Provider、模型名称、Base URL 和 API Key，可以先检查连接，再保存并应用。模型配置由同一 Host 的所有工作区共用。配置写入状态根的 `runtime.sqlite`，API Key 使用同目录 `secret.key` 或 `NEXUS_SECRET_KEY` 加密。
 
 默认状态根：Windows 为 `%LOCALAPPDATA%\Nexus`，macOS 为 `~/Library/Application Support/Nexus`，Linux 为 `$XDG_STATE_HOME/nexus`（未设置时 `~/.local/state/nexus`）。`NEXUS_STATE_DIR` 可覆盖；相对路径相对于启动工作目录解析。状态目录独占：`serve` 运行期间，使用同一状态根的另一 CLI/Host 会明确报错，首版没有跨进程客户端协议。
 
@@ -84,6 +84,16 @@ Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `p
 上下文摘要只覆盖已结束的 turn，原始事件不变。无法在上下文预算内保留有效摘要与当前 turn 时返回 `context_overflow`，不会静默丢弃当前交互。预算单位保持为序列化消息的字符数。
 
 HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id`；空请求继续绑定启动项目。`POST /api/sessions/{id}/continue` 等待新 run 完成并返回 RunResult，验证失败返回 409；Web 工作台通过 Session 状态与 Run History 发现 Continue 创建的新 Run，再消费同一 SSE 事件流。同 Workspace 的并发 HTTP 请求返回 409。Web 控制台以 Workspace、Session 和语义化运行阶段组织事件，不直接展示底层 Runtime 日志。
+
+## Web 工作记录页
+
+左侧选择 Workspace 和持续存在的工作（Session），正文优先展示工作目标、当前状态与最近成果；“本次执行结束”不代表 Session 被关闭。首次浏览不自动创建空 Session，点击“新建工作”或首次提交目标时才创建。刷新会恢复该 Workspace 上次选择的工作。
+
+工作经过按用户意图及其 Continue 链分章，较早章节按需加载，工具操作默认折叠。工具请求与结果配对后展示对象和执行状态；“操作完成”不额外宣称测试全部通过。原始 Events、模型协议、工具参数和 checkpoint 通过临时右侧详情查看。结果支持标题、列表、代码和安全链接的 Markdown 子集，以及复制；原始 HTML 不执行。
+
+停驻时输入区切换为 Continue 操作，通过后立即展示接续过程；校验失败保留停驻状态与原因。仅最新停驻工作提供 Continue。审批直接在正文提供“本次允许”和“拒绝”。同 Workspace 忙碌时不能再次提交；历史仍可浏览。正文独立滚动，底部操作区保持可达，小屏也可切换 Workspace、新建工作和查看详情。
+
+Web 运行不依赖 Node 或前端构建。开发时可用 Node.js 22+ 运行 `node --test tests/web.test.mjs`；pytest 检测到合适的 Node 时也会执行这些离线投影和传输检查。另有 `node tests/web_browser.cjs` 浏览器验收，需预先提供 Playwright 与 Chromium；`NEXUS_PLAYWRIGHT_MODULE` 可指定已安装的包路径，`NEXUS_BROWSER_CHANNEL=msedge` 可使用已安装的 Edge。浏览器测试使用内存 HTTP/SSE 样例，不读取用户数据库或连接模型，截图写入忽略目录 `.task_outputs/`。
 
 ## 配置真实模型
 
