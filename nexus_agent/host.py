@@ -7,7 +7,8 @@ import inspect
 import time
 import uuid
 from collections import defaultdict
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -92,6 +93,7 @@ class RuntimeHost:
         self._workspace_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._active_tasks: set[asyncio.Task[Any]] = set()
         self._closed = False
+        self._configuring = False
         self._config_path: Path | None = None
         self._enable_mcp = enable_mcp
 
@@ -215,6 +217,16 @@ class RuntimeHost:
             "configuration_error": self._provider_secret_error,
         }
 
+    @contextmanager
+    def _configuration_change(self) -> Iterator[None]:
+        if self._configuring or self._active_tasks:
+            raise ValueError("Wait for active runs or configuration changes")
+        self._configuring = True
+        try:
+            yield
+        finally:
+            self._configuring = False
+
     async def configure_provider(
         self,
         *,
@@ -226,50 +238,54 @@ class RuntimeHost:
         clear_api_key: bool = False,
     ) -> None:
         """Replace live provider settings and optionally persist an encrypted credential."""
-        if self._active_tasks:
-            raise ValueError("Wait for active runs before changing provider configuration")
-        normalized = provider.strip().lower().replace("-", "_")
-        if normalized not in {"anthropic", "openai_compatible", "openai_responses"}:
-            raise ValueError(f"Unsupported provider '{provider}'")
-        if not model.strip():
-            raise ValueError("Model cannot be empty")
-        normalized_url = base_url.strip() if base_url else None
-        selected_key = api_key.strip() if api_key and api_key.strip() else self.settings.api_key
-        if persist:
-            current = self.store.get_provider_config() or {}
-            encrypted = current.get("api_key_ciphertext")
-            if self._provider_secret_error and encrypted and not api_key and not clear_api_key:
-                raise SecretKeyError("已保存的 API Key 无法解密；请输入新密钥覆盖，或先清除旧密钥")
-            if clear_api_key:
-                encrypted = None
-                selected_key = self._startup_settings.api_key
-            elif api_key and api_key.strip():
-                encrypted = self._secret_box.encrypt(api_key.strip())
-            self.store.save_provider_config(
+        with self._configuration_change():
+            if self._active_tasks:
+                raise ValueError("Wait for active runs before changing provider configuration")
+            normalized = provider.strip().lower().replace("-", "_")
+            if normalized not in {"anthropic", "openai_compatible", "openai_responses"}:
+                raise ValueError(f"Unsupported provider '{provider}'")
+            if not model.strip():
+                raise ValueError("Model cannot be empty")
+            normalized_url = base_url.strip() if base_url else None
+            selected_key = api_key.strip() if api_key and api_key.strip() else self.settings.api_key
+            if persist:
+                current = self.store.get_provider_config() or {}
+                encrypted = current.get("api_key_ciphertext")
+                if self._provider_secret_error and encrypted and not api_key and not clear_api_key:
+                    raise SecretKeyError(
+                        "已保存的 API Key 无法解密；请输入新密钥覆盖，或先清除旧密钥"
+                    )
+                if clear_api_key:
+                    encrypted = None
+                    selected_key = self._startup_settings.api_key
+                elif api_key and api_key.strip():
+                    encrypted = self._secret_box.encrypt(api_key.strip())
+                self.store.save_provider_config(
+                    provider=normalized,
+                    base_url=normalized_url,
+                    model=model.strip(),
+                    api_key_ciphertext=encrypted,
+                )
+            await self._close_provider()
+            self.settings = replace(
+                self.settings,
                 provider=normalized,
+                api_key=selected_key,
                 base_url=normalized_url,
                 model=model.strip(),
-                api_key_ciphertext=encrypted,
             )
-        await self._close_provider()
-        self.settings = replace(
-            self.settings,
-            provider=normalized,
-            api_key=selected_key,
-            base_url=normalized_url,
-            model=model.strip(),
-        )
-        self._provider_secret_error = None
-        self.provider = None
+            self._provider_secret_error = None
+            self.provider = None
 
     async def reset_provider_configuration(self) -> None:
-        if self._active_tasks:
-            raise ValueError("Wait for active runs before changing provider configuration")
-        await self._close_provider()
-        self.store.delete_provider_config()
-        self.settings = self._startup_settings
-        self._provider_secret_error = None
-        self.provider = None
+        with self._configuration_change():
+            if self._active_tasks:
+                raise ValueError("Wait for active runs before changing provider configuration")
+            await self._close_provider()
+            self.store.delete_provider_config()
+            self.settings = self._startup_settings
+            self._provider_secret_error = None
+            self.provider = None
 
     async def probe_provider(
         self,
@@ -397,7 +413,12 @@ class RuntimeHost:
         approval_handler: ApprovalHandler | None,
     ) -> RunResult:
         await self.initialize()
+        if self._configuring:
+            raise ValueError("Provider configuration is changing")
         workspace = self.sessions.workspace(session_id)
+        root = Path(workspace.path)
+        if not root.is_dir() or root.resolve() != root:
+            raise ValueError("Workspace missing or path identity changed")
         task = asyncio.current_task()
         assert task is not None
         self._active_tasks.add(task)
@@ -407,7 +428,7 @@ class RuntimeHost:
                     raise RuntimeError("Host is closed")
                 previous = self.store.latest_run(session_id)
                 if continuation:
-                    self._validate_continue(workspace, previous)
+                    await asyncio.to_thread(self._validate_continue, workspace, previous)
                 elif previous and previous["status"] == "interrupted":
                     raise ValueError("Session is parked; use Continue after resolving interruption")
                 run_id = (
@@ -536,12 +557,12 @@ class RuntimeHost:
                 },
                 sink,
             )
-            configs = manager.load_configs(
-                self._config_path
-                if workspace == self.default_workspace and self._config_path
-                else root / "mcp.json"
-            )
             if self._enable_mcp:
+                configs = manager.load_configs(
+                    self._config_path
+                    if workspace == self.default_workspace and self._config_path
+                    else root / "mcp.json"
+                )
                 await manager.connect_all(configs)
             tools = [*self.tools, *manager.tools]
             handlers = {**self.handlers, **manager.handlers}

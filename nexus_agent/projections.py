@@ -64,9 +64,15 @@ class RuntimeStateProjection:
             if event["partial"]:
                 continue
             kind, payload = event["type"], event["payload"]
+            if kind == "model.response":
+                state["steps"] = payload.get("step", state["steps"])
+            if kind in {"model.response", "context.compacted"}:
+                for key, value in payload.get("usage", {}).items():
+                    state["usage"][key] = state["usage"].get(key, 0) + value
             if kind == "workspace.checkpoint":
                 state["checkpoint"] = payload.get("checkpoint")
             if kind == "tool.prepared":
+                state["tool_calls"] += 1
                 state["tools"][payload["call_id"]] = {**payload, "status": "prepared"}
             if kind in {"tool.completed", "tool.abandoned"}:
                 state["tools"][payload["call_id"]] = {**payload, "status": kind.split(".")[1]}

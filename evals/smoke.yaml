@@ -77,6 +77,6 @@ cases:
     script:
       - tool_calls:
           - {id: multi_1, name: read_file, arguments: {path: README.md, limit: 2}}
-          - {id: multi_2, name: read_file, arguments: {path: CODEX.md, limit: 2}}
+          - {id: multi_2, name: read_file, arguments: {path: AGENTS.md, limit: 2}}
       - {text: multi-tool complete}
     expected: {final_contains: multi-tool, required_tools: [read_file]}

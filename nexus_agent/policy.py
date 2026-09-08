@@ -53,7 +53,14 @@ def validate_agent_name(name: str) -> str | None:
 class PolicyEngine:
     """Classify tool calls. ASK requires a surface-specific approval handler."""
 
-    def evaluate(self, tool_name: str, arguments: dict[str, Any], cwd: Path) -> PolicyResult:
+    def evaluate(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        cwd: Path,
+        *,
+        trusted_readonly: bool = False,
+    ) -> PolicyResult:
         if tool_name == "bash":
             command = str(arguments.get("command", ""))
             if any(pattern.search(command) for pattern in _DENIED_COMMANDS):
@@ -74,8 +81,8 @@ class PolicyEngine:
                     return PolicyResult(PolicyDecision.DENY, str(exc))
             return PolicyResult(PolicyDecision.ALLOW, "Path is scoped to the workspace")
         if tool_name.startswith("mcp__"):
-            if arguments.pop("_nexus_approved", False):
-                return PolicyResult(PolicyDecision.ALLOW, "MCP action was explicitly approved")
+            if trusted_readonly:
+                return PolicyResult(PolicyDecision.ALLOW, "MCP server declares this tool read-only")
             return PolicyResult(
                 PolicyDecision.ASK, "External MCP tools require explicit approval unless read-only"
             )

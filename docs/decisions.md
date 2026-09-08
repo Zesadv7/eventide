@@ -20,7 +20,7 @@
 
 ## ADR-002：使用 session 粒度并发
 
-**状态：Accepted**
+**状态：Superseded**，由 ADR-014 的 Workspace 级互斥替代。
 
 **背景：** 同一会话的历史必须保持顺序，不同会话不应被全局锁互相阻塞。
 
@@ -60,7 +60,7 @@
 
 ## ADR-006：使用 SQLite 保存状态与事件
 
-**状态：Accepted**
+**状态：Superseded**，由 ADR-013 的唯一事件事实源替代。
 
 **背景：** 仅依赖进程内 history 和终端输出无法支持服务重启后的查询、SSE 重连、JSONL 导出和确定性评测。
 
@@ -127,3 +127,27 @@
 **决策：** 当前不实现账号系统、分布式队列、云部署、复杂前端或公网凭据管理。
 
 **影响：** 默认绑定 `127.0.0.1`；SQLite 和进程内 session 锁只提供单机语义；扩展到公网或多节点前需要新的架构决策。
+
+## ADR-013：Event Log 是唯一运行事实源
+
+**状态：Accepted**，替代 ADR-006。
+
+**决策：** runtime_events 追加保存消息、工具、审批、usage 和终态。Messages、Runtime State 和 Context Builder 只从该日志投影；身份表不保存第二份运行状态。上下文 checkpoint 是带来源 digest 的有损投影，不改变日志。
+
+**影响：** 增加版本化 schema、不可变触发器和唯一终态约束。v0.2 数据不迁移；应用拒绝旧 schema，不自动删除旧文件。TraceStore 名称和常用入口保留兼容，JSONL 输出 canonical 事件，旧 SSE 名称通过适配提供。
+
+## ADR-014：RuntimeHost 拥有 Workspace 执行权
+
+**状态：Accepted**，替代 ADR-002。
+
+**决策：** 一个状态根由一个进程内 Host 持有 OS 文件锁，Workspace 绑定规范项目目录，Session 永久绑定 Workspace。同 Workspace 全 run 互斥，不同 Workspace 可并发。Provider 配置属于 Host；MCP 和指令按 Workspace 解析。
+
+**影响：** 默认状态移到用户级目录；serve 与临时 CLI Host 不能同时打开同一状态根。AgentRuntime 为兼容门面。后续同项目并行写作须经独立 Git worktree；常驻 Host 协议和 Agent Graph 延后。
+
+## ADR-015：中断检测与用户主动 Continue
+
+**状态：Accepted**。
+
+**决策：** 重启补写 interrupted，Session parked。仅用户主动请求、Git 可见源码 checkpoint 一致且无未知副作用时创建关联旧 run 的新 turn/run。未知 Bash/MCP/写工具不自动重试；只读未完成调用明确 abandoned。
+
+**影响：** 不承诺指令级恢复、ignored 文件或宿主机全状态恢复。无 HEAD、非 Git、submodule 或无法采集证据时拒绝 Continue。旧兼容调度和协作工具不进入生产 Host 默认工具目录。

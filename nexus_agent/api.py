@@ -9,6 +9,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -30,14 +31,20 @@ class RunBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=100_000)
 
 
+class SessionBody(BaseModel):
+    workspace_id: str | None = None
+
+
+class WorkspaceBody(BaseModel):
+    path: str = Field(min_length=1)
+
+
 class ApprovalBody(BaseModel):
     approved: bool
 
 
 class ProviderConfigBody(BaseModel):
-    provider: Literal[
-        "anthropic", "openai_compatible", "openai-compatible", "openai_responses"
-    ]
+    provider: Literal["anthropic", "openai_compatible", "openai-compatible", "openai_responses"]
     api_key: SecretStr | None = None
     base_url: str | None = Field(default=None, max_length=2_048)
     model: str = Field(min_length=1, max_length=256)
@@ -99,6 +106,7 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
     agent_runtime = runtime or AgentRuntime(Settings.from_env())
     broker = ApprovalBroker()
     tasks: set[asyncio.Task[Any]] = set()
+    reserved: set[str] = set()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -106,11 +114,13 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         yield
         for task in list(tasks):
             task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         await agent_runtime.close()
 
     app = FastAPI(
         title="Nexus Agent Runtime",
-        version="0.2.0",
+        version="0.3.0",
         description="Traceable, policy-aware execution for tool-using agents.",
         lifespan=lifespan,
     )
@@ -127,8 +137,88 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         return {"status": "ok", "runtime": "nexus-agent"}
 
     @app.post("/api/sessions", status_code=status.HTTP_201_CREATED)
-    async def create_session() -> dict[str, str]:
-        return {"session_id": agent_runtime.create_session()}
+    async def create_session(body: SessionBody | None = None) -> dict[str, str]:
+        try:
+            return {
+                "session_id": agent_runtime.create_session(
+                    workspace_id=body.workspace_id if body else None
+                )
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/workspaces", status_code=201)
+    async def register_workspace(body: WorkspaceBody, request: Request) -> dict[str, Any]:
+        _require_local_request(request)
+        try:
+            return asdict(agent_runtime.resolve_or_register_workspace(body.path))
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/workspaces")
+    async def list_workspaces() -> list[dict[str, Any]]:
+        return [asdict(w) for w in agent_runtime.store.list_workspaces()]
+
+    @app.get("/api/workspaces/{workspace_id}")
+    async def get_workspace(workspace_id: str) -> dict[str, Any]:
+        try:
+            return asdict(agent_runtime.store.get_workspace(workspace_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.delete("/api/workspaces/{workspace_id}")
+    async def remove_workspace(workspace_id: str, request: Request) -> dict[str, str]:
+        _require_local_request(request)
+        await get_workspace(workspace_id)
+        try:
+            agent_runtime.store.remove_workspace(workspace_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"removed": workspace_id}
+
+    @app.get("/api/workspaces/{workspace_id}/sessions")
+    async def list_sessions(workspace_id: str) -> list[dict[str, Any]]:
+        await get_workspace(workspace_id)
+        return [
+            agent_runtime.session_status(s["id"])
+            for s in agent_runtime.store.list_sessions(workspace_id)
+        ]
+
+    @app.get("/api/sessions/{session_id}")
+    async def get_session(session_id: str) -> dict[str, Any]:
+        try:
+            return agent_runtime.session_status(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/sessions/{session_id}/messages")
+    async def get_messages(session_id: str) -> list[dict[str, Any]]:
+        await get_session(session_id)
+        try:
+            return agent_runtime.store.load_messages(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/sessions/{session_id}/continue")
+    async def continue_session(session_id: str) -> dict[str, Any]:
+        # Continue validation is part of admission; a rejected request returns 409,
+        # without creating a run that could hide the parked source run.
+        record = await get_session(session_id)
+        workspace_id = record["workspace_id"]
+        if workspace_id in reserved:
+            raise HTTPException(status_code=409, detail="Workspace is busy")
+        reserved.add(workspace_id)
+        try:
+            return asdict(
+                await agent_runtime.continue_session(
+                    session_id,
+                    approval_handler=broker.request,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            reserved.discard(workspace_id)
 
     @app.get("/api/config/provider")
     async def get_provider_config() -> dict[str, Any]:
@@ -168,9 +258,7 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         return agent_runtime.provider_config_status()
 
     @app.post("/api/config/provider/test")
-    async def test_provider_config(
-        body: ProviderConfigBody, request: Request
-    ) -> dict[str, Any]:
+    async def test_provider_config(body: ProviderConfigBody, request: Request) -> dict[str, Any]:
         _require_local_request(request)
         key = body.api_key.get_secret_value() if body.api_key else None
         started = time.perf_counter()
@@ -208,13 +296,25 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(session_id: str, body: RunBody) -> dict[str, str]:
+        # Keep the v0.2 behavior for callers that supply their own session identity.
+        agent_runtime.create_session(session_id)
+        record = agent_runtime.session_status(session_id)
+        workspace_id = record["workspace_id"]
+        if workspace_id in reserved or record["status"] == "parked":
+            raise HTTPException(status_code=409, detail="Workspace busy or session parked")
+        reserved.add(workspace_id)
         run_id = f"run_{uuid.uuid4().hex[:16]}"
-        task = asyncio.create_task(
-            agent_runtime.run(
-                RunRequest(body.prompt, session_id=session_id, run_id=run_id),
-                approval_handler=broker.request,
-            )
-        )
+
+        async def execute() -> None:
+            try:
+                await agent_runtime.run(
+                    RunRequest(body.prompt, session_id=session_id, run_id=run_id),
+                    approval_handler=broker.request,
+                )
+            finally:
+                reserved.discard(workspace_id)
+
+        task = asyncio.create_task(execute())
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
@@ -238,7 +338,11 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
                     encoded = json.dumps(event, ensure_ascii=False)
                     yield f"id: {cursor}\nevent: {event['type']}\ndata: {encoded}\n\n"
                 record = agent_runtime.store.get_run(run_id)
-                if record and record["status"] in {"completed", "failed"} and not events:
+                if (
+                    record
+                    and record["status"] in {"completed", "failed", "interrupted"}
+                    and not events
+                ):
                     break
                 if not events:
                     idle_ticks += 1
@@ -255,6 +359,8 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         record = agent_runtime.store.get_run(run_id)
         if not record:
             raise HTTPException(status_code=404, detail="Run not found")
+        if approval_id not in record["pending_approvals"]:
+            raise HTTPException(status_code=404, detail="Approval does not belong to this run")
         if not broker.resolve(approval_id, body.approved):
             raise HTTPException(status_code=404, detail="Approval is no longer pending")
         return {"approval_id": approval_id, "approved": body.approved}

@@ -50,13 +50,15 @@ class ToolExecutor:
         self.command_executor = command_executor or LocalCommandExecutor()
 
     async def execute(self, call: ToolCall, context: ToolContext) -> ToolResult:
-        if call.name in self.readonly_tools:
-            policy = None
-        else:
-            policy = context.policy.evaluate(call.name, dict(call.arguments), context.cwd)
-        if policy and policy.decision == PolicyDecision.DENY:
+        policy = context.policy.evaluate(
+            call.name,
+            dict(call.arguments),
+            context.cwd,
+            trusted_readonly=call.name in self.readonly_tools,
+        )
+        if policy.decision == PolicyDecision.DENY:
             return ToolResult(call.id, call.name, f"Permission denied: {policy.reason}", True)
-        if policy and policy.decision == PolicyDecision.ASK:
+        if policy.decision == PolicyDecision.ASK:
             if not context.approval_handler:
                 return ToolResult(call.id, call.name, f"Permission denied: {policy.reason}", True)
             approval_id = f"approval_{call.id}_{int(time.time() * 1000)}"

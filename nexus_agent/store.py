@@ -197,6 +197,8 @@ class RuntimeStore:
         author: str = "runtime",
         partial: bool = False,
     ) -> dict[str, Any]:
+        if partial and event_type in TERMINALS:
+            raise ValueError("Terminal facts cannot be partial")
         with self._lock, self._connection:
             self._connection.execute("BEGIN IMMEDIATE")
             turn_id = None

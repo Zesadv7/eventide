@@ -1,176 +1,89 @@
 # Nexus Agent 架构
 
-本文描述 Nexus Agent 当前实现的结构、数据模型和工程约定。设计原因记录在 [decisions.md](decisions.md)。
+## 核心关系
 
-## 系统结构
-
-```mermaid
-flowchart LR
-    CLI[CLI] --> RT[AgentRuntime]
-    WEB[Web UI] --> API[FastAPI]
-    API --> RT
-    EVAL[Offline / Live Eval] --> RT
-
-    RT --> PROVIDER[Provider]
-    PROVIDER --> ANT[Anthropic Messages]
-    PROVIDER --> CHAT[OpenAI-compatible Chat]
-    PROVIDER --> RESP[OpenAI Responses]
-
-    RT --> EXEC[ToolExecutor]
-    EXEC --> POLICY[PolicyEngine]
-    EXEC --> BUILTIN[Built-in Tools]
-    EXEC --> MCP[MCP stdio / HTTP]
-    EXEC --> CMD[CommandExecutor]
-
-    RT --> STORE[(TraceStore / SQLite)]
-    STORE --> SSE[SSE Timeline]
-    STORE --> JSONL[JSONL Export]
+```text
+RuntimeHost
+  └─ Workspace
+      └─ Session
+          └─ Runtime Event Log
+              ├─ MessagesProjection
+              ├─ RuntimeStateProjection
+              └─ ContextBuilder
 ```
 
-| 组件 | 职责 |
+RuntimeHost 是进程内唯一执行 Owner，持有状态根的 OS 文件锁、RuntimeStore、Provider 配置、SessionManager 和 Workspace 锁。AgentRuntime 是兼容门面，CLI、FastAPI 和 Eval 复用 Host。首版不含后台 daemon 或 IPC client：同状态根已有 Host 时第二个进程失败。进程终止由 OS 释放文件锁。
+
+Workspace 保存稳定 ID、规范路径、Git 根、名称和创建时间；Git 子目录统一绑定仓库根。Session 的 Workspace 绑定不可改变；工具 cwd 只由该绑定解析。同 Workspace 全 run 串行，不同 Workspace 可并发。服务关闭时取消并等待活跃任务，工具执行线程结束后才释放 Workspace 所有权。
+
+主要实现：`host.py` 管理生命周期与 Agent loop；`workspace.py` 管理路径、锁和 Git evidence；`store.py` 保存身份与事实；`projections.py`、`context_builder.py` 负责投影。生产工具位于 `tools/runtime_catalog.py`，不导入 legacy 注册表。
+
+## 存储与事件契约
+
+默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。NEXUS_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。首次创建版本 1，未知版本和未版本化旧数据库明确拒绝，不自动迁移或删除。
+
+| 表 | 职责 |
 |---|---|
-| CLI / FastAPI / Web | 接收任务、展示事件并提供审批界面 |
-| `AgentRuntime` | 管理 session、模型—工具循环、重试、压缩和运行结果 |
-| `Provider` | 在统一模型协议与厂商 API 之间转换 |
-| `ToolExecutor` | 执行统一工具调用并返回 `ToolResult` |
-| `PolicyEngine` | 在工具执行前返回 `ALLOW`、`ASK` 或 `DENY` |
-| `MCPManager` | 管理 MCP 连接、工具发现、命名和关闭 |
-| `TraceStore` | 持久化 session、message、run、event 和模型配置 |
-| Evaluation | 使用 scripted 或真实 Provider 执行评测用例 |
+| workspaces | Workspace 身份、规范路径、Git 根 |
+| sessions | 身份、固定 Workspace 绑定、创建时间 |
+| turns | 用户回合身份、session、continuation_of |
+| runs | 执行身份、session、turn、开始时间 |
+| runtime_events | 唯一运行事实源 |
+| context_checkpoints | 可失效的摘要投影及覆盖证明 |
+| provider_config | Host 级模型配置和加密凭据 |
+| schema_migrations | 已应用 schema 版本 |
 
-## 稳定接口
+RuntimeEvent 包含 event_id、session_id、严格递增 session_seq、turn_id、run_id、ts、type、role、author、payload、partial、schema_version。SQLite 事务分配 session_seq；唯一索引防止重复序号，触发器禁止事件 UPDATE/DELETE。一次 run 的第一个终态胜出；终态后的普通事件拒绝写入。partial 不进入消息、状态投影，且不能作为终态。
 
-```python
-await AgentRuntime.run(request: RunRequest, sink: EventSink) -> RunResult
-await Provider.complete(request: ModelRequest) -> ModelResponse
-await ToolExecutor.execute(call: ToolCall, context: ToolContext) -> ToolResult
-```
+身份表不保存独立运行状态。消息与状态查询每次折叠事件，不依赖不可重建的缓存或 messages 表。TraceStore 在 v0.3 中是 RuntimeStore 的别名；兼容 append_message() 追加 message.imported 事件，生产主链不调用它。
 
-`AgentRuntime` 是唯一编排核心。CLI、API 和评测只负责构造请求、提供审批处理器以及消费事件，不在入口层复制 Agent loop。
+主要事件：
 
-## Run 数据流
+- run.started、message.user、model.request、model.response、model.retry；
+- tool.prepared、tool.completed、tool.abandoned；
+- approval.required、approval.resolved；
+- workspace.checkpoint、context.configured、context.compacted；
+- run.completed、run.failed、run.interrupted。
 
-```mermaid
-sequenceDiagram
-    participant C as CLI / API / Eval
-    participant R as AgentRuntime
-    participant P as Provider
-    participant X as ToolExecutor
-    participant A as Approval Surface
-    participant S as TraceStore
+模型响应保存结构化 content blocks，包括 provider_state 与带稳定 ID 的 tool_use。工具执行前提交 prepared，结束后提交 completed；工具组收齐结果后才形成 provider-neutral tool_result 消息。副作用结果之后另存 workspace checkpoint；若两者之间崩溃，Continue 拒绝缺失 checkpoint 的历史。
 
-    C->>R: RunRequest
-    R->>S: run.started
-    R->>S: load session messages
-    loop 直到最终回答或达到步数限制
-        R->>P: ModelRequest
-        P-->>R: ModelResponse
-        R->>S: model.response
-        alt 返回工具调用
-            R->>X: ToolCall + ToolContext
-            X->>X: PolicyEngine.evaluate
-            opt ASK
-                X->>A: approval.required
-                A-->>X: allow / deny / timeout
-            end
-            X-->>R: ToolResult
-            R->>S: tool.result
-        end
-    end
-    R->>S: run.completed / run.failed
-    R-->>C: RunResult
-```
+SSE/get_events 为旧客户端把 prepared/completed 映射成 tool.request/tool.result，并使用 session_seq 作为兼容 seq 游标；JSONL 导出使用 canonical 事件名称。事件先提交，再通知观察者；观察者失败不改变运行事实。
 
-同一 `session_id` 的 run 由独立 `asyncio.Lock` 串行化。不同 session 使用不同锁和消息历史，可以并发执行。
+## 三类投影与上下文
 
-## Runtime 数据模型
+MessagesProjection 只消费已提交消息和工具事实，保留工具配对、次序及 Responses 私有状态。未配对历史拒绝发送给模型；其他 Provider 按 adapter 契约忽略不适用的私有状态。
 
-| 模型 | 主要字段 | 用途 |
-|---|---|---|
-| `RunRequest` | `prompt`、`session_id?`、`run_id?` | 提交一次 Agent 任务 |
-| `RunResult` | `run_id`、`session_id`、`status`、`output`、`steps`、`tool_calls`、`duration_ms`、`usage` | 返回任务结果与指标 |
-| `ModelRequest` | `system`、`messages`、`tools`、`model`、`max_tokens` | Provider 中立的模型请求 |
-| `ModelResponse` | `text`、`tool_calls`、`stop_reason`、`usage`、`provider_items` | Provider 中立的模型响应 |
-| `ToolCall` | `id`、`name`、`arguments` | 模型请求执行一个工具 |
-| `ToolResult` | `call_id`、`name`、`content`、`is_error` | 工具执行结果 |
-| `ToolContext` | `cwd`、`run_id`、`policy`、`approval_handler?` | 工具运行作用域和审批入口 |
-| `PolicyResult` | `decision`、`reason` | 权限判断结果 |
+RuntimeStateProjection 从事件得到 running、waiting_for_user、completed、failed、interrupted、usage、步骤、工具和待审批状态。SessionManager 将最新 interrupted run 展示为 parked；pending approval 保留历史证据，审批提交还必须匹配该 run 与当前进程的 pending future。
 
-Responses Provider 的私有 reasoning item 保存在 `ModelResponse.provider_items` 中，并以 `provider_state` block 回放。其他 Provider 会忽略该私有状态。
+ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读取 32,000 字符，拒绝指向 Workspace 外的链接。每轮 run 记录指令 hash 和工具目录 hash。消息/工具结果只在进入语义记录时规范化、脱敏和限长；下一模型请求读取同一记录。普通文本上限 4,000 字符，Responses provider_state 上限 200,000 字符；已知模型 API Key 在文本中也会替换。UI 可以进一步裁剪展示。
 
-## SQLite 数据模型
+持久 checkpoint 保存 covered_seq、source_digest、summary、policy_version、provider、model。摘要只覆盖结束 turn 的完整前缀；模型调用使用 summary + 未覆盖 raw tail。checkpoint 来源 digest、策略和模型身份不符时忽略；摘要生成失败且旧投影仍在预算内时使用旧投影，否则 context_overflow。压缩不改变原始事件。当前 context_limit 仍按序列化消息字符数计量，不宣称 token 精确计量。
 
-默认数据库为 `.nexus/nexus.db`，启用 WAL 模式。
+## 中断与 Continue
 
-| 表 | 主键 | 主要字段 | 关系与用途 |
-|---|---|---|---|
-| `sessions` | `id` | `created_at`、`updated_at` | 一个会话对应有序消息和多个 run |
-| `messages` | `(session_id, seq)` | `role`、`content_json` | 按 session 保存模型历史 |
-| `runs` | `id` | `session_id`、`status`、时间、输出、步骤、工具数、耗时、usage、error | 保存一次运行的最终状态 |
-| `events` | `(run_id, seq)` | `ts`、`type`、`payload_json` | 保存 run 的有序事件流 |
-| `provider_config` | 固定 `id = 1` | `provider`、`base_url`、`model`、`api_key_ciphertext`、`updated_at` | 保存单机模型配置 |
+启动时扫描缺少终态的 run，追加 run.interrupted，不调用模型。用户主动 Continue 必须通过 Workspace 锁内检查：
 
-当前 schema 在进程启动时使用 `CREATE TABLE IF NOT EXISTS` 初始化，没有独立迁移框架。SQLite 连接由 `TraceStore.close()` 显式关闭。
+1. 最新 run 为 interrupted，且 Workspace 为可验证的 Git 仓库。
+2. 当前 HEAD、暂存与未暂存 binary diff digest、未跟踪文件路径和内容 digest 与最后可信 checkpoint 相同。
+3. 不存在结果未知的非只读 prepared 调用；MCP 即使声明只读，也采用保守的恢复策略。
+4. 已完成副作用工具后存在 checkpoint；无法采集证据时拒绝继续。
 
-## 事件约定
+Continue 创建新 turn/run，并以唯一 continuation_of 关联来源 run；不会重放旧工具或重复用户消息。未完成 read_file/glob/compact 和确定尚未派发的调用写入 abandoned，补齐下一次模型请求的 tool-result 结构。只读结果也不伪装成成功。
 
-标准事件类型：
+没有 HEAD、非 Git、存在 submodule、证据采集失败、未知副作用或源码变化时维持 parked 并解释原因。范围仅为 Git 可见源码；ignored 文件、外部 MCP 服务和 OS 全局状态不在快照内。不是指令级恢复，也不是操作系统沙箱。
 
-- `run.started`、`run.completed`、`run.failed`；
-- `model.request`、`model.response`、`model.retry`；
-- `tool.request`、`tool.result`；
-- `approval.required`、`approval.resolved`；
-- `context.compacted`。
+## 入口、模型与 MCP
 
-每个事件包含 `run_id`、递增 `seq`、时间戳、类型和 payload。SSE 从 SQLite 按序号增量读取，因此页面重连后可以继续拉取已持久化事件。JSONL 导出使用同一事件结构。
+保留 AgentRuntime.run(RunRequest)、create_session、Provider 配置和 RunResult 原字段；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。
 
-事件和消息写入前递归脱敏。API Key、Authorization、密码和普通 token 字段会替换为 `[REDACTED]`；token usage 字段保留数值；普通文本默认截断到 4,000 字符。Responses 的加密 provider state 使用更高的存储上限，以便多步无状态调用能够继续。
+CLI 提供 run/chat/serve 的 --workspace、workspace add/list/show/remove 和 continue。无指定 Workspace 时使用启动 cwd。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages 和 /continue。Continue 同步等待结果；原 run 提交仍为 202。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。
 
-## Provider 与配置约定
+模型配置为 Host 级，活跃 run 期间不允许修改。Provider 客户端惰性创建，连接检查不切换活动 Provider。密钥继续使用 Fernet；主密钥优先 NEXUS_SECRET_KEY，否则状态根 secret.key。解密失败不退回明文。凭据管理及 Workspace 注册/移除仅接受本机回环请求。
 
-- `anthropic` 映射 Anthropic Messages API；
-- `openai_compatible` 映射 OpenAI-compatible Chat Completions；
-- `openai_responses` 映射 OpenAI Responses API；
-- Provider 客户端惰性创建，帮助、测试和离线评测不依赖密钥或网络；
-- 429 和部分 5xx 错误转换为可重试 `ProviderError`，Runtime 最多重试三次；
-- Web 持久化配置优先于模型环境变量；数据库没有密钥时回退到环境变量；
-- 主密钥优先使用 `NEXUS_SECRET_KEY`，否则使用 `.nexus/secret.key`；
-- 主密钥不匹配时停止使用已保存密钥，不降级成明文；
-- 保存、清除和连接检查只允许本机回环请求；连接检查使用临时 Provider，不切换活动 Runtime。
+每个 run 按 Workspace 读取 mcp.json；MCP SDK transport 在同一 owning task 内连接和关闭，避免跨 task 的资源退出。所有工具统一进入 ToolExecutor/PolicyEngine，文件工具内部再次检查路径。生产默认目录仅包含文件、Shell 和 compact；旧 task/worktree/teammate/cron 保留为兼容代码。离线 Eval 显式关闭真实 MCP，使用独立评测数据库和 scripted Provider。
 
-## 工具与权限约定
+## 工程边界
 
-`ToolExecutor` 是所有生产入口共享的执行边界：
+系统仍面向可信单机使用：没有账号、多租户、公网鉴权、容器沙箱、分布式锁或 Agent Graph。状态根锁不等于工具安全隔离。AGENTS.md 是模型指令，不会扩张 PolicyEngine 权限。生产代码的 import、--help、测试与离线评测不需要 API Key 或网络。
 
-| 决策 | 行为 |
-|---|---|
-| `ALLOW` | 直接执行 |
-| `ASK` | 请求一次性审批；无处理器、拒绝或超时均不执行 |
-| `DENY` | 不可覆盖地拒绝 |
-
-文件路径通过 `Path.resolve()` 解析并要求仍位于 workspace root 内。文件工具内部再次执行作用域检查，防止调用方绕过入口策略。危险命令由策略匹配为 `ASK` 或 `DENY`；本地命令最终由 `LocalCommandExecutor` 在宿主机执行。
-
-## MCP 约定
-
-`MCPManager` 读取本地 `mcp.json`：
-
-- stdio 配置包含 `command`、`args` 和显式环境变量白名单；
-- Streamable HTTP 配置包含 `url` 和可选 headers；
-- 工具统一命名为 `mcp__server__tool`；
-- 只有服务端 annotations 明确标记只读的工具可以跳过外部操作审批；
-- Runtime 关闭时统一关闭 MCP session、transport 和子进程。
-
-## 上下文与工作区约定
-
-- 每轮模型请求前检查序列化历史预算，超限时保留最近完整交互并写入 `context.compacted`；
-- 工具可以显式请求上下文压缩；
-- worktree 创建时记录基线 commit；清理前同时检查工作区状态和 `base..HEAD` 的本地提交；
-- teammate 和 worktree 名称只允许长度 1–64 的字母、数字、点、下划线和短横线，且不能为 `.` 或 `..`。
-
-## 当前边界
-
-- `LocalCommandExecutor` 不是安全沙箱；
-- FastAPI 没有账号、租户和公网鉴权；
-- SQLite 面向单机运行，不提供分布式协调；
-- MCP 连接由一个 Runtime 实例共享，外部 MCP server 的内部状态隔离由服务端负责；
-- 当前没有 Docker 执行器、分布式队列、云部署或复杂前端框架。
+完整验证门禁见 AGENTS.md。测试创建隔离目录和独立状态根，Git 测试使用测试仓库；不使用或删除用户级真实状态。

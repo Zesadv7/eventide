@@ -1,14 +1,15 @@
 # Nexus Agent
 
-Nexus Agent 是一个面向工具调用场景的 Agent Runtime。它负责组织模型调用、工具执行、权限审批、MCP 连接、会话状态、运行追踪与评测，让同一套 Agent 能力同时运行在 CLI、HTTP API 和 Web 控制台中。
+Nexus Agent v0.3 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHost 管理 Workspace 与 Session，运行事实统一写入 Event Log；消息、运行状态和模型上下文都从日志投影生成。CLI、HTTP API 和现有 Web 控制台使用同一执行主链。
 
 主要能力：
 
-- async-first Agent loop，同一会话串行、不同会话并发；
+- async-first Agent loop，同一 Workspace 串行、不同 Workspace 并发；
 - Anthropic Messages、OpenAI-compatible Chat Completions 和 OpenAI Responses API；
 - `ALLOW / ASK / DENY` 权限决策与 CLI、Web 一次性审批；
 - MCP stdio 与 Streamable HTTP 工具发现和调用；
-- SQLite session、run、event 持久化与 JSONL trace 导出；
+- SQLite 追加式 Event Log、持久上下文 checkpoint 与 JSONL 导出；
+- 中断检测、停驻与用户主动 Continue，不自动重放工具副作用；
 - scripted provider 离线评测与真实模型 live eval；
 - FastAPI、SSE 事件流和原生中文 Web 控制台。
 
@@ -58,7 +59,31 @@ uv run nexus-agent eval evals/smoke.yaml
 uv run nexus-agent serve --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 `http://127.0.0.1:8000`。在右上角的模型配置窗口中填写 Provider、模型名称、Base URL 和 API Key，可以先检查连接，再保存并应用。配置写入 `.nexus/nexus.db`，API Key 使用 `.nexus/secret.key` 或 `NEXUS_SECRET_KEY` 加密；这些文件默认不会提交到 Git。
+浏览器打开 `http://127.0.0.1:8000`。在右上角的模型配置窗口中填写 Provider、模型名称、Base URL 和 API Key，可以先检查连接，再保存并应用。配置写入状态根的 `runtime.sqlite`，API Key 使用同目录 `secret.key` 或 `NEXUS_SECRET_KEY` 加密。
+
+默认状态根：Windows 为 `%LOCALAPPDATA%\Nexus`，macOS 为 `~/Library/Application Support/Nexus`，Linux 为 `$XDG_STATE_HOME/nexus`（未设置时 `~/.local/state/nexus`）。`NEXUS_STATE_DIR` 可覆盖；相对路径相对于启动工作目录解析。状态目录独占：`serve` 运行期间，使用同一状态根的另一 CLI/Host 会明确报错，首版没有跨进程客户端协议。
+
+v0.2 数据库不自动迁移。请关闭旧进程后选择新的状态根；旧 `.nexus/nexus.db`、历史和密钥不会被程序自动删除或导入。新状态根需要重新配置模型。测试和离线评测不需要 API Key。
+
+## Workspace 与 Continue
+
+```bash
+uv run nexus-agent workspace add /path/to/project
+uv run nexus-agent workspace list
+uv run nexus-agent workspace show ws_example
+uv run nexus-agent run "检查项目测试" --workspace /path/to/project --json
+uv run nexus-agent chat --workspace ws_example
+uv run nexus-agent serve --workspace /path/to/project
+uv run nexus-agent continue session_example --json
+```
+
+省略 `--workspace` 时使用当前目录；Git 仓库内的子目录归一化到仓库根，非 Git 目录也可运行。每个 Session 固定绑定一个 Workspace。根目录 `AGENTS.md` 加入模型上下文，`mcp.json` 按 Workspace 加载。生产默认工具为 `bash/read_file/write_file/edit_file/glob/compact`；旧 task、worktree、teammate 等接口仍可导入，但不进入新 Runtime 默认工具目录。`workspace remove <id>` 只移除没有 Session 的注册记录，不删除项目文件。
+
+Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `parked`。Continue 必须由用户发起；它检查 Git HEAD、暂存/未暂存改动及未跟踪文件是否匹配最后可信 checkpoint，并拒绝存在未知 Bash、MCP 或写工具结果的历史。通过检查后创建新 turn/run，旧用户消息不会重复写入，未完成的只读调用会标记为 abandoned。非 Git、未提交过的 Git 仓库、包含 submodule 的项目或缺少可信 checkpoint 时不支持 Continue。检查范围是 Git 可见源码，不覆盖 ignored 文件或外部系统状态。
+
+上下文摘要只覆盖已结束的 turn，原始事件不变。无法在上下文预算内保留有效摘要与当前 turn 时返回 `context_overflow`，不会静默丢弃当前交互。预算单位保持为序列化消息的字符数。
+
+HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表及 session/messages 查询。`POST /api/sessions` 可传 `workspace_id`；空请求继续绑定启动项目。`POST /api/sessions/{id}/continue` 等待新 run 完成并返回 RunResult，验证失败返回 409；运行期间可从 Session 查询得到 run ID 并消费事件或提交审批。同 Workspace 的并发 HTTP 请求返回 409。现有 Web 页面保持原布局，新增管理操作通过 CLI/API 使用。
 
 ## 配置真实模型
 
@@ -112,7 +137,7 @@ uv run nexus-agent run "调用 demo MCP echo 工具"
 - 不要把 API Key 写入命令行、`mcp.json`、代码或提交记录；
 - Web 模型配置的写入、清除和连接检查只接受本机回环请求；
 - 本地 Shell 执行器会在宿主机运行命令，权限策略不等于操作系统沙箱；
-- `.nexus/` 包含本地配置、数据库和 trace，不应提交或公开。
+- 状态根包含本地配置、数据库和 trace，不应提交或公开；项目内的 `.nexus/` 仍受 Git 忽略。
 
 ## 进一步阅读
 
