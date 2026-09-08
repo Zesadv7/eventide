@@ -18,6 +18,26 @@ class ContextOverflow(RuntimeError):
     pass
 
 
+def _describe_context(messages: list[dict[str, Any]], budget: int) -> str:
+    """Budget breakdown for overflow diagnostics; never includes message text."""
+    total = len(json.dumps(messages, ensure_ascii=False))
+    results = [
+        message
+        for message in messages
+        if isinstance(message.get("content"), list)
+        and any(
+            isinstance(block, dict) and block.get("type") == "tool_result"
+            for block in message["content"]
+        )
+    ]
+    tool_chars = sum(len(json.dumps(message, ensure_ascii=False)) for message in results)
+    return (
+        f"{total} characters against a {budget} character budget "
+        f"({len(messages)} messages, {len(results)} tool-result messages "
+        f"totalling {tool_chars} characters)"
+    )
+
+
 class ContextBuilder:
     def __init__(self, store: RuntimeStore):
         self.store = store
@@ -72,10 +92,12 @@ class ContextBuilder:
 
         if not force and size(messages) <= budget:
             return messages, None
-        # Only close whole turns. The latest active turn is always retained verbatim.
+        # Only close whole turns. The latest active turn is always retained verbatim,
+        # so a turn that exceeds the budget on its own can never be compacted away.
         boundary = max((e["session_seq"] for e in events if e["type"] in TERMINALS), default=0)
         if boundary and (not checkpoint or boundary > checkpoint["covered_seq"]):
             prefix = [e for e in events if e["session_seq"] <= boundary]
+            failure: str | None = None
             try:
                 history = MessagesProjection.project(prefix)
                 response = await provider.complete(
@@ -96,26 +118,37 @@ class ContextBuilder:
                 proposed = {"covered_seq": boundary, "summary": summary}
                 candidate_messages = materialize(proposed)
                 if size(candidate_messages) > budget:
-                    raise ContextOverflow("context_overflow: summary and active turn exceed budget")
-                self.store.save_checkpoint(
-                    session_id,
-                    boundary,
-                    digest(prefix),
-                    summary,
-                    provider_name,
-                    model,
+                    failure = (
+                        "completed turns were summarized but the active turn still "
+                        "exceeds the budget"
+                    )
+                else:
+                    self.store.save_checkpoint(
+                        session_id,
+                        boundary,
+                        digest(prefix),
+                        summary,
+                        provider_name,
+                        model,
+                    )
+                    return candidate_messages, {
+                        "covered_seq": boundary,
+                        "source_digest": digest(prefix),
+                        "policy_version": 1,
+                        "usage": response.usage,
+                    }
+            except Exception as exc:
+                failure = f"summarizing completed turns failed ({type(exc).__name__}: {exc})"
+            if failure and size(messages) > budget:
+                raise ContextOverflow(
+                    f"context_overflow: {failure}; active context is "
+                    f"{_describe_context(messages, budget)}"
                 )
-                return candidate_messages, {
-                    "covered_seq": boundary,
-                    "source_digest": digest(prefix),
-                    "policy_version": 1,
-                    "usage": response.usage,
-                }
-            except Exception:
-                if size(messages) > budget:
-                    raise ContextOverflow("context_overflow: no usable checkpoint") from None
         if size(messages) > budget:
-            raise ContextOverflow("context_overflow: active context exceeds budget")
+            raise ContextOverflow(
+                "context_overflow: active turn exceeds the budget and no completed turn is "
+                f"available to compact; active context is {_describe_context(messages, budget)}"
+            )
         return messages, {
             "covered_seq": 0,
             "reason": "No completed prefix to compact",

@@ -1,11 +1,40 @@
 """Tests for basic tools."""
 
-from nexus_agent.tools.bash import run_bash
+import subprocess
+import sys
+
+from nexus_agent.tools.bash import _decode_output, run_bash
 from nexus_agent.tools.filesystem import run_edit, run_glob, run_read, run_write
 
 
 def test_run_bash():
     assert run_bash("echo ok") == "ok"
+
+
+def test_decode_output_handles_utf8_and_console_encoding(monkeypatch):
+    assert _decode_output("中文".encode()) == "中文"
+    monkeypatch.setattr("nexus_agent.tools.bash._console_encoding", lambda: "gbk")
+    assert _decode_output("错误".encode("gbk")) == "错误"
+    assert isinstance(_decode_output(b"\xff\xfe\xfa"), str)
+    assert _decode_output(None) == ""
+    assert _decode_output(b"") == ""
+
+
+def test_run_bash_survives_missing_streams(monkeypatch):
+    class Result:
+        stdout = None
+        stderr = None
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    assert run_bash("anything") == "(no output)"
+
+
+def test_run_bash_returns_utf8_child_output(isolated_workspace):
+    script = isolated_workspace / "emit_utf8.py"
+    script.write_text(
+        "import sys; sys.stdout.buffer.write('中文输出'.encode('utf-8'))", encoding="utf-8"
+    )
+    assert run_bash(f'"{sys.executable}" "{script}"', cwd=isolated_workspace) == "中文输出"
 
 
 def test_run_write_and_read(isolated_workspace):

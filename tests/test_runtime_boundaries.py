@@ -138,6 +138,31 @@ async def test_summary_failure_uses_valid_checkpoint_or_overflows(isolated_works
         await host.close()
 
 
+async def test_overflow_reports_the_active_turn_not_a_missing_checkpoint(isolated_workspace):
+    host = RuntimeHost(settings_for(isolated_workspace))
+    try:
+        session = host.create_session()
+        host.store.create_run("r", session)
+        host.store.append_message(session, {"role": "user", "content": "x" * 4000})
+        host.store.finish_run("r", status="completed", output="done")
+        host.store.create_run("next", session)
+        host.store.append_message(session, {"role": "user", "content": "y" * 4000})
+        with pytest.raises(ContextOverflow) as excinfo:
+            await host.context_builder.build(
+                session,
+                provider=ScriptedProvider([{"text": "z" * 4000}]),
+                provider_name="scripted",
+                model="scripted",
+                budget=1000,
+            )
+        message = str(excinfo.value)
+        assert "context_overflow" in message
+        assert "no usable checkpoint" not in message
+        assert "1000 character budget" in message
+    finally:
+        await host.close()
+
+
 async def test_no_post_write_checkpoint_blocks_continue(isolated_workspace):
     repo = make_repo(isolated_workspace / "repo")
     host = RuntimeHost(settings_for(isolated_workspace))
