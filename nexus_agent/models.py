@@ -66,6 +66,44 @@ class RunResult:
     tool_calls: int
     duration_ms: float
     usage: dict[str, int] = field(default_factory=dict)
+    turn_id: str | None = None
+    continuation_of: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceTarget:
+    path: str | None = None
+    workspace_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceRecord:
+    workspace_id: str
+    name: str
+    path: str
+    git_root: str | None
+    created_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class ContinuationRequest:
+    session_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeEvent:
+    event_id: str
+    session_id: str
+    session_seq: int
+    turn_id: str | None
+    run_id: str | None
+    ts: float
+    type: str
+    role: str
+    author: str
+    payload: dict[str, Any]
+    partial: bool = False
+    schema_version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
