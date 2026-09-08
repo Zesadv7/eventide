@@ -5,7 +5,12 @@ import subprocess
 import pytest
 
 from nexus_agent.tasks import worktree as worktree_module
-from nexus_agent.tasks.worktree import create_worktree, remove_worktree, validate_worktree_name
+from nexus_agent.tasks.worktree import (
+    create_worktree,
+    remove_worktree,
+    run_git,
+    validate_worktree_name,
+)
 
 
 def test_validate_worktree_name():
@@ -52,3 +57,24 @@ def test_create_and_remove_worktree(isolated_workspace, monkeypatch):
         refusal = remove_worktree(name)
         assert "1 commit(s)" in refusal
         remove_worktree(name, discard_changes=True)
+
+
+def test_run_git_survives_non_ascii_output(isolated_workspace, monkeypatch):
+    repo = isolated_workspace / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+    (repo / "中文.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(worktree_module, "WORKDIR", repo)
+    ok, output = run_git(["-c", "core.quotepath=false", "status", "--porcelain"])
+    assert ok is True
+    assert "中文.txt" in output
+
+
+def test_run_git_survives_missing_streams(monkeypatch):
+    class Result:
+        stdout = None
+        stderr = None
+        returncode = 0
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    assert run_git(["status"]) == (True, "(no output)")

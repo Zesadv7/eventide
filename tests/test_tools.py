@@ -3,8 +3,9 @@
 import subprocess
 import sys
 
-from nexus_agent.tools.bash import _decode_output, run_bash
+from nexus_agent.tools.bash import run_bash
 from nexus_agent.tools.filesystem import run_edit, run_glob, run_read, run_write
+from nexus_agent.utils import decode_output
 
 
 def test_run_bash():
@@ -12,12 +13,12 @@ def test_run_bash():
 
 
 def test_decode_output_handles_utf8_and_console_encoding(monkeypatch):
-    assert _decode_output("中文".encode()) == "中文"
-    monkeypatch.setattr("nexus_agent.tools.bash._console_encoding", lambda: "gbk")
-    assert _decode_output("错误".encode("gbk")) == "错误"
-    assert isinstance(_decode_output(b"\xff\xfe\xfa"), str)
-    assert _decode_output(None) == ""
-    assert _decode_output(b"") == ""
+    assert decode_output("中文".encode()) == "中文"
+    monkeypatch.setattr("nexus_agent.utils.console_encoding", lambda: "gbk")
+    assert decode_output("错误".encode("gbk")) == "错误"
+    assert isinstance(decode_output(b"\xff\xfe\xfa"), str)
+    assert decode_output(None) == ""
+    assert decode_output(b"") == ""
 
 
 def test_run_bash_survives_missing_streams(monkeypatch):

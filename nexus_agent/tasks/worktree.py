@@ -8,6 +8,7 @@ from pathlib import Path
 
 from nexus_agent.config import WORKDIR, WORKTREES_DIR
 from nexus_agent.tasks.store import load_task, save_task
+from nexus_agent.utils import decode_output
 
 WORKTREES_DIR.mkdir(exist_ok=True)
 
@@ -33,10 +34,9 @@ def run_git(args: list[str]) -> tuple[bool, str]:
             ["git"] + args,
             cwd=WORKDIR,
             capture_output=True,
-            text=True,
             timeout=30,
         )
-        output = (result.stdout + result.stderr).strip()
+        output = (decode_output(result.stdout) + decode_output(result.stderr)).strip()
         return result.returncode == 0, output[:5000] if output else "(no output)"
     except subprocess.TimeoutExpired:
         return False, "Error: git timeout"
@@ -94,20 +94,20 @@ def _count_worktree_changes(path: Path, base_commit: str) -> tuple[int, int]:
             ["git", "status", "--porcelain"],
             cwd=path,
             capture_output=True,
-            text=True,
             timeout=10,
         )
-        files = len([line for line in r1.stdout.strip().splitlines() if line.strip()])
+        files = len(
+            [line for line in decode_output(r1.stdout).strip().splitlines() if line.strip()]
+        )
         r2 = subprocess.run(
             ["git", "rev-list", "--count", f"{base_commit}..HEAD"],
             cwd=path,
             capture_output=True,
-            text=True,
             timeout=10,
         )
         if r1.returncode != 0 or r2.returncode != 0:
             return -1, -1
-        commits = int(r2.stdout.strip() or "0")
+        commits = int(decode_output(r2.stdout).strip() or "0")
         return files, commits
     except Exception:
         return -1, -1
