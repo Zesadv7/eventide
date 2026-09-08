@@ -72,7 +72,7 @@ async def run_evaluations(
     suite_started = time.perf_counter()
     for index, case in enumerate(cases, 1):
         provider = build_provider(settings) if live else ScriptedProvider(case.get("script", []))
-        runtime = AgentRuntime(settings=settings, provider=provider, store=store)
+        runtime = AgentRuntime(settings=settings, provider=provider, store=store, enable_mcp=live)
         mode = "live" if live else "offline"
         session_id = f"eval_{mode}_{index}_{int(time.time() * 1000)}"
         result = await runtime.run(

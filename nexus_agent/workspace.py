@@ -31,7 +31,7 @@ class HostLease:
             self._file.flush()
         self._file.seek(0)
         try:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 import msvcrt
 
                 msvcrt.locking(self._file.fileno(), msvcrt.LK_NBLCK, 1)

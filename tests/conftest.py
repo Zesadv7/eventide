@@ -15,8 +15,9 @@ def _patch_env(monkeypatch):
 
 
 @pytest.fixture
-def isolated_workspace():
+def isolated_workspace(monkeypatch):
     root = Path.cwd() / ".task_outputs" / "pytest"
     root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(root.resolve()))
     with tempfile.TemporaryDirectory(dir=root) as directory:
         yield Path(directory)

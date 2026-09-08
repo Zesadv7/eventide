@@ -9,6 +9,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from nexus_agent.workspace import user_state_dir
+
 load_dotenv(override=True)
 
 
@@ -35,7 +37,7 @@ class Settings:
         api_key = os.getenv("NEXUS_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
         base_url = os.getenv("NEXUS_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")
         model = os.getenv("NEXUS_MODEL") or os.getenv("MODEL_ID") or "claude-sonnet-4-6"
-        state_value = Path(os.getenv("NEXUS_STATE_DIR", ".nexus"))
+        state_value = Path(os.getenv("NEXUS_STATE_DIR", str(user_state_dir())))
         state_dir = state_value if state_value.is_absolute() else root / state_value
         return cls(
             workdir=root,

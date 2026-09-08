@@ -389,7 +389,8 @@ class RuntimeStore:
         with self._lock, self._connection:
             self._connection.execute(
                 "INSERT INTO context_checkpoints "
-                "(session_id, covered_seq, source_digest, summary, policy_version, provider, model) "
+                "(session_id, covered_seq, source_digest, summary, "
+                "policy_version, provider, model) "
                 "VALUES (?, ?, ?, ?, 1, ?, ?)",
                 (session_id, covered_seq, source_digest, summary, provider, model),
             )

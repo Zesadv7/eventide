@@ -74,9 +74,10 @@ async def test_runtime_approval_handler(isolated_workspace):
 
 
 async def test_runtime_retries_and_compacts(isolated_workspace):
-    settings = settings_for(isolated_workspace, context_limit=80)
+    settings = settings_for(isolated_workspace, context_limit=200)
     provider = ScriptedProvider(
         [
+            {"text": "Earlier goal retained."},
             {"error": "429", "retryable": True},
             {"text": "recovered"},
         ]
@@ -84,6 +85,8 @@ async def test_runtime_retries_and_compacts(isolated_workspace):
     runtime = AgentRuntime(settings, provider)
     session = runtime.create_session("long")
     runtime.store.append_message(session, {"role": "user", "content": "x" * 300})
+    runtime.store.create_run("earlier", session)
+    runtime.store.finish_run("earlier", status="completed", output="earlier")
     result = await runtime.run(RunRequest("continue", session_id=session))
     types = [event["type"] for event in runtime.store.get_events(result.run_id)]
     assert result.output == "recovered"

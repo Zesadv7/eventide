@@ -23,7 +23,7 @@ async def test_provider_config_is_encrypted_and_restored(isolated_workspace):
     record = runtime.store.get_provider_config()
     assert record and record["api_key_ciphertext"]
     assert "persistent-test-secret" not in record["api_key_ciphertext"]
-    database = settings.state_dir / "nexus.db"
+    database = settings.state_dir / "runtime.sqlite"
     await runtime.close()
 
     raw_database = database.read_bytes()
@@ -107,7 +107,7 @@ async def test_clear_key_and_reset_to_startup_config(isolated_workspace):
     await runtime.close()
 
 
-def test_provider_config_table_contains_single_row(isolated_workspace):
+async def test_provider_config_table_contains_single_row(isolated_workspace):
     runtime = AgentRuntime(settings_for(isolated_workspace))
     runtime.store.save_provider_config(
         provider="anthropic", base_url=None, model="one", api_key_ciphertext=None
@@ -121,4 +121,4 @@ def test_provider_config_table_contains_single_row(isolated_workspace):
     finally:
         connection.close()
     assert count == 1
-    runtime.store.close()
+    await runtime.close()
