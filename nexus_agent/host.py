@@ -13,7 +13,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from nexus_agent.config import Settings
+from nexus_agent.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from nexus_agent.context_builder import ContextBuilder
 from nexus_agent.executor import ApprovalHandler, ToolContext, ToolExecutor
 from nexus_agent.mcp.client import MCPManager
@@ -273,8 +273,8 @@ class RuntimeHost:
         with self._configuration_change():
             if self._active_tasks:
                 raise ValueError("Wait for active runs before changing provider configuration")
-            normalized = provider.strip().lower().replace("-", "_")
-            if normalized not in {"anthropic", "openai_compatible", "openai_responses"}:
+            normalized = normalize_provider(provider)
+            if normalized not in SUPPORTED_PROVIDERS:
                 raise ValueError(f"Unsupported provider '{provider}'")
             if not model.strip():
                 raise ValueError("Model cannot be empty")
@@ -327,8 +327,8 @@ class RuntimeHost:
         base_url: str | None,
         model: str,
     ) -> ModelResponse:
-        normalized = provider.strip().lower().replace("-", "_")
-        if normalized not in {"anthropic", "openai_compatible", "openai_responses"}:
+        normalized = normalize_provider(provider)
+        if normalized not in SUPPORTED_PROVIDERS:
             raise ValueError(f"Unsupported provider '{provider}'")
         selected_key = api_key.strip() if api_key and api_key.strip() else self.settings.api_key
         if not selected_key and self._provider_secret_error:

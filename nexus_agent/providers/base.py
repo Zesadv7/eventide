@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from nexus_agent.config import Settings
+from nexus_agent.config import Settings, normalize_provider
 from nexus_agent.models import ModelRequest, ModelResponse
 
 
@@ -19,12 +19,12 @@ class Provider(Protocol):
 
 
 def build_provider(settings: Settings) -> Provider:
-    name = settings.provider.replace("-", "_")
+    name = normalize_provider(settings.provider)
     if name == "anthropic":
         from nexus_agent.providers.anthropic import AnthropicProvider
 
         return AnthropicProvider(settings)
-    if name in {"openai", "openai_compatible"}:
+    if name == "openai_compatible":
         from nexus_agent.providers.openai_compatible import OpenAICompatibleProvider
 
         return OpenAICompatibleProvider(settings)

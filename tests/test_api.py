@@ -4,7 +4,7 @@ import time
 
 from fastapi.testclient import TestClient
 
-from nexus_agent.api import create_app
+from nexus_agent.api import _probe_error, create_app
 from nexus_agent.models import ModelResponse
 from nexus_agent.providers import ScriptedProvider
 from nexus_agent.runtime import AgentRuntime
@@ -167,7 +167,36 @@ def test_api_probe_failure_is_stable_and_redacted(isolated_workspace):
         result = response.json()
         assert result["success"] is False
         assert result["error_type"] == "authentication"
+        assert result["detail"]
+        assert "highly-secret-value" not in result["detail"]
         assert "highly-secret-value" not in response.text
+
+
+def test_probe_error_classifies_by_exception_type():
+    cases = {
+        "AuthenticationError": "authentication",
+        "PermissionDeniedError": "permission_denied",
+        "NotFoundError": "model_not_found",
+        "RateLimitError": "rate_limit",
+        "BadRequestError": "bad_request",
+        "APIConnectionError": "network",
+        "TimeoutError": "timeout",
+    }
+    for class_name, expected in cases.items():
+        outer = RuntimeError("wrapped")
+        outer.__cause__ = type(class_name, (RuntimeError,), {})(class_name)
+        assert _probe_error(outer)[0] == expected
+
+
+def test_probe_error_string_fallback():
+    assert _probe_error(RuntimeError("401 invalid api key"))[0] == "authentication"
+    assert _probe_error(RuntimeError("model not found"))[0] == "model_not_found"
+    assert _probe_error(RuntimeError("429 too many requests"))[0] == "rate_limit"
+    assert _probe_error(RuntimeError("529 overloaded"))[0] == "overloaded"
+    assert _probe_error(RuntimeError("connection refused"))[0] == "network"
+    assert _probe_error(RuntimeError("ssl certificate verify failed"))[0] == "network"
+    assert _probe_error(RuntimeError("no model api key configured"))[0] == "missing_api_key"
+    assert _probe_error(RuntimeError("已保存的 API Key 无法解密"))[0] == "decrypt_error"
 
 
 def test_api_clear_and_reset_persisted_config(isolated_workspace):

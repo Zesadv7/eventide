@@ -116,7 +116,7 @@ dialog { color:var(--ink); }
 .field-hint { color:var(--muted); font-size:12px; }
 .dialog-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:24px; }
 .action-spacer { flex:1; }
-.config-message,.connection-result { font-size:13px; margin-top:15px; line-height:1.6; color:var(--danger); }
+.config-message,.connection-result { font-size:13px; margin-top:15px; line-height:1.6; color:var(--danger); white-space:pre-line; }
 .success { color:var(--accent); }
 .nav-collapsed .app-shell { grid-template-columns:minmax(0,1fr); }
 .nav-collapsed .navigation { display:none; }

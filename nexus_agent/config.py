@@ -13,6 +13,16 @@ from nexus_agent.workspace import user_state_dir
 
 load_dotenv(override=True)
 
+_PROVIDER_ALIASES = {"openai": "openai_compatible"}
+SUPPORTED_PROVIDERS = frozenset({"anthropic", "openai_compatible", "openai_responses"})
+DEFAULT_MODEL = "claude-sonnet-5"
+
+
+def normalize_provider(name: str) -> str:
+    """把 provider 标识规范化为稳定的下划线形式（含别名映射）。"""
+    normalized = name.strip().lower().replace("-", "_")
+    return _PROVIDER_ALIASES.get(normalized, normalized)
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -33,10 +43,10 @@ class Settings:
     @classmethod
     def from_env(cls, workdir: Path | None = None) -> Settings:
         root = (workdir or Path.cwd()).resolve()
-        provider = os.getenv("NEXUS_PROVIDER", "anthropic").strip().lower()
+        provider = normalize_provider(os.getenv("NEXUS_PROVIDER", "anthropic"))
         api_key = os.getenv("NEXUS_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
         base_url = os.getenv("NEXUS_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")
-        model = os.getenv("NEXUS_MODEL") or os.getenv("MODEL_ID") or "claude-sonnet-4-6"
+        model = os.getenv("NEXUS_MODEL") or os.getenv("MODEL_ID") or DEFAULT_MODEL
         state_value = Path(os.getenv("NEXUS_STATE_DIR", str(user_state_dir())))
         state_dir = state_value if state_value.is_absolute() else root / state_value
         return cls(
@@ -71,7 +81,7 @@ TRANSCRIPT_DIR = WORKDIR / ".transcripts"
 TOOL_RESULTS_DIR = WORKDIR / ".task_outputs" / "tool-results"
 SKILLS_DIR = WORKDIR / "skills"
 
-MODEL = os.getenv("NEXUS_MODEL") or os.getenv("MODEL_ID", "claude-sonnet-4-6")
+MODEL = os.getenv("NEXUS_MODEL") or os.getenv("MODEL_ID", DEFAULT_MODEL)
 PRIMARY_MODEL = MODEL
 FALLBACK_MODEL = os.getenv("NEXUS_FALLBACK_MODEL") or os.getenv("FALLBACK_MODEL_ID")
 DEFAULT_MAX_TOKENS = 8_000

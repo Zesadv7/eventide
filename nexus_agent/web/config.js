@@ -1,8 +1,16 @@
 import {request} from "./transport.js";
 const $ = (selector) => document.querySelector(selector);
 let configured = false;
+function normalizeBaseUrl(value) {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+  const local = /^(localhost|127\.\d{1,3}(\.\d{1,3}){2}|0\.0\.0\.0|\[::1\])(:\d+)?/i.test(trimmed);
+  return `${local ? "http" : "https"}://${trimmed}`;
+}
+
 function providerBody() {
-  const body = { provider: $("#provider").value, model: $("#model").value.trim(), base_url: $("#base-url").value.trim() || null };
+  const body = { provider: $("#provider").value, model: $("#model").value.trim(), base_url: normalizeBaseUrl($("#base-url").value) };
   const key = $("#api-key").value.trim();
   if (key) body.api_key = key;
   return body;
@@ -18,7 +26,9 @@ function renderProviderStatus(config) {
   configured = config.api_key_configured && !config.configuration_error;
   $("#model-state").textContent = config.configuration_error ? "配置异常" : configured ? "" : "需要配置";
   $("#model-config-button").classList.toggle("configured", configured);
-  $("#provider").value = config.provider;
+  const providerSelect = $("#provider");
+  const known = [...providerSelect.options].some((option) => option.value === config.provider);
+  providerSelect.value = known ? config.provider : "openai_compatible";
   $("#model").value = config.model || "";
   $("#base-url").value = config.base_url || "";
   $("#key-hint").textContent = config.api_key_status === "decrypt_error" ? config.configuration_error : configured ? "安全保存的 API Key 已配置" : "尚未保存 API Key";
@@ -48,6 +58,7 @@ async function testProviderConfig() {
   try {
     const probe = await request("/api/config/provider/test", { method: "POST", body: JSON.stringify(providerBody()) });
     result.textContent = `${probe.message} · ${Math.round(probe.latency_ms)} ms`;
+    if (!probe.success && probe.detail) result.textContent += `\n${probe.detail}`;
     result.className = `connection-result ${probe.success ? "success" : "failure"}`;
   } catch (error) { result.textContent = error.message; result.className = "connection-result failure"; }
   finally { $("#test-model-config").disabled = false; }

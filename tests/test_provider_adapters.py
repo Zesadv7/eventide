@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from nexus_agent.config import Settings
+from nexus_agent.config import Settings, normalize_provider
 from nexus_agent.models import ModelRequest
 from nexus_agent.providers.anthropic import AnthropicProvider, _without_provider_state
 from nexus_agent.providers.base import ProviderError, build_provider
@@ -242,6 +242,26 @@ def test_provider_factory_and_missing_key(isolated_workspace):
     settings = replace(settings, api_key=None)
     with pytest.raises(RuntimeError, match="NEXUS_API_KEY"):
         settings.require_api_key()
+
+
+def test_normalize_provider_canonicalizes_aliases_and_case():
+    assert normalize_provider("openai-compatible") == "openai_compatible"
+    assert normalize_provider("openai") == "openai_compatible"
+    assert normalize_provider("OPENAI_RESPONSES") == "openai_responses"
+    assert normalize_provider("anthropic") == "anthropic"
+    assert normalize_provider("  Anthropic  ") == "anthropic"
+
+
+def test_settings_from_env_normalizes_hyphenated_provider(monkeypatch, isolated_workspace):
+    monkeypatch.setenv("NEXUS_PROVIDER", "openai-compatible")
+    assert Settings.from_env(isolated_workspace).provider == "openai_compatible"
+
+
+async def test_build_provider_accepts_hyphenated_and_alias(isolated_workspace):
+    for name in ("openai-compatible", "openai"):
+        provider = build_provider(live_settings(isolated_workspace, name))
+        assert isinstance(provider, OpenAICompatibleProvider)
+        await provider.close()
 
 
 def test_anthropic_messages_drop_foreign_provider_state():
