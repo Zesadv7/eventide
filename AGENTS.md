@@ -61,3 +61,7 @@ uv run nexus-agent eval evals/smoke.yaml
 2. 运行 `git diff --check` 并复查 `git status --short`。
 3. 创建一个说明清楚的本地提交；不要夹带无关修改。
 4. 在最终回复中报告修改内容、验证结果、commit hash 和仍需用户处理的阻塞。
+
+## 回复风格
+
+- 回复稍微带点大白话：先说结论，再补细节，少堆术语。
