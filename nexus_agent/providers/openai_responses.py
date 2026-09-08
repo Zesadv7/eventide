@@ -80,15 +80,19 @@ class OpenAIResponsesProvider:
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
         try:
-            response = await self._client.responses.create(
-                model=request.model,
-                instructions=request.system,
-                input=cast(Any, convert_response_input(request.messages)),
-                tools=cast(Any, convert_response_tools(request.tools)),
-                max_output_tokens=request.max_tokens,
-                store=False,
-                include=["reasoning.encrypted_content"],
-            )
+            # Omit the `tools` field when empty; the Responses API treats an
+            # empty list differently from an absent field on strict backends.
+            params: dict[str, Any] = {
+                "model": request.model,
+                "instructions": request.system,
+                "input": cast(Any, convert_response_input(request.messages)),
+                "max_output_tokens": request.max_tokens,
+                "store": False,
+                "include": ["reasoning.encrypted_content"],
+            }
+            if request.tools:
+                params["tools"] = cast(Any, convert_response_tools(request.tools))
+            response = await cast(Any, self._client).responses.create(**params)
         except Exception as exc:
             text = str(exc).lower()
             retryable = any(token in text for token in ("429", "500", "502", "503", "529"))

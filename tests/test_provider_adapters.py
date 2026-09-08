@@ -185,6 +185,56 @@ async def test_openai_responses_adapter_invalid_json_and_retryable_error(isolate
     assert caught.value.retryable
 
 
+async def test_adapters_omit_tools_field_when_empty(isolated_workspace):
+    captured: dict = {}
+
+    class Completions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            message = SimpleNamespace(content="ok", tool_calls=None)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=message, finish_reason="stop")],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            )
+
+    provider = OpenAICompatibleProvider(live_settings(isolated_workspace, "openai-compatible"))
+    provider._client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    await provider.complete(request())  # request() carries an empty tools list
+    assert "tools" not in captured
+
+    captured.clear()
+
+    class Messages:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="ok")],
+                usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+                stop_reason="end_turn",
+            )
+
+    provider = AnthropicProvider(live_settings(isolated_workspace, "anthropic"))
+    provider._client = SimpleNamespace(messages=Messages())
+    await provider.complete(request())
+    assert "tools" not in captured
+
+    captured.clear()
+
+    class Responses:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                output=[], output_text="ok",
+                usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+                status="completed",
+            )
+
+    provider = OpenAIResponsesProvider(live_settings(isolated_workspace, "openai_responses"))
+    provider._client = SimpleNamespace(responses=Responses())
+    await provider.complete(request())
+    assert "tools" not in captured
+
+
 def test_provider_factory_and_missing_key(isolated_workspace):
     with pytest.raises(ValueError, match="Unsupported"):
         build_provider(live_settings(isolated_workspace, "other"))

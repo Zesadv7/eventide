@@ -78,12 +78,16 @@ class OpenAICompatibleProvider:
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
         try:
-            response = await self._client.chat.completions.create(
-                model=request.model,
-                messages=cast(Any, convert_messages(request.messages, request.system)),
-                tools=cast(Any, convert_tools(request.tools)),
-                max_tokens=request.max_tokens,
-            )
+            # Strict OpenAI-compatible backends (e.g. DashScope) reject an empty
+            # `tools` array; omit the field entirely when there are no tools.
+            params: dict[str, Any] = {
+                "model": request.model,
+                "messages": cast(Any, convert_messages(request.messages, request.system)),
+                "max_tokens": request.max_tokens,
+            }
+            if request.tools:
+                params["tools"] = cast(Any, convert_tools(request.tools))
+            response = await cast(Any, self._client).chat.completions.create(**params)
         except Exception as exc:
             text = str(exc).lower()
             retryable = any(token in text for token in ("429", "500", "502", "503", "529"))

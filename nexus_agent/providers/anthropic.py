@@ -39,13 +39,17 @@ class AnthropicProvider:
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
         try:
-            response = await self._client.messages.create(
-                model=request.model,
-                system=request.system,
-                messages=cast(Any, _without_provider_state(request.messages)),
-                tools=cast(Any, request.tools),
-                max_tokens=request.max_tokens,
-            )
+            # Omit the `tools` field when empty so strict backends do not reject
+            # the request; an empty array is not semantically equivalent to none.
+            params: dict[str, Any] = {
+                "model": request.model,
+                "system": request.system,
+                "messages": cast(Any, _without_provider_state(request.messages)),
+                "max_tokens": request.max_tokens,
+            }
+            if request.tools:
+                params["tools"] = cast(Any, request.tools)
+            response = await cast(Any, self._client).messages.create(**params)
         except Exception as exc:
             text = str(exc).lower()
             retryable = any(token in text for token in ("429", "529", "overloaded"))
