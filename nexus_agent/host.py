@@ -41,6 +41,9 @@ from nexus_agent.workspace import (
     workspace_checkpoint,
 )
 
+# stop_reason values that mean the provider cut the answer off at max_tokens.
+TRUNCATION_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
+
 
 class EventSink(Protocol):
     async def emit(self, event: dict[str, Any]) -> None: ...
@@ -649,6 +652,7 @@ class RuntimeHost:
                 )
                 return approved
 
+            step_budget_exhausted = False
             for steps in range(1, self.settings.max_steps + 1):
                 messages, compacted, trimmed = await self.context_builder.build(
                     session_id,
@@ -723,6 +727,13 @@ class RuntimeHost:
                     author="model",
                 )
                 if not calls:
+                    if response.stop_reason in TRUNCATION_REASONS:
+                        # A truncated final answer is not a finished task; fail loudly
+                        # instead of reporting success with half the output.
+                        raise RuntimeError(
+                            f"Model output truncated ({response.stop_reason}); raise "
+                            f"NEXUS_MAX_TOKENS (currently {self.settings.max_tokens})"
+                        )
                     output = self._clean(response.text)
                     break
                 for call in calls:
@@ -775,8 +786,25 @@ class RuntimeHost:
                             sink,
                         )
             else:
-                raise RuntimeError(f"Maximum agent steps exceeded ({self.settings.max_steps})")
-            status, error = "completed", None
+                step_budget_exhausted = True
+            if step_budget_exhausted:
+                # Every tool result is already committed, so park instead of failing:
+                # the user can Continue into a fresh turn with a new step budget.
+                events = self.store.run_events(run_id)
+                if not events or events[-1]["type"] != "workspace.checkpoint":
+                    await self._emit(
+                        run_id,
+                        "workspace.checkpoint",
+                        {
+                            "checkpoint": await asyncio.to_thread(workspace_checkpoint, root),
+                        },
+                        sink,
+                    )
+                status, error = "interrupted", self._clean(
+                    f"Maximum agent steps exceeded ({self.settings.max_steps})"
+                )
+            else:
+                status, error = "completed", None
         except asyncio.CancelledError:
             await self._emit(
                 run_id, "run.interrupted", {"error": "Run cancelled; session parked"}, sink

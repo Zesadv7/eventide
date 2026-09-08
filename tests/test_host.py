@@ -253,6 +253,45 @@ async def test_long_turn_folds_older_tool_results_instead_of_failing(isolated_wo
         await host.close()
 
 
+async def test_step_budget_parks_the_session_and_continue_resumes(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    (repo / "README.md").write_text("hello", encoding="utf-8")
+    provider = ScriptedProvider(
+        [
+            {"tool_calls": [{"id": "r1", "name": "read_file", "arguments": {"path": "README.md"}}]},
+            {"tool_calls": [{"id": "r2", "name": "read_file", "arguments": {"path": "README.md"}}]},
+            {"text": "resumed"},
+        ]
+    )
+    settings = replace(settings_for(repo), state_dir=isolated_workspace / "state", max_steps=2)
+    host = RuntimeHost(settings, provider)
+    try:
+        workspace = host.resolve_or_register_workspace(repo)
+        session = host.create_session(workspace_id=workspace.workspace_id)
+        result = await host.run(RunRequest("read", session))
+        assert result.status == "interrupted"
+        assert "Maximum agent steps exceeded" in result.output
+        assert host.session_status(session)["status"] == "parked"
+        assert host.store.run_events(result.run_id)[-1]["type"] == "run.interrupted"
+        continued = await host.continue_session(session)
+        assert continued.status == "completed"
+        assert continued.output == "resumed"
+    finally:
+        await host.close()
+
+
+async def test_truncated_final_answer_fails_instead_of_reporting_success(isolated_workspace):
+    provider = ScriptedProvider([{"text": "half an answer", "stop_reason": "max_tokens"}])
+    host = RuntimeHost(settings_for(isolated_workspace), provider)
+    try:
+        result = await host.run(RunRequest("write a long answer"))
+        assert result.status == "failed"
+        assert "truncated" in result.output
+        assert "NEXUS_MAX_TOKENS" in result.output
+    finally:
+        await host.close()
+
+
 async def test_cancel_and_close_release_owner(isolated_workspace):
     entered = asyncio.Event()
 

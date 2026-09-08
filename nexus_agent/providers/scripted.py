@@ -35,6 +35,6 @@ class ScriptedProvider:
         return ModelResponse(
             text=str(item.get("text", "")),
             tool_calls=calls,
-            stop_reason="tool_use" if calls else "end_turn",
+            stop_reason=str(item.get("stop_reason") or ("tool_use" if calls else "end_turn")),
             usage={k: int(v) for k, v in item.get("usage", {}).items()},
         )

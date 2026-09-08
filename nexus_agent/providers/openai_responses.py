@@ -122,6 +122,10 @@ class OpenAIResponsesProvider:
             "output_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
         }
         status = str(getattr(response, "status", "completed") or "completed")
+        if status == "incomplete":
+            # Preserve the reason (e.g. max_output_tokens) so truncation is detectable.
+            details = getattr(response, "incomplete_details", None)
+            status = str(getattr(details, "reason", "") or "") or "incomplete"
         return ModelResponse(
             str(getattr(response, "output_text", "") or ""),
             tuple(calls),

@@ -161,6 +161,25 @@ async def test_openai_responses_adapter_tool_roundtrip_and_usage(isolated_worksp
     assert replay[0] == {"type": "reasoning", "encrypted_content": "opaque-state"}
 
 
+async def test_openai_responses_adapter_preserves_incomplete_reason(isolated_workspace):
+    provider = OpenAIResponsesProvider(live_settings(isolated_workspace, "openai_responses"))
+
+    class IncompleteResponses:
+        async def create(self, **_kwargs):
+            return SimpleNamespace(
+                output=[],
+                output_text="half an answer",
+                usage=SimpleNamespace(input_tokens=3, output_tokens=4),
+                status="incomplete",
+                incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+            )
+
+    provider._client = SimpleNamespace(responses=IncompleteResponses())
+    result = await provider.complete(request())
+    assert result.stop_reason == "max_output_tokens"
+    assert result.text == "half an answer"
+
+
 async def test_openai_responses_adapter_invalid_json_and_retryable_error(isolated_workspace):
     provider = OpenAIResponsesProvider(live_settings(isolated_workspace, "openai_responses"))
 
