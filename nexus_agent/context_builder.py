@@ -19,6 +19,7 @@ class ContextOverflow(RuntimeError):
 
 
 KEEP_RECENT_TOOL_RESULTS = 3
+INSTRUCTIONS_LIMIT = 4_000
 
 
 def _tool_result_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
@@ -98,7 +99,7 @@ class ContextBuilder:
             return ""
         if not path.resolve().is_relative_to(root):
             raise ValueError("AGENTS.md escapes workspace")
-        return path.read_text(encoding="utf-8")[:32_000]
+        return path.read_text(encoding="utf-8")[:INSTRUCTIONS_LIMIT]
 
     async def build(
         self,
