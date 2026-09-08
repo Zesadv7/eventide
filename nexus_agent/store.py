@@ -300,6 +300,30 @@ class RuntimeStore:
             ).fetchone()
         return self.get_run(row[0]) if row else None
 
+    def list_runs(self, session_id: str) -> list[dict[str, Any]]:
+        """Return all runs with projected state and lightweight event facts."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT r.*, t.continuation_of FROM runs r "
+                "JOIN turns t ON r.turn_id=t.id "
+                "WHERE r.session_id=? ORDER BY r.started_at, r.rowid",
+                (session_id,),
+            ).fetchall()
+        records: list[dict[str, Any]] = []
+        for row in rows:
+            events = self.run_events(row["id"])
+            record = {**dict(row), **RuntimeStateProjection.project(events)}
+            record["event_count"] = len(events)
+            record["checkpoint_count"] = sum(
+                event["type"] == "workspace.checkpoint" for event in events
+            )
+            record["approval_count"] = sum(
+                event["type"] == "approval.required" for event in events
+            )
+            record["last_seq"] = events[-1]["session_seq"] if events else 0
+            records.append(record)
+        return records
+
     def recover_interrupted(self) -> None:
         with self._lock:
             rows = self._connection.execute(

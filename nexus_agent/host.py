@@ -9,7 +9,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -33,7 +33,13 @@ from nexus_agent.providers import Provider, ProviderError, build_provider
 from nexus_agent.secrets import SecretBox, SecretKeyError
 from nexus_agent.store import RuntimeStore
 from nexus_agent.tools.runtime_catalog import HANDLERS, TOOLS
-from nexus_agent.workspace import HostLease, canonical_workspace, digest, workspace_checkpoint
+from nexus_agent.workspace import (
+    HostLease,
+    canonical_workspace,
+    digest,
+    git_metadata,
+    workspace_checkpoint,
+)
 
 
 class EventSink(Protocol):
@@ -125,10 +131,27 @@ class RuntimeHost:
 
     def session_status(self, session_id: str) -> dict[str, Any]:
         workspace = self.sessions.workspace(session_id)
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Session not found: {session_id}")
         run = self.store.latest_run(session_id)
+        events = self.store.session_events(session_id)
+        first_intent = next(
+            (
+                event["payload"].get("message", {}).get("content")
+                for event in events
+                if event["type"] in {"message.user", "message.imported"}
+            ),
+            None,
+        )
+        title = str(first_intent or "New session").replace("\n", " ").strip()
+        updated_at = max((event["ts"] for event in events), default=session["created_at"])
         return {
             "session_id": session_id,
             "workspace_id": workspace.workspace_id,
+            "created_at": session["created_at"],
+            "updated_at": updated_at,
+            "title": title[:96],
             "status": "parked"
             if run and run["status"] == "interrupted"
             else run["status"]
@@ -136,6 +159,15 @@ class RuntimeHost:
             else "idle",
             "latest_run": run,
         }
+
+    def workspace_status(self, workspace_id: str) -> dict[str, Any]:
+        workspace = self.store.get_workspace(workspace_id)
+        metadata = git_metadata(Path(workspace.path))
+        return {**asdict(workspace), **metadata}
+
+    def session_runs(self, session_id: str) -> list[dict[str, Any]]:
+        self.sessions.workspace(session_id)
+        return self.store.list_runs(session_id)
 
     async def initialize(self, config_path: Path | None = None) -> None:
         if self._closed:

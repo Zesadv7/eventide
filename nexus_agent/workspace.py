@@ -71,6 +71,17 @@ def canonical_workspace(path: Path) -> tuple[Path, str | None]:
     return top, str(top)
 
 
+def git_metadata(path: Path) -> dict[str, str | None]:
+    """Return lightweight, live Git identity metadata for UI/API projections."""
+    try:
+        root = Path(os.fsdecode(git(path, "rev-parse", "--show-toplevel")).strip()).resolve()
+        head = git(root, "rev-parse", "--verify", "HEAD").decode().strip()
+        branch = git(root, "branch", "--show-current").decode().strip() or None
+        return {"git_branch": branch, "git_head": head[:12]}
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        return {"git_branch": None, "git_head": None}
+
+
 def digest(value: Any) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode()

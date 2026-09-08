@@ -83,7 +83,7 @@ Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `p
 
 上下文摘要只覆盖已结束的 turn，原始事件不变。无法在上下文预算内保留有效摘要与当前 turn 时返回 `context_overflow`，不会静默丢弃当前交互。预算单位保持为序列化消息的字符数。
 
-HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表及 session/messages 查询。`POST /api/sessions` 可传 `workspace_id`；空请求继续绑定启动项目。`POST /api/sessions/{id}/continue` 等待新 run 完成并返回 RunResult，验证失败返回 409；运行期间可从 Session 查询得到 run ID 并消费事件或提交审批。同 Workspace 的并发 HTTP 请求返回 409。现有 Web 页面保持原布局，新增管理操作通过 CLI/API 使用。
+HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id`；空请求继续绑定启动项目。`POST /api/sessions/{id}/continue` 等待新 run 完成并返回 RunResult，验证失败返回 409；Web 工作台通过 Session 状态与 Run History 发现 Continue 创建的新 Run，再消费同一 SSE 事件流。同 Workspace 的并发 HTTP 请求返回 409。Web 控制台以 Workspace、Session 和语义化运行阶段组织事件，不直接展示底层 Runtime 日志。
 
 ## 配置真实模型
 

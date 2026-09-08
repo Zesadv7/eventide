@@ -151,18 +151,22 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
     async def register_workspace(body: WorkspaceBody, request: Request) -> dict[str, Any]:
         _require_local_request(request)
         try:
-            return asdict(agent_runtime.resolve_or_register_workspace(body.path))
+            workspace = agent_runtime.resolve_or_register_workspace(body.path)
+            return agent_runtime.workspace_status(workspace.workspace_id)
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/workspaces")
     async def list_workspaces() -> list[dict[str, Any]]:
-        return [asdict(w) for w in agent_runtime.store.list_workspaces()]
+        return [
+            agent_runtime.workspace_status(w.workspace_id)
+            for w in agent_runtime.store.list_workspaces()
+        ]
 
     @app.get("/api/workspaces/{workspace_id}")
     async def get_workspace(workspace_id: str) -> dict[str, Any]:
         try:
-            return asdict(agent_runtime.store.get_workspace(workspace_id))
+            return agent_runtime.workspace_status(workspace_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -198,6 +202,11 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             return agent_runtime.store.load_messages(session_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/sessions/{session_id}/runs")
+    async def list_runs(session_id: str) -> list[dict[str, Any]]:
+        await get_session(session_id)
+        return agent_runtime.session_runs(session_id)
 
     @app.post("/api/sessions/{session_id}/continue")
     async def continue_session(session_id: str) -> dict[str, Any]:

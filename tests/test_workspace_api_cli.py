@@ -22,14 +22,21 @@ def test_workspace_http_catalog_and_session_binding(isolated_workspace):
         response = client.post("/api/workspaces", json={"path": str(other)})
         assert response.status_code == 201
         workspace_id = response.json()["workspace_id"]
+        assert "git_branch" in response.json()
+        assert "git_head" in response.json()
         assert client.get(f"/api/workspaces/{workspace_id}").json()["path"] == str(other)
         assert len(client.get("/api/workspaces").json()) == 2
         session = client.post("/api/sessions", json={"workspace_id": workspace_id}).json()[
             "session_id"
         ]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
-        assert wait_for_run(client, accepted.json()["run_id"])["status"] == "completed"
+        run_id = accepted.json()["run_id"]
+        assert wait_for_run(client, run_id)["status"] == "completed"
         assert client.get(f"/api/sessions/{session}/messages").json()[0]["content"] == "hello"
+        history = client.get(f"/api/sessions/{session}/runs")
+        assert history.status_code == 200
+        assert history.json()[0]["id"] == run_id
+        assert history.json()[0]["event_count"] > 0
         assert (
             client.get(f"/api/workspaces/{workspace_id}/sessions").json()[0]["session_id"]
             == session
