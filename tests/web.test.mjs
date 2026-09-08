@@ -71,6 +71,15 @@ test("advertised but unprepared abandoned call uses its continuation lineage", (
   assert.equal(work.operations.get("r1:same").status, "abandoned");
 });
 
+test("folded tool results are reported without inventing operations", () => {
+  const work = project([prepared(1, "read_file", {path: "a"}), completed(2, "read_file", false), event(3, "context.trimmed", {call_ids: ["c1", "c2"], omitted_chars: 1234}), prepared(4, "read_file", {path: "b"}, "c3")]);
+  const folded = work.blocks.find((b) => b.kind === "context");
+  assert.match(folded.title, /折叠/);
+  assert.match(folded.text, /2 条/);
+  assert.equal(folded.operations.length, 0);
+  assert.equal(work.operations.size, 2);
+});
+
 test("unknown shell commands and model protocol events do not create invented work", () => {
   const work = project([event(1, "model.request", {}), event(2, "model.response", {text: "I changed everything"}), prepared(3, "bash", {command: "echo pytest"})]);
   assert.equal(work.blocks.length, 1);

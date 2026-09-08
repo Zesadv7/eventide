@@ -78,6 +78,9 @@ export function projectWork(runs, eventMap) {
       note(event, "continuation", "接续上次停驻", "同一项工作继续执行，未重发原始指令。");
     } else if (type === "workspace.checkpoint") {
       checkpoint = p.checkpoint || null;
+    } else if (type === "context.trimmed") {
+      const count = (p.call_ids || []).length;
+      note(event, "context", "已折叠较早的工具结果", `为控制上下文，折叠了 ${count} 条较早的工具结果；原文仍保留在事件日志与工作记录中。`);
     } else if (type === "tool.prepared") {
       const op = {id: `${event.run_id}:${p.call_id}`, callId: p.call_id, runId: event.run_id, name: p.name,
         arguments: p.arguments || {}, status: "prepared", events: [event], result: ""};
