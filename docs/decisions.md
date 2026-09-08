@@ -181,3 +181,13 @@
 **决策：** 构造模型请求时，若摘要之后仍超预算，把当前 turn 内较早的 `tool_result` 内容替换为占位串，直到落入预算：保留最近三条工具结果原文，只替换 `content` 字符串以维持 tool_use/tool_result 配对，事件日志不写入折叠结果，并记录 `context.trimmed` 供界面展示。
 
 **影响：** 折叠是请求侧的有损投影，不改变事件日志、checkpoint 的 `source_digest`、Continue 的 Git 证据或 JSONL 导出；原文仍可通过工作记录和日志取回。模型可能丢失早期工具输出细节，因此保留最近证据并让折叠可观测。不做输出落盘，也不自动重试副作用工具。
+
+## ADR-019：步数预算用尽后停驻可继续
+
+**状态：Accepted**，扩展 ADR-015 的停驻来源。
+
+**背景：** 单次 run 受 `max_steps`（默认 30）限制。用尽后原实现抛异常并以 `run.failed` 结束：工具结果虽已提交，但用户既不能 Continue，也无法让模型接着做，只能重新描述任务。大型任务因此常在步数而非上下文上失败。
+
+**决策：** 步数用尽且所有工具结果已提交时，Host 先记录工作区 checkpoint，再写入 `run.interrupted`，Session 停驻；用户 Continue 创建新 turn/run 并获得新的步数预算。终端事件仍复用 `run.interrupted`，不新增状态类型，也不自动放大步数预算。
+
+**影响：** Continue 的安全检查不变（Git 证据、未知副作用、post-tool checkpoint）；停驻时补记 checkpoint，使纯只读 run 也能提供可信证据，因此 checkpoint 必须与 JSON 往返后的形态可比。模型输出被 `max_tokens` 截断且没有工具调用时改为失败并提示提高预算，不再静默报成功。
