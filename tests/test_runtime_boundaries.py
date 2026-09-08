@@ -1,6 +1,7 @@
 """Failure contracts that protect replay and ownership."""
 
 import asyncio
+import json
 import sqlite3
 import subprocess
 import sys
@@ -161,6 +162,13 @@ async def test_overflow_reports_the_active_turn_not_a_missing_checkpoint(isolate
         assert "1000 character budget" in message
     finally:
         await host.close()
+
+
+def test_checkpoint_survives_json_roundtrip_with_untracked_files(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    (repo / "README.md").write_text("hello", encoding="utf-8")
+    checkpoint = workspace_checkpoint(repo)
+    assert checkpoint == json.loads(json.dumps(checkpoint))
 
 
 def _append_tool_group(store, session, run_id, call_id, name, content):

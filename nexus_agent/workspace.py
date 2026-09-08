@@ -108,7 +108,9 @@ def workspace_checkpoint(path: Path) -> dict[str, Any] | None:
                 body = os.fsencode(os.readlink(candidate))
             else:
                 body = candidate.read_bytes()
-            untracked.append((name, hashlib.sha256(body).hexdigest()))
+            # Lists, not tuples: checkpoints are compared after a JSON round-trip,
+            # and a tuple would never equal the list SQLite gives back.
+            untracked.append([name, hashlib.sha256(body).hexdigest()])
         # Dirty submodules have state that a top-level diff cannot fully describe.
         if git(path, "submodule", "status", "--recursive").strip():
             return None
