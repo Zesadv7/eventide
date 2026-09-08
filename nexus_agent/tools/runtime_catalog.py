@@ -21,7 +21,8 @@ TOOLS = [
     ),
     _tool(
         "read_file",
-        "Read a workspace text file.",
+        "Read a workspace text file. Long files are paged; the header reports the "
+        "total line count and the next offset.",
         {"path": TEXT, "offset": {"type": "integer"}, "limit": {"type": "integer"}},
         ["path"],
     ),

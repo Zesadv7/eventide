@@ -55,7 +55,7 @@ MessagesProjection 只消费已提交消息和工具事实，保留工具配对�
 
 RuntimeStateProjection 从事件得到 running、waiting_for_user、completed、failed、interrupted、usage、步骤、工具和待审批状态。SessionManager 将最新 interrupted run 展示为 parked；pending approval 保留历史证据，审批提交还必须匹配该 run 与当前进程的 pending future。
 
-ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读取 32,000 字符，拒绝指向 Workspace 外的链接。每轮 run 记录指令 hash 和工具目录 hash。消息/工具结果只在进入语义记录时规范化、脱敏和限长；下一模型请求读取同一记录。普通文本上限 4,000 字符，Responses provider_state 上限 200,000 字符；已知模型 API Key 在文本中也会替换。预算不足时，当前 turn 内较早的工具结果在构造请求时折叠为占位串，保留最近三条原文与 tool_use/tool_result 配对，事件日志仍保存原文。UI 可以进一步裁剪展示。
+ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读取 32,000 字符，拒绝指向 Workspace 外的链接。每轮 run 记录指令 hash 和工具目录 hash。消息/工具结果只在进入语义记录时规范化、脱敏和限长；下一模型请求读取同一记录。普通文本上限 4,000 字符，Responses provider_state 上限 200,000 字符；已知模型 API Key 在文本中也会替换。预算不足时，当前 turn 内较早的工具结果在构造请求时折叠为占位串，保留最近三条原文与 tool_use/tool_result 配对，事件日志仍保存原文。read_file 自行分页并报告文件总行数与下一页 offset，因此不会被该上限截断。UI 可以进一步裁剪展示。
 
 持久 checkpoint 保存 covered_seq、source_digest、summary、policy_version、provider、model。摘要只覆盖结束 turn 的完整前缀；模型调用使用 summary + 未覆盖 raw tail。checkpoint 来源 digest、策略和模型身份不符时忽略；摘要生成失败且旧投影仍在预算内时使用旧投影；摘要之后仍超预算时先折叠当前 turn 的旧工具结果，仍不够才返回 context_overflow。压缩与折叠都不改变原始事件。当前 context_limit 仍按序列化消息字符数计量，不宣称 token 精确计量。
 

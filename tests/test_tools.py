@@ -1,5 +1,6 @@
 """Tests for basic tools."""
 
+import re
 import subprocess
 import sys
 
@@ -41,6 +42,30 @@ def test_run_bash_returns_utf8_child_output(isolated_workspace):
 def test_run_write_and_read(isolated_workspace):
     assert run_write("test.txt", "hello", cwd=isolated_workspace) == "Wrote 5 bytes to test.txt"
     assert run_read("test.txt", cwd=isolated_workspace) == "hello"
+
+
+def test_run_read_pages_large_files_and_reports_extent(isolated_workspace):
+    lines = [f"line {index} " + "x" * 60 for index in range(200)]
+    (isolated_workspace / "big.txt").write_text("\n".join(lines), encoding="utf-8")
+    first = run_read("big.txt", cwd=isolated_workspace)
+    assert first.startswith("[big.txt — 200 lines total; showing lines 1-")
+    assert "continue with offset=" in first
+    assert "more lines)" in first
+    assert len(first) < 4000
+    offset = int(re.search(r"offset=(\d+)", first).group(1))
+    second = run_read("big.txt", offset=offset, cwd=isolated_workspace)
+    assert second.startswith(f"[big.txt — 200 lines total; showing lines {offset + 1}-")
+    assert "line 0 " not in second
+
+
+def test_run_read_explicit_limit_reports_page(isolated_workspace):
+    (isolated_workspace / "many.txt").write_text(
+        "\n".join(f"l{index}" for index in range(10)), encoding="utf-8"
+    )
+    out = run_read("many.txt", limit=3, cwd=isolated_workspace)
+    assert "showing lines 1-3" in out
+    assert "l0" in out
+    assert "l3" not in out
 
 
 def test_run_edit(isolated_workspace):
