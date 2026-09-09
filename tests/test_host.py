@@ -330,7 +330,9 @@ async def test_long_turn_folds_older_tool_results_instead_of_failing(isolated_wo
     )
     for index in range(5):
         (isolated_workspace / f"d{index}").write_text("y" * 3000, encoding="utf-8")
-    host = RuntimeHost(settings_for(isolated_workspace, context_limit=12000), provider)
+    # The system prompt contains the absolute Workspace path, so leave enough room
+    # for this regression to run from the repository's required nested worktrees.
+    host = RuntimeHost(settings_for(isolated_workspace, context_limit=14_000), provider)
     try:
         result = await host.run(RunRequest("read"))
         assert result.status == "completed"

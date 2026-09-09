@@ -31,6 +31,7 @@ from eventide.normalization import normalize, redact
 from eventide.policy import PolicyEngine
 from eventide.providers import Provider, ProviderError, build_provider
 from eventide.secrets import SecretBox, SecretKeyError
+from eventide.skills import SkillCatalog
 from eventide.store import RuntimeStore
 from eventide.tools.runtime_catalog import HANDLERS, TOOLS
 from eventide.workspace import (
@@ -44,6 +45,7 @@ from eventide.workspace import (
 
 # stop_reason values that mean the provider cut the answer off at max_tokens.
 TRUNCATION_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
+BASE_RUNTIME_READONLY_TOOLS = frozenset({"read_file", "glob", "compact"})
 
 
 class EventSink(Protocol):
@@ -734,11 +736,18 @@ class RuntimeHost:
         last_checkpoint = max(
             (e["session_seq"] for e in events if e["type"] == "workspace.checkpoint"), default=0
         )
+        readonly_calls = {
+            event["payload"]["call_id"]
+            for event in events
+            if event["type"] == "tool.prepared" and event["payload"].get("readonly", False)
+        }
         for event in events:
-            if event["type"] == "tool.completed" and event["session_seq"] > last_checkpoint:
-                name = event["payload"]["name"]
-                if name not in {"read_file", "glob", "compact"}:
-                    raise ValueError("Missing post-tool checkpoint; session remains parked")
+            if (
+                event["type"] == "tool.completed"
+                and event["session_seq"] > last_checkpoint
+                and event["payload"]["call_id"] not in readonly_calls
+            ):
+                raise ValueError("Missing post-tool checkpoint; session remains parked")
         for operation in previous["tools"].values():
             if operation["status"] == "prepared" and not operation.get("readonly", False):
                 raise ValueError("Unknown tool outcome; session remains parked")
@@ -849,6 +858,7 @@ class RuntimeHost:
                 },
                 sink,
             )
+            skills = SkillCatalog.discover(workspace_root)
             if self._enable_mcp:
                 configs = manager.load_configs(
                     self._config_path
@@ -866,17 +876,31 @@ class RuntimeHost:
                         self._clean(failure),
                         sink,
                     )
-            tools = [*self.tools, *manager.tools]
-            handlers = {**self.handlers, **manager.handlers}
+            if skills and any(tool.get("name") == "load_skill" for tool in self.tools):
+                raise ValueError("load_skill is reserved for Workspace Skill loading")
+            skill_tools = [skills.tool()] if skills else []
+            tools = [*self.tools, *skill_tools, *manager.tools]
+            handlers = {
+                **self.handlers,
+                **({"load_skill": skills.load} if skills else {}),
+                **manager.handlers,
+            }
             executor = ToolExecutor(
-                handlers, manager.readonly_tools, self.executor.command_executor
+                handlers,
+                {*manager.readonly_tools, *({"load_skill"} if skills else set())},
+                self.executor.command_executor,
             )
+            runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)
+            if skills:
+                runtime_readonly_tools.add("load_skill")
             instructions = self._clean(ContextBuilder.instructions(workspace_root))
+            skill_prompt = skills.prompt()
             system = (
                 "You are Eventide. Use tools to finish work, respect permissions, and never "
                 "claim success without evidence.\n"
                 f"Workspace: {workspace_root}\nWorking directory: {working_root}\n"
                 f"Project instructions:\n{instructions}"
+                + (f"\n\n{skill_prompt}" if skill_prompt else "")
             )
             catalog_hash = digest(tools)
             await self._emit(
@@ -884,6 +908,8 @@ class RuntimeHost:
                 "context.configured",
                 {
                     "instruction_hash": digest(instructions),
+                    "skill_catalog_hash": skills.catalog_hash,
+                    "skill_count": len(skills.skills),
                     "tool_catalog_hash": catalog_hash,
                 },
                 sink,
@@ -1010,7 +1036,7 @@ class RuntimeHost:
                 for call in calls:
                     tool_count += 1
                     # MCP and unknown/custom tools are always conservative recovery boundaries.
-                    readonly = call.name in {"read_file", "glob", "compact"}
+                    readonly = call.name in runtime_readonly_tools
                     await self._emit(
                         run_id,
                         "tool.prepared",

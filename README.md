@@ -8,6 +8,7 @@ Eventide v0.3 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHo
 - Anthropic Messages、OpenAI-compatible Chat Completions 和 OpenAI Responses API；
 - `ALLOW / ASK / DENY` 权限决策与 CLI、Web 一次性审批；
 - MCP stdio 与 Streamable HTTP 工具发现和调用；
+- Workspace 级 Skill 发现与按需加载；
 - SQLite 追加式 Event Log、持久上下文 checkpoint 与 JSONL 导出；
 - 中断检测、停驻与用户主动 Continue，不自动重放工具副作用；
 - scripted provider 离线评测与真实模型 live eval；
@@ -85,7 +86,7 @@ uv run eventide abandon session_example --json
 uv run eventide export run_example ./eventide-run.jsonl
 ```
 
-省略 `--workspace` 时使用当前目录；Git 仓库内的子目录归一化到仓库根，非 Git 目录也可运行。每个 Session 固定绑定一个 Workspace 和其中的 working directory；`run/chat --cwd` 可显式选择，若 `--workspace` 本身传入仓库子目录则默认把该子目录作为 cwd。Shell 与文件工具从 cwd 运行，并把它作为文件访问边界；Git checkpoint 仍覆盖整个 Workspace。根目录 `AGENTS.md` 加入模型上下文（最多 4,000 字符），`mcp.json` 按 Workspace 加载。生产默认工具为 `bash/read_file/write_file/edit_file/glob/compact`；旧 task、worktree、teammate 等接口仍可导入，但不进入新 Runtime 默认工具目录。`workspace remove <id>` 只移除没有 Session 的注册记录，不删除项目文件。
+省略 `--workspace` 时使用当前目录；Git 仓库内的子目录归一化到仓库根，非 Git 目录也可运行。每个 Session 固定绑定一个 Workspace 和其中的 working directory；`run/chat --cwd` 可显式选择，若 `--workspace` 本身传入仓库子目录则默认把该子目录作为 cwd。Shell 与文件工具从 cwd 运行，并把它作为文件访问边界；Git checkpoint 仍覆盖整个 Workspace。根目录 `AGENTS.md` 加入模型上下文（最多 4,000 字符），`mcp.json` 和 `skills/` 按 Workspace 加载。生产基础工具为 `bash/read_file/write_file/edit_file/glob/compact`；发现有效 Skill 时再增加只读的 `load_skill`。旧 task、worktree、teammate 等接口仍可导入，但不进入新 Runtime 默认工具目录。`workspace remove <id>` 只移除没有 Session 的注册记录，不删除项目文件。
 
 Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `parked`；单次 run 用尽步数预算（默认 30 步，`EVENTIDE_MAX_STEPS` 可调）时同样停驻，可由用户 Continue 继续，不会整轮失败。Continue 必须由用户发起；它检查 Git HEAD、暂存/未暂存改动及未跟踪文件是否匹配最后可信 checkpoint，并拒绝存在未知 Bash、MCP 或写工具结果的历史。通过检查后创建新 turn/run，旧用户消息不会重复写入，未完成的只读调用会标记为 abandoned。非 Git、未提交过的 Git 仓库、包含 submodule 的项目或缺少可信 checkpoint 时不支持 Continue。检查范围是 Git 可见源码，不覆盖 ignored 文件或外部系统状态。Continue 无法通过时，可以使用 Web 的“放弃恢复”或 `eventide abandon` 保留历史并解除停驻；结果未知的工具不会被视为成功或重新执行。
 
@@ -152,6 +153,23 @@ uv run eventide run "调用 demo MCP echo 工具"
 ```
 
 `mcp.json` 支持 stdio 和 Streamable HTTP。stdio 服务只会收到配置中显式列出的环境变量，发现的工具统一命名为 `mcp__server__tool`。每个服务独立连接；单个服务离线或超时会记录在工作经过中，但不会阻断其他 MCP 或内置工具。本地 `mcp.json` 默认不会提交到 Git。
+
+## 使用 Skills
+
+在 Workspace 根目录下创建 `skills/<目录名>/SKILL.md`。文件可使用 YAML frontmatter 提供稳定名称和简介：
+
+```markdown
+---
+name: code-review
+description: Review code for correctness, security and maintainability.
+---
+
+# Code review
+
+这里写完整工作说明。
+```
+
+每次 Run 开始时，Eventide 会快照有效 Skill：只把名称和简介加入 system prompt，并向模型提供只读的 `load_skill` 工具；模型判断 Skill 相关后才加载完整 `SKILL.md`。工具调用和完整结果继续写入 canonical Event Log，`context.configured` 同时记录 Skill 数量和目录 hash。Skill 始终从 Workspace 根目录解析，不随 Session working directory 改变；运行中修改文件只会影响下一次 Run。
 
 ## 安全提醒
 

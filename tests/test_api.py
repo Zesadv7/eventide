@@ -13,7 +13,10 @@ from tests.test_runtime import settings_for
 
 
 def wait_for_run(client: TestClient, run_id: str):
-    for _ in range(100):
+    # Git checkpoint collection runs in a worker thread and can be delayed when the
+    # full Windows suite is also exercising subprocess and thread cleanup.
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         response = client.get(f"/api/runs/{run_id}")
         if response.status_code == 200 and response.json()["status"] != "running":
             return response.json()

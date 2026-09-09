@@ -281,3 +281,13 @@
 **决策：** HTTP 提供按 Run 的 NDJSON 流式下载，直接分页读取 canonical Runtime Event；CLI 提供等价文件导出，并默认拒绝覆盖已有目标。导出保留完整持久字段和 session_seq，不增加 SSE 的 `seq` 或事件别名。
 
 **影响：** 大 Run 不需要一次性在 HTTP 内存中物化；导出仍受本地服务现有信任边界约束。JSONL 可能包含用户工作内容和工具结果，调用者负责保存位置和后续共享范围。
+
+## ADR-029：Skill 按 Workspace 渐进式加载
+
+**状态：Accepted**。
+
+**背景：** 仓库已有 `skills/*/SKILL.md` 和进程全局 legacy loader，但 v0.3 Runtime 只读取根 AGENTS.md。把所有 Skill 全文提前塞入 system prompt 会浪费上下文，也无法稳定表达每次 Run 实际看到的 Skill 版本。
+
+**决策：** 每次 Run 从 Workspace 根目录发现并快照直接子目录中的 `SKILL.md`。system prompt 只暴露 Skill 名称和简介；存在有效 Skill 时动态注册只读 `load_skill`，由模型按需取得完整快照。目录和 manifest 解析不得逃出 Workspace。`context.configured` 记录 Skill 数量与包含内容摘要的目录 hash，加载操作继续使用 canonical tool 事件。
+
+**影响：** 不新增数据库 schema 或进程全局 Skill 状态；不同 Workspace 的目录彼此隔离，Session working directory 不改变查找根。运行中对 Skill 的修改只影响下一次 Run。旧 `eventide.memory.skills` 保留兼容，但生产 Host 不导入它。
