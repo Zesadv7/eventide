@@ -20,6 +20,7 @@ class ContextOverflow(RuntimeError):
 
 KEEP_RECENT_TOOL_RESULTS = 3
 INSTRUCTIONS_LIMIT = 4_000
+TRUNCATED_SUMMARY_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
 
 
 def _tool_result_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
@@ -172,6 +173,10 @@ class ContextBuilder:
                 summary = normalize(redact(response.text), secrets).strip()
                 if not summary or response.tool_calls:
                     raise ValueError("Invalid context summary")
+                if response.stop_reason in TRUNCATED_SUMMARY_REASONS:
+                    raise ValueError(
+                        f"Context summary truncated ({response.stop_reason})"
+                    )
                 candidate_messages = materialize({"covered_seq": boundary, "summary": summary})
                 pending = {
                     "covered_seq": boundary,

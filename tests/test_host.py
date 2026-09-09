@@ -477,3 +477,22 @@ async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace
         assert len(reopened.store.checkpoints(session)) == 2
     finally:
         await reopened.close()
+
+
+async def test_truncated_context_summary_is_never_persisted(isolated_workspace):
+    provider = ScriptedProvider(
+        [{"text": "partial summary", "stop_reason": "max_tokens"}]
+    )
+    settings = settings_for(isolated_workspace, context_limit=220)
+    host = RuntimeHost(settings, provider)
+    session = host.create_session()
+    host.store.create_run("previous", session)
+    host.store.append_message(session, {"role": "user", "content": "x" * 2_000})
+    host.store.finish_run("previous", status="completed", output="ok")
+    try:
+        result = await host.run(RunRequest("next", session))
+        assert result.status == "failed"
+        assert "summary truncated" in result.output
+        assert host.store.checkpoints(session) == []
+    finally:
+        await host.close()
