@@ -128,6 +128,9 @@ export function projectWork(runs, eventMap) {
       if (block) { block.events.push(event); block.title = p.approved ? "已允许一次操作" : "未授权操作"; }
     } else if (type === "model.retry") {
       note(event, "attention", "模型请求遇到问题", p.retryable ? "请求遇到可重试错误，已保留尝试记录。" : "此错误不可重试，请查看详情。");
+    } else if (type === "mcp.connection_failed" || type === "mcp.close_failed") {
+      note(event, "attention", type === "mcp.connection_failed" ? "部分 MCP 服务不可用" : "MCP 服务关闭异常",
+        type === "mcp.connection_failed" ? `${p.server || "未知服务"} 未连接；其余能力仍可继续使用。` : "本次工作结果已保留，请查看详情。");
     } else if (type === "run.interrupted" || type === "run.failed") {
       note(event, "attention", type === "run.interrupted" ? "执行中断，工作已停驻" : "本次执行失败", p.error || "查看详情了解原因。");
     }

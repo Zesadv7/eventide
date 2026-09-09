@@ -29,6 +29,27 @@ async def test_real_stdio_mcp_discovers_and_calls_tools():
         await manager.close()
 
 
+async def test_connect_all_isolates_unavailable_servers(monkeypatch):
+    manager = MCPManager()
+    connected = []
+
+    async def connect(config, *, timeout=None):
+        if config.name == "broken":
+            raise TimeoutError("offline")
+        connected.append((config.name, timeout))
+
+    monkeypatch.setattr(manager, "connect", connect)
+    failures = await manager.connect_all(
+        [
+            MCPServerConfig(name="broken", transport="stdio", command="bad"),
+            MCPServerConfig(name="healthy", transport="stdio", command="ok"),
+        ],
+        timeout=0.1,
+    )
+    assert connected == [("healthy", 0.1)]
+    assert failures == [{"server": "broken", "error": "TimeoutError: offline"}]
+
+
 def test_mcp_config_parsing_and_validation(isolated_workspace):
     config = isolated_workspace / "mcp.json"
     config.write_text(

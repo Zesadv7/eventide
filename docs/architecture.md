@@ -80,7 +80,7 @@ CLI 提供 run/chat/serve 的 --workspace、workspace add/list/show/remove、con
 
 模型配置为 Host 级，活跃 run 期间不允许修改。Provider 客户端惰性创建，连接检查不切换活动 Provider。密钥继续使用 Fernet；主密钥优先 EVENTIDE_SECRET_KEY，否则状态根 secret.key。解密失败不退回明文。凭据管理及 Workspace 注册/移除仅接受本机回环请求。
 
-每个 run 按 Workspace 读取 mcp.json；MCP SDK transport 在同一 owning task 内连接和关闭，避免跨 task 的资源退出。模型请求、MCP 连接/调用和本地 Shell 分别受 `EVENTIDE_MODEL_TIMEOUT`、`EVENTIDE_MCP_TIMEOUT`、`EVENTIDE_COMMAND_TIMEOUT` 限制；取消 Shell 时终止其进程树。所有工具统一进入 ToolExecutor/PolicyEngine，文件工具内部再次检查路径。生产默认目录仅包含文件、Shell 和 compact；旧 task/worktree/teammate/cron 保留为兼容代码。离线 Eval 显式关闭真实 MCP，使用独立评测数据库和 scripted Provider。
+每个 run 按 Workspace 读取 mcp.json；MCP SDK transport 在同一 owning task 内连接和关闭，避免跨 task 的资源退出。各 MCP Server 独立连接和报告错误，单个 Server 的连接、发现或关闭异常不覆盖其他能力及已完成结果。模型请求、MCP 连接/调用和本地 Shell 分别受 `EVENTIDE_MODEL_TIMEOUT`、`EVENTIDE_MCP_TIMEOUT`、`EVENTIDE_COMMAND_TIMEOUT` 限制；取消 Shell 时终止其进程树。所有工具统一进入 ToolExecutor/PolicyEngine，文件工具内部再次检查路径。生产默认目录仅包含文件、Shell 和 compact；旧 task/worktree/teammate/cron 保留为兼容代码。离线 Eval 显式关闭真实 MCP，使用独立评测数据库和 scripted Provider。
 
 ## Web 展示投影与交互
 

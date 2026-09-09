@@ -86,6 +86,12 @@ test("abandoned recovery is visible as a durable work event", () => {
   assert.match(work.blocks[0].text, /结果未知/);
 });
 
+test("an unavailable MCP server is visible without inventing run failure", () => {
+  const work = project([event(1, "mcp.connection_failed", {server: "docs", error: "offline"})]);
+  assert.equal(work.blocks[0].title, "部分 MCP 服务不可用");
+  assert.match(work.blocks[0].text, /docs/);
+});
+
 test("unknown shell commands and model protocol events do not create invented work", () => {
   const work = project([event(1, "model.request", {}), event(2, "model.response", {text: "I changed everything"}), prepared(3, "bash", {command: "echo pytest"})]);
   assert.equal(work.blocks.length, 1);

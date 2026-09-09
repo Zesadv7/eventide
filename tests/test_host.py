@@ -455,6 +455,35 @@ async def test_model_request_timeout_fails_with_durable_retries(isolated_workspa
         await host.close()
 
 
+async def test_mcp_close_failure_does_not_overwrite_success(isolated_workspace, monkeypatch):
+    class BrokenCloseManager:
+        tools = []
+        handlers = {}
+        readonly_tools = set()
+
+        @staticmethod
+        def load_configs(_path):
+            return []
+
+        async def connect_all(self, _configs, *, timeout=None):
+            return []
+
+        async def close(self):
+            raise RuntimeError("close broke")
+
+    monkeypatch.setattr("eventide.host.MCPManager", BrokenCloseManager)
+    host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
+    try:
+        result = await host.run(RunRequest("work"))
+        assert result.status == "completed"
+        assert any(
+            event["type"] == "mcp.close_failed"
+            for event in host.store.run_events(result.run_id)
+        )
+    finally:
+        await host.close()
+
+
 async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace):
     provider = ScriptedProvider([{"text": "summary"}, {"text": "done"}])
     settings = settings_for(isolated_workspace, context_limit=220)

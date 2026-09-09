@@ -144,7 +144,7 @@ cp mcp.example.json mcp.json
 uv run eventide run "调用 demo MCP echo 工具"
 ```
 
-`mcp.json` 支持 stdio 和 Streamable HTTP。stdio 服务只会收到配置中显式列出的环境变量，发现的工具统一命名为 `mcp__server__tool`。本地 `mcp.json` 默认不会提交到 Git。
+`mcp.json` 支持 stdio 和 Streamable HTTP。stdio 服务只会收到配置中显式列出的环境变量，发现的工具统一命名为 `mcp__server__tool`。每个服务独立连接；单个服务离线或超时会记录在工作经过中，但不会阻断其他 MCP 或内置工具。本地 `mcp.json` 默认不会提交到 Git。
 
 ## 安全提醒
 

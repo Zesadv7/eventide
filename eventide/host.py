@@ -747,7 +747,17 @@ class RuntimeHost:
                     if workspace == self.default_workspace and self._config_path
                     else root / "mcp.json"
                 )
-                await manager.connect_all(configs, timeout=self.settings.mcp_timeout)
+                failures = await manager.connect_all(
+                    configs,
+                    timeout=self.settings.mcp_timeout,
+                )
+                for failure in failures:
+                    await self._emit(
+                        run_id,
+                        "mcp.connection_failed",
+                        self._clean(failure),
+                        sink,
+                    )
             tools = [*self.tools, *manager.tools]
             handlers = {**self.handlers, **manager.handlers}
             executor = ToolExecutor(
@@ -974,7 +984,14 @@ class RuntimeHost:
             try:
                 await manager.close()
             except Exception as exc:
-                status, error = "failed", self._clean(f"MCP close failed: {exc}")
+                # Closing an optional integration must not overwrite completed work.
+                with suppress(Exception):
+                    await self._emit(
+                        run_id,
+                        "mcp.close_failed",
+                        {"error": self._clean(f"MCP close failed: {exc}")},
+                        sink,
+                    )
         duration = (time.perf_counter() - started) * 1000
         await self._emit(
             run_id,

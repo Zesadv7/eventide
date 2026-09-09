@@ -205,12 +205,22 @@ class MCPManager:
 
     async def connect_all(
         self, configs: list[MCPServerConfig], *, timeout: float | None = None
-    ) -> None:
+    ) -> list[dict[str, str]]:
+        failures: list[dict[str, str]] = []
         for config in configs:
-            if timeout is None:
-                await self.connect(config)
-            else:
-                await asyncio.wait_for(self.connect(config, timeout=timeout), timeout)
+            try:
+                if timeout is None:
+                    await self.connect(config)
+                else:
+                    await asyncio.wait_for(self.connect(config, timeout=timeout), timeout)
+            except Exception as exc:
+                failures.append(
+                    {
+                        "server": config.name,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+        return failures
 
     async def connect(
         self, config: MCPServerConfig, *, timeout: float | None = None
