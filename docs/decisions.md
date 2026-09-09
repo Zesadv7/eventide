@@ -261,3 +261,13 @@
 **决策：** Workspace 继续代表规范仓库根和并发/恢复边界；Session 另存相对 Workspace 的 `working_directory`，schema 升级到版本 3。创建 Session 时解析并验证该目录真实存在、位于 Workspace 内且没有通过符号链接逃逸。Shell 与内置文件工具以它作为 cwd 和文件边界；MCP 配置、根 AGENTS.md 与 Git checkpoint 仍属于 Workspace。
 
 **影响：** Session cwd 创建后不可变，API 状态返回解析后的绝对路径。CLI `--cwd` 和 Session POST 暴露该能力；把 `--workspace` 指向 Git 子目录时，run/chat 自动沿用该子目录。旧 Session 和 v0.2 导入记录迁移为 `.`，行为保持不变。
+
+## ADR-027：长任务只展示可证明的活动指标
+
+**状态：Accepted**。
+
+**背景：** “正在执行”不足以区分正常长任务与停滞，但 Agent 没有可信的总工作量，百分比进度会制造错误预期。
+
+**决策：** 最新 Run 的轻量摘要从事件聚合模型 step、工具调用数和最后活动时间；Web 与当前 SSE 事件合并，实时展示已运行时长、已观察 step 和距最近持久事件的时间。停止仍按稳定 run_id 操作。不计算完成百分比，也不把模型文字当作进度事实。
+
+**影响：** 用户刷新页面后仍能看到服务端活动时间，断线期间也不会把 UI 动画误当成后台进展。每秒更新只重绘当前状态文本，不增加网络轮询；权威状态仍由 Runtime Projection 和事件终态决定。

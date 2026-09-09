@@ -445,6 +445,15 @@ class RuntimeStore:
                     (run_id,),
                 )
             ]
+            activity = self._connection.execute(
+                "SELECT MAX(ts) last_activity_at, "
+                "COALESCE(MAX(CASE WHEN type='model.response' THEN "
+                "CAST(json_extract(payload_json, '$.step') AS INTEGER) END), 0) steps, "
+                "COALESCE(SUM(CASE WHEN type='tool.prepared' THEN 1 ELSE 0 END), 0) "
+                "tool_calls "
+                "FROM runtime_events WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
         state = RuntimeStateProjection.project(events)
         return {
             **row,
@@ -452,6 +461,9 @@ class RuntimeStore:
                 key: state[key]
                 for key in ("status", "output", "duration_ms", "error", "pending_approvals")
             },
+            "steps": activity["steps"],
+            "tool_calls": activity["tool_calls"],
+            "last_activity_at": activity["last_activity_at"] or row["started_at"],
             **({"completed_at": state["completed_at"]} if "completed_at" in state else {}),
         }
 

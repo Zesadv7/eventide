@@ -88,6 +88,7 @@ def test_run_history_pages_and_event_cursor_are_bounded(isolated_workspace):
         run_id = f"run-{index}"
         store.create_run(run_id, "long")
         store.append_event(run_id, "message.user", {"message": {"content": f"work {index}"}})
+        store.append_event(run_id, "model.response", {"step": index + 1})
         store.finish_run(run_id, status="completed", output=f"done {index}")
 
     latest = store.list_runs("long", limit=2)
@@ -97,4 +98,7 @@ def test_run_history_pages_and_event_cursor_are_bounded(isolated_workspace):
     cursor = store.run_events("run-4")[0]["session_seq"]
     assert all(event["session_seq"] > cursor for event in store.get_events("run-4", cursor))
     assert store.session_activity("long")["first_intent"] == "work 0"
+    summary = store.get_run_summary("run-4")
+    assert summary["steps"] == 5
+    assert summary["last_activity_at"] >= summary["started_at"]
     store.close()

@@ -11,6 +11,17 @@ export const short = (value, limit = 100) => {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 };
 
+export function runActivity(run, events = [], now = Date.now() / 1000) {
+  const own = events.filter((event) => event.run_id === runId(run));
+  const steps = Math.max(run?.steps || 0, ...own.filter((event) => event.type === "model.response").map((event) => event.payload?.step || 0));
+  const lastActivity = Math.max(run?.last_activity_at || run?.started_at || now, ...own.map((event) => event.ts || 0));
+  return {
+    steps,
+    elapsedSeconds: Math.max(0, now - (run?.started_at || now)),
+    idleSeconds: Math.max(0, now - lastActivity),
+  };
+}
+
 export function mergeEvents(existing, incoming) {
   const events = new Map(existing.map((e) => [e.event_id || `${e.run_id}:${e.session_seq ?? e.seq}`, e]));
   for (const event of incoming) {

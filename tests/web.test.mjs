@@ -1,12 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {chapters, mergeEvents, projectWork} from "../eventide/web/projection.js";
+import {chapters, mergeEvents, projectWork, runActivity} from "../eventide/web/projection.js";
 import {EventFeed, parseSse} from "../eventide/web/transport.js";
 
 const event = (seq, type, payload, run_id = "r1", extra = {}) => ({event_id: `e${seq}`, run_id, session_seq: seq, type, payload, ...extra});
 const prepared = (seq, name, args, id = "c1") => event(seq, "tool.prepared", {call_id: id, name, arguments: args});
 const completed = (seq, name, is_error, id = "c1") => event(seq, "tool.completed", {call_id: id, name, is_error, content: is_error ? "Error: failed" : "ok"});
 const project = (events) => projectWork([{id: "r1", status: "completed"}], new Map([["r1", events]]));
+
+test("live activity reports observed steps and last durable event", () => {
+  const activity = runActivity(
+    {id: "r1", started_at: 100, last_activity_at: 110, steps: 1},
+    [event(2, "model.response", {step: 3}, "r1", {ts: 125})],
+    130,
+  );
+  assert.deepEqual(activity, {steps: 3, elapsedSeconds: 30, idleSeconds: 5});
+});
 
 test("failed pytest stays paired with its command and never claims success", () => {
   const work = project([prepared(1, "bash", {command: "uv run pytest -q"}), completed(2, "bash", true)]);

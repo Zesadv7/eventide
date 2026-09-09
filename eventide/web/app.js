@@ -1,4 +1,4 @@
-import {chapters, projectWork, runId, terminal, labels, short, operationText} from "./projection.js";
+import {chapters, projectWork, runActivity, runId, terminal, labels, short, operationText} from "./projection.js";
 import {EventFeed, request} from "./transport.js";
 import {el, button, reconcile, markdown} from "./view.js";
 import {loadProviderConfig, isConfigured, showConfig} from "./config.js";
@@ -14,6 +14,7 @@ const sessionJobs = new Map(), workspaceJobs = new Map(), loadingChapters = new 
 const sessionRecord = (id = state.session) => [...state.sessions.values()].flat().find((s) => s.session_id === id);
 const currentRuns = () => state.runs.get(state.session) || [];
 const time = (timestamp) => timestamp ? new Date(timestamp * 1000).toLocaleString("zh-CN", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "";
+const duration = (seconds) => seconds < 60 ? `${Math.floor(seconds)} 秒` : seconds < 3600 ? `${Math.floor(seconds / 60)} 分 ${Math.floor(seconds % 60)} 秒` : `${Math.floor(seconds / 3600)} 小时 ${Math.floor((seconds % 3600) / 60)} 分`;
 const title = (session) => session?.title && session.title !== "New session" ? session.title : "新的工作";
 const draftKey = () => state.session || `new:${state.workspace}`;
 let viewVersion = 0;
@@ -313,9 +314,13 @@ function renderActions(session) {
 
 function render() {
   const session = sessionRecord();
+  const active = session?.latest_run && !terminal(session.latest_run) ? session.latest_run : null;
+  const activity = active ? runActivity(active, feed.events.get(runId(active)) || []) : null;
   renderNavigation();
   $("#session-title").textContent = session ? title(session) : "从一项工作开始";
-  $("#session-status").textContent = session ? `${labels[session.status] || session.status}${session.status === "completed" ? "，可继续追加工作" : ""}` : "一个工作区，一段持续的工作过程。";
+  $("#session-status").textContent = activity
+    ? `${labels[session.status] || session.status} · ${activity.steps ? `第 ${activity.steps} 步 · ` : ""}已运行 ${duration(activity.elapsedSeconds)} · ${activity.idleSeconds < 5 ? "刚刚有活动" : `${duration(activity.idleSeconds)}前有活动`}`
+    : session ? `${labels[session.status] || session.status}${session.status === "completed" ? "，可继续追加工作" : ""}` : "一个工作区，一段持续的工作过程。";
   $("#session-status").className = `session-status status-${session?.status || "idle"}`;
   $("#notice").hidden = !state.notices.get(state.session);
   $("#notice").textContent = state.notices.get(state.session) || "";
@@ -480,3 +485,7 @@ setInterval(async () => {
   } catch { state.notices.set(owner, "暂时无法更新工作状态，正在重连…"); scheduleRender(); }
   finally { polling = false; }
 }, 2500);
+setInterval(() => {
+  const run = sessionRecord()?.latest_run;
+  if (run && !terminal(run) && !document.hidden) scheduleRender();
+}, 1000);
