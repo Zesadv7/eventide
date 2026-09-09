@@ -11,6 +11,7 @@ import pytest
 from eventide.context_builder import ContextOverflow
 from eventide.host import RuntimeHost
 from eventide.models import ModelResponse, RunRequest, ToolCall
+from eventide.projections import MessagesProjection
 from eventide.providers import ScriptedProvider
 from eventide.store import RuntimeStore
 from eventide.workspace import HostLease, digest, workspace_checkpoint
@@ -231,6 +232,44 @@ async def test_folding_keeps_pairing_and_recent_results(isolated_workspace):
         assert blocks[-2]["content"].startswith("body3")
         assert blocks[-3]["content"].startswith("body2")
         assert host.store.session_events(session) == before
+    finally:
+        await host.close()
+
+
+async def test_folding_stops_on_the_request_measure_not_messages_only(isolated_workspace):
+    host = RuntimeHost(settings_for(isolated_workspace))
+    try:
+        session = host.create_session()
+        host.store.create_run("r", session)
+        host.store.append_message(session, {"role": "user", "content": "go"})
+        for index in range(5):
+            _append_tool_group(host.store, session, "r", f"call_{index}", "read_file", "x" * 3000)
+        system = "s" * 4000
+        tools = [{"name": "read_file", "description": "Read", "input_schema": {"type": "object"}}]
+
+        def request_size(messages):
+            return len(
+                json.dumps(
+                    {"system": system, "messages": messages, "tools": tools}, ensure_ascii=False
+                )
+            )
+
+        raw = MessagesProjection.project(host.store.session_events(session))
+        # Budget sits in the window where messages alone fit but the whole request
+        # does not: one folded result satisfies a messages-only check, and folding
+        # must keep going until the real request measure fits.
+        budget = len(json.dumps(raw, ensure_ascii=False)) - 500
+        messages, _, trimmed = await host.context_builder.build(
+            session,
+            provider=ScriptedProvider([]),
+            provider_name="scripted",
+            model="scripted",
+            budget=budget,
+            system=system,
+            tools=tools,
+        )
+        assert request_size(messages) <= budget
+        assert trimmed and len(trimmed["call_ids"]) >= 2
     finally:
         await host.close()
 

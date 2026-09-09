@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +68,10 @@ def _describe_context(
 
 
 def _fold_tool_results(
-    messages: list[dict[str, Any]], budget: int, names: dict[str, str]
+    messages: list[dict[str, Any]],
+    budget: int,
+    names: dict[str, str],
+    size: Callable[[Any], int],
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """Replace older active-turn tool results with placeholders until the budget fits.
 
@@ -75,6 +79,10 @@ def _fold_tool_results(
     tool_result stay paired and MessagesProjection keeps working. The newest
     KEEP_RECENT_TOOL_RESULTS groups stay verbatim, and the event log is never
     touched: folding is a lossy request-side projection, not a new fact.
+
+    `size` must be the caller's request measure (system + messages + tools), not a
+    messages-only count: folding has to stop on the same number the caller checks,
+    or it stops early and the request still overflows.
     """
     groups = [index for index, message in enumerate(messages) if _tool_result_blocks(message)]
     protected = set(groups[-KEEP_RECENT_TOOL_RESULTS:])
@@ -100,7 +108,7 @@ def _fold_tool_results(
             working[index] = {**original, "content": blocks}
             folded.append(call_id)
             omitted += len(text) - len(placeholder)
-            if len(json.dumps(working, ensure_ascii=False)) <= budget:
+            if size(working) <= budget:
                 return working, {"call_ids": folded, "omitted_chars": omitted}
     if not folded:
         return messages, None
@@ -217,7 +225,7 @@ class ContextBuilder:
                 failure = f"summarizing completed turns failed ({type(exc).__name__}: {exc})"
 
         current, trimmed = (
-            _fold_tool_results(current, budget, names)
+            _fold_tool_results(current, budget, names, size)
             if size(current) > budget
             else (current, None)
         )
