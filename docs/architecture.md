@@ -76,7 +76,7 @@ Continue 创建新 turn/run，并以唯一 continuation_of 关联来源 run；�
 
 保留 AgentRuntime.run(RunRequest)、create_session、Provider 配置和 RunResult 原字段；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。
 
-CLI 提供 run/chat/serve 的 --workspace、workspace add/list/show/remove、continue 和 abandon。无指定 Workspace 时使用启动 cwd。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon 和按 run_id 取消。Session PATCH 可设置标题或归档；列表默认隐藏归档记录；DELETE 只允许没有运行历史的空 Session。Continue 同步等待结果；原 run 提交仍为 202。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。
+CLI 提供 run/chat/serve 的 --workspace、workspace add/list/show/remove、continue 和 abandon。无指定 Workspace 时使用启动 cwd。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon 和按 run_id 取消。Session PATCH 可设置标题或归档；列表默认隐藏归档记录；DELETE 只允许没有运行历史的空 Session。普通 Run 与 Continue 都返回 202；Continue 在响应前完成安全校验并持久化 continuation Run 身份，执行结果通过 Run 查询与 SSE 获取。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。
 
 `migrate-v02 [source] --workspace <target>` 显式导入旧 `.nexus/nexus.db`。旧 messages 变为 `message.imported`，工具事件名称映射到 canonical prepared/completed，Run 根据旧终态补成当前终态；无法确认结束的旧 running Run 作为 interrupted 导入。旧源文件不写入，身份冲突时整个导入回滚。Provider 名称、URL 和模型可在目标没有配置时导入，旧 `api_key_ciphertext` 不跨密钥根复制。
 
@@ -94,7 +94,7 @@ Semantic Work Projection 从 canonical 事件证据与 Run 关联生成只读工
 
 每条用户意图和其 Continue 链组成一个章节；最新章节默认展开，旧章节的终态事件按需加载，工具详情默认折叠。Execution Block 包含稳定 ID、来源事件、Run、操作状态和可读描述，不写 SQLite。最终输出只在最新成果区或对应旧章节展示一次。界面显示的“本次执行结束”区别于 Session 生命周期结束。
 
-Continue 保留同步 POST 契约；等待返回期间并行发现新 Run 并立即订阅，包括处理新审批。仅最新 parked Session 提供 Continue；409 留在恢复区，不发普通 Prompt 绕过。审批按钮提交前检查服务端 pending 状态。历史展开、草稿、阅读位置按 Session/章节保存于页面内存；选择项保存在 localStorage。按稳定 key 更新发生变化的 DOM，Inspector 以 ID 获取最新投影，使用原生 dialog 支持 Escape 和焦点返回。Markdown 通过 DOM 文本构造，禁用原始 HTML 和非 HTTP(S)/mailto 链接协议。
+Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订阅，包括处理新审批。仅最新 parked Session 提供 Continue；409 留在恢复区，不发普通 Prompt 绕过。审批按钮提交前检查服务端 pending 状态。历史展开、草稿、阅读位置按 Session/章节保存于页面内存；选择项保存在 localStorage。按稳定 key 更新发生变化的 DOM，Inspector 以 ID 获取最新投影，使用原生 dialog 支持 Escape 和焦点返回。Markdown 通过 DOM 文本构造，禁用原始 HTML 和非 HTTP(S)/mailto 链接协议。
 
 ## 工程边界
 

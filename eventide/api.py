@@ -290,8 +290,11 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="limit must be between 1 and 200")
         return agent_runtime.session_runs(session_id, limit=limit, before=before)
 
-    @app.post("/api/sessions/{session_id}/continue")
-    async def continue_session(session_id: str) -> dict[str, Any]:
+    @app.post(
+        "/api/sessions/{session_id}/continue",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def continue_session(session_id: str) -> dict[str, str]:
         # Continue validation is part of admission; a rejected request returns 409,
         # without creating a run that could hide the parked source run.
         record = await get_session(session_id)
@@ -299,17 +302,30 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         if workspace_id in reserved:
             raise HTTPException(status_code=409, detail="Workspace is busy")
         reserved.add(workspace_id)
+        run_id = f"run_{uuid.uuid4().hex[:16]}"
         try:
-            return asdict(
+            await agent_runtime.admit_continue(session_id, run_id)
+        except ValueError as exc:
+            reserved.discard(workspace_id)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except BaseException:
+            reserved.discard(workspace_id)
+            raise
+
+        async def execute() -> None:
+            try:
                 await agent_runtime.continue_session(
                     session_id,
                     approval_handler=broker.request,
+                    run_id=run_id,
                 )
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        finally:
-            reserved.discard(workspace_id)
+            finally:
+                reserved.discard(workspace_id)
+
+        task = asyncio.create_task(execute())
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
 
     @app.post("/api/sessions/{session_id}/abandon")
     async def abandon_interruption(session_id: str) -> dict[str, Any]:

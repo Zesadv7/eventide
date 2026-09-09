@@ -386,20 +386,11 @@ async function continueSession() {
   if (!owner || previous?.status !== "interrupted" || $("#continue-button").disabled) return;
   if (!isConfigured()) { showConfig("请先配置模型连接。"); return; }
   state.busy.add(owner); state.errors.delete(owner); render();
-  let settled = false;
-  // Attach rejection handling immediately while discovery runs alongside the request.
-  const outcome = request(`/api/sessions/${owner}/continue`, {method: "POST"})
-    .then((value) => ({value}), (error) => ({error})).finally(() => { settled = true; });
   try {
-    while (!settled) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      await refreshSession(owner).catch((error) => report(owner, error));
-      // refreshSession subscribes immediately, including approval events, before POST resolves.
-    }
-    const result = await outcome;
-    if (result.error) throw result.error;
+    const accepted = await request(`/api/sessions/${owner}/continue`, {method: "POST"});
+    feed.watch(accepted.run_id, owner);
+    state.notices.set(owner, "Continue 已接受；恢复会在后台继续，离开页面也不会中断。");
     await refreshSession(owner);
-    if (result.value) await feed.history(runId(result.value), owner);
   } catch (error) {
     report(owner, error);
     await refreshSession(owner).catch(() => {});

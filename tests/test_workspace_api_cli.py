@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sqlite3
+import time
 
 from fastapi.testclient import TestClient
 
@@ -63,9 +64,30 @@ def test_http_continue_and_reject_parked_normal_run(isolated_workspace):
             client.post(f"/api/sessions/{session}/runs", json={"prompt": "oops"}).status_code == 409
         )
         result = client.post(f"/api/sessions/{session}/continue")
-        assert result.status_code == 200
-        assert result.json()["continuation_of"] == "crashed"
-        assert result.json()["status"] == "completed"
+        assert result.status_code == 202
+        assert result.json()["status"] == "accepted"
+        continued = wait_for_run(client, result.json()["run_id"])
+        assert continued["continuation_of"] == "crashed"
+        assert continued["status"] == "completed"
+
+
+def test_http_continue_returns_before_provider_finishes(isolated_workspace):
+    class WaitingProvider:
+        async def complete(self, _request):
+            await asyncio.Future()
+
+    host, session, _ = asyncio.run(interrupted_host(isolated_workspace))
+    host.provider = WaitingProvider()
+    with TestClient(create_app(host)) as client:
+        accepted = client.post(f"/api/sessions/{session}/continue")
+        assert accepted.status_code == 202
+        run_id = accepted.json()["run_id"]
+        assert client.get(f"/api/runs/{run_id}").status_code == 200
+        for _ in range(100):
+            if host.store.run_events(run_id):
+                break
+            time.sleep(0.01)
+        assert client.post(f"/api/runs/{run_id}/cancel").status_code == 200
 
 
 def test_http_abandon_unlocks_parked_session(isolated_workspace):

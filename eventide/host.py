@@ -490,9 +490,43 @@ class RuntimeHost:
         request: ContinuationRequest | str,
         sink: EventSink | None = None,
         approval_handler: ApprovalHandler | None = None,
+        *,
+        run_id: str | None = None,
     ) -> RunResult:
         session_id = request if isinstance(request, str) else request.session_id
-        return await self._admit(session_id, None, True, sink, approval_handler)
+        return await self._admit(
+            session_id,
+            None,
+            True,
+            sink,
+            approval_handler,
+            run_id=run_id,
+        )
+
+    def validate_continue(self, session_id: str) -> WorkspaceRecord:
+        """Validate recovery admission before an asynchronous transport accepts it."""
+        workspace = self.sessions.workspace(session_id)
+        root = Path(workspace.path)
+        if not root.is_dir() or root.resolve() != root:
+            raise ValueError("Workspace missing or path identity changed")
+        self._validate_continue(workspace, self.store.latest_run(session_id))
+        return workspace
+
+    async def admit_continue(self, session_id: str, run_id: str) -> str:
+        """Validate and durably reserve a continuation identity before HTTP 202."""
+        await self.initialize()
+        if self._configuring:
+            raise ValueError("Provider configuration is changing")
+        workspace = self.sessions.workspace(session_id)
+        async with self._workspace_locks[workspace.workspace_id]:
+            self.validate_continue(session_id)
+            previous = self.store.latest_run(session_id)
+            assert previous is not None
+            return self.store.create_run(
+                run_id,
+                session_id,
+                continuation_of=previous["id"],
+            )
 
     async def abandon_interruption(
         self,
@@ -580,6 +614,8 @@ class RuntimeHost:
         continuation: bool | None,
         sink: EventSink | None,
         approval_handler: ApprovalHandler | None,
+        *,
+        run_id: str | None = None,
     ) -> RunResult:
         await self.initialize()
         if self._configuring:
@@ -595,28 +631,48 @@ class RuntimeHost:
             async with self._workspace_locks[workspace.workspace_id]:
                 if self._closed:
                     raise RuntimeError("Host is closed")
-                previous = self.store.latest_run(session_id)
-                if continuation:
+                admitted = (
+                    self.store.get_run_identity(run_id)
+                    if continuation and run_id
+                    else None
+                )
+                if admitted and admitted["session_id"] != session_id:
+                    raise ValueError("Run/session identity mismatch")
+                previous = (
+                    self.store.get_run(admitted["continuation_of"])
+                    if admitted
+                    else self.store.latest_run(session_id)
+                )
+                if continuation and not admitted:
                     await asyncio.to_thread(self._validate_continue, workspace, previous)
-                elif previous and previous["status"] == "interrupted":
-                    raise ValueError("Session is parked; use Continue after resolving interruption")
-                run_id = (
-                    request.run_id if request and request.run_id else f"run_{uuid.uuid4().hex[:16]}"
+                elif (
+                    not continuation
+                    and previous
+                    and previous["status"] == "interrupted"
+                ):
+                    raise ValueError(
+                        "Session is parked; use Continue after resolving interruption"
+                    )
+                admitted_run_id = (
+                    request.run_id
+                    if request and request.run_id
+                    else run_id or f"run_{uuid.uuid4().hex[:16]}"
                 )
                 source_id = previous["id"] if continuation and previous else None
-                self._run_tasks[run_id] = task
+                self._run_tasks[admitted_run_id] = task
                 try:
                     return await self._execute(
                         session_id,
-                        run_id,
+                        admitted_run_id,
                         workspace,
                         request.prompt if request else None,
                         source_id,
                         sink,
                         approval_handler,
+                        existing_turn_id=admitted["turn_id"] if admitted else None,
                     )
                 finally:
-                    self._run_tasks.pop(run_id, None)
+                    self._run_tasks.pop(admitted_run_id, None)
         finally:
             self._active_tasks.discard(task)
 
@@ -697,9 +753,15 @@ class RuntimeHost:
         continuation_of: str | None,
         sink: EventSink | None,
         approval_handler: ApprovalHandler | None,
+        *,
+        existing_turn_id: str | None = None,
     ) -> RunResult:
         started = time.perf_counter()
-        turn_id = self.store.create_run(run_id, session_id, continuation_of=continuation_of)
+        turn_id = existing_turn_id or self.store.create_run(
+            run_id,
+            session_id,
+            continuation_of=continuation_of,
+        )
         root = Path(workspace.path)
         manager = MCPManager()
         usage = {"input_tokens": 0, "output_tokens": 0}

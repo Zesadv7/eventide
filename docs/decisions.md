@@ -170,7 +170,7 @@
 
 **决策：** 工作记录页先表达目标、当前状态、最近成果，再按用户意图及 Continue 链组织历史章节。Run 仍是执行事实身份，但不作为页面标题层级。请求和结果先按操作身份配对，再聚合工作片段；checkpoint、模型协议和原始 Events 进入临时 Inspector。审批与停驻恢复是主界面动作。Run completed 显示“本次执行结束”，不引入 Session 永久完成状态。
 
-**影响：** 展示投影全部可由日志重建，不新增数据库事实或模型摘要调用，不更改 HTTP 与 Continue 安全契约。前端拆分原生模块、按所属 Session 协调异步请求，Continue 等待返回时立即观察新 Run。验收增加离线 JS 投影/传输测试及内存 HTTP/SSE 浏览器场景，覆盖审批、恢复、断线补齐、选择隔离、历史折叠与小屏操作。
+**影响：** 展示投影全部可由日志重建，不新增数据库事实或模型摘要调用。前端拆分原生模块、按所属 Session 协调异步请求；Continue 的 HTTP 契约由 ADR-025 改为接受后立即返回。验收增加离线 JS 投影/传输测试及内存 HTTP/SSE 浏览器场景，覆盖审批、恢复、断线补齐、选择隔离、历史折叠与小屏操作。
 
 ## ADR-018：当前轮工具结果按需折叠
 
@@ -241,3 +241,13 @@
 **决策：** 提供 `migrate-v02` 命令，由用户指定旧库和目标 Workspace。Importer 用 SQLite 只读连接验证旧 schema 和 JSON，预检所有身份引用与冲突，再用目标库单事务创建 Workspace 绑定的 Session、Turn、Run 和事件。旧 messages 作为完整 `message.imported` 历史；兼容工具事件映射到 canonical 名称；终态从旧 Run 记录合成，未结束 Run 作为 interrupted。源文件永不修改。
 
 **影响：** 迁移可审计、可重试且失败不留半成品，但不是静默自动发现。旧 Provider 的名称、URL、模型可在目标未配置时恢复；旧 API Key 密文不复制，因为它绑定旧 `secret.key`，用户需要重新配置密钥。已有同名 Session 或 Run 时拒绝整批导入，不覆盖当前事实。
+
+## ADR-025：Continue 在持久化执行身份后异步返回
+
+**状态：Accepted**，修订 ADR-017 的 HTTP 等待契约。
+
+**背景：** Continue 先前让单个 HTTP 请求一直等待模型和工具执行结束。反向代理超时、浏览器刷新或网络中断会让用户失去可靠反馈，虽然后端 Run 可能仍在继续。
+
+**决策：** HTTP Continue 在 admission 阶段完成 parked 状态、Git checkpoint 和未知副作用校验，并先创建带 `continuation_of` 的 Run/Turn 身份；随后返回 `202 accepted` 和稳定 `run_id`，后台任务使用已创建身份执行。CLI 与 Python 调用仍可同步等待 RunResult。
+
+**影响：** 收到 202 即保证 Run 可查询；若 Host 在后台任务开始前崩溃，启动恢复会把无终态 Run 标为 interrupted。Web 不再轮询一个未返回的 POST，而是立即订阅返回的 run_id。校验失败仍返回 409，且不会创建遮蔽原 parked Run 的新身份。
