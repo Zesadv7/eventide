@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {chapters, mergeEvents, projectWork} from "../nexus_agent/web/projection.js";
-import {EventFeed, parseSse} from "../nexus_agent/web/transport.js";
+import {chapters, mergeEvents, projectWork} from "../eventide/web/projection.js";
+import {EventFeed, parseSse} from "../eventide/web/transport.js";
 
 const event = (seq, type, payload, run_id = "r1", extra = {}) => ({event_id: `e${seq}`, run_id, session_seq: seq, type, payload, ...extra});
 const prepared = (seq, name, args, id = "c1") => event(seq, "tool.prepared", {call_id: id, name, arguments: args});

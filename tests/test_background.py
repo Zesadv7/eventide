@@ -3,7 +3,7 @@
 import time
 from types import SimpleNamespace
 
-from nexus_agent.scheduling.background import (
+from eventide.scheduling.background import (
     collect_background_results,
     is_slow_operation,
     should_run_background,
@@ -22,7 +22,7 @@ def test_should_run_background_flag():
 
 
 def test_background_task_lifecycle(monkeypatch):
-    monkeypatch.setattr("nexus_agent.scheduling.background.trigger_hooks", lambda *a, **k: None)
+    monkeypatch.setattr("eventide.scheduling.background.trigger_hooks", lambda *a, **k: None)
     block = SimpleNamespace(id="bg_block", name="bash", input={"command": "echo ok"})
     handlers = {"bash": lambda command: "ok"}
     bg_id = start_background_task(block, handlers)

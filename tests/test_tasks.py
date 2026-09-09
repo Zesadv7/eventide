@@ -1,6 +1,6 @@
 """Tests for the task graph."""
 
-from nexus_agent.tasks.store import (
+from eventide.tasks.store import (
     can_start,
     claim_task,
     complete_task,

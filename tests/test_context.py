@@ -1,6 +1,6 @@
 """Tests for context compaction."""
 
-from nexus_agent.context import (
+from eventide.context import (
     estimate_size,
     micro_compact,
     snip_compact,

@@ -1,7 +1,7 @@
 """Tests for team collaboration primitives."""
 
-from nexus_agent.teams.bus import BUS, MessageBus
-from nexus_agent.teams.protocol import (
+from eventide.teams.bus import BUS, MessageBus
+from eventide.teams.protocol import (
     ProtocolState,
     consume_lead_inbox,
     match_response,

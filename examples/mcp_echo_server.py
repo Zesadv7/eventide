@@ -1,15 +1,15 @@
-"""Small real MCP server for Nexus Agent integration demos."""
+"""Small real MCP server for Eventide integration demos."""
 
 import argparse
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-mcp = MCPServer("nexus_demo_mcp")
+mcp = MCPServer("eventide_demo_mcp")
 
 
 @mcp.tool(
-    name="nexus_demo_echo",
+    name="eventide_demo_echo",
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -17,13 +17,13 @@ mcp = MCPServer("nexus_demo_mcp")
         openWorldHint=False,
     ),
 )
-async def nexus_demo_echo(text: str) -> str:
+async def eventide_demo_echo(text: str) -> str:
     """Return exactly the supplied text for transport and tool-call verification."""
     return text
 
 
 @mcp.tool(
-    name="nexus_demo_sum",
+    name="eventide_demo_sum",
     annotations=ToolAnnotations(
         readOnlyHint=True,
         destructiveHint=False,
@@ -31,7 +31,7 @@ async def nexus_demo_echo(text: str) -> str:
         openWorldHint=False,
     ),
 )
-async def nexus_demo_sum(a: float, b: float) -> float:
+async def eventide_demo_sum(a: float, b: float) -> float:
     """Add two numbers and return the result."""
     return a + b
 

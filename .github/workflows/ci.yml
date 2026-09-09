@@ -18,9 +18,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install -e ".[dev]"
-      - run: python -m nexus_agent --help
+      - run: python -m eventide --help
       - run: python -m pytest -q
-      - run: nexus-agent eval evals/smoke.yaml
+      - run: eventide eval evals/smoke.yaml
 
   quality:
     runs-on: ubuntu-latest
@@ -31,9 +31,9 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install -e ".[dev]"
-      - run: ruff check nexus_agent tests examples
-      - run: mypy nexus_agent
-      - run: pytest --cov=nexus_agent --cov-report=term-missing --cov-fail-under=85
+      - run: ruff check eventide tests examples
+      - run: mypy eventide
+      - run: pytest --cov=eventide --cov-report=term-missing --cov-fail-under=85
 
   cross-platform-smoke:
     strategy:
@@ -47,6 +47,6 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install -e ".[dev]"
-      - run: python -m nexus_agent --help
+      - run: python -m eventide --help
       - run: python -m pytest -q
-      - run: nexus-agent eval evals/smoke.yaml
+      - run: eventide eval evals/smoke.yaml

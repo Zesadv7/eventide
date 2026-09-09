@@ -5,8 +5,8 @@ import sqlite3
 import pytest
 from cryptography.fernet import Fernet
 
-from nexus_agent.runtime import AgentRuntime
-from nexus_agent.secrets import SecretKeyError
+from eventide.runtime import AgentRuntime
+from eventide.secrets import SecretKeyError
 from tests.test_runtime import settings_for
 
 
@@ -40,7 +40,7 @@ async def test_provider_config_is_encrypted_and_restored(isolated_workspace):
 async def test_wrong_master_key_is_reported_without_plaintext_fallback(
     isolated_workspace, monkeypatch
 ):
-    monkeypatch.setenv("NEXUS_SECRET_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("EVENTIDE_SECRET_KEY", Fernet.generate_key().decode())
     settings = settings_for(isolated_workspace)
     runtime = AgentRuntime(settings)
     await runtime.configure_provider(
@@ -52,7 +52,7 @@ async def test_wrong_master_key_is_reported_without_plaintext_fallback(
     )
     await runtime.close()
 
-    monkeypatch.setenv("NEXUS_SECRET_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("EVENTIDE_SECRET_KEY", Fernet.generate_key().decode())
     restored = AgentRuntime(settings)
     status = restored.provider_config_status()
     assert restored.settings.api_key is None

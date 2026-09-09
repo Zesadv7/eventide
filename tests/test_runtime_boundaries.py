@@ -8,12 +8,12 @@ import sys
 
 import pytest
 
-from nexus_agent.context_builder import ContextOverflow
-from nexus_agent.host import RuntimeHost
-from nexus_agent.models import ModelResponse, RunRequest, ToolCall
-from nexus_agent.providers import ScriptedProvider
-from nexus_agent.store import RuntimeStore
-from nexus_agent.workspace import HostLease, digest, workspace_checkpoint
+from eventide.context_builder import ContextOverflow
+from eventide.host import RuntimeHost
+from eventide.models import ModelResponse, RunRequest, ToolCall
+from eventide.providers import ScriptedProvider
+from eventide.store import RuntimeStore
+from eventide.workspace import HostLease, digest, workspace_checkpoint
 from tests.test_host import make_repo
 from tests.test_runtime import settings_for
 
@@ -24,7 +24,7 @@ def test_owner_lock_is_cross_process_and_crash_released(isolated_workspace):
             sys.executable,
             "-c",
             "import sys; from pathlib import Path; "
-            "from nexus_agent.workspace import HostLease; "
+            "from eventide.workspace import HostLease; "
             "lease = HostLease(Path(sys.argv[1])); "
             "print('ready', flush=True); sys.stdin.readline()",
             str(isolated_workspace),

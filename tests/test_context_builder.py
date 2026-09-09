@@ -1,6 +1,6 @@
 """ContextBuilder input limits."""
 
-from nexus_agent.context_builder import ContextBuilder
+from eventide.context_builder import ContextBuilder
 
 
 def test_instructions_are_capped_at_the_documented_limit(isolated_workspace):

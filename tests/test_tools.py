@@ -4,9 +4,9 @@ import re
 import subprocess
 import sys
 
-from nexus_agent.tools.bash import run_bash
-from nexus_agent.tools.filesystem import run_edit, run_glob, run_read, run_write
-from nexus_agent.utils import decode_output
+from eventide.tools.bash import run_bash
+from eventide.tools.filesystem import run_edit, run_glob, run_read, run_write
+from eventide.utils import decode_output
 
 
 def test_run_bash():
@@ -15,7 +15,7 @@ def test_run_bash():
 
 def test_decode_output_handles_utf8_and_console_encoding(monkeypatch):
     assert decode_output("中文".encode()) == "中文"
-    monkeypatch.setattr("nexus_agent.utils.console_encoding", lambda: "gbk")
+    monkeypatch.setattr("eventide.utils.console_encoding", lambda: "gbk")
     assert decode_output("错误".encode("gbk")) == "错误"
     assert isinstance(decode_output(b"\xff\xfe\xfa"), str)
     assert decode_output(None) == ""

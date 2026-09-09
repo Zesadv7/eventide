@@ -1,4 +1,4 @@
-# Nexus Agent 架构
+# Eventide 架构
 
 ## 核心关系
 
@@ -20,7 +20,7 @@ Workspace 保存稳定 ID、规范路径、Git 根、名称和创建时间；Git
 
 ## 存储与事件契约
 
-默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。NEXUS_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。首次创建版本 1，未知版本和未版本化旧数据库明确拒绝，不自动迁移或删除。
+默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。EVENTIDE_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。首次创建版本 1，未知版本和未版本化旧数据库明确拒绝，不自动迁移或删除。
 
 | 表 | 职责 |
 |---|---|
@@ -78,7 +78,7 @@ Continue 创建新 turn/run，并以唯一 continuation_of 关联来源 run；�
 
 CLI 提供 run/chat/serve 的 --workspace、workspace add/list/show/remove 和 continue。无指定 Workspace 时使用启动 cwd。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs 和 /continue。Continue 同步等待结果；原 run 提交仍为 202。Web 不新增独立 Continue 执行路径，而是观察 Session/Run Projection 发现同步 Continue 创建的新 Run。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。
 
-模型配置为 Host 级，活跃 run 期间不允许修改。Provider 客户端惰性创建，连接检查不切换活动 Provider。密钥继续使用 Fernet；主密钥优先 NEXUS_SECRET_KEY，否则状态根 secret.key。解密失败不退回明文。凭据管理及 Workspace 注册/移除仅接受本机回环请求。
+模型配置为 Host 级，活跃 run 期间不允许修改。Provider 客户端惰性创建，连接检查不切换活动 Provider。密钥继续使用 Fernet；主密钥优先 EVENTIDE_SECRET_KEY，否则状态根 secret.key。解密失败不退回明文。凭据管理及 Workspace 注册/移除仅接受本机回环请求。
 
 每个 run 按 Workspace 读取 mcp.json；MCP SDK transport 在同一 owning task 内连接和关闭，避免跨 task 的资源退出。所有工具统一进入 ToolExecutor/PolicyEngine，文件工具内部再次检查路径。生产默认目录仅包含文件、Shell 和 compact；旧 task/worktree/teammate/cron 保留为兼容代码。离线 Eval 显式关闭真实 MCP，使用独立评测数据库和 scripted Provider。
 

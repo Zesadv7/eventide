@@ -8,6 +8,9 @@
 .transcripts/
 .task_outputs/
 .scheduled_tasks.json
+# Current Eventide runtime state
+.eventide/
+# Legacy runtime state from before the project rename
 .nexus/
 mcp.json
 

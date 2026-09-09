@@ -4,10 +4,10 @@ import time
 
 from fastapi.testclient import TestClient
 
-from nexus_agent.api import _probe_error, create_app
-from nexus_agent.models import ModelResponse
-from nexus_agent.providers import ScriptedProvider
-from nexus_agent.runtime import AgentRuntime
+from eventide.api import _probe_error, create_app
+from eventide.models import ModelResponse
+from eventide.providers import ScriptedProvider
+from eventide.runtime import AgentRuntime
 from tests.test_runtime import settings_for
 
 
@@ -27,7 +27,7 @@ def test_api_run_and_console(isolated_workspace):
     with TestClient(create_app(runtime)) as client:
         assert client.get("/healthz").json()["status"] == "ok"
         console = client.get("/").text
-        assert "NEXUS" in console
+        assert "EVENTIDE" in console
         assert "配置大模型" in console
         assert 'value="openai_responses"' in console
         assert "检查连接" in console

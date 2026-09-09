@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from nexus_agent import agent as agent_module
+from eventide import agent as agent_module
 
 
 def _make_text_block(text: str):
@@ -24,7 +24,7 @@ def test_agent_loop_no_tool_use(monkeypatch):
         calls.append((model, messages, tools))
         return _make_response([_make_text_block("Hello")])
 
-    monkeypatch.setattr("nexus_agent.agent.client.messages.create", fake_create)
+    monkeypatch.setattr("eventide.agent.client.messages.create", fake_create)
     history = []
     context = {"workdir": "."}
     agent_module.agent_loop(history, context)
@@ -41,7 +41,7 @@ def test_agent_loop_tool_use_then_stop(monkeypatch):
     def fake_create(*, model, system, messages, tools, max_tokens):
         return responses.pop(0)
 
-    monkeypatch.setattr("nexus_agent.agent.client.messages.create", fake_create)
+    monkeypatch.setattr("eventide.agent.client.messages.create", fake_create)
     history = []
     context = {"workdir": "."}
     agent_module.agent_loop(history, context)

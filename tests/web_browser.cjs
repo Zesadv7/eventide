@@ -1,11 +1,11 @@
 // Offline browser acceptance: real HTTP/SSE, in-memory facts, no Runtime state or keys.
-// NEXUS_PLAYWRIGHT_MODULE optionally points at an installed Playwright package.
-const {chromium} = require(process.env.NEXUS_PLAYWRIGHT_MODULE || "playwright");
+// EVENTIDE_PLAYWRIGHT_MODULE optionally points at an installed Playwright package.
+const {chromium} = require(process.env.EVENTIDE_PLAYWRIGHT_MODULE || "playwright");
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
-const root = path.resolve(__dirname, "../nexus_agent/web");
+const root = path.resolve(__dirname, "../eventide/web");
 const output = path.resolve(__dirname, "../.task_outputs");
 const timestamp = 1788870000;
 let seq = 0, creations = 0, continuationResponse, continueRejected = false;
@@ -51,7 +51,7 @@ session("s2", "w1", "API 行为检查");
 addRun("r-other", "s2", "completed", null, "API 检查结果"); emit("r-other", "run.completed", {output: "API 检查结果"});
 session("s3", "w2", "另一个工作区");
 addRun("r-third", "s3", "completed", null, "另一个项目的结果"); emit("r-third", "run.completed", {output: "另一个项目的结果"});
-const workspaces = [{workspace_id: "w1", name: "nexus-agent", path: "E:\\projects\\nexus-agent", git_root: "E:\\projects\\nexus-agent", git_branch: "main", git_head: "30edeec12345"}, {workspace_id: "w2", name: "other-project", path: "E:\\other"}, {workspace_id: "empty", name: "empty", path: "E:\\empty"}];
+const workspaces = [{workspace_id: "w1", name: "eventide", path: "E:\\projects\\eventide", git_root: "E:\\projects\\eventide", git_branch: "main", git_head: "30edeec12345"}, {workspace_id: "w2", name: "other-project", path: "E:\\other"}, {workspace_id: "empty", name: "empty", path: "E:\\empty"}];
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const pathname = url.pathname;
@@ -118,12 +118,12 @@ const server = http.createServer(async (req, res) => {
 (async () => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({headless: true, ...(process.env.NEXUS_BROWSER_CHANNEL ? {channel: process.env.NEXUS_BROWSER_CHANNEL} : {})});
+  const browser = await chromium.launch({headless: true, ...(process.env.EVENTIDE_BROWSER_CHANNEL ? {channel: process.env.EVENTIDE_BROWSER_CHANNEL} : {})});
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   try {
-    await page.addInitScript(() => { if (!localStorage.getItem("fixture-seeded")) { localStorage.setItem("nexus.workspace", "w1"); localStorage.setItem("nexus.session.w1", "s1"); localStorage.setItem("fixture-seeded", "yes"); } });
+    await page.addInitScript(() => { if (!localStorage.getItem("fixture-seeded")) { localStorage.setItem("eventide.workspace", "w1"); localStorage.setItem("eventide.session.w1", "s1"); localStorage.setItem("fixture-seeded", "yes"); } });
     await page.goto(base); await page.waitForLoadState("networkidle");
     await page.locator("#session-title").filter({hasText: "改善 Session"}).waitFor();
     assert.equal(creations, 0);

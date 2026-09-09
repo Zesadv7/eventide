@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from nexus_agent.evaluation import load_suite, run_evaluations
+from eventide.evaluation import load_suite, run_evaluations
 from tests.test_runtime import settings_for
 
 
@@ -48,6 +48,6 @@ cases:
     assert report["safety_blocks"] == 1
     assert report["tool_success_rate"] == 1.0
     saved = json.loads(
-        (isolated_workspace / ".nexus/evals/offline-report.json").read_text(encoding="utf-8")
+        (isolated_workspace / ".eventide/evals/offline-report.json").read_text(encoding="utf-8")
     )
     assert saved["pass_rate"] == 1.0

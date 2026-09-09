@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from nexus_agent.mcp.client import MCPManager, MCPServerConfig, normalize_mcp_name
+from eventide.mcp.client import MCPManager, MCPServerConfig, normalize_mcp_name
 
 
 async def test_real_stdio_mcp_discovers_and_calls_tools():
@@ -21,9 +21,9 @@ async def test_real_stdio_mcp_discovers_and_calls_tools():
                 name="demo", transport="stdio", command=sys.executable, args=(str(server),)
             )
         )
-        assert "mcp__demo__nexus_demo_echo" in {tool["name"] for tool in manager.tools}
-        assert "mcp__demo__nexus_demo_echo" in manager.readonly_tools
-        result = await manager.handlers["mcp__demo__nexus_demo_echo"](text="transport-ok")
+        assert "mcp__demo__eventide_demo_echo" in {tool["name"] for tool in manager.tools}
+        assert "mcp__demo__eventide_demo_echo" in manager.readonly_tools
+        result = await manager.handlers["mcp__demo__eventide_demo_echo"](text="transport-ok")
         assert "transport-ok" in result
     finally:
         await manager.close()
@@ -94,7 +94,7 @@ async def test_real_streamable_http_discovers_and_calls_tools():
                 url=f"http://127.0.0.1:{port}/mcp",
             )
         )
-        handler = manager.handlers["mcp__http-demo__nexus_demo_sum"]
+        handler = manager.handlers["mcp__http-demo__eventide_demo_sum"]
         assert "7" in await handler(a=3, b=4)
     finally:
         await manager.close()

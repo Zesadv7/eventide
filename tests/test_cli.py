@@ -2,7 +2,7 @@
 
 import pytest
 
-from nexus_agent.cli import build_parser, main
+from eventide.cli import build_parser, main
 
 
 def test_cli_subcommands_parse():
@@ -20,4 +20,4 @@ def test_help_needs_no_api_key(capsys):
     with pytest.raises(SystemExit) as caught:
         main(["--help"])
     assert caught.value.code == 0
-    assert "nexus-agent" in capsys.readouterr().out
+    assert "eventide" in capsys.readouterr().out

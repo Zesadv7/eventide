@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from nexus_agent.host import RuntimeHost
-from nexus_agent.models import ModelResponse, RunRequest, WorkspaceTarget
-from nexus_agent.providers import ScriptedProvider
-from nexus_agent.workspace import workspace_checkpoint
+from eventide.host import RuntimeHost
+from eventide.models import ModelResponse, RunRequest, WorkspaceTarget
+from eventide.providers import ScriptedProvider
+from eventide.workspace import workspace_checkpoint
 from tests.test_runtime import settings_for
 
 
@@ -287,7 +287,7 @@ async def test_truncated_final_answer_fails_instead_of_reporting_success(isolate
         result = await host.run(RunRequest("write a long answer"))
         assert result.status == "failed"
         assert "truncated" in result.output
-        assert "NEXUS_MAX_TOKENS" in result.output
+        assert "EVENTIDE_MAX_TOKENS" in result.output
     finally:
         await host.close()
 

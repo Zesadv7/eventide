@@ -1,6 +1,6 @@
 """Tests for trace persistence and redaction."""
 
-from nexus_agent.observability import TraceStore, redact
+from eventide.observability import TraceStore, redact
 
 
 def test_redact_secrets_and_large_values():

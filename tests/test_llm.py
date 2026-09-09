@@ -2,12 +2,12 @@
 
 import pytest
 
-from nexus_agent.llm import RecoveryState, is_prompt_too_long_error, with_retry
+from eventide.llm import RecoveryState, is_prompt_too_long_error, with_retry
 
 
 def test_retry_429_then_success(monkeypatch):
     state = RecoveryState()
-    monkeypatch.setattr("nexus_agent.llm.time.sleep", lambda _: None)
+    monkeypatch.setattr("eventide.llm.time.sleep", lambda _: None)
 
     calls = {"count": 0}
 
@@ -26,7 +26,7 @@ def test_retry_429_then_success(monkeypatch):
 
 def test_retry_529_switches_fallback(monkeypatch):
     monkeypatch.setenv("FALLBACK_MODEL_ID", "fallback-model")
-    monkeypatch.setattr("nexus_agent.llm.time.sleep", lambda _: None)
+    monkeypatch.setattr("eventide.llm.time.sleep", lambda _: None)
 
     state = RecoveryState()
 

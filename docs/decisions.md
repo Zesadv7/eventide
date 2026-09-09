@@ -1,4 +1,4 @@
-# Nexus Agent 架构决策
+# Eventide 架构决策
 
 本文记录影响长期结构、边界或维护方式的决策。当前实现事实见 [architecture.md](architecture.md)。
 
@@ -104,7 +104,7 @@
 
 **背景：** Web 保存配置需要跨重启恢复，但 API Key 不能以明文进入 SQLite、HTTP 响应或日志。
 
-**决策：** 使用 Fernet 加密数据库中的 API Key。主密钥来自 `NEXUS_SECRET_KEY`，未配置时生成 `.nexus/secret.key`；配置变更和连接检查只接受回环请求。
+**决策：** 使用 Fernet 加密数据库中的 API Key。主密钥来自 `EVENTIDE_SECRET_KEY`，未配置时生成 `.eventide/secret.key`；配置变更和连接检查只接受回环请求。
 
 **影响：** 数据库和主密钥需要分开保护；主密钥丢失时必须重新输入 API Key；解密失败不能静默回退成明文。
 

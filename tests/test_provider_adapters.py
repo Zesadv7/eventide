@@ -5,12 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from nexus_agent.config import Settings, normalize_provider
-from nexus_agent.models import ModelRequest
-from nexus_agent.providers.anthropic import AnthropicProvider, _without_provider_state
-from nexus_agent.providers.base import ProviderError, build_provider
-from nexus_agent.providers.openai_compatible import OpenAICompatibleProvider
-from nexus_agent.providers.openai_responses import (
+from eventide.config import Settings, normalize_provider
+from eventide.models import ModelRequest
+from eventide.providers.anthropic import AnthropicProvider, _without_provider_state
+from eventide.providers.base import ProviderError, build_provider
+from eventide.providers.openai_compatible import OpenAICompatibleProvider
+from eventide.providers.openai_responses import (
     OpenAIResponsesProvider,
     convert_response_input,
 )
@@ -19,7 +19,7 @@ from nexus_agent.providers.openai_responses import (
 def live_settings(isolated_workspace, provider):
     return Settings(
         workdir=isolated_workspace,
-        state_dir=isolated_workspace / ".nexus",
+        state_dir=isolated_workspace / ".eventide",
         provider=provider,
         api_key="test-key",
         base_url="https://example.invalid/v1",
@@ -259,7 +259,7 @@ def test_provider_factory_and_missing_key(isolated_workspace):
         build_provider(live_settings(isolated_workspace, "other"))
     settings = live_settings(isolated_workspace, "anthropic")
     settings = replace(settings, api_key=None)
-    with pytest.raises(RuntimeError, match="NEXUS_API_KEY"):
+    with pytest.raises(RuntimeError, match="EVENTIDE_API_KEY"):
         settings.require_api_key()
 
 
@@ -272,7 +272,7 @@ def test_normalize_provider_canonicalizes_aliases_and_case():
 
 
 def test_settings_from_env_normalizes_hyphenated_provider(monkeypatch, isolated_workspace):
-    monkeypatch.setenv("NEXUS_PROVIDER", "openai-compatible")
+    monkeypatch.setenv("EVENTIDE_PROVIDER", "openai-compatible")
     assert Settings.from_env(isolated_workspace).provider == "openai_compatible"
 
 

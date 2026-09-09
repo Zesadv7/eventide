@@ -4,8 +4,8 @@ import subprocess
 
 import pytest
 
-from nexus_agent.tasks import worktree as worktree_module
-from nexus_agent.tasks.worktree import (
+from eventide.tasks import worktree as worktree_module
+from eventide.tasks.worktree import (
     create_worktree,
     remove_worktree,
     run_git,

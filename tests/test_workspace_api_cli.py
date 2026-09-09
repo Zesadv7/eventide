@@ -5,10 +5,10 @@ import json
 
 from fastapi.testclient import TestClient
 
-from nexus_agent.api import create_app
-from nexus_agent.cli import main
-from nexus_agent.host import RuntimeHost
-from nexus_agent.providers import ScriptedProvider
+from eventide.api import create_app
+from eventide.cli import main
+from eventide.host import RuntimeHost
+from eventide.providers import ScriptedProvider
 from tests.test_api import wait_for_run
 from tests.test_host import interrupted_host
 from tests.test_runtime import settings_for
@@ -65,7 +65,7 @@ def test_http_continue_and_reject_parked_normal_run(isolated_workspace):
 
 
 def test_cli_workspace_and_runs(isolated_workspace, monkeypatch, capsys):
-    import nexus_agent.cli as cli
+    import eventide.cli as cli
 
     settings = settings_for(isolated_workspace)
     monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
@@ -100,7 +100,7 @@ def test_cli_workspace_and_runs(isolated_workspace, monkeypatch, capsys):
 
 
 def test_cli_continue(isolated_workspace, monkeypatch, capsys):
-    import nexus_agent.cli as cli
+    import eventide.cli as cli
 
     host, session, _ = asyncio.run(interrupted_host(isolated_workspace))
     monkeypatch.setattr(cli, "AgentRuntime", lambda _: host)

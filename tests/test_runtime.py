@@ -3,17 +3,17 @@
 import asyncio
 from dataclasses import replace
 
-from nexus_agent.config import Settings
-from nexus_agent.models import RunRequest
-from nexus_agent.observability import TraceStore
-from nexus_agent.providers import ScriptedProvider
-from nexus_agent.runtime import AgentRuntime
+from eventide.config import Settings
+from eventide.models import RunRequest
+from eventide.observability import TraceStore
+from eventide.providers import ScriptedProvider
+from eventide.runtime import AgentRuntime
 
 
 def settings_for(path, **changes):
     settings = Settings(
         workdir=path,
-        state_dir=path / ".nexus",
+        state_dir=path / ".eventide",
         provider="scripted",
         api_key=None,
         base_url=None,
@@ -99,7 +99,7 @@ async def test_sessions_are_isolated_and_can_run_concurrently(isolated_workspace
     class EchoProvider:
         async def complete(self, request):
             await asyncio.sleep(0.01)
-            from nexus_agent.models import ModelResponse
+            from eventide.models import ModelResponse
 
             return ModelResponse(str(request.messages[-1]["content"]))
 

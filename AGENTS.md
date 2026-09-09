@@ -1,4 +1,4 @@
-# Nexus Agent 维护约定
+# Eventide 维护约定
 
 本文件是新 Codex 对话进入仓库时的统一上下文入口。仓库文件和 Git 状态是事实来源，不依赖其他对话的历史。
 
@@ -38,7 +38,7 @@
 ## 安全与仓库卫生
 
 - 保留 `LICENSE`。
-- 不提交 `.env`、`mcp.json`、`.nexus/`、API Key、数据库、trace 原文或 live 运行产物。
+- 不提交 `.env`、`mcp.json`、`.eventide/`、API Key、数据库、trace 原文或 live 运行产物。
 - 写文件前检查目标路径和现有改动；删除或移动前确认精确目标。
 - 不创建远程、不推送、不公开发布，除非用户明确授权。
 
@@ -47,12 +47,12 @@
 根据修改范围运行相关检查；完整门禁为：
 
 ```bash
-uv run python -m nexus_agent --help
+uv run python -m eventide --help
 uv run pytest -q
-uv run pytest --cov=nexus_agent --cov-fail-under=85
-uv run ruff check nexus_agent tests examples
-uv run mypy nexus_agent
-uv run nexus-agent eval evals/smoke.yaml
+uv run pytest --cov=eventide --cov-fail-under=85
+uv run ruff check eventide tests examples
+uv run mypy eventide
+uv run eventide eval evals/smoke.yaml
 ```
 
 完成后：

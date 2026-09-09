@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nexus-agent"
+name = "eventide"
 version = "0.3.0"
 description = "A traceable, policy-aware runtime for tool-using AI agents."
 readme = "README.md"
@@ -31,14 +31,14 @@ dev = [
 ]
 
 [project.scripts]
-nexus-agent = "nexus_agent.cli:main"
+eventide = "eventide.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["nexus_agent*"]
+include = ["eventide*"]
 
 [tool.setuptools.package-data]
-nexus_agent = ["web/*.html", "web/*.css", "web/*.js"]
+eventide = ["web/*.html", "web/*.css", "web/*.js"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -46,21 +46,21 @@ testpaths = ["tests"]
 cache_dir = ".task_outputs/pytest-cache"
 
 [tool.coverage.run]
-source = ["nexus_agent"]
+source = ["eventide"]
 # The v0.1 teaching harness remains for source compatibility; the 85% gate
 # measures the v0.2 runtime and its actively supported integration surfaces.
 omit = [
-    "nexus_agent/agent.py",
-    "nexus_agent/context.py",
-    "nexus_agent/hooks.py",
-    "nexus_agent/memory/*",
-    "nexus_agent/scheduling/cron.py",
-    "nexus_agent/teams/teammate.py",
-    "nexus_agent/teams/subagent.py",
-    "nexus_agent/tools/built_ins.py",
-    "nexus_agent/tools/dispatch.py",
-    "nexus_agent/tools/registry.py",
-    "nexus_agent/utils.py",
+    "eventide/agent.py",
+    "eventide/context.py",
+    "eventide/hooks.py",
+    "eventide/memory/*",
+    "eventide/scheduling/cron.py",
+    "eventide/teams/teammate.py",
+    "eventide/teams/subagent.py",
+    "eventide/tools/built_ins.py",
+    "eventide/tools/dispatch.py",
+    "eventide/tools/registry.py",
+    "eventide/utils.py",
 ]
 
 [tool.coverage.report]
@@ -83,15 +83,15 @@ disable_error_code = ["import-untyped"]
 
 [[tool.mypy.overrides]]
 module = [
-    "nexus_agent.agent",
-    "nexus_agent.context",
-    "nexus_agent.hooks",
-    "nexus_agent.llm",
-    "nexus_agent.memory.*",
-    "nexus_agent.scheduling.*",
-    "nexus_agent.tasks.*",
-    "nexus_agent.teams.*",
-    "nexus_agent.tools.*",
-    "nexus_agent.utils",
+    "eventide.agent",
+    "eventide.context",
+    "eventide.hooks",
+    "eventide.llm",
+    "eventide.memory.*",
+    "eventide.scheduling.*",
+    "eventide.tasks.*",
+    "eventide.teams.*",
+    "eventide.tools.*",
+    "eventide.utils",
 ]
 ignore_errors = true

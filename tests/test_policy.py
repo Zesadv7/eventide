@@ -1,6 +1,6 @@
 """Tests for the central policy boundary."""
 
-from nexus_agent.policy import (
+from eventide.policy import (
     PolicyDecision,
     PolicyEngine,
     resolve_scoped_path,
@@ -33,8 +33,8 @@ def test_path_scope_and_agent_names(isolated_workspace):
 
 
 def test_settings_custom_state_dir(isolated_workspace, monkeypatch):
-    from nexus_agent.config import Settings
+    from eventide.config import Settings
 
-    monkeypatch.setenv("NEXUS_STATE_DIR", "runtime-state")
+    monkeypatch.setenv("EVENTIDE_STATE_DIR", "runtime-state")
     settings = Settings.from_env(isolated_workspace)
     assert settings.state_dir == (isolated_workspace / "runtime-state").resolve()

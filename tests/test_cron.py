@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from nexus_agent.scheduling.cron import (
+from eventide.scheduling.cron import (
     cancel_job,
     consume_cron_queue,
     cron_matches,

@@ -5,8 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from nexus_agent.store import RuntimeStore
-from nexus_agent.workspace import HostLease, canonical_workspace
+from eventide.store import RuntimeStore
+from eventide.workspace import HostLease, canonical_workspace
 
 
 def test_store_replay_order_and_terminal(isolated_workspace):

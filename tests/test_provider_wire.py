@@ -11,9 +11,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from nexus_agent.config import Settings
-from nexus_agent.models import ModelRequest
-from nexus_agent.providers.openai_compatible import OpenAICompatibleProvider
+from eventide.config import Settings
+from eventide.models import ModelRequest
+from eventide.providers.openai_compatible import OpenAICompatibleProvider
 
 MINIMAL_COMPLETION = {
     "id": "x",
@@ -68,7 +68,7 @@ def openai_wire(monkeypatch):
 def _settings(base_url, isolated_workspace):
     return Settings(
         workdir=isolated_workspace,
-        state_dir=isolated_workspace / ".nexus",
+        state_dir=isolated_workspace / ".eventide",
         provider="openai_compatible",
         api_key="test-key",
         base_url=base_url,

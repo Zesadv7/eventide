@@ -2,7 +2,7 @@
 
 import json
 
-from nexus_agent.providers.openai_compatible import convert_messages, convert_tools
+from eventide.providers.openai_compatible import convert_messages, convert_tools
 
 
 def test_openai_tool_conversion():

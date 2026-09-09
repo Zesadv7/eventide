@@ -1,4 +1,4 @@
-name: nexus-offline-smoke
+name: eventide-offline-smoke
 cases:
   - id: direct-answer
     prompt: Reply with offline-ready.
