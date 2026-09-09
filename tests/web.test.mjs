@@ -80,6 +80,12 @@ test("folded tool results are reported without inventing operations", () => {
   assert.equal(work.operations.size, 2);
 });
 
+test("abandoned recovery is visible as a durable work event", () => {
+  const work = project([event(1, "recovery.abandoned", {source_run_id: "r0"})]);
+  assert.equal(work.blocks[0].title, "已放弃本次恢复");
+  assert.match(work.blocks[0].text, /结果未知/);
+});
+
 test("unknown shell commands and model protocol events do not create invented work", () => {
   const work = project([event(1, "model.request", {}), event(2, "model.response", {text: "I changed everything"}), prepared(3, "bash", {command: "echo pytest"})]);
   assert.equal(work.blocks.length, 1);

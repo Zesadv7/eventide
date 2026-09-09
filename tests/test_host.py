@@ -195,6 +195,30 @@ async def test_continue_changed_workspace_rejected(isolated_workspace):
         await host.close()
 
 
+async def test_abandon_interruption_unlocks_parked_session(isolated_workspace):
+    host, session, repo = await interrupted_host(isolated_workspace, "write_file")
+    try:
+        Path(repo, "user-change.txt").write_text("changed", encoding="utf-8")
+        with pytest.raises(ValueError, match="Workspace changed"):
+            await host.continue_session(session)
+
+        abandoned = await host.abandon_interruption(session)
+        assert abandoned.status == "completed"
+        assert abandoned.continuation_of == "crashed"
+        assert host.session_status(session)["status"] == "completed"
+        assert any(
+            event["type"] == "recovery.abandoned"
+            for event in host.store.session_events(session)
+        )
+        assert "outcome was not assumed" in json.dumps(host.store.load_messages(session))
+
+        resumed = await host.run(RunRequest("start safely from current state", session))
+        assert resumed.status == "completed"
+        assert resumed.output == "continued"
+    finally:
+        await host.close()
+
+
 async def test_event_and_model_normalization_are_identical(isolated_workspace):
     provider = ScriptedProvider(
         [

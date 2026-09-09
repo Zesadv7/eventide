@@ -35,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume = subparsers.add_parser("continue", help="Continue an interrupted session safely")
     resume.add_argument("session_id")
     resume.add_argument("--json", action="store_true")
+    abandon = subparsers.add_parser(
+        "abandon", help="Abandon recovery and allow new work in a parked session"
+    )
+    abandon.add_argument("session_id")
+    abandon.add_argument("--json", action="store_true")
     workspace = subparsers.add_parser("workspace", help="Manage registered project directories")
     actions = workspace.add_subparsers(dest="workspace_action", required=True)
     actions.add_parser("list")
@@ -109,9 +114,13 @@ async def _manage(args: argparse.Namespace) -> int:
     runtime = AgentRuntime(Settings.from_env())
     try:
         value: Any
-        if args.command == "continue":
-            result = await runtime.continue_session(
-                args.session_id, approval_handler=_terminal_approval
+        if args.command in {"continue", "abandon"}:
+            result = (
+                await runtime.continue_session(
+                    args.session_id, approval_handler=_terminal_approval
+                )
+                if args.command == "continue"
+                else await runtime.abandon_interruption(args.session_id)
             )
             print(json.dumps(asdict(result), ensure_ascii=False) if args.json else result.output)
             return 0 if result.status == "completed" else 1
@@ -153,7 +162,7 @@ def _main(argv: list[str] | None = None) -> int:
         return asyncio.run(_run_once(args))
     if args.command == "eval":
         return asyncio.run(_eval(args))
-    if args.command in {"workspace", "continue"}:
+    if args.command in {"workspace", "continue", "abandon"}:
         return asyncio.run(_manage(args))
     if args.command == "serve":
         try:

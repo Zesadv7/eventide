@@ -64,6 +64,16 @@ def test_http_continue_and_reject_parked_normal_run(isolated_workspace):
         assert result.json()["status"] == "completed"
 
 
+def test_http_abandon_unlocks_parked_session(isolated_workspace):
+    host, session, _ = asyncio.run(interrupted_host(isolated_workspace, "bash"))
+    with TestClient(create_app(host)) as client:
+        assert client.post(f"/api/sessions/{session}/continue").status_code == 409
+        abandoned = client.post(f"/api/sessions/{session}/abandon")
+        assert abandoned.status_code == 200
+        assert abandoned.json()["continuation_of"] == "crashed"
+        assert client.get(f"/api/sessions/{session}").json()["status"] == "completed"
+
+
 def test_cli_workspace_and_runs(isolated_workspace, monkeypatch, capsys):
     import eventide.cli as cli
 
@@ -105,4 +115,13 @@ def test_cli_continue(isolated_workspace, monkeypatch, capsys):
     host, session, _ = asyncio.run(interrupted_host(isolated_workspace))
     monkeypatch.setattr(cli, "AgentRuntime", lambda _: host)
     assert main(["continue", session, "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["continuation_of"] == "crashed"
+
+
+def test_cli_abandon(isolated_workspace, monkeypatch, capsys):
+    import eventide.cli as cli
+
+    host, session, _ = asyncio.run(interrupted_host(isolated_workspace, "bash"))
+    monkeypatch.setattr(cli, "AgentRuntime", lambda _: host)
+    assert main(["abandon", session, "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["continuation_of"] == "crashed"

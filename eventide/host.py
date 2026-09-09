@@ -451,6 +451,85 @@ class RuntimeHost:
         session_id = request if isinstance(request, str) else request.session_id
         return await self._admit(session_id, None, True, sink, approval_handler)
 
+    async def abandon_interruption(
+        self,
+        session_id: str,
+        sink: EventSink | None = None,
+    ) -> RunResult:
+        """Close unresolved protocol history without claiming unknown tools succeeded."""
+        await self.initialize()
+        workspace = self.sessions.workspace(session_id)
+        task = asyncio.current_task()
+        assert task is not None
+        self._active_tasks.add(task)
+        try:
+            async with self._workspace_locks[workspace.workspace_id]:
+                previous = self.store.latest_run(session_id)
+                if not previous or previous["status"] != "interrupted":
+                    raise ValueError("Only an interrupted, parked session can be abandoned")
+                started = time.perf_counter()
+                run_id = f"run_{uuid.uuid4().hex[:16]}"
+                turn_id = self.store.create_run(
+                    run_id,
+                    session_id,
+                    continuation_of=previous["id"],
+                )
+                await self._emit(
+                    run_id,
+                    "run.started",
+                    {
+                        "session_id": session_id,
+                        "workspace_id": workspace.workspace_id,
+                        "provider": self.settings.provider,
+                        "model": self.settings.model,
+                        "continuation_of": previous["id"],
+                        "recovery_action": "abandon",
+                    },
+                    sink,
+                    author="user",
+                )
+                await self._resolve_interrupted_history(
+                    run_id,
+                    previous,
+                    sink,
+                    "Recovery abandoned by user; tool outcome was not assumed or replayed.",
+                )
+                await self._emit(
+                    run_id,
+                    "recovery.abandoned",
+                    {"source_run_id": previous["id"]},
+                    sink,
+                    author="user",
+                )
+                duration = (time.perf_counter() - started) * 1000
+                await self._emit(
+                    run_id,
+                    "run.completed",
+                    {
+                        "output": "",
+                        "error": None,
+                        "steps": 0,
+                        "tool_calls": 0,
+                        "duration_ms": duration,
+                        "usage": {},
+                    },
+                    sink,
+                )
+                return RunResult(
+                    run_id,
+                    session_id,
+                    "completed",
+                    "",
+                    0,
+                    0,
+                    duration,
+                    {},
+                    turn_id,
+                    previous["id"],
+                )
+        finally:
+            self._active_tasks.discard(task)
+
     async def _admit(
         self,
         session_id: str,
@@ -519,6 +598,49 @@ class RuntimeHost:
             if operation["status"] == "prepared" and not operation.get("readonly", False):
                 raise ValueError("Unknown tool outcome; session remains parked")
 
+    async def _resolve_interrupted_history(
+        self,
+        run_id: str,
+        previous: dict[str, Any],
+        sink: EventSink | None,
+        content: str = "Abandoned after interruption; not replayed.",
+    ) -> None:
+        """Pair unresolved calls and close ephemeral approvals in a successor run."""
+        old_events = self.store.run_events(previous["id"])
+        completed = {
+            event["payload"]["call_id"]
+            for event in old_events
+            if event["type"] == "tool.completed"
+        }
+        for event in old_events:
+            if event["type"] != "model.response":
+                continue
+            for block in event["payload"].get("message", {}).get("content", []):
+                if block.get("type") == "tool_use" and block["id"] not in completed:
+                    await self._emit(
+                        run_id,
+                        "tool.abandoned",
+                        {
+                            "call_id": block["id"],
+                            "name": block["name"],
+                            "is_error": True,
+                            "content": content,
+                        },
+                        sink,
+                    )
+        for approval_id in previous["pending_approvals"]:
+            await self._emit(
+                run_id,
+                "approval.resolved",
+                {
+                    "approval_id": approval_id,
+                    "approved": False,
+                    "reason": "Host interrupted",
+                },
+                sink,
+                author="recovery",
+            )
+
     async def _execute(
         self,
         session_id: str,
@@ -553,38 +675,7 @@ class RuntimeHost:
                 previous = self.store.get_run(continuation_of)
                 assert previous is not None
                 # Resolve every unpaired advertised call, including calls never dispatched.
-                old_events = self.store.run_events(continuation_of)
-                completed = {
-                    e["payload"]["call_id"] for e in old_events if e["type"] == "tool.completed"
-                }
-                for event in old_events:
-                    if event["type"] != "model.response":
-                        continue
-                    for block in event["payload"].get("message", {}).get("content", []):
-                        if block.get("type") == "tool_use" and block["id"] not in completed:
-                            await self._emit(
-                                run_id,
-                                "tool.abandoned",
-                                {
-                                    "call_id": block["id"],
-                                    "name": block["name"],
-                                    "is_error": True,
-                                    "content": "Abandoned after interruption; not replayed.",
-                                },
-                                sink,
-                            )
-                for approval_id in previous["pending_approvals"]:
-                    await self._emit(
-                        run_id,
-                        "approval.resolved",
-                        {
-                            "approval_id": approval_id,
-                            "approved": False,
-                            "reason": "Host interrupted",
-                        },
-                        sink,
-                        author="recovery",
-                    )
+                await self._resolve_interrupted_history(run_id, previous, sink)
             else:
                 await self._emit(
                     run_id,

@@ -269,6 +269,7 @@ function renderActions(session) {
   $("#recovery").hidden = !parked;
   $("#prompt-form").hidden = parked;
   $("#continue-button").disabled = workspaceBusy;
+  $("#abandon-button").disabled = workspaceBusy;
   $("#continue-button").textContent = state.busy.has(owner) ? "正在接续…" : "尝试 Continue";
   $("#run-button").disabled = !state.workspace || workspaceBusy;
   $("#run-button").textContent = session?.latest_run ? "提交" : "开始";
@@ -373,6 +374,19 @@ async function continueSession() {
   } finally { state.busy.delete(owner); scheduleRender(); }
 }
 
+async function abandonInterruption() {
+  const owner = state.session;
+  if (!owner || sessionRecord(owner)?.status !== "parked" || $("#abandon-button").disabled) return;
+  if (!confirm("放弃本次恢复吗？历史会保留，结果未知的操作不会被当作成功或重新执行。")) return;
+  state.busy.add(owner); state.errors.delete(owner); render();
+  try {
+    await request(`/api/sessions/${owner}/abandon`, {method: "POST"});
+    state.notices.set(owner, "已放弃本次恢复；历史仍然保留，现在可以提交新的工作。");
+    await refreshSession(owner);
+  } catch (error) { report(owner, error); }
+  finally { state.busy.delete(owner); scheduleRender(); }
+}
+
 $("#workspace-switcher").onchange = (event) => void selectWorkspace(event.target.value);
 $("#new-session").onclick = async () => {
   const workspace = state.workspace, lock = `new:${workspace}`;
@@ -385,6 +399,7 @@ $("#prompt-form").onsubmit = startRun;
 $("#prompt").oninput = () => state.drafts.set(draftKey(), $("#prompt").value);
 $("#prompt").onkeydown = (event) => { if (event.ctrlKey && event.key === "Enter") { event.preventDefault(); $("#prompt-form").requestSubmit(); } };
 $("#continue-button").onclick = () => void continueSession();
+$("#abandon-button").onclick = () => void abandonInterruption();
 $("#session-details").onclick = (event) => openInspector({}, event.currentTarget);
 $("#interruption-details").onclick = (event) => openInspector({chapterId: chapters(currentRuns()).at(-1)?.id}, event.currentTarget);
 $("#close-inspector").onclick = closeInspector;

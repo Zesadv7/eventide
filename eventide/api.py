@@ -269,6 +269,20 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         finally:
             reserved.discard(workspace_id)
 
+    @app.post("/api/sessions/{session_id}/abandon")
+    async def abandon_interruption(session_id: str) -> dict[str, Any]:
+        record = await get_session(session_id)
+        workspace_id = record["workspace_id"]
+        if workspace_id in reserved:
+            raise HTTPException(status_code=409, detail="Workspace is busy")
+        reserved.add(workspace_id)
+        try:
+            return asdict(await agent_runtime.abandon_interruption(session_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            reserved.discard(workspace_id)
+
     @app.get("/api/config/provider")
     async def get_provider_config() -> dict[str, Any]:
         return agent_runtime.provider_config_status()

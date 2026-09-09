@@ -18,7 +18,11 @@ _USAGE_KEYS = {
 
 def redact(value: Any, *, max_text: int | None = 4_000) -> Any:
     if isinstance(value, dict):
-        limit = 200_000 if max_text is not None and value.get("type") == "provider_state" else max_text
+        limit = (
+            200_000
+            if max_text is not None and value.get("type") == "provider_state"
+            else max_text
+        )
         return {
             key: "[REDACTED]"
             if str(key).lower().replace("-", "_") not in _USAGE_KEYS

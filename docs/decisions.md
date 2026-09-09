@@ -191,3 +191,13 @@
 **决策：** 步数用尽且所有工具结果已提交时，Host 先记录工作区 checkpoint，再写入 `run.interrupted`，Session 停驻；用户 Continue 创建新 turn/run 并获得新的步数预算。终端事件仍复用 `run.interrupted`，不新增状态类型，也不自动放大步数预算。
 
 **影响：** Continue 的安全检查不变（Git 证据、未知副作用、post-tool checkpoint）；停驻时补记 checkpoint，使纯只读 run 也能提供可信证据，因此 checkpoint 必须与 JSON 往返后的形态可比。模型输出被 `max_tokens` 截断且没有工具调用时改为失败并提示提高预算，不再静默报成功。
+
+## ADR-020：停驻恢复可以由用户显式放弃
+
+**状态：Accepted**。
+
+**背景：** 严格 Continue 会拒绝非 Git、源码变化或结果未知的副作用调用；若普通 Prompt 也继续禁止，Session 会永久停驻。
+
+**决策：** 用户可以显式 abandon 当前停驻恢复。Runtime 创建不调用模型的关联 run，为未配对工具写入 `tool.abandoned`，记录 `recovery.abandoned` 并恢复普通 Prompt。历史、未知结果和审批证据全部保留，不声称工具失败或成功，也不自动重放。
+
+**影响：** abandon 会消费该 interrupted run 的 continuation 关系，因此之后不能再对同一来源 Continue；Web、HTTP 和 CLI 提供同一操作。Workspace 路径仍必须在后续实际 Run 前有效。

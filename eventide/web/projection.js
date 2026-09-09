@@ -81,6 +81,8 @@ export function projectWork(runs, eventMap) {
     } else if (type === "context.trimmed") {
       const count = (p.call_ids || []).length;
       note(event, "context", "已折叠较早的工具结果", `为控制上下文，折叠了 ${count} 条较早的工具结果；原文仍保留在事件日志与工作记录中。`);
+    } else if (type === "recovery.abandoned") {
+      note(event, "attention", "已放弃本次恢复", "历史记录仍然保留；结果未知的操作没有被当作成功或重新执行。");
     } else if (type === "tool.prepared") {
       const op = {id: `${event.run_id}:${p.call_id}`, callId: p.call_id, runId: event.run_id, name: p.name,
         arguments: p.arguments || {}, status: "prepared", events: [event], result: ""};
