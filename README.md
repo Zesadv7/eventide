@@ -92,7 +92,7 @@ HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、�
 
 工作经过按用户意图及其 Continue 链分章，较早章节按需加载，工具操作默认折叠。工具请求与结果配对后展示对象和执行状态；“操作完成”不额外宣称测试全部通过。原始 Events、模型协议、工具参数和 checkpoint 通过临时右侧详情查看。结果支持标题、列表、代码和安全链接的 Markdown 子集，以及复制；原始 HTML 不执行。
 
-停驻时输入区切换为 Continue 操作，通过后立即展示接续过程；校验失败保留停驻状态与原因。仅最新停驻工作提供 Continue。审批直接在正文提供“本次允许”和“拒绝”。同 Workspace 忙碌时不能再次提交；历史仍可浏览。正文独立滚动，底部操作区保持可达，小屏也可切换 Workspace、新建工作和查看详情。
+停驻时输入区切换为 Continue 或放弃恢复操作，通过后立即展示接续过程；校验失败保留停驻状态与原因。仅最新停驻工作提供恢复操作。审批直接在正文提供“本次允许”和“拒绝”。运行中的工作可以单独停止，停止后按中断语义停驻并保留记录。同 Workspace 忙碌时不能再次提交；历史仍可浏览。正文独立滚动，底部操作区保持可达，小屏也可切换 Workspace、新建工作和查看详情。
 
 Web 运行不依赖 Node 或前端构建。开发时可用 Node.js 22+ 运行 `node --test tests/web.test.mjs`；pytest 检测到合适的 Node 时也会执行这些离线投影和传输检查。另有 `node tests/web_browser.cjs` 浏览器验收，需预先提供 Playwright 与 Chromium；`EVENTIDE_PLAYWRIGHT_MODULE` 可指定已安装的包路径，`EVENTIDE_BROWSER_CHANNEL=msedge` 可使用已安装的 Edge。浏览器测试使用内存 HTTP/SSE 样例，不读取用户数据库或连接模型，截图写入忽略目录 `.task_outputs/`。
 
@@ -111,6 +111,9 @@ EVENTIDE_PROVIDER=openai_compatible
 EVENTIDE_API_KEY=replace-me
 EVENTIDE_BASE_URL=https://provider.example/v1
 EVENTIDE_MODEL=tool-capable-model
+EVENTIDE_MODEL_TIMEOUT=300
+EVENTIDE_MCP_TIMEOUT=30
+EVENTIDE_COMMAND_TIMEOUT=120
 ```
 
 `EVENTIDE_PROVIDER` 支持：

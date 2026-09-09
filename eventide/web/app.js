@@ -272,6 +272,10 @@ function renderActions(session) {
   $("#abandon-button").disabled = workspaceBusy;
   $("#continue-button").textContent = state.busy.has(owner) ? "正在接续…" : "尝试 Continue";
   $("#run-button").disabled = !state.workspace || workspaceBusy;
+  const activeRun = session?.latest_run && !terminal(session.latest_run) ? session.latest_run : null;
+  $("#cancel-run").hidden = !activeRun;
+  $("#cancel-run").disabled = activeRun ? state.busy.has(`cancel:${runId(activeRun)}`) : true;
+  $("#cancel-run").textContent = $("#cancel-run").disabled && activeRun ? "正在停止…" : "停止";
   $("#run-button").textContent = session?.latest_run ? "提交" : "开始";
   $("#composer-hint").textContent = workspaceBusy ? session?.status === "waiting_for_user" ? "请先处理上方审批。" : "工作区正在执行；结束后可提交下一步。" : "Ctrl + Enter 提交 · 延续同一项工作";
   $("#prompt").disabled = workspaceBusy;
@@ -387,6 +391,20 @@ async function abandonInterruption() {
   finally { state.busy.delete(owner); scheduleRender(); }
 }
 
+async function cancelCurrentRun() {
+  const owner = state.session;
+  const run = sessionRecord(owner)?.latest_run;
+  if (!owner || terminal(run) || $("#cancel-run").disabled) return;
+  const lock = `cancel:${runId(run)}`;
+  state.busy.add(lock); state.errors.delete(owner); render();
+  try {
+    await request(`/api/runs/${runId(run)}/cancel`, {method: "POST"});
+    state.notices.set(owner, "执行已停止，工作记录已停驻。");
+    await refreshSession(owner);
+  } catch (error) { report(owner, error); }
+  finally { state.busy.delete(lock); scheduleRender(); }
+}
+
 $("#workspace-switcher").onchange = (event) => void selectWorkspace(event.target.value);
 $("#new-session").onclick = async () => {
   const workspace = state.workspace, lock = `new:${workspace}`;
@@ -400,6 +418,7 @@ $("#prompt").oninput = () => state.drafts.set(draftKey(), $("#prompt").value);
 $("#prompt").onkeydown = (event) => { if (event.ctrlKey && event.key === "Enter") { event.preventDefault(); $("#prompt-form").requestSubmit(); } };
 $("#continue-button").onclick = () => void continueSession();
 $("#abandon-button").onclick = () => void abandonInterruption();
+$("#cancel-run").onclick = () => void cancelCurrentRun();
 $("#session-details").onclick = (event) => openInspector({}, event.currentTarget);
 $("#interruption-details").onclick = (event) => openInspector({chapterId: chapters(currentRuns()).at(-1)?.id}, event.currentTarget);
 $("#close-inspector").onclick = closeInspector;

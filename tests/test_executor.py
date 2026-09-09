@@ -1,6 +1,8 @@
 """Tool executor policy and handler behavior tests."""
 
-from eventide.executor import ToolContext, ToolExecutor
+import sys
+
+from eventide.executor import LocalCommandExecutor, ToolContext, ToolExecutor
 from eventide.models import ToolCall
 from eventide.policy import PolicyEngine
 
@@ -52,6 +54,15 @@ async def test_command_executor_is_replaceable(isolated_workspace):
         ToolContext(isolated_workspace, "run", PolicyEngine()),
     )
     assert result.content.startswith("isolated:echo ok")
+
+
+async def test_local_command_timeout_terminates_process(isolated_workspace):
+    executor = LocalCommandExecutor(timeout=0.05)
+    output = await executor.execute(
+        f'"{sys.executable}" -c "import time; time.sleep(30)"',
+        isolated_workspace,
+    )
+    assert output == "Error: Timeout (0.05s)"
 
 
 async def test_model_cannot_supply_its_own_mcp_approval(isolated_workspace):

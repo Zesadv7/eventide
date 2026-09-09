@@ -15,7 +15,7 @@ from typing import Any, Protocol
 
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder
-from eventide.executor import ApprovalHandler, ToolContext, ToolExecutor
+from eventide.executor import ApprovalHandler, LocalCommandExecutor, ToolContext, ToolExecutor
 from eventide.mcp.client import MCPManager
 from eventide.models import (
     ContinuationRequest,
@@ -98,9 +98,13 @@ class RuntimeHost:
         self.tools = list(TOOLS if tools is None else tools)
         self.handlers = dict(HANDLERS if handlers is None else handlers)
         self.policy = PolicyEngine()
-        self.executor = ToolExecutor(self.handlers)
+        self.executor = ToolExecutor(
+            self.handlers,
+            command_executor=LocalCommandExecutor(self.settings.command_timeout),
+        )
         self._workspace_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._active_tasks: set[asyncio.Task[Any]] = set()
+        self._run_tasks: dict[str, asyncio.Task[Any]] = {}
         self._closed = False
         self._configuring = False
         self._config_path: Path | None = None
@@ -415,7 +419,27 @@ class RuntimeHost:
         last_error: Exception | None = None
         for attempt in range(3):
             try:
-                return await self._provider().complete(request)
+                return await asyncio.wait_for(
+                    self._provider().complete(request),
+                    timeout=self.settings.model_timeout,
+                )
+            except TimeoutError as exc:
+                last_error = exc
+                await self._emit(
+                    run_id,
+                    "model.retry",
+                    {
+                        "attempt": attempt + 1,
+                        "retryable": attempt < 2,
+                        "error": f"Model request timed out ({self.settings.model_timeout:g}s)",
+                    },
+                    sink,
+                )
+                if attempt == 2:
+                    raise RuntimeError(
+                        f"Model request timed out ({self.settings.model_timeout:g}s)"
+                    ) from exc
+                continue
             except ProviderError as exc:
                 last_error = exc
                 await self._emit(
@@ -432,6 +456,24 @@ class RuntimeHost:
                     raise
                 await asyncio.sleep(0.25 * (2**attempt))
         raise RuntimeError(str(last_error))
+
+    async def cancel_run(self, run_id: str) -> dict[str, Any]:
+        """Cancel one active run and wait until its interrupted fact is durable."""
+        task = self._run_tasks.get(run_id)
+        if task is None or task.done():
+            record = self.store.get_run(run_id)
+            if record is None:
+                raise ValueError(f"Run not found: {run_id}")
+            raise ValueError(f"Run is not active: {run_id}")
+        if task is asyncio.current_task():
+            raise ValueError("A run cannot cancel itself")
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        record = self.store.get_run(run_id)
+        if record is None:
+            raise RuntimeError("Cancelled run was not persisted")
+        return record
 
     async def run(
         self,
@@ -561,15 +603,19 @@ class RuntimeHost:
                     request.run_id if request and request.run_id else f"run_{uuid.uuid4().hex[:16]}"
                 )
                 source_id = previous["id"] if continuation and previous else None
-                return await self._execute(
-                    session_id,
-                    run_id,
-                    workspace,
-                    request.prompt if request else None,
-                    source_id,
-                    sink,
-                    approval_handler,
-                )
+                self._run_tasks[run_id] = task
+                try:
+                    return await self._execute(
+                        session_id,
+                        run_id,
+                        workspace,
+                        request.prompt if request else None,
+                        source_id,
+                        sink,
+                        approval_handler,
+                    )
+                finally:
+                    self._run_tasks.pop(run_id, None)
         finally:
             self._active_tasks.discard(task)
 
@@ -701,7 +747,7 @@ class RuntimeHost:
                     if workspace == self.default_workspace and self._config_path
                     else root / "mcp.json"
                 )
-                await manager.connect_all(configs)
+                await manager.connect_all(configs, timeout=self.settings.mcp_timeout)
             tools = [*self.tools, *manager.tools]
             handlers = {**self.handlers, **manager.handlers}
             executor = ToolExecutor(
@@ -864,8 +910,16 @@ class RuntimeHost:
                     try:
                         result = await asyncio.shield(execution)
                     except asyncio.CancelledError:
-                        # Do not release workspace ownership while a host thread still writes.
-                        await execution
+                        # Async commands/MCP calls can stop cooperatively. Sync file/custom
+                        # handlers run in threads, so retain ownership until they finish.
+                        if call.name == "bash" or inspect.iscoroutinefunction(
+                            handlers.get(call.name)
+                        ):
+                            execution.cancel()
+                            with suppress(asyncio.CancelledError):
+                                await execution
+                        else:
+                            await execution
                         raise
                     await self._emit(
                         run_id,

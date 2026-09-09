@@ -38,7 +38,7 @@
       <footer class="action-area">
         <div class="action-inner">
           <div id="recovery" hidden><strong>工作已停驻</strong><p>Continue 将核验工作区与历史操作结果；若无法恢复，可以保留历史并放弃本次恢复。</p><div class="recovery-actions"><button id="continue-button" class="primary-button" type="button">尝试 Continue</button><button id="abandon-button" class="secondary-button" type="button">放弃恢复</button><button id="interruption-details" class="text-button" type="button">查看中断详情</button></div></div>
-          <form id="prompt-form" class="composer"><label for="prompt">下一步工作</label><div class="composer-row"><textarea id="prompt" rows="2" placeholder="描述希望完成的工作…" required></textarea><button id="run-button" class="primary-button" type="submit">开始</button></div><div class="composer-foot"><span id="composer-hint">Ctrl + Enter 提交</span></div></form>
+          <form id="prompt-form" class="composer"><label for="prompt">下一步工作</label><div class="composer-row"><textarea id="prompt" rows="2" placeholder="描述希望完成的工作…" required></textarea><button id="cancel-run" class="secondary-button" type="button" hidden>停止</button><button id="run-button" class="primary-button" type="submit">开始</button></div><div class="composer-foot"><span id="composer-hint">Ctrl + Enter 提交</span></div></form>
           <p id="action-message" class="action-message" role="status" hidden></p>
         </div>
       </footer>

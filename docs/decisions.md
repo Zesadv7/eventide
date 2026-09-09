@@ -201,3 +201,13 @@
 **决策：** 用户可以显式 abandon 当前停驻恢复。Runtime 创建不调用模型的关联 run，为未配对工具写入 `tool.abandoned`，记录 `recovery.abandoned` 并恢复普通 Prompt。历史、未知结果和审批证据全部保留，不声称工具失败或成功，也不自动重放。
 
 **影响：** abandon 会消费该 interrupted run 的 continuation 关系，因此之后不能再对同一来源 Continue；Web、HTTP 和 CLI 提供同一操作。Workspace 路径仍必须在后续实际 Run 前有效。
+
+## ADR-021：Run 必须可按身份停止并受外部等待上限约束
+
+**状态：Accepted**。
+
+**背景：** 仅在 Host 关闭时取消匿名 task，无法让用户停止单个长任务；Provider、MCP 或 Shell 卡住还会长期占用 Workspace。
+
+**决策：** Host 维护活跃 run_id 到 owning task 的映射，并提供幂等边界明确的取消入口。取消沿异步调用传播，Shell 使用可终止进程树的异步子进程实现；同步线程工具仍等待实际结束后释放 Workspace。模型请求、MCP 连接/调用和 Shell 使用可配置超时。
+
+**影响：** 用户取消写入 `run.interrupted` 并进入既有 parked/Continue/abandon 流程。HTTP 与 Web 可以停止特定 Run；已结束或不存在的 Run 不伪装成成功取消。本地 Shell 仍不是安全沙箱。

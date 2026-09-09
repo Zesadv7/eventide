@@ -39,6 +39,9 @@ class Settings:
     max_steps: int = 30
     context_limit: int = 50_000
     approval_timeout: float = 60.0
+    model_timeout: float = 300.0
+    mcp_timeout: float = 30.0
+    command_timeout: float = 120.0
 
     @classmethod
     def from_env(cls, workdir: Path | None = None) -> Settings:
@@ -61,6 +64,9 @@ class Settings:
             max_steps=int(os.getenv("EVENTIDE_MAX_STEPS", "30")),
             context_limit=int(os.getenv("EVENTIDE_CONTEXT_LIMIT", "50000")),
             approval_timeout=float(os.getenv("EVENTIDE_APPROVAL_TIMEOUT", "60")),
+            model_timeout=float(os.getenv("EVENTIDE_MODEL_TIMEOUT", "300")),
+            mcp_timeout=float(os.getenv("EVENTIDE_MCP_TIMEOUT", "30")),
+            command_timeout=float(os.getenv("EVENTIDE_COMMAND_TIMEOUT", "120")),
         )
 
     def require_api_key(self) -> str:

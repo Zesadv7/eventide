@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -202,11 +203,18 @@ class MCPManager:
             raise ValueError("MCP config must contain an object named 'servers'")
         return [MCPServerConfig.from_dict(name, item) for name, item in servers.items()]
 
-    async def connect_all(self, configs: list[MCPServerConfig]) -> None:
+    async def connect_all(
+        self, configs: list[MCPServerConfig], *, timeout: float | None = None
+    ) -> None:
         for config in configs:
-            await self.connect(config)
+            if timeout is None:
+                await self.connect(config)
+            else:
+                await asyncio.wait_for(self.connect(config, timeout=timeout), timeout)
 
-    async def connect(self, config: MCPServerConfig) -> None:
+    async def connect(
+        self, config: MCPServerConfig, *, timeout: float | None = None
+    ) -> None:
         try:
             from mcp import Client, StdioServerParameters
             from mcp.client.streamable_http import streamable_http_client
@@ -251,9 +259,18 @@ class MCPManager:
                 self.readonly_tools.add(safe_name)
 
             async def invoke(
-                *, _session: Any = session, _tool_name: str = tool.name, **kwargs: Any
+                *,
+                _session: Any = session,
+                _tool_name: str = tool.name,
+                _timeout: float | None = timeout,
+                **kwargs: Any,
             ) -> str:
-                result = await _session.call_tool(_tool_name, arguments=kwargs)
+                request = _session.call_tool(_tool_name, arguments=kwargs)
+                result = (
+                    await request
+                    if _timeout is None
+                    else await asyncio.wait_for(request, _timeout)
+                )
                 parts: list[str] = []
                 for block in result.content:
                     text = getattr(block, "text", None)

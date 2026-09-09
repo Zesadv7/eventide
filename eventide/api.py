@@ -390,6 +390,15 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Run not found")
         return record
 
+    @app.post("/api/runs/{run_id}/cancel")
+    async def cancel_run(run_id: str) -> dict[str, Any]:
+        if not agent_runtime.store.get_run(run_id):
+            raise HTTPException(status_code=404, detail="Run not found")
+        try:
+            return await agent_runtime.cancel_run(run_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.get("/api/runs/{run_id}/events")
     async def run_events(run_id: str, request: Request, after: int = 0) -> StreamingResponse:
         async def stream() -> AsyncIterator[str]:

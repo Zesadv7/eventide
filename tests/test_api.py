@@ -248,3 +248,26 @@ def test_provider_save_waits_for_active_run(isolated_workspace):
         )
         assert response.status_code == 409
         wait_for_run(client, accepted.json()["run_id"])
+
+
+def test_api_cancels_active_run(isolated_workspace):
+    class WaitingProvider:
+        async def complete(self, _request):
+            import asyncio
+
+            await asyncio.Future()
+
+    runtime = AgentRuntime(settings_for(isolated_workspace), WaitingProvider())
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "wait"})
+        run_id = accepted.json()["run_id"]
+        for _ in range(100):
+            record = client.get(f"/api/runs/{run_id}")
+            if record.status_code == 200:
+                break
+            time.sleep(0.01)
+        cancelled = client.post(f"/api/runs/{run_id}/cancel")
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "interrupted"
+        assert client.post(f"/api/runs/{run_id}/cancel").status_code == 409

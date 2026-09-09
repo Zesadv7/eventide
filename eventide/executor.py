@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
+import signal
+import subprocess
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from eventide.models import ToolCall, ToolResult
 from eventide.policy import PolicyDecision, PolicyEngine
-from eventide.tools.bash import run_bash
+from eventide.utils import decode_output
 
 ApprovalHandler = Callable[[str, ToolCall, str], Awaitable[bool]]
 
@@ -26,8 +30,64 @@ class CommandExecutor(Protocol):
 class LocalCommandExecutor:
     """Run commands on the host; this is explicitly not a security sandbox."""
 
+    def __init__(self, timeout: float = 120.0):
+        self.timeout = timeout
+
     async def execute(self, command: str, cwd: Path) -> str:
-        return await asyncio.to_thread(run_bash, command, cwd)
+        if os.name == "nt":
+            process = await asyncio.create_subprocess_shell(
+                command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+        else:
+            process = await asyncio.create_subprocess_shell(
+                command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), self.timeout)
+        except TimeoutError:
+            await self._terminate(process)
+            return f"Error: Timeout ({self.timeout:g}s)"
+        except asyncio.CancelledError:
+            await self._terminate(process)
+            raise
+        output = (decode_output(stdout) + decode_output(stderr)).strip()
+        return output[:50_000] if output else "(no output)"
+
+    @staticmethod
+    async def _terminate(process: asyncio.subprocess.Process) -> None:
+        if process.returncode is not None:
+            return
+        if os.name == "nt":
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/PID",
+                str(process.pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.wait()
+        else:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)  # type: ignore[attr-defined]
+        try:
+            await asyncio.wait_for(process.wait(), 2)
+        except TimeoutError:
+            if os.name != "nt":
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)  # type: ignore[attr-defined]
+            else:
+                process.kill()
+            await process.wait()
 
 
 @dataclass(slots=True)

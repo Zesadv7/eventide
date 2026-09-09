@@ -412,6 +412,49 @@ async def test_cancel_and_close_release_owner(isolated_workspace):
         await reopened.close()
 
 
+async def test_cancel_run_by_id_persists_interruption(isolated_workspace):
+    entered = asyncio.Event()
+
+    class WaitingProvider:
+        async def complete(self, _request):
+            entered.set()
+            await asyncio.Future()
+
+    host = RuntimeHost(settings_for(isolated_workspace), WaitingProvider())
+    task = asyncio.create_task(
+        host.run(RunRequest("wait", run_id="run_cancel_by_id"))
+    )
+    try:
+        await entered.wait()
+        record = await host.cancel_run("run_cancel_by_id")
+        assert record["status"] == "interrupted"
+        assert "cancelled" in record["error"].lower()
+        assert task.cancelled()
+    finally:
+        await host.close()
+
+
+async def test_model_request_timeout_fails_with_durable_retries(isolated_workspace):
+    class WaitingProvider:
+        async def complete(self, _request):
+            await asyncio.sleep(60)
+
+    settings = replace(settings_for(isolated_workspace), model_timeout=0.01)
+    host = RuntimeHost(settings, WaitingProvider())
+    try:
+        result = await host.run(RunRequest("wait"))
+        assert result.status == "failed"
+        assert "timed out" in result.output
+        retries = [
+            event
+            for event in host.store.run_events(result.run_id)
+            if event["type"] == "model.retry"
+        ]
+        assert len(retries) == 3
+    finally:
+        await host.close()
+
+
 async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace):
     provider = ScriptedProvider([{"text": "summary"}, {"text": "done"}])
     settings = settings_for(isolated_workspace, context_limit=220)
