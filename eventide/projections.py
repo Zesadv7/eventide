@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 TERMINALS = {"run.completed", "run.failed", "run.interrupted"}
@@ -9,7 +10,11 @@ TERMINALS = {"run.completed", "run.failed", "run.interrupted"}
 
 class MessagesProjection:
     @staticmethod
-    def project(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def project(
+        events: list[dict[str, Any]],
+        *,
+        tool_result_content: Callable[[dict[str, Any]], str] | None = None,
+    ) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         pending: set[str] = set()
         results: list[dict[str, Any]] = []
@@ -27,11 +32,16 @@ class MessagesProjection:
             elif event["type"] in {"tool.completed", "tool.abandoned"}:
                 call_id = payload["call_id"]
                 if call_id in pending:
+                    content = (
+                        tool_result_content(event)
+                        if tool_result_content and event["type"] == "tool.completed"
+                        else payload.get("content", "Tool abandoned after interruption")
+                    )
                     results.append(
                         {
                             "type": "tool_result",
                             "tool_use_id": call_id,
-                            "content": payload.get("content", "Tool abandoned after interruption"),
+                            "content": content,
                             "is_error": payload.get("is_error", True),
                         }
                     )

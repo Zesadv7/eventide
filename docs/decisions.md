@@ -291,3 +291,13 @@
 **决策：** 每次 Run 从 Workspace 根目录发现并快照直接子目录中的 `SKILL.md`。system prompt 只暴露 Skill 名称和简介；存在有效 Skill 时动态注册只读 `load_skill`，由模型按需取得完整快照。目录和 manifest 解析不得逃出 Workspace。`context.configured` 记录 Skill 数量与包含内容摘要的目录 hash，加载操作继续使用 canonical tool 事件。
 
 **影响：** 不新增数据库 schema 或进程全局 Skill 状态；不同 Workspace 的目录彼此隔离，Session working directory 不改变查找根。运行中对 Skill 的修改只影响下一次 Run。旧 `eventide.memory.skills` 保留兼容，但生产 Host 不导入它。
+
+## ADR-030：大型工具结果使用无损日志和分页请求投影
+
+**状态：Accepted**，扩展 ADR-018。
+
+**背景：** ADR-018 只在整个请求超预算后折叠较早结果，并固定保护最近三条。单次 Shell、MCP 或自定义工具可以返回接近完整 context limit 的正文；当它位于当前 turn 的受保护尾部时，摘要和旧结果折叠都无法避免 `context_overflow`。把完整正文反复发送给模型也会让大型任务快速消耗上下文。
+
+**决策：** canonical `tool.completed` 继续保存执行器返回的完整正文。ContextBuilder 对超过 12,000 字符的结果始终生成有界头尾预览，预览携带 run_id/call_id；Runtime 提供只读、Session 隔离的 `read_tool_result`，按字符 offset/limit 从 Event Log 读取任意页，单页上限 12,000 字符。若请求仍超预算，再沿用 ADR-018 的较早结果折叠。预览与折叠都记录 `context.trimmed`，不写回事件正文。
+
+**影响：** 最新的大结果不再单独占满请求，模型仍能按证据需要无损回读具体区间；审计导出、工作记录和默认 MessagesProjection 保持原文。分页身份必须同时匹配当前 Session、Run 和 call，不能跨 Session 探测结果。不引入外部 artifact 文件、数据库迁移或自动任务拆分；TodoWrite/Task System 属于后续调度层工作。

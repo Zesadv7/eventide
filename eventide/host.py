@@ -33,6 +33,8 @@ from eventide.providers import Provider, ProviderError, build_provider
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skills import SkillCatalog
 from eventide.store import RuntimeStore
+from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
+from eventide.tool_results import reader as tool_result_reader
 from eventide.tools.runtime_catalog import HANDLERS, TOOLS
 from eventide.workspace import (
     HostLease,
@@ -45,7 +47,9 @@ from eventide.workspace import (
 
 # stop_reason values that mean the provider cut the answer off at max_tokens.
 TRUNCATION_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
-BASE_RUNTIME_READONLY_TOOLS = frozenset({"read_file", "glob", "compact"})
+BASE_RUNTIME_READONLY_TOOLS = frozenset(
+    {"read_file", "glob", "compact", "read_tool_result"}
+)
 
 
 class EventSink(Protocol):
@@ -878,16 +882,23 @@ class RuntimeHost:
                     )
             if skills and any(tool.get("name") == "load_skill" for tool in self.tools):
                 raise ValueError("load_skill is reserved for Workspace Skill loading")
+            if any(tool.get("name") == "read_tool_result" for tool in self.tools):
+                raise ValueError("read_tool_result is reserved for Runtime tool-result paging")
             skill_tools = [skills.tool()] if skills else []
-            tools = [*self.tools, *skill_tools, *manager.tools]
+            tools = [*self.tools, READ_TOOL_RESULT_TOOL, *skill_tools, *manager.tools]
             handlers = {
                 **self.handlers,
+                "read_tool_result": tool_result_reader(self.store, session_id),
                 **({"load_skill": skills.load} if skills else {}),
                 **manager.handlers,
             }
             executor = ToolExecutor(
                 handlers,
-                {*manager.readonly_tools, *({"load_skill"} if skills else set())},
+                {
+                    "read_tool_result",
+                    *manager.readonly_tools,
+                    *({"load_skill"} if skills else set()),
+                },
                 self.executor.command_executor,
             )
             runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)

@@ -12,6 +12,7 @@ from eventide.normalization import normalize, redact
 from eventide.projections import TERMINALS, MessagesProjection
 from eventide.providers import Provider
 from eventide.store import RuntimeStore
+from eventide.tool_results import preview
 from eventide.workspace import digest
 
 
@@ -158,14 +159,32 @@ class ContextBuilder:
                 checkpoint = candidate
                 break
 
-        def materialize(cp: dict[str, Any] | None) -> list[dict[str, Any]]:
+        def materialize(
+            cp: dict[str, Any] | None,
+        ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
             tail = [e for e in events if not cp or e["session_seq"] > cp["covered_seq"]]
-            messages = MessagesProjection.project(tail)
+            previewed: list[str] = []
+            omitted = 0
+
+            def project_result(event: dict[str, Any]) -> str:
+                nonlocal omitted
+                content, removed = preview(event)
+                if removed:
+                    previewed.append(str(event["payload"].get("call_id", "")))
+                    omitted += removed
+                return content
+
+            messages = MessagesProjection.project(tail, tool_result_content=project_result)
             if cp:
                 messages.insert(0, {"role": "user", "content": "[Prior context]\n" + cp["summary"]})
-            return messages
+            trimmed = (
+                {"previewed_call_ids": previewed, "preview_omitted_chars": omitted}
+                if previewed
+                else None
+            )
+            return messages, trimmed
 
-        messages = materialize(checkpoint)
+        messages, preview_trimmed = materialize(checkpoint)
 
         def size(value: Any) -> int:
             return len(
@@ -176,7 +195,7 @@ class ContextBuilder:
             )
 
         if not force and size(messages) <= budget:
-            return messages, None, None
+            return messages, None, preview_trimmed
         names = {
             str(event["payload"].get("call_id")): str(event["payload"].get("name", "tool"))
             for event in events
@@ -191,7 +210,9 @@ class ContextBuilder:
         if boundary and (not checkpoint or boundary > checkpoint["covered_seq"]):
             prefix = [e for e in events if e["session_seq"] <= boundary]
             try:
-                history = MessagesProjection.project(prefix)
+                history = MessagesProjection.project(
+                    prefix, tool_result_content=lambda event: preview(event)[0]
+                )
                 response = await provider.complete(
                     ModelRequest(
                         system="Summarize goals, work, constraints, decisions and next steps. "
@@ -211,7 +232,9 @@ class ContextBuilder:
                     raise ValueError(
                         f"Context summary truncated ({response.stop_reason})"
                     )
-                candidate_messages = materialize({"covered_seq": boundary, "summary": summary})
+                candidate_messages, candidate_preview = materialize(
+                    {"covered_seq": boundary, "summary": summary}
+                )
                 pending = {
                     "covered_seq": boundary,
                     "source_digest": digest(prefix),
@@ -221,14 +244,18 @@ class ContextBuilder:
                 }
                 if size(candidate_messages) < size(current):
                     current = candidate_messages
+                    preview_trimmed = candidate_preview
             except Exception as exc:
                 failure = f"summarizing completed turns failed ({type(exc).__name__}: {exc})"
 
-        current, trimmed = (
+        current, folded_trimmed = (
             _fold_tool_results(current, budget, names, size)
             if size(current) > budget
             else (current, None)
         )
+        trimmed = preview_trimmed
+        if folded_trimmed:
+            trimmed = {**(trimmed or {}), **folded_trimmed}
         if size(current) > budget:
             if failure:
                 reason = failure

@@ -403,6 +403,24 @@ class RuntimeStore:
                 for row in self._connection.execute(query, parameters)
             ]
 
+    def get_tool_result(
+        self, session_id: str, run_id: str, call_id: str
+    ) -> dict[str, Any] | None:
+        """Return one completed result only when both identities belong to the session."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT payload_json FROM runtime_events "
+                "WHERE session_id=? AND run_id=? AND type='tool.completed' "
+                "ORDER BY session_seq",
+                (session_id, run_id),
+            ).fetchall()
+        for row in rows:
+            payload = json.loads(row[0])
+            if payload.get("call_id") == call_id:
+                content = payload.get("content", "")
+                return {**payload, "content": content if isinstance(content, str) else str(content)}
+        return None
+
     def get_run_identity(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._connection.execute(
