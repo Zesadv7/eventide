@@ -72,6 +72,14 @@ const server = http.createServer(async (req, res) => {
     creations++; const id = `new-${creations}`; session(id, JSON.parse(body).workspace_id, "New session"); return reply({session_id: id}, 201);
   }
   if ((match = pathname.match(/^\/api\/sessions\/([^/]+)$/))) {
+    if (req.method === "PATCH") {
+      const record = sessions.get(match[1]); Object.assign(record, JSON.parse(body)); return reply(record);
+    }
+    if (req.method === "DELETE") {
+      const hasRuns = [...runs.values()].some((run) => run.session_id === match[1]);
+      if (hasRuns) return reply({detail: "Session has history; archive it instead of deleting"}, 409);
+      sessions.delete(match[1]); return reply({deleted: match[1]});
+    }
     // Exercise out-of-order selection responses.
     if (match[1] === "s2") await new Promise((resolve) => setTimeout(resolve, 80));
     return reply(sessions.get(match[1]));
@@ -131,6 +139,11 @@ const server = http.createServer(async (req, res) => {
     await page.goto(base); await page.waitForLoadState("networkidle");
     await page.locator("#session-title").filter({hasText: "改善 Session"}).waitFor();
     assert.equal(creations, 0);
+    await page.locator(".session-item").first().click({button: "right"});
+    await page.locator("#session-dialog[open]").waitFor();
+    await page.locator("#session-title-input").fill("恢复体验审计");
+    await page.locator("#save-session").click();
+    await page.locator("#session-title").filter({hasText: "恢复体验审计"}).waitFor();
     assert.equal(await page.locator(".chapter").count(), 2);
     assert.equal(await page.locator(".chapter[open]").count(), 1);
     assert.equal(await page.locator(".operations[open]").count(), 0);

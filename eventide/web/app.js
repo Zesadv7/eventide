@@ -9,6 +9,7 @@ const state = {
   sessions: new Map(), runs: new Map(), expanded: new Map(), manualExpansion: new Set(), errors: new Map(), notices: new Map(),
   drafts: new Map(), positions: new Map(), busy: new Set(), approvals: new Set(), inspector: null,
   hasOlder: new Map(), loadingOlder: new Set(),
+  showArchived: new Set(), sessionEditing: null,
 };
 const sessionJobs = new Map(), workspaceJobs = new Map(), loadingChapters = new Map();
 const sessionRecord = (id = state.session) => [...state.sessions.values()].flat().find((s) => s.session_id === id);
@@ -45,7 +46,8 @@ function subscriptions() {
 
 async function refreshWorkspace(id) {
   if (workspaceJobs.has(id)) return workspaceJobs.get(id);
-  const job = request(`/api/workspaces/${id}/sessions`).then((sessions) => {
+  const suffix = state.showArchived.has(id) ? "?include_archived=true" : "";
+  const job = request(`/api/workspaces/${id}/sessions${suffix}`).then((sessions) => {
     state.sessions.set(id, sessions.sort((a, b) => b.updated_at - a.updated_at || b.created_at - a.created_at));
     subscriptions(); scheduleRender();
   }).finally(() => workspaceJobs.delete(id));
@@ -173,6 +175,69 @@ async function addWorkspace(event) {
   finally { $("#save-workspace").disabled = false; scheduleRender(); }
 }
 
+function openSessionActions(session, event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  state.sessionEditing = session.session_id;
+  $("#session-title-input").value = title(session);
+  $("#session-working-directory").textContent = `工作目录：${session.working_directory || "Workspace 根目录"}`;
+  $("#archive-session").textContent = session.archived ? "恢复到列表" : "归档";
+  $("#session-message").textContent = "";
+  $("#session-dialog").showModal();
+  $("#session-title-input").focus();
+  $("#session-title-input").select();
+}
+
+async function saveSessionTitle(event) {
+  event.preventDefault();
+  const session = sessionRecord(state.sessionEditing);
+  const value = $("#session-title-input").value.trim();
+  if (!session || !value) return;
+  $("#save-session").disabled = true;
+  try {
+    await request(`/api/sessions/${session.session_id}`, {method: "PATCH", body: JSON.stringify({title: value})});
+    $("#session-dialog").close();
+    await refreshWorkspace(session.workspace_id);
+    if (state.session === session.session_id) await refreshSession(session.session_id);
+  } catch (error) { $("#session-message").textContent = error.message || String(error); }
+  finally { $("#save-session").disabled = false; scheduleRender(); }
+}
+
+async function toggleSessionArchive() {
+  const session = sessionRecord(state.sessionEditing);
+  if (!session) return;
+  $("#archive-session").disabled = true;
+  try {
+    await request(`/api/sessions/${session.session_id}`, {method: "PATCH", body: JSON.stringify({archived: !session.archived})});
+    $("#session-dialog").close();
+    await refreshWorkspace(session.workspace_id);
+    if (!session.archived && state.session === session.session_id && !state.showArchived.has(session.workspace_id)) {
+      const remaining = state.sessions.get(session.workspace_id) || [];
+      await selectSession(remaining[0]?.session_id || null);
+    }
+  } catch (error) { $("#session-message").textContent = error.message || String(error); }
+  finally { $("#archive-session").disabled = false; scheduleRender(); }
+}
+
+async function deleteEmptySession() {
+  const session = sessionRecord(state.sessionEditing);
+  if (!session || !confirm("删除这条空工作记录吗？有运行历史的记录不会被删除。")) return;
+  $("#delete-session").disabled = true;
+  try {
+    await request(`/api/sessions/${session.session_id}`, {method: "DELETE"});
+    state.runs.delete(session.session_id);
+    state.hasOlder.delete(session.session_id);
+    $("#session-dialog").close();
+    await refreshWorkspace(session.workspace_id);
+    if (state.session === session.session_id) {
+      localStorage.removeItem(`eventide.session.${session.workspace_id}`);
+      const remaining = state.sessions.get(session.workspace_id) || [];
+      await selectSession(remaining[0]?.session_id || null);
+    }
+  } catch (error) { $("#session-message").textContent = error.message || String(error); }
+  finally { $("#delete-session").disabled = false; scheduleRender(); }
+}
+
 function renderNavigation() {
   const workspace = state.workspaces.find((w) => w.workspace_id === state.workspace);
   $("#workspace-name").textContent = workspace?.name || "工作空间";
@@ -184,13 +249,20 @@ function renderNavigation() {
   }
   select.value = state.workspace || "";
   const sessions = state.sessions.get(state.workspace) || [];
-  reconcile($("#session-list"), sessions, (s) => s.session_id, (s) => JSON.stringify([s.title, s.status, s.updated_at, state.session === s.session_id]), (s) => {
-    const node = button("", () => void selectSession(s.session_id), "session-item");
-    node.setAttribute("aria-current", String(s.session_id === state.session));
-    node.append(el("strong", "", title(s)), el("small", `status-${s.status}`, `${labels[s.status] || s.status} · ${time(s.updated_at)}`));
-    return node;
+  reconcile($("#session-list"), sessions, (s) => s.session_id, (s) => JSON.stringify([s.title, s.status, s.updated_at, s.archived, s.working_directory, state.session === s.session_id]), (s) => {
+    const row = el("div", `session-item${s.archived ? " archived" : ""}`);
+    row.setAttribute("aria-current", String(s.session_id === state.session));
+    row.oncontextmenu = (event) => openSessionActions(s, event);
+    const selectSessionButton = button("", () => void selectSession(s.session_id), "session-select");
+    selectSessionButton.setAttribute("aria-current", String(s.session_id === state.session));
+    selectSessionButton.append(el("strong", "", title(s)), el("small", `status-${s.status}`, `${s.archived ? "已归档 · " : ""}${labels[s.status] || s.status} · ${time(s.updated_at)}`));
+    const more = button("⋯", (event) => openSessionActions(s, event), "session-more");
+    more.setAttribute("aria-label", `管理 ${title(s)}`);
+    row.append(selectSessionButton, more);
+    return row;
   });
   $("#new-session").disabled = !state.workspace || state.busy.has(`new:${state.workspace}`);
+  $("#toggle-archived").textContent = state.showArchived.has(state.workspace) ? "隐藏已归档" : "显示已归档";
 }
 
 function renderOutcome(runs) {
@@ -449,6 +521,17 @@ $("#workspace-switcher").onchange = (event) => void selectWorkspace(event.target
 $("#add-workspace").onclick = () => { $("#workspace-message").textContent = ""; $("#workspace-dialog").showModal(); $("#workspace-input").focus(); };
 $("#close-workspace-dialog").onclick = () => $("#workspace-dialog").close();
 $("#workspace-form").onsubmit = addWorkspace;
+$("#toggle-archived").onclick = async () => {
+  if (!state.workspace) return;
+  if (state.showArchived.has(state.workspace)) state.showArchived.delete(state.workspace);
+  else state.showArchived.add(state.workspace);
+  await refreshWorkspace(state.workspace).catch((error) => report(draftKey(), error));
+};
+$("#close-session-dialog").onclick = () => $("#session-dialog").close();
+$("#session-form").onsubmit = saveSessionTitle;
+$("#archive-session").onclick = () => void toggleSessionArchive();
+$("#delete-session").onclick = () => void deleteEmptySession();
+$("#session-dialog").addEventListener("close", () => { state.sessionEditing = null; });
 $("#new-session").onclick = async () => {
   const workspace = state.workspace, lock = `new:${workspace}`;
   if (state.busy.has(lock)) return;

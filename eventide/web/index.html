@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Eventide · 持续工作的 Workspace">
   <title>Eventide · 工作空间</title>
-  <link rel="stylesheet" href="/assets/style.css?v=7">
+  <link rel="stylesheet" href="/assets/style.css?v=8">
 </head>
 <body>
   <div class="app-shell">
@@ -17,7 +17,7 @@
       <p id="workspace-path" class="workspace-path"></p>
       <p id="workspace-git" class="workspace-git"></p>
       <button id="new-session" class="new-work" type="button">＋ 新建工作</button>
-      <div class="nav-heading">工作记录</div>
+      <div class="nav-heading"><span>工作记录</span><button id="toggle-archived" class="text-button" type="button">显示已归档</button></div>
       <div id="session-list" class="session-list"></div>
       <div class="nav-footer">工作与历史保存在本机</div>
     </aside>
@@ -99,7 +99,23 @@
       <div class="dialog-actions"><span class="action-spacer"></span><button id="save-workspace" class="primary-button" type="submit">添加并打开</button></div>
     </form>
   </dialog>
+  <dialog id="session-dialog" class="model-dialog">
+    <form id="session-form" class="model-form">
+      <div class="dialog-heading">
+        <div><h2>管理工作记录</h2></div>
+        <button id="close-session-dialog" class="icon-button" type="button" aria-label="关闭工作记录管理">×</button>
+      </div>
+      <p id="session-working-directory" class="dialog-note"></p>
+      <div class="config-grid">
+        <label class="wide">标题
+          <input id="session-title-input" name="title" type="text" maxlength="96" required>
+        </label>
+      </div>
+      <div id="session-message" class="config-message" role="status"></div>
+      <div class="dialog-actions"><button id="delete-session" class="text-button danger-button" type="button">删除空记录</button><button id="archive-session" class="secondary-button" type="button">归档</button><span class="action-spacer"></span><button id="save-session" class="primary-button" type="submit">保存标题</button></div>
+    </form>
+  </dialog>
 
-  <script type="module" src="/assets/app.js?v=7"></script>
+  <script type="module" src="/assets/app.js?v=8"></script>
 </body>
 </html>

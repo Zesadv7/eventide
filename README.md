@@ -59,7 +59,7 @@ uv run eventide eval evals/smoke.yaml
 uv run eventide serve --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 `http://127.0.0.1:8000`。左侧“添加工作区”可注册这台电脑上的已有项目目录，成功后直接进入该 Workspace；通过右上角“设置”填写 Provider、模型名称、Base URL 和 API Key，可以先检查连接，再保存并应用。模型配置由同一 Host 的所有工作区共用。配置写入状态根的 `runtime.sqlite`，API Key 使用同目录 `secret.key` 或 `EVENTIDE_SECRET_KEY` 加密。
+浏览器打开 `http://127.0.0.1:8000`。左侧“添加工作区”可注册这台电脑上的已有项目目录，成功后直接进入该 Workspace；工作记录可通过右侧“⋯”或右键重命名、归档/恢复，只有没有运行历史的空记录可硬删除。“显示已归档”用于找回归档记录。通过右上角“设置”填写 Provider、模型名称、Base URL 和 API Key，可以先检查连接，再保存并应用。模型配置由同一 Host 的所有工作区共用。配置写入状态根的 `runtime.sqlite`，API Key 使用同目录 `secret.key` 或 `EVENTIDE_SECRET_KEY` 加密。
 
 默认状态根：Windows 为 `%LOCALAPPDATA%\Eventide`，macOS 为 `~/Library/Application Support/Eventide`，Linux 为 `$XDG_STATE_HOME/eventide`（未设置时 `~/.local/state/eventide`）。`EVENTIDE_STATE_DIR` 可覆盖；相对路径相对于启动工作目录解析。状态目录独占：`serve` 运行期间，使用同一状态根的另一 CLI/Host 会明确报错，首版没有跨进程客户端协议。
 
