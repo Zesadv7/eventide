@@ -12,6 +12,7 @@ from typing import Any
 
 from eventide.config import Settings
 from eventide.evaluation import run_evaluations
+from eventide.migration import import_v02_database
 from eventide.models import RunRequest, ToolCall
 from eventide.runtime import AgentRuntime
 
@@ -40,6 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     abandon.add_argument("session_id")
     abandon.add_argument("--json", action="store_true")
+    migrate = subparsers.add_parser(
+        "migrate-v02", help="Import a v0.2 nexus.db without modifying the source"
+    )
+    migrate.add_argument("source", nargs="?", type=Path)
+    migrate.add_argument("--workspace", help="Workspace ID or existing path")
     workspace = subparsers.add_parser("workspace", help="Manage registered project directories")
     actions = workspace.add_subparsers(dest="workspace_action", required=True)
     actions.add_parser("list")
@@ -124,6 +130,16 @@ async def _manage(args: argparse.Namespace) -> int:
             )
             print(json.dumps(asdict(result), ensure_ascii=False) if args.json else result.output)
             return 0 if result.status == "completed" else 1
+        if args.command == "migrate-v02":
+            workspace = (
+                runtime.resolve_or_register_workspace(args.workspace)
+                if args.workspace
+                else runtime.default_workspace
+            )
+            source = args.source or (Path(workspace.path) / ".nexus" / "nexus.db")
+            value = import_v02_database(runtime.store, source, workspace.workspace_id)
+            print(json.dumps(value, ensure_ascii=False, indent=2))
+            return 0
         if args.workspace_action == "list":
             value = [asdict(w) for w in runtime.store.list_workspaces()]
         elif args.workspace_action == "remove":
@@ -162,7 +178,7 @@ def _main(argv: list[str] | None = None) -> int:
         return asyncio.run(_run_once(args))
     if args.command == "eval":
         return asyncio.run(_eval(args))
-    if args.command in {"workspace", "continue", "abandon"}:
+    if args.command in {"workspace", "continue", "abandon", "migrate-v02"}:
         return asyncio.run(_manage(args))
     if args.command == "serve":
         try:

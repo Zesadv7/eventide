@@ -134,7 +134,7 @@
 
 **决策：** runtime_events 追加保存消息、工具、审批、usage 和终态。Messages、Runtime State 和 Context Builder 只从该日志投影；身份表不保存第二份运行状态。上下文 checkpoint 是带来源 digest 的有损投影，不改变日志。
 
-**影响：** 增加版本化 schema、不可变触发器和唯一终态约束。v0.2 数据不迁移；应用拒绝旧 schema，不自动删除旧文件。TraceStore 名称和常用入口保留兼容，JSONL 输出 canonical 事件，旧 SSE 名称通过适配提供。
+**影响：** 增加版本化 schema、不可变触发器和唯一终态约束。应用不会把旧 schema 直接当作当前数据库打开或自动删除；v0.2 数据通过 ADR-024 的显式只读导入迁移。TraceStore 名称和常用入口保留兼容，JSONL 输出 canonical 事件，旧 SSE 名称通过适配提供。
 
 ## ADR-014：RuntimeHost 拥有 Workspace 执行权
 
@@ -231,3 +231,13 @@
 **决策：** Session 列表通过定向 SQL 读取首次意图、最新活动和最新 Run 摘要；Run History 只投影索引所需的审批与终态，并用数据库聚合生成计数。HTTP 默认返回最近 100 条 Run，以稳定 `run_id` 作为向前游标。SSE 的 `after` 条件直接下推到 SQLite；完整 Event 与完整 Runtime Projection 仅在对应详情、恢复和上下文构建中读取。
 
 **影响：** 不新增第二份运行事实，也不改变不可变日志。历史索引不再返回完整工具、usage 或 checkpoint 投影；需要这些事实的调用者读取单 Run 详情或事件。Web 显式加载更早页面，并在内存中按 Run 身份合并。
+
+## ADR-024：v0.2 历史使用显式只读导入
+
+**状态：Accepted**，修订 ADR-013 的迁移边界。
+
+**背景：** v0.2 的项目内 `.nexus/nexus.db` 没有 Workspace、Turn 和 canonical Event 身份，直接原地升级既无法可靠选择 Workspace，也会让失败恢复和旧密钥处理变得含糊；完全拒绝又会让长期用户丢失产品内历史。
+
+**决策：** 提供 `migrate-v02` 命令，由用户指定旧库和目标 Workspace。Importer 用 SQLite 只读连接验证旧 schema 和 JSON，预检所有身份引用与冲突，再用目标库单事务创建 Workspace 绑定的 Session、Turn、Run 和事件。旧 messages 作为完整 `message.imported` 历史；兼容工具事件映射到 canonical 名称；终态从旧 Run 记录合成，未结束 Run 作为 interrupted。源文件永不修改。
+
+**影响：** 迁移可审计、可重试且失败不留半成品，但不是静默自动发现。旧 Provider 的名称、URL、模型可在目标未配置时恢复；旧 API Key 密文不复制，因为它绑定旧 `secret.key`，用户需要重新配置密钥。已有同名 Session 或 Run 时拒绝整批导入，不覆盖当前事实。

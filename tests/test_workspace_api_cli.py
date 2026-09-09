@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sqlite3
 
 from fastapi.testclient import TestClient
 
@@ -9,6 +10,7 @@ from eventide.api import create_app
 from eventide.cli import main
 from eventide.host import RuntimeHost
 from eventide.providers import ScriptedProvider
+from eventide.store import RuntimeStore
 from tests.test_api import wait_for_run
 from tests.test_host import interrupted_host
 from tests.test_runtime import settings_for
@@ -164,3 +166,80 @@ def test_cli_abandon(isolated_workspace, monkeypatch, capsys):
     monkeypatch.setattr(cli, "AgentRuntime", lambda _: host)
     assert main(["abandon", session, "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["continuation_of"] == "crashed"
+
+
+def test_cli_imports_v02_history_without_changing_source(
+    isolated_workspace, monkeypatch, capsys
+):
+    import eventide.cli as cli
+
+    source = isolated_workspace / "nexus.db"
+    connection = sqlite3.connect(source)
+    connection.executescript("""
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, created_at REAL NOT NULL, updated_at REAL NOT NULL
+        );
+        CREATE TABLE messages (
+            session_id TEXT NOT NULL, seq INTEGER NOT NULL, role TEXT NOT NULL,
+            content_json TEXT NOT NULL, PRIMARY KEY (session_id, seq)
+        );
+        CREATE TABLE runs (
+            id TEXT PRIMARY KEY, session_id TEXT NOT NULL, status TEXT NOT NULL,
+            started_at REAL NOT NULL, completed_at REAL, output TEXT NOT NULL DEFAULT '',
+            steps INTEGER NOT NULL DEFAULT 0, tool_calls INTEGER NOT NULL DEFAULT 0,
+            duration_ms REAL NOT NULL DEFAULT 0, usage_json TEXT NOT NULL DEFAULT '{}',
+            error TEXT
+        );
+        CREATE TABLE events (
+            run_id TEXT NOT NULL, seq INTEGER NOT NULL, ts REAL NOT NULL,
+            type TEXT NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY (run_id, seq)
+        );
+        CREATE TABLE provider_config (
+            id INTEGER PRIMARY KEY, provider TEXT NOT NULL, base_url TEXT,
+            model TEXT NOT NULL, api_key_ciphertext TEXT, updated_at REAL NOT NULL
+        );
+        INSERT INTO sessions VALUES ('old-session', 10, 20);
+        INSERT INTO messages VALUES ('old-session', 1, 'user', '"old prompt"');
+        INSERT INTO messages VALUES ('old-session', 2, 'assistant', '"old answer"');
+        INSERT INTO runs VALUES (
+            'old-run', 'old-session', 'completed', 11, 12, 'old answer',
+            1, 0, 25, '{"input_tokens": 3, "output_tokens": 2}', NULL
+        );
+        INSERT INTO events VALUES (
+            'old-run', 1, 11, 'run.started', '{"provider": "anthropic"}'
+        );
+        INSERT INTO events VALUES (
+            'old-run', 2, 12, 'run.completed', '{"output": "old answer"}'
+        );
+        INSERT INTO provider_config VALUES (
+            1, 'anthropic', NULL, 'legacy-model', 'old-ciphertext', 12
+        );
+    """)
+    connection.close()
+    original = source.read_bytes()
+
+    settings = settings_for(isolated_workspace)
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
+    monkeypatch.setattr(
+        cli,
+        "AgentRuntime",
+        lambda value: RuntimeHost(value, ScriptedProvider([{"text": "unused"}])),
+    )
+    assert main(["migrate-v02", str(source)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["sessions"] == 1
+    assert result["api_key_imported"] is False
+    assert source.read_bytes() == original
+
+    store = RuntimeStore(settings.state_dir / "runtime.sqlite")
+    assert store.load_messages("old-session") == [
+        {"role": "user", "content": "old prompt"},
+        {"role": "assistant", "content": "old answer"},
+    ]
+    assert store.get_run("old-run")["output"] == "old answer"
+    assert store.get_provider_config()["api_key_ciphertext"] is None
+    assert sum(event["type"] == "run.completed" for event in store.run_events("old-run")) == 1
+    store.close()
+
+    assert main(["migrate-v02", str(source)]) == 1
+    assert "already exists" in capsys.readouterr().out

@@ -63,7 +63,13 @@ uv run eventide serve --host 127.0.0.1 --port 8000
 
 默认状态根：Windows 为 `%LOCALAPPDATA%\Eventide`，macOS 为 `~/Library/Application Support/Eventide`，Linux 为 `$XDG_STATE_HOME/eventide`（未设置时 `~/.local/state/eventide`）。`EVENTIDE_STATE_DIR` 可覆盖；相对路径相对于启动工作目录解析。状态目录独占：`serve` 运行期间，使用同一状态根的另一 CLI/Host 会明确报错，首版没有跨进程客户端协议。
 
-v0.2 数据库不自动迁移。请关闭旧进程后选择新的状态根；旧版状态数据库、历史和密钥不会被程序自动删除或导入。新状态根需要重新配置模型。测试和离线评测不需要 API Key。
+v0.2 历史可在关闭旧进程后显式导入；源数据库保持只读，导入在新库中要么全部成功、要么不写入：
+
+```bash
+uv run eventide migrate-v02 /path/to/project/.nexus/nexus.db --workspace /path/to/project
+```
+
+省略数据库路径时，默认读取目标 Workspace 下的 `.nexus/nexus.db`。导入保留 Session、消息、Run、事件以及未含密钥的 Provider 配置；旧密文依赖旧状态根的密钥，出于安全原因不会复制，需要在 Web 设置中重新填写 API Key。重复 Session/Run 身份会在导入前拒绝，不覆盖现有历史。测试和离线评测不需要 API Key。
 
 ## Workspace 与 Continue
 
