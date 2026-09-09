@@ -46,11 +46,12 @@ class RuntimeStore:
             }
             if "sessions" in tables and "schema_migrations" not in tables:
                 raise ValueError("Legacy database: choose a fresh v0.3 state root")
+            version = 0
             if "schema_migrations" in tables:
                 version = self._connection.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
-                if version != 1:
+                if version not in {1, 2}:
                     raise ValueError(f"Unsupported runtime schema version: {version}")
             self._connection.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -101,6 +102,21 @@ class RuntimeStore:
                 );
                 INSERT OR IGNORE INTO schema_migrations VALUES (1, unixepoch());
             """)
+            version = max(version, 1)
+            if version < 2:
+                columns = {
+                    row[1]
+                    for row in self._connection.execute("PRAGMA table_info(sessions)")
+                }
+                if "title" not in columns:
+                    self._connection.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
+                if "archived" not in columns:
+                    self._connection.execute(
+                        "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+                    )
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations VALUES (2, unixepoch())"
+                )
 
     def register_workspace(self, path: Path, git_root: str | None) -> WorkspaceRecord:
         with self._lock, self._connection:
@@ -151,7 +167,8 @@ class RuntimeStore:
                 ).workspace_id
             self.get_workspace(workspace_id)
             self._connection.execute(
-                "INSERT INTO sessions VALUES (?, ?, ?)", (session_id, workspace_id, time.time())
+                "INSERT INTO sessions (id, workspace_id, created_at) VALUES (?, ?, ?)",
+                (session_id, workspace_id, time.time()),
             )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
@@ -161,15 +178,63 @@ class RuntimeStore:
             ).fetchone()
         return dict(row) if row else None
 
-    def list_sessions(self, workspace_id: str) -> list[dict[str, Any]]:
+    def list_sessions(
+        self, workspace_id: str, *, include_archived: bool = True
+    ) -> list[dict[str, Any]]:
+        where = "workspace_id=?" if include_archived else "workspace_id=? AND archived=0"
         with self._lock:
             return [
                 dict(r)
                 for r in self._connection.execute(
-                    "SELECT * FROM sessions WHERE workspace_id=? ORDER BY created_at",
+                    f"SELECT * FROM sessions WHERE {where} ORDER BY created_at",
                     (workspace_id,),
                 )
             ]
+
+    def update_session(
+        self,
+        session_id: str,
+        *,
+        title: str | None = None,
+        archived: bool | None = None,
+    ) -> dict[str, Any]:
+        if self.get_session(session_id) is None:
+            raise ValueError(f"Session not found: {session_id}")
+        updates: list[str] = []
+        values: list[Any] = []
+        if title is not None:
+            cleaned = title.replace("\n", " ").strip()
+            if not cleaned:
+                raise ValueError("Session title cannot be empty")
+            updates.append("title=?")
+            values.append(cleaned[:96])
+        if archived is not None:
+            updates.append("archived=?")
+            values.append(int(archived))
+        if not updates:
+            raise ValueError("No session changes supplied")
+        values.append(session_id)
+        with self._lock, self._connection:
+            self._connection.execute(
+                f"UPDATE sessions SET {', '.join(updates)} WHERE id=?",
+                values,
+            )
+        record = self.get_session(session_id)
+        assert record is not None
+        return record
+
+    def delete_session(self, session_id: str) -> None:
+        if self.get_session(session_id) is None:
+            raise ValueError(f"Session not found: {session_id}")
+        with self._lock, self._connection:
+            has_history = self._connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE session_id=? "
+                "UNION SELECT 1 FROM runs WHERE session_id=?)",
+                (session_id, session_id),
+            ).fetchone()[0]
+            if has_history:
+                raise ValueError("Session has history; archive it instead of deleting")
+            self._connection.execute("DELETE FROM sessions WHERE id=?", (session_id,))
 
     def create_run(
         self, run_id: str, session_id: str, *, continuation_of: str | None = None

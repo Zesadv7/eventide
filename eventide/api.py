@@ -36,6 +36,11 @@ class SessionBody(BaseModel):
     workspace_id: str | None = None
 
 
+class SessionUpdateBody(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=96)
+    archived: bool | None = None
+
+
 class WorkspaceBody(BaseModel):
     path: str = Field(min_length=1)
 
@@ -221,11 +226,16 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         return {"removed": workspace_id}
 
     @app.get("/api/workspaces/{workspace_id}/sessions")
-    async def list_sessions(workspace_id: str) -> list[dict[str, Any]]:
+    async def list_sessions(
+        workspace_id: str, include_archived: bool = False
+    ) -> list[dict[str, Any]]:
         await get_workspace(workspace_id)
         return [
             agent_runtime.session_status(s["id"])
-            for s in agent_runtime.store.list_sessions(workspace_id)
+            for s in agent_runtime.store.list_sessions(
+                workspace_id,
+                include_archived=include_archived,
+            )
         ]
 
     @app.get("/api/sessions/{session_id}")
@@ -234,6 +244,32 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             return agent_runtime.session_status(session_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.patch("/api/sessions/{session_id}")
+    async def update_session(
+        session_id: str, body: SessionUpdateBody, request: Request
+    ) -> dict[str, Any]:
+        _require_local_request(request)
+        await get_session(session_id)
+        try:
+            agent_runtime.store.update_session(
+                session_id,
+                title=body.title,
+                archived=body.archived,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return agent_runtime.session_status(session_id)
+
+    @app.delete("/api/sessions/{session_id}")
+    async def delete_session(session_id: str, request: Request) -> dict[str, str]:
+        _require_local_request(request)
+        await get_session(session_id)
+        try:
+            agent_runtime.store.delete_session(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"deleted": session_id}
 
     @app.get("/api/sessions/{session_id}/messages")
     async def get_messages(session_id: str) -> list[dict[str, Any]]:

@@ -74,6 +74,43 @@ def test_http_abandon_unlocks_parked_session(isolated_workspace):
         assert client.get(f"/api/sessions/{session}").json()["status"] == "completed"
 
 
+def test_http_session_metadata_archive_and_delete(isolated_workspace):
+    host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
+    with TestClient(create_app(host)) as client:
+        workspace_id = host.default_workspace.workspace_id
+        empty = client.post("/api/sessions", json={"workspace_id": workspace_id}).json()[
+            "session_id"
+        ]
+        renamed = client.patch(
+            f"/api/sessions/{empty}",
+            json={"title": "Named work"},
+        )
+        assert renamed.status_code == 200
+        assert renamed.json()["title"] == "Named work"
+
+        archived = client.patch(
+            f"/api/sessions/{empty}",
+            json={"archived": True},
+        )
+        assert archived.json()["archived"] is True
+        assert client.get(f"/api/workspaces/{workspace_id}/sessions").json() == []
+        assert len(
+            client.get(
+                f"/api/workspaces/{workspace_id}/sessions?include_archived=true"
+            ).json()
+        ) == 1
+        assert client.delete(f"/api/sessions/{empty}").status_code == 200
+
+        history = client.post(
+            "/api/sessions", json={"workspace_id": workspace_id}
+        ).json()["session_id"]
+        accepted = client.post(
+            f"/api/sessions/{history}/runs", json={"prompt": "work"}
+        )
+        wait_for_run(client, accepted.json()["run_id"])
+        assert client.delete(f"/api/sessions/{history}").status_code == 409
+
+
 def test_cli_workspace_and_runs(isolated_workspace, monkeypatch, capsys):
     import eventide.cli as cli
 

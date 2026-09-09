@@ -54,3 +54,26 @@ def test_workspace_remove_and_binding(isolated_workspace):
     assert len(store.list_workspaces()) == 1
     assert canonical_workspace(isolated_workspace)[0].is_dir()
     store.close()
+
+
+def test_session_metadata_archive_and_safe_delete(isolated_workspace):
+    store = RuntimeStore(isolated_workspace / "runtime.sqlite")
+    workspace = store.register_workspace(isolated_workspace, None)
+    store.create_session("empty", workspace.workspace_id)
+    renamed = store.update_session("empty", title="  Durable work\nrecord  ")
+    assert renamed["title"] == "Durable work record"
+    assert renamed["archived"] == 0
+    store.update_session("empty", archived=True)
+    assert store.list_sessions(workspace.workspace_id, include_archived=False) == []
+    assert store.list_sessions(workspace.workspace_id, include_archived=True)[0]["archived"] == 1
+    store.delete_session("empty")
+    assert store.get_session("empty") is None
+
+    store.create_session("history", workspace.workspace_id)
+    store.create_run("run", "history")
+    with pytest.raises(ValueError, match="archive"):
+        store.delete_session("history")
+    assert store._connection.execute(
+        "SELECT MAX(version) FROM schema_migrations"
+    ).fetchone()[0] == 2
+    store.close()

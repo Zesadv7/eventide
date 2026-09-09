@@ -20,12 +20,12 @@ Workspace 保存稳定 ID、规范路径、Git 根、名称和创建时间；Git
 
 ## 存储与事件契约
 
-默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。EVENTIDE_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。首次创建版本 1，未知版本和未版本化旧数据库明确拒绝，不自动迁移或删除。
+默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。EVENTIDE_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。当前 schema 版本为 2，版本 1 在同一 v0.3 数据模型内自动升级；未知版本和未版本化旧数据库明确拒绝，不自动删除。
 
 | 表 | 职责 |
 |---|---|
 | workspaces | Workspace 身份、规范路径、Git 根 |
-| sessions | 身份、固定 Workspace 绑定、创建时间 |
+| sessions | 身份、固定 Workspace 绑定、显式标题、归档状态、创建时间 |
 | turns | 用户回合身份、session、continuation_of |
 | runs | 执行身份、session、turn、开始时间 |
 | runtime_events | 唯一运行事实源 |
@@ -76,7 +76,7 @@ Continue 创建新 turn/run，并以唯一 continuation_of 关联来源 run；�
 
 保留 AgentRuntime.run(RunRequest)、create_session、Provider 配置和 RunResult 原字段；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。
 
-CLI 提供 run/chat/serve 的 --workspace、workspace add/list/show/remove、continue 和 abandon。无指定 Workspace 时使用启动 cwd。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon 和按 run_id 取消。Continue 同步等待结果；原 run 提交仍为 202。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。
+CLI 提供 run/chat/serve 的 --workspace、workspace add/list/show/remove、continue 和 abandon。无指定 Workspace 时使用启动 cwd。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon 和按 run_id 取消。Session PATCH 可设置标题或归档；列表默认隐藏归档记录；DELETE 只允许没有运行历史的空 Session。Continue 同步等待结果；原 run 提交仍为 202。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。
 
 模型配置为 Host 级，活跃 run 期间不允许修改。Provider 客户端惰性创建，连接检查不切换活动 Provider。密钥继续使用 Fernet；主密钥优先 EVENTIDE_SECRET_KEY，否则状态根 secret.key。解密失败不退回明文。凭据管理及 Workspace 注册/移除仅接受本机回环请求。
 

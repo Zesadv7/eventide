@@ -51,9 +51,14 @@ def test_legacy_and_future_schema_rejected(isolated_workspace):
     with pytest.raises(ValueError, match="Legacy"):
         RuntimeStore(path)
     store = RuntimeStore(isolated_workspace / "runtime.sqlite")
-    store._connection.execute("UPDATE schema_migrations SET version=99")
-    store._connection.commit()
-    store.close()
+    try:
+        store._connection.execute("DELETE FROM schema_migrations")
+        store._connection.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (99, 0)"
+        )
+        store._connection.commit()
+    finally:
+        store.close()
     with pytest.raises(ValueError, match="Unsupported"):
         RuntimeStore(isolated_workspace / "runtime.sqlite")
 

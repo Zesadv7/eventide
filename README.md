@@ -84,7 +84,7 @@ Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `p
 
 上下文摘要只覆盖已结束的 turn，原始事件不变；达到模型输出上限的残缺摘要不会保存为 checkpoint。Prompt、模型正文和工具结果不会因日志展示限长而在执行前被静默截断；工具始终使用 Provider 返回的原始参数，审计事件中的敏感字段使用脱敏副本。预算按 system、messages 和完整工具目录的序列化请求计算。摘要之后仍超预算时，当前 turn 内较早的工具结果会折叠为占位串（保留最近三条原文，事件日志与工作记录仍保存完整结果），并记录 `context.trimmed`。仍无法在预算内保留时返回 `context_overflow`，不会静默丢弃当前交互。预算单位保持为序列化请求的字符数。模型输出达到 `max_tokens` 被截断且没有工具调用时，run 以 `failed` 结束并提示提高 `EVENTIDE_MAX_TOKENS`，不会静默报成功。
 
-HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id`；空请求继续绑定启动项目。`POST /api/sessions/{id}/continue` 等待新 run 完成并返回 RunResult，验证失败返回 409；Web 工作台通过 Session 状态与 Run History 发现 Continue 创建的新 Run，再消费同一 SSE 事件流。同 Workspace 的并发 HTTP 请求返回 409。Web 控制台以 Workspace、Session 和语义化运行阶段组织事件，不直接展示底层 Runtime 日志。
+HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id`；空请求继续绑定启动项目。`PATCH /api/sessions/{id}` 可设置显式标题或归档状态；默认列表隐藏已归档 Session，传 `include_archived=true` 可查看。`DELETE /api/sessions/{id}` 只删除没有 Run 或事件历史的空 Session，有历史的工作记录必须归档。`POST /api/sessions/{id}/continue` 等待新 run 完成并返回 RunResult，验证失败返回 409；Web 工作台通过 Session 状态与 Run History 发现 Continue 创建的新 Run，再消费同一 SSE 事件流。同 Workspace 的并发 HTTP 请求返回 409。Web 控制台以 Workspace、Session 和语义化运行阶段组织事件，不直接展示底层 Runtime 日志。
 
 ## Web 工作记录页
 

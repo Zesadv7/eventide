@@ -151,7 +151,9 @@ class RuntimeHost:
             ),
             None,
         )
-        title = str(first_intent or "New session").replace("\n", " ").strip()
+        title = str(session.get("title") or first_intent or "New session").replace(
+            "\n", " "
+        ).strip()
         updated_at = max((event["ts"] for event in events), default=session["created_at"])
         return {
             "session_id": session_id,
@@ -159,6 +161,7 @@ class RuntimeHost:
             "created_at": session["created_at"],
             "updated_at": updated_at,
             "title": title[:96],
+            "archived": bool(session.get("archived", False)),
             "status": "parked"
             if run and run["status"] == "interrupted"
             else run["status"]
