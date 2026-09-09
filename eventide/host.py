@@ -141,25 +141,17 @@ class RuntimeHost:
         session = self.store.get_session(session_id)
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
-        run = self.store.latest_run(session_id)
-        events = self.store.session_events(session_id)
-        first_intent = next(
-            (
-                event["payload"].get("message", {}).get("content")
-                for event in events
-                if event["type"] in {"message.user", "message.imported"}
-            ),
-            None,
-        )
+        run = self.store.latest_run_summary(session_id)
+        activity = self.store.session_activity(session_id)
+        first_intent = activity["first_intent"]
         title = str(session.get("title") or first_intent or "New session").replace(
             "\n", " "
         ).strip()
-        updated_at = max((event["ts"] for event in events), default=session["created_at"])
         return {
             "session_id": session_id,
             "workspace_id": workspace.workspace_id,
             "created_at": session["created_at"],
-            "updated_at": updated_at,
+            "updated_at": activity["updated_at"],
             "title": title[:96],
             "archived": bool(session.get("archived", False)),
             "status": "parked"
@@ -175,9 +167,15 @@ class RuntimeHost:
         metadata = git_metadata(Path(workspace.path))
         return {**asdict(workspace), **metadata}
 
-    def session_runs(self, session_id: str) -> list[dict[str, Any]]:
+    def session_runs(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        before: str | None = None,
+    ) -> list[dict[str, Any]]:
         self.sessions.workspace(session_id)
-        return self.store.list_runs(session_id)
+        return self.store.list_runs(session_id, limit=limit, before=before)
 
     async def initialize(self, config_path: Path | None = None) -> None:
         if self._closed:

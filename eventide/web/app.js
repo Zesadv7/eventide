@@ -8,6 +8,7 @@ const state = {
   workspace: localStorage.getItem("eventide.workspace"), session: null, workspaces: [],
   sessions: new Map(), runs: new Map(), expanded: new Map(), manualExpansion: new Set(), errors: new Map(), notices: new Map(),
   drafts: new Map(), positions: new Map(), busy: new Set(), approvals: new Set(), inspector: null,
+  hasOlder: new Map(), loadingOlder: new Set(),
 };
 const sessionJobs = new Map(), workspaceJobs = new Map(), loadingChapters = new Map();
 const sessionRecord = (id = state.session) => [...state.sessions.values()].flat().find((s) => s.session_id === id);
@@ -58,7 +59,14 @@ async function refreshSession(id) {
   job.promise = (async () => {
     do {
       job.again = false;
-      const [session, runs] = await Promise.all([request(`/api/sessions/${id}`), request(`/api/sessions/${id}/runs`)]);
+      const [session, page] = await Promise.all([request(`/api/sessions/${id}`), request(`/api/sessions/${id}/runs?limit=101`)]);
+      const hasExisting = state.runs.has(id);
+      const hasOlder = page.length > 100;
+      const recent = hasOlder ? page.slice(1) : page;
+      const known = state.runs.get(id) || [];
+      const merged = new Map([...known, ...recent].map((run) => [runId(run), run]));
+      const runs = [...merged.values()].sort((a, b) => a.started_at - b.started_at);
+      if (!hasExisting) state.hasOlder.set(id, hasOlder);
       const list = state.sessions.get(session.workspace_id) || [];
       state.sessions.set(session.workspace_id, [...list.filter((s) => s.session_id !== id), session].sort((a, b) => b.updated_at - a.updated_at));
       state.runs.set(id, runs);
@@ -76,6 +84,23 @@ async function refreshSession(id) {
   })().finally(() => sessionJobs.delete(id));
   sessionJobs.set(id, job);
   return job.promise;
+}
+
+async function loadOlderRuns() {
+  const owner = state.session;
+  const runs = currentRuns();
+  if (!owner || !runs.length || state.loadingOlder.has(owner)) return;
+  state.loadingOlder.add(owner); scheduleRender();
+  try {
+    const before = encodeURIComponent(runId(runs[0]));
+    const page = await request(`/api/sessions/${owner}/runs?limit=101&before=${before}`);
+    const hasOlder = page.length > 100;
+    const older = hasOlder ? page.slice(1) : page;
+    const merged = new Map([...older, ...currentRuns()].map((run) => [runId(run), run]));
+    state.runs.set(owner, [...merged.values()].sort((a, b) => a.started_at - b.started_at));
+    state.hasOlder.set(owner, hasOlder);
+  } catch (error) { report(owner, error); }
+  finally { state.loadingOlder.delete(owner); scheduleRender(); }
 }
 
 async function loadChapter(owner, chapter) {
@@ -213,6 +238,9 @@ function renderBlock(block, chapterId) {
 
 function renderHistory(runs) {
   const owner = state.session;
+  $("#load-older").hidden = !owner || !state.hasOlder.get(owner);
+  $("#load-older").disabled = state.loadingOlder.has(owner);
+  $("#load-older").textContent = state.loadingOlder.has(owner) ? "正在加载…" : "加载更早记录";
   const groups = chapters(runs);
   const latestResult = [...runs].reverse().find((r) => r.status === "completed" && r.output);
   if (!groups.length) {
@@ -419,6 +447,7 @@ $("#prompt").onkeydown = (event) => { if (event.ctrlKey && event.key === "Enter"
 $("#continue-button").onclick = () => void continueSession();
 $("#abandon-button").onclick = () => void abandonInterruption();
 $("#cancel-run").onclick = () => void cancelCurrentRun();
+$("#load-older").onclick = () => void loadOlderRuns();
 $("#session-details").onclick = (event) => openInspector({}, event.currentTarget);
 $("#interruption-details").onclick = (event) => openInspector({chapterId: chapters(currentRuns()).at(-1)?.id}, event.currentTarget);
 $("#close-inspector").onclick = closeInspector;

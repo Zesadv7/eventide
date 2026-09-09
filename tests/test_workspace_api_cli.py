@@ -37,6 +37,8 @@ def test_workspace_http_catalog_and_session_binding(isolated_workspace):
         assert history.status_code == 200
         assert history.json()[0]["id"] == run_id
         assert history.json()[0]["event_count"] > 0
+        assert client.get(f"/api/sessions/{session}/runs?limit=0").status_code == 422
+        assert client.get("/api/runs/missing/events").status_code == 404
         assert (
             client.get(f"/api/workspaces/{workspace_id}/sessions").json()[0]["session_id"]
             == session

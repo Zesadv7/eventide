@@ -77,3 +77,23 @@ def test_session_metadata_archive_and_safe_delete(isolated_workspace):
         "SELECT MAX(version) FROM schema_migrations"
     ).fetchone()[0] == 2
     store.close()
+
+
+def test_run_history_pages_and_event_cursor_are_bounded(isolated_workspace):
+    store = RuntimeStore(isolated_workspace / "runtime.sqlite")
+    workspace = store.register_workspace(isolated_workspace, None)
+    store.create_session("long", workspace.workspace_id)
+    for index in range(5):
+        run_id = f"run-{index}"
+        store.create_run(run_id, "long")
+        store.append_event(run_id, "message.user", {"message": {"content": f"work {index}"}})
+        store.finish_run(run_id, status="completed", output=f"done {index}")
+
+    latest = store.list_runs("long", limit=2)
+    assert [run["id"] for run in latest] == ["run-3", "run-4"]
+    older = store.list_runs("long", limit=2, before="run-3")
+    assert [run["id"] for run in older] == ["run-1", "run-2"]
+    cursor = store.run_events("run-4")[0]["session_seq"]
+    assert all(event["session_seq"] > cursor for event in store.get_events("run-4", cursor))
+    assert store.session_activity("long")["first_intent"] == "work 0"
+    store.close()

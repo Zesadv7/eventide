@@ -280,9 +280,15 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/sessions/{session_id}/runs")
-    async def list_runs(session_id: str) -> list[dict[str, Any]]:
+    async def list_runs(
+        session_id: str,
+        limit: int = 100,
+        before: str | None = None,
+    ) -> list[dict[str, Any]]:
         await get_session(session_id)
-        return agent_runtime.session_runs(session_id)
+        if not 1 <= limit <= 200:
+            raise HTTPException(status_code=422, detail="limit must be between 1 and 200")
+        return agent_runtime.session_runs(session_id, limit=limit, before=before)
 
     @app.post("/api/sessions/{session_id}/continue")
     async def continue_session(session_id: str) -> dict[str, Any]:
@@ -437,6 +443,9 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
 
     @app.get("/api/runs/{run_id}/events")
     async def run_events(run_id: str, request: Request, after: int = 0) -> StreamingResponse:
+        if not agent_runtime.store.get_run_identity(run_id):
+            raise HTTPException(status_code=404, detail="Run not found")
+
         async def stream() -> AsyncIterator[str]:
             cursor = max(after, 0)
             idle_ticks = 0
@@ -446,10 +455,8 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
                     cursor = event["seq"]
                     encoded = json.dumps(event, ensure_ascii=False)
                     yield f"id: {cursor}\nevent: {event['type']}\ndata: {encoded}\n\n"
-                record = agent_runtime.store.get_run(run_id)
                 if (
-                    record
-                    and record["status"] in {"completed", "failed", "interrupted"}
+                    agent_runtime.store.run_is_terminal(run_id)
                     and not events
                 ):
                     break

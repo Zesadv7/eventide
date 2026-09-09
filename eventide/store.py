@@ -336,27 +336,98 @@ class RuntimeStore:
                 )
             ]
 
-    def run_events(self, run_id: str) -> list[dict[str, Any]]:
+    def session_activity(self, session_id: str) -> dict[str, Any]:
+        """Return list-view facts without decoding the full session log."""
+        session = self.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Session not found: {session_id}")
+        with self._lock:
+            updated_at = self._connection.execute(
+                "SELECT MAX(ts) FROM runtime_events WHERE session_id=?",
+                (session_id,),
+            ).fetchone()[0]
+            intent = self._connection.execute(
+                "SELECT payload_json FROM runtime_events "
+                "WHERE session_id=? AND type IN ('message.user', 'message.imported') "
+                "ORDER BY session_seq LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        first_intent = None
+        if intent:
+            first_intent = json.loads(intent[0]).get("message", {}).get("content")
+        return {
+            "first_intent": first_intent,
+            "updated_at": updated_at or session["created_at"],
+        }
+
+    def run_events(
+        self, run_id: str, *, after: int = 0, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        query = (
+            "SELECT * FROM runtime_events WHERE run_id=? AND session_seq>? "
+            "ORDER BY session_seq"
+        )
+        parameters: list[Any] = [run_id, after]
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters.append(limit)
         with self._lock:
             return [
                 self._decode(row)
-                for row in self._connection.execute(
-                    "SELECT * FROM runtime_events WHERE run_id=? ORDER BY session_seq", (run_id,)
-                )
+                for row in self._connection.execute(query, parameters)
             ]
 
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
+    def get_run_identity(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._connection.execute(
                 "SELECT r.*, t.continuation_of FROM runs r JOIN turns t ON r.turn_id=t.id "
                 "WHERE r.id=?",
                 (run_id,),
             ).fetchone()
+        return dict(row) if row else None
+
+    def run_is_terminal(self, run_id: str) -> bool:
+        with self._lock:
+            return bool(
+                self._connection.execute(
+                    "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE run_id=? "
+                    "AND type IN ('run.completed','run.failed','run.interrupted'))",
+                    (run_id,),
+                ).fetchone()[0]
+            )
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        row = self.get_run_identity(run_id)
         return (
-            {**dict(row), **RuntimeStateProjection.project(self.run_events(run_id))}
+            {**row, **RuntimeStateProjection.project(self.run_events(run_id))}
             if row
             else None
         )
+
+    def get_run_summary(self, run_id: str) -> dict[str, Any] | None:
+        """Project only state needed by navigation and history indexes."""
+        row = self.get_run_identity(run_id)
+        if row is None:
+            return None
+        with self._lock:
+            events = [
+                self._decode(event)
+                for event in self._connection.execute(
+                    "SELECT * FROM runtime_events WHERE run_id=? AND type IN "
+                    "('approval.required','approval.resolved','run.completed',"
+                    "'run.failed','run.interrupted') ORDER BY session_seq",
+                    (run_id,),
+                )
+            ]
+        state = RuntimeStateProjection.project(events)
+        return {
+            **row,
+            **{
+                key: state[key]
+                for key in ("status", "output", "duration_ms", "error", "pending_approvals")
+            },
+            **({"completed_at": state["completed_at"]} if "completed_at" in state else {}),
+        }
 
     def latest_run(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -365,27 +436,89 @@ class RuntimeStore:
             ).fetchone()
         return self.get_run(row[0]) if row else None
 
-    def list_runs(self, session_id: str) -> list[dict[str, Any]]:
-        """Return all runs with projected state and lightweight event facts."""
+    def latest_run_summary(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
-            rows = self._connection.execute(
-                "SELECT r.*, t.continuation_of FROM runs r "
-                "JOIN turns t ON r.turn_id=t.id "
-                "WHERE r.session_id=? ORDER BY r.started_at, r.rowid",
+            row = self._connection.execute(
+                "SELECT id FROM runs WHERE session_id=? ORDER BY rowid DESC LIMIT 1",
                 (session_id,),
-            ).fetchall()
+            ).fetchone()
+        return self.get_run_summary(row[0]) if row else None
+
+    def list_runs(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        before: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return a newest-first page, presented in chronological order."""
+        if limit is not None and limit < 1:
+            raise ValueError("Run page limit must be positive")
+        conditions = ["r.session_id=?"]
+        parameters: list[Any] = [session_id]
+        if before is not None:
+            conditions.append(
+                "r.rowid < COALESCE((SELECT rowid FROM runs WHERE id=? AND session_id=?), -1)"
+            )
+            parameters.extend([before, session_id])
+        query = (
+            "SELECT r.*, t.continuation_of FROM runs r "
+            "JOIN turns t ON r.turn_id=t.id "
+            f"WHERE {' AND '.join(conditions)} ORDER BY r.rowid DESC"
+        )
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters.append(limit)
+        with self._lock:
+            rows = list(reversed(self._connection.execute(query, parameters).fetchall()))
+            events_by_run: dict[str, list[dict[str, Any]]] = {
+                row["id"]: [] for row in rows
+            }
+            aggregates: dict[str, sqlite3.Row] = {}
+            if rows:
+                placeholders = ",".join("?" for _ in rows)
+                for event in self._connection.execute(
+                    f"SELECT * FROM runtime_events WHERE run_id IN ({placeholders}) "
+                    "AND type IN ('approval.required','approval.resolved','run.completed',"
+                    "'run.failed','run.interrupted') "
+                    "ORDER BY session_seq",
+                    [row["id"] for row in rows],
+                ):
+                    events_by_run[event["run_id"]].append(self._decode(event))
+                aggregates = {
+                    aggregate["run_id"]: aggregate
+                    for aggregate in self._connection.execute(
+                        f"SELECT run_id, COUNT(*) event_count, MAX(session_seq) last_seq, "
+                        "SUM(type='workspace.checkpoint') checkpoint_count, "
+                        "SUM(type='approval.required') approval_count "
+                        f"FROM runtime_events WHERE run_id IN ({placeholders}) GROUP BY run_id",
+                        [row["id"] for row in rows],
+                    )
+                }
         records: list[dict[str, Any]] = []
         for row in rows:
-            events = self.run_events(row["id"])
-            record = {**dict(row), **RuntimeStateProjection.project(events)}
-            record["event_count"] = len(events)
-            record["checkpoint_count"] = sum(
-                event["type"] == "workspace.checkpoint" for event in events
-            )
-            record["approval_count"] = sum(
-                event["type"] == "approval.required" for event in events
-            )
-            record["last_seq"] = events[-1]["session_seq"] if events else 0
+            events = events_by_run[row["id"]]
+            state = RuntimeStateProjection.project(events)
+            record = {
+                **dict(row),
+                **{
+                    key: state[key]
+                    for key in (
+                        "status",
+                        "output",
+                        "duration_ms",
+                        "error",
+                        "pending_approvals",
+                    )
+                },
+            }
+            if "completed_at" in state:
+                record["completed_at"] = state["completed_at"]
+            aggregate = aggregates.get(row["id"])
+            record["event_count"] = aggregate["event_count"] if aggregate else 0
+            record["checkpoint_count"] = aggregate["checkpoint_count"] if aggregate else 0
+            record["approval_count"] = aggregate["approval_count"] if aggregate else 0
+            record["last_seq"] = aggregate["last_seq"] if aggregate else 0
             records.append(record)
         return records
 
@@ -414,7 +547,7 @@ class RuntimeStore:
         return MessagesProjection.project(self.session_events(session_id))
 
     def append_event(self, run_id: str, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-        run = self.get_run(run_id)
+        run = self.get_run_identity(run_id)
         if not run:
             raise ValueError("Run not found")
         event = self.append_fact(run["session_id"], event_type, redact(payload), run_id=run_id)
@@ -428,8 +561,7 @@ class RuntimeStore:
         aliases = {"tool.prepared": "tool.request", "tool.completed": "tool.result"}
         return [
             {**e, "seq": e["session_seq"], "type": aliases.get(e["type"], e["type"])}
-            for e in self.run_events(run_id)
-            if e["session_seq"] > after
+            for e in self.run_events(run_id, after=after)
         ]
 
     def export_jsonl(self, run_id: str, destination: Path) -> Path:
