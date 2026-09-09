@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Eventide · 持续工作的 Workspace">
   <title>Eventide · 工作空间</title>
-  <link rel="stylesheet" href="/assets/style.css?v=6">
+  <link rel="stylesheet" href="/assets/style.css?v=7">
 </head>
 <body>
   <div class="app-shell">
@@ -13,6 +13,7 @@
       <div class="nav-brand"><a href="/" aria-label="Eventide">EVENTIDE<span>Agent</span></a><button id="close-nav" class="icon-button" aria-label="收起导航" type="button">‹</button></div>
       <label class="workspace-label" for="workspace-switcher">工作区</label>
       <select id="workspace-switcher" aria-label="切换 Workspace"></select>
+      <button id="add-workspace" class="text-button workspace-add" type="button">＋ 添加工作区</button>
       <p id="workspace-path" class="workspace-path"></p>
       <p id="workspace-git" class="workspace-git"></p>
       <button id="new-session" class="new-work" type="button">＋ 新建工作</button>
@@ -82,7 +83,23 @@
       </div>
     </form>
   </dialog>
+  <dialog id="workspace-dialog" class="model-dialog">
+    <form id="workspace-form" class="model-form">
+      <div class="dialog-heading">
+        <div><h2>添加工作区</h2></div>
+        <button id="close-workspace-dialog" class="icon-button" type="button" aria-label="关闭添加工作区">×</button>
+      </div>
+      <p class="dialog-note">输入这台电脑上已有的项目目录。Git 子目录会归一到仓库根目录。</p>
+      <div class="config-grid">
+        <label class="wide">项目目录
+          <input id="workspace-input" name="path" type="text" autocomplete="off" placeholder="C:\projects\my-app" required>
+        </label>
+      </div>
+      <div id="workspace-message" class="config-message" role="status"></div>
+      <div class="dialog-actions"><span class="action-spacer"></span><button id="save-workspace" class="primary-button" type="submit">添加并打开</button></div>
+    </form>
+  </dialog>
 
-  <script type="module" src="/assets/app.js?v=6"></script>
+  <script type="module" src="/assets/app.js?v=7"></script>
 </body>
 </html>

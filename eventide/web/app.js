@@ -157,6 +157,22 @@ async function createSession(workspace = state.workspace) {
   return result.session_id;
 }
 
+async function addWorkspace(event) {
+  event.preventDefault();
+  const path = $("#workspace-input").value.trim();
+  if (!path) return;
+  $("#save-workspace").disabled = true;
+  $("#workspace-message").textContent = "";
+  try {
+    const workspace = await request("/api/workspaces", {method: "POST", body: JSON.stringify({path})});
+    state.workspaces = [...state.workspaces.filter((item) => item.workspace_id !== workspace.workspace_id), workspace];
+    $("#workspace-dialog").close();
+    $("#workspace-input").value = "";
+    await selectWorkspace(workspace.workspace_id);
+  } catch (error) { $("#workspace-message").textContent = error.message || String(error); }
+  finally { $("#save-workspace").disabled = false; scheduleRender(); }
+}
+
 function renderNavigation() {
   const workspace = state.workspaces.find((w) => w.workspace_id === state.workspace);
   $("#workspace-name").textContent = workspace?.name || "工作空间";
@@ -430,6 +446,9 @@ async function cancelCurrentRun() {
 }
 
 $("#workspace-switcher").onchange = (event) => void selectWorkspace(event.target.value);
+$("#add-workspace").onclick = () => { $("#workspace-message").textContent = ""; $("#workspace-dialog").showModal(); $("#workspace-input").focus(); };
+$("#close-workspace-dialog").onclick = () => $("#workspace-dialog").close();
+$("#workspace-form").onsubmit = addWorkspace;
 $("#new-session").onclick = async () => {
   const workspace = state.workspace, lock = `new:${workspace}`;
   if (state.busy.has(lock)) return;

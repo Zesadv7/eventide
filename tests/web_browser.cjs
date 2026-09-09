@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const root = path.resolve(__dirname, "../eventide/web");
 const output = path.resolve(__dirname, "../.task_outputs");
 const timestamp = 1788870000;
-let seq = 0, creations = 0, continuationResponse, continueRejected = false;
+let seq = 0, creations = 0, continueRejected = false;
 const streams = new Map();
 const runs = new Map();
 const sessions = new Map();
@@ -60,6 +60,11 @@ const server = http.createServer(async (req, res) => {
   for await (const chunk of req) body += chunk;
   apiCalls.push([req.method, pathname]);
   if (pathname === "/api/config/provider") return reply({provider: "openai_compatible", model: "offline-fixture", api_key_configured: true});
+  if (pathname === "/api/workspaces" && req.method === "POST") {
+    const projectPath = JSON.parse(body).path;
+    const workspace = {workspace_id: "w-added", name: "added-project", path: projectPath};
+    workspaces.push(workspace); return reply(workspace, 201);
+  }
   if (pathname === "/api/workspaces") return reply(workspaces);
   let match;
   if ((match = pathname.match(/^\/api\/workspaces\/([^/]+)\/sessions$/))) return reply([...sessions.values()].filter((s) => s.workspace_id === match[1]));
@@ -88,15 +93,14 @@ const server = http.createServer(async (req, res) => {
     const approval = {approval_id: "approval-write", tool: "write_file", arguments: {path: "notes.txt"}, reason: "需要允许写入文件"};
     run.pending_approvals[approval.approval_id] = approval;
     emit(run.id, "approval.required", approval);
-    continuationResponse = res; return;
+    return reply({run_id: run.id, session_id: owner, status: "accepted"}, 202);
   }
   if ((match = pathname.match(/^\/api\/runs\/([^/]+)\/approvals\/([^/]+)$/))) {
     const run = runs.get(match[1]); delete run.pending_approvals[match[2]];
     emit(run.id, "approval.resolved", {approval_id: match[2], approved: JSON.parse(body).approved});
     emit(run.id, "tool.completed", {call_id: "write", name: "write_file", content: "Permission denied by user", is_error: true});
     emit(run.id, "run.completed", {output: "已处理授权决定，工作可以继续。"});
-    reply({approved: false});
-    continuationResponse.writeHead(200, {"Content-Type": "application/json"}); continuationResponse.end(JSON.stringify({...run, run_id: run.id})); continuationResponse = null; return;
+    return reply({approved: false});
   }
   if ((match = pathname.match(/^\/api\/runs\/([^/]+)\/events$/))) {
     const id = match[1], after = Number(url.searchParams.get("after") || 0);
@@ -149,10 +153,9 @@ const server = http.createServer(async (req, res) => {
     await page.reload(); await page.waitForLoadState("networkidle");
     assert.equal(await page.locator("#session-title").innerText(), "改善 Session 恢复体验");
 
-    // The synchronous Continue response is still open while the UI handles approval.
+    // Continue returns its durable run identity before the UI handles approval.
     await page.locator("#continue-button").click();
     await page.getByRole("button", {name: "本次允许", exact: true}).waitFor();
-    assert.ok(continuationResponse && !continuationResponse.writableEnded);
     assert.equal(await page.locator("#continue-button").isVisible(), false);
     assert.equal(await page.locator("#run-button").isDisabled(), true);
     assert.match(await page.locator("#narrative").innerText(), /接续上次停驻/);
@@ -177,12 +180,19 @@ const server = http.createServer(async (req, res) => {
     await page.locator("#workspace-switcher").selectOption("w2");
     await page.locator("#outcome").filter({hasText: "另一个项目的结果"}).waitFor();
     await page.locator("#work-scroll").evaluate((node) => { node.scrollTop = 700; });
-    await page.waitForResponse((response) => response.url().endsWith("/api/sessions/s3/runs"));
+    await page.waitForResponse((response) => response.url().includes("/api/sessions/s3/runs"));
     assert.equal(await page.locator("#work-scroll").evaluate((node) => node.scrollTop), 700);
     const actionBox = await page.locator("#run-button").boundingBox();
     assert.ok(actionBox.y + actionBox.height <= 1000, "composer stays reachable with long output");
     await page.locator("#workspace-switcher").selectOption("w1");
     await page.locator("#session-title").filter({hasText: "改善 Session"}).waitFor();
+
+    await page.locator("#add-workspace").click();
+    await page.locator("#workspace-input").fill("E:\\added");
+    await page.locator("#save-workspace").click();
+    await page.waitForFunction(() => document.querySelector("#workspace-switcher").value === "w-added");
+    assert.equal(workspaces.at(-1).path, "E:\\added");
+    await page.locator("#workspace-switcher").selectOption("w1");
 
     // A rejected Continue leaves Parked visible and explains admission failure.
     addRun("parked-again", "s1", "interrupted"); emit("parked-again", "run.interrupted", {error: "Interrupted"}); continueRejected = true;
@@ -206,6 +216,6 @@ const server = http.createServer(async (req, res) => {
     await page.locator("#outcome").filter({hasText: "新的工作结果"}).waitFor();
     await page.screenshot({path: path.join(output, "web-workspace-mobile.png")});
     assert.deepEqual(errors, []);
-    console.log("PASS: lazy history, Markdown safety, inspector focus, refresh, Continue with live approval, selection races, 409 recovery, mobile navigation and submission");
+    console.log("PASS: lazy history, Markdown safety, inspector focus, refresh, async Continue, Workspace add, selection races, 409 recovery, mobile navigation and submission");
   } finally { await browser.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
 })().catch((error) => { console.error(error); process.exitCode = 1; server.closeAllConnections(); server.close(); });

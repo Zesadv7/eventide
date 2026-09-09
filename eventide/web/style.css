@@ -18,6 +18,7 @@ code,pre,.workspace-path,.workspace-git { font-family:ui-monospace,SFMono-Regula
 .icon-button:hover,.text-button:hover,.settings-button:hover { background:#edf0f2; color:var(--ink); }
 .workspace-label { font-size:12px; color:var(--muted); margin:0 8px 8px; }
 #workspace-switcher { background:transparent; border:0; width:100%; padding:8px 5px; font-size:15px; font-weight:600; text-overflow:ellipsis; }
+.workspace-add { align-self:flex-start; margin:2px 0 4px; }
 .workspace-path,.workspace-git { margin:4px 8px; font-size:12px; line-height:1.6; color:var(--muted); overflow-wrap:anywhere; }
 .workspace-path { max-height:58px; overflow:auto; }
 .new-work { margin:25px 0 30px; padding:10px; text-align:left; border:1px solid #d8dde2; border-radius:6px; background:var(--paper); font-size:14px; }

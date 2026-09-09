@@ -86,7 +86,7 @@ CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/l
 
 ## Web 展示投影与交互
 
-Web 是原生 ES modules，无构建步骤。`app.js` 协调 Workspace/Session 选择、API 状态、审批、Continue 与工作记录页；`projection.js` 提供纯展示投影；`transport.js` 消费同一 SSE 路由；`view.js` 处理稳定 DOM 与安全 Markdown 子集；`config.js` 管理 Host 模型配置。
+Web 是原生 ES modules，无构建步骤。`app.js` 协调 Workspace 注册、Workspace/Session 选择、API 状态、审批、Continue 与工作记录页；`projection.js` 提供纯展示投影；`transport.js` 消费同一 SSE 路由；`view.js` 处理稳定 DOM 与安全 Markdown 子集；`config.js` 管理 Host 模型配置。添加工作区对话框调用仅限本机的 Workspace POST，成功后刷新内存目录并直接切换，不自动创建空 Session。
 
 传输层将兼容 tool.request/result 名称归一化，按 event_id 或 run/seq 去重、按 session_seq 排序；流断开后从最后已消费游标补齐，即使 Run 已终止也不跳过尾部事件。Event cursor 在 SQLite 查询中直接过滤，不先重放旧事件。导航与历史索引只投影状态、审批和终态等轻量事实，Run History 按稳定 run_id cursor 分页；展开章节时才读取该 Run 的事件。最新 Run 摘要另用 SQL 聚合步骤、工具数和最后事件时间，Web 将其与已收到的 SSE 合并，显示经过时间和最近活动。运行状态和 pending approval 始终查询服务端 Runtime Projection，事件通知触发状态协调，周期查询发现其他入口启动的 Run。异步结果按所属 Workspace/Session 缓存，不写入当前选中 Session 的其他记录。
 
