@@ -137,6 +137,57 @@ def test_http_session_metadata_archive_and_delete(isolated_workspace):
         assert client.delete(f"/api/sessions/{history}").status_code == 409
 
 
+def test_http_session_working_directory_scopes_execution(isolated_workspace):
+    package = isolated_workspace / "package"
+    package.mkdir()
+    (package / "marker.txt").write_text("from package", encoding="utf-8")
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "read",
+                        "name": "read_file",
+                        "arguments": {"path": "marker.txt"},
+                    }
+                ]
+            },
+            {"text": "done"},
+        ]
+    )
+    host = RuntimeHost(settings_for(isolated_workspace), provider)
+    with TestClient(create_app(host)) as client:
+        workspace_id = host.default_workspace.workspace_id
+        created = client.post(
+            "/api/sessions",
+            json={"workspace_id": workspace_id, "working_directory": "package"},
+        )
+        assert created.status_code == 201
+        session = created.json()["session_id"]
+        assert client.get(f"/api/sessions/{session}").json()["working_directory"] == str(
+            package
+        )
+        accepted = client.post(
+            f"/api/sessions/{session}/runs", json={"prompt": "read marker"}
+        )
+        run_id = accepted.json()["run_id"]
+        assert wait_for_run(client, run_id)["status"] == "completed"
+        result = next(
+            event
+            for event in host.store.run_events(run_id)
+            if event["type"] == "tool.completed"
+        )
+        assert result["payload"]["content"] == "from package"
+        assert f"Working directory: {package}" in provider.requests[0].system
+        assert (
+            client.post(
+                "/api/sessions",
+                json={"workspace_id": workspace_id, "working_directory": ".."},
+            ).status_code
+            == 422
+        )
+
+
 def test_cli_workspace_and_runs(isolated_workspace, monkeypatch, capsys):
     import eventide.cli as cli
 

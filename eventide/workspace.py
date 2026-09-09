@@ -71,6 +71,20 @@ def canonical_workspace(path: Path) -> tuple[Path, str | None]:
     return top, str(top)
 
 
+def session_working_directory(workspace: Path, target: str | Path | None) -> tuple[str, Path]:
+    """Resolve a stable Session cwd and keep it inside its Workspace identity."""
+    root = workspace.resolve(strict=True)
+    requested = Path(target).expanduser() if target is not None else Path(".")
+    candidate = requested if requested.is_absolute() else root / requested
+    candidate = candidate.resolve(strict=True)
+    if not candidate.is_dir():
+        raise ValueError("Working directory must be an existing directory")
+    if not candidate.is_relative_to(root):
+        raise ValueError("Working directory must stay inside its Workspace")
+    relative = candidate.relative_to(root)
+    return (relative.as_posix() if relative.parts else "."), candidate
+
+
 def git_metadata(path: Path) -> dict[str, str | None]:
     """Return lightweight, live Git identity metadata for UI/API projections."""
     try:

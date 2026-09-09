@@ -34,6 +34,7 @@ class RunBody(BaseModel):
 
 class SessionBody(BaseModel):
     workspace_id: str | None = None
+    working_directory: str | None = Field(default=None, min_length=1)
 
 
 class SessionUpdateBody(BaseModel):
@@ -186,11 +187,13 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         try:
             return {
                 "session_id": agent_runtime.create_session(
-                    workspace_id=body.workspace_id if body else None
+                    workspace_id=body.workspace_id if body else None,
+                    working_directory=body.working_directory if body else None,
                 )
             }
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            code = 404 if str(exc).startswith("Workspace not found") else 422
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
 
     @app.post("/api/workspaces", status_code=201)
     async def register_workspace(body: WorkspaceBody, request: Request) -> dict[str, Any]:

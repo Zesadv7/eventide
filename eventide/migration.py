@@ -185,8 +185,9 @@ def import_v02_database(
             session_id = session["id"]
             created_at = float(session["created_at"])
             store._connection.execute(
-                "INSERT INTO sessions (id, workspace_id, created_at, title, archived) "
-                "VALUES (?, ?, ?, NULL, 0)",
+                "INSERT INTO sessions "
+                "(id, workspace_id, created_at, title, archived, working_directory) "
+                "VALUES (?, ?, ?, NULL, 0, '.')",
                 (session_id, workspace_id, created_at),
             )
             for message in messages_by_session[session_id]:

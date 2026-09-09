@@ -54,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     actions.add_parser("remove").add_argument("target")
     for name in ("run", "chat", "serve"):
         subparsers.choices[name].add_argument("--workspace", help="Workspace ID or existing path")
+    for name in ("run", "chat"):
+        subparsers.choices[name].add_argument(
+            "--cwd", help="Session working directory inside the Workspace"
+        )
     return parser
 
 
@@ -70,7 +74,15 @@ async def _run_once(args: argparse.Namespace) -> int:
         workspace = (
             runtime.resolve_or_register_workspace(args.workspace) if args.workspace else None
         )
-        session = runtime.create_session(workspace_id=workspace.workspace_id if workspace else None)
+        inferred_cwd = (
+            args.workspace
+            if args.workspace and not args.workspace.startswith("ws_")
+            else None
+        )
+        session = runtime.create_session(
+            workspace_id=workspace.workspace_id if workspace else None,
+            working_directory=args.cwd or inferred_cwd,
+        )
         result = await runtime.run(
             RunRequest(args.prompt, session), approval_handler=_terminal_approval
         )
@@ -82,7 +94,10 @@ async def _run_once(args: argparse.Namespace) -> int:
         await runtime.close()
 
 
-async def _chat(workspace_target: str | None = None) -> int:
+async def _chat(
+    workspace_target: str | None = None,
+    working_directory: str | None = None,
+) -> int:
     settings = Settings.from_env()
     runtime = AgentRuntime(settings)
     try:
@@ -90,7 +105,13 @@ async def _chat(workspace_target: str | None = None) -> int:
             runtime.resolve_or_register_workspace(workspace_target) if workspace_target else None
         )
         session_id = runtime.create_session(
-            workspace_id=workspace.workspace_id if workspace else None
+            workspace_id=workspace.workspace_id if workspace else None,
+            working_directory=working_directory
+            or (
+                workspace_target
+                if workspace_target and not workspace_target.startswith("ws_")
+                else None
+            ),
         )
         print("Eventide · policy-aware runtime")
         print(f"Type q to quit. State: {settings.state_dir}. Session: {session_id}\n")
@@ -173,7 +194,12 @@ def _main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command in {None, "chat"}:
-        return asyncio.run(_chat(getattr(args, "workspace", None)))
+        return asyncio.run(
+            _chat(
+                getattr(args, "workspace", None),
+                getattr(args, "cwd", None),
+            )
+        )
     if args.command == "run":
         return asyncio.run(_run_once(args))
     if args.command == "eval":

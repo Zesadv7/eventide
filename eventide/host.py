@@ -38,6 +38,7 @@ from eventide.workspace import (
     canonical_workspace,
     digest,
     git_metadata,
+    session_working_directory,
     workspace_checkpoint,
 )
 
@@ -53,9 +54,25 @@ class SessionManager:
     def __init__(self, store: RuntimeStore):
         self.store = store
 
-    def create(self, workspace_id: str, session_id: str | None = None) -> str:
+    def create(
+        self,
+        workspace_id: str,
+        session_id: str | None = None,
+        working_directory: str | Path | None = None,
+    ) -> str:
         identity = session_id or f"session_{uuid.uuid4().hex[:16]}"
-        self.store.create_session(identity, workspace_id)
+        if self.store.get_session(identity) and working_directory is None:
+            self.store.create_session(identity, workspace_id)
+            return identity
+        workspace = self.store.get_workspace(workspace_id)
+        relative, _ = session_working_directory(
+            Path(workspace.path), working_directory
+        )
+        self.store.create_session(
+            identity,
+            workspace_id,
+            working_directory=relative,
+        )
         return identity
 
     def workspace(self, session_id: str) -> WorkspaceRecord:
@@ -63,6 +80,16 @@ class SessionManager:
         if not session:
             raise ValueError(f"Session not found: {session_id}")
         return self.store.get_workspace(session["workspace_id"])
+
+    def working_directory(self, session_id: str) -> Path:
+        session = self.store.get_session(session_id)
+        if not session:
+            raise ValueError(f"Session not found: {session_id}")
+        workspace = self.store.get_workspace(session["workspace_id"])
+        _, path = session_working_directory(
+            Path(workspace.path), session["working_directory"]
+        )
+        return path
 
 
 class RuntimeHost:
@@ -130,11 +157,23 @@ class RuntimeHost:
         return self.store.register_workspace(root, git_root)
 
     def create_session(
-        self, session_id: str | None = None, *, workspace_id: str | None = None
+        self,
+        session_id: str | None = None,
+        *,
+        workspace_id: str | None = None,
+        working_directory: str | Path | None = None,
     ) -> str:
-        if session_id and self.store.get_session(session_id) and workspace_id is None:
-            return session_id
-        return self.sessions.create(workspace_id or self.default_workspace.workspace_id, session_id)
+        existing = self.store.get_session(session_id) if session_id else None
+        target_workspace = (
+            workspace_id
+            or (existing["workspace_id"] if existing else None)
+            or self.default_workspace.workspace_id
+        )
+        return self.sessions.create(
+            target_workspace,
+            session_id,
+            working_directory if working_directory is not None else None,
+        )
 
     def session_status(self, session_id: str) -> dict[str, Any]:
         workspace = self.sessions.workspace(session_id)
@@ -150,6 +189,7 @@ class RuntimeHost:
         return {
             "session_id": session_id,
             "workspace_id": workspace.workspace_id,
+            "working_directory": str(self.sessions.working_directory(session_id)),
             "created_at": session["created_at"],
             "updated_at": activity["updated_at"],
             "title": title[:96],
@@ -509,6 +549,7 @@ class RuntimeHost:
         root = Path(workspace.path)
         if not root.is_dir() or root.resolve() != root:
             raise ValueError("Workspace missing or path identity changed")
+        self.sessions.working_directory(session_id)
         self._validate_continue(workspace, self.store.latest_run(session_id))
         return workspace
 
@@ -624,6 +665,7 @@ class RuntimeHost:
         root = Path(workspace.path)
         if not root.is_dir() or root.resolve() != root:
             raise ValueError("Workspace missing or path identity changed")
+        self.sessions.working_directory(session_id)
         task = asyncio.current_task()
         assert task is not None
         self._active_tasks.add(task)
@@ -762,7 +804,8 @@ class RuntimeHost:
             session_id,
             continuation_of=continuation_of,
         )
-        root = Path(workspace.path)
+        workspace_root = Path(workspace.path)
+        working_root = self.sessions.working_directory(session_id)
         manager = MCPManager()
         usage = {"input_tokens": 0, "output_tokens": 0}
         output, steps, tool_count = "", 0, 0
@@ -800,7 +843,9 @@ class RuntimeHost:
                 run_id,
                 "workspace.checkpoint",
                 {
-                    "checkpoint": await asyncio.to_thread(workspace_checkpoint, root),
+                    "checkpoint": await asyncio.to_thread(
+                        workspace_checkpoint, workspace_root
+                    ),
                 },
                 sink,
             )
@@ -808,7 +853,7 @@ class RuntimeHost:
                 configs = manager.load_configs(
                     self._config_path
                     if workspace == self.default_workspace and self._config_path
-                    else root / "mcp.json"
+                    else workspace_root / "mcp.json"
                 )
                 failures = await manager.connect_all(
                     configs,
@@ -826,11 +871,12 @@ class RuntimeHost:
             executor = ToolExecutor(
                 handlers, manager.readonly_tools, self.executor.command_executor
             )
-            instructions = self._clean(ContextBuilder.instructions(root))
+            instructions = self._clean(ContextBuilder.instructions(workspace_root))
             system = (
                 "You are Eventide. Use tools to finish work, respect permissions, and never "
                 "claim success without evidence.\n"
-                f"Workspace: {root}\nProject instructions:\n{instructions}"
+                f"Workspace: {workspace_root}\nWorking directory: {working_root}\n"
+                f"Project instructions:\n{instructions}"
             )
             catalog_hash = digest(tools)
             await self._emit(
@@ -979,7 +1025,7 @@ class RuntimeHost:
                     execution = asyncio.create_task(
                         executor.execute(
                             call,
-                            ToolContext(root, run_id, self.policy, approve),
+                            ToolContext(working_root, run_id, self.policy, approve),
                         )
                     )
                     try:
@@ -1014,7 +1060,9 @@ class RuntimeHost:
                             run_id,
                             "workspace.checkpoint",
                             {
-                                "checkpoint": await asyncio.to_thread(workspace_checkpoint, root),
+                                "checkpoint": await asyncio.to_thread(
+                                    workspace_checkpoint, workspace_root
+                                ),
                             },
                             sink,
                         )
@@ -1029,7 +1077,9 @@ class RuntimeHost:
                         run_id,
                         "workspace.checkpoint",
                         {
-                            "checkpoint": await asyncio.to_thread(workspace_checkpoint, root),
+                            "checkpoint": await asyncio.to_thread(
+                                workspace_checkpoint, workspace_root
+                            ),
                         },
                         sink,
                     )

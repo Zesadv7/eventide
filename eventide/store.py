@@ -51,7 +51,7 @@ class RuntimeStore:
                 version = self._connection.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
-                if version not in {1, 2}:
+                if version not in {1, 2, 3}:
                     raise ValueError(f"Unsupported runtime schema version: {version}")
             self._connection.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -117,6 +117,20 @@ class RuntimeStore:
                 self._connection.execute(
                     "INSERT OR IGNORE INTO schema_migrations VALUES (2, unixepoch())"
                 )
+                version = 2
+            if version < 3:
+                columns = {
+                    row[1]
+                    for row in self._connection.execute("PRAGMA table_info(sessions)")
+                }
+                if "working_directory" not in columns:
+                    self._connection.execute(
+                        "ALTER TABLE sessions ADD COLUMN working_directory "
+                        "TEXT NOT NULL DEFAULT '.'"
+                    )
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations VALUES (3, unixepoch())"
+                )
 
     def register_workspace(self, path: Path, git_root: str | None) -> WorkspaceRecord:
         with self._lock, self._connection:
@@ -154,12 +168,23 @@ class RuntimeStore:
                 raise ValueError("Workspace has sessions; removal would orphan history")
             self._connection.execute("DELETE FROM workspaces WHERE workspace_id=?", (workspace_id,))
 
-    def create_session(self, session_id: str, workspace_id: str | None = None) -> None:
+    def create_session(
+        self,
+        session_id: str,
+        workspace_id: str | None = None,
+        *,
+        working_directory: str | None = None,
+    ) -> None:
         with self._lock, self._connection:
             existing = self.get_session(session_id)
             if existing:
                 if workspace_id and existing["workspace_id"] != workspace_id:
                     raise ValueError("Session is bound to a different workspace")
+                if (
+                    working_directory is not None
+                    and existing["working_directory"] != working_directory
+                ):
+                    raise ValueError("Session is bound to a different working directory")
                 return
             if workspace_id is None:
                 workspace_id = self.register_workspace(
@@ -167,8 +192,9 @@ class RuntimeStore:
                 ).workspace_id
             self.get_workspace(workspace_id)
             self._connection.execute(
-                "INSERT INTO sessions (id, workspace_id, created_at) VALUES (?, ?, ?)",
-                (session_id, workspace_id, time.time()),
+                "INSERT INTO sessions "
+                "(id, workspace_id, created_at, working_directory) VALUES (?, ?, ?, ?)",
+                (session_id, workspace_id, time.time(), working_directory or "."),
             )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
