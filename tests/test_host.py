@@ -486,7 +486,7 @@ async def test_mcp_close_failure_does_not_overwrite_success(isolated_workspace, 
 
 async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace):
     provider = ScriptedProvider([{"text": "summary"}, {"text": "done"}])
-    settings = settings_for(isolated_workspace, context_limit=220)
+    settings = settings_for(isolated_workspace, context_limit=2_200)
     host = RuntimeHost(settings, provider)
     session = host.create_session()
     host.store.create_run("previous", session)
@@ -512,7 +512,7 @@ async def test_truncated_context_summary_is_never_persisted(isolated_workspace):
     provider = ScriptedProvider(
         [{"text": "partial summary", "stop_reason": "max_tokens"}]
     )
-    settings = settings_for(isolated_workspace, context_limit=220)
+    settings = settings_for(isolated_workspace, context_limit=2_200)
     host = RuntimeHost(settings, provider)
     session = host.create_session()
     host.store.create_run("previous", session)
@@ -523,5 +523,18 @@ async def test_truncated_context_summary_is_never_persisted(isolated_workspace):
         assert result.status == "failed"
         assert "summary truncated" in result.output
         assert host.store.checkpoints(session) == []
+    finally:
+        await host.close()
+
+
+async def test_context_budget_includes_system_and_tool_catalog(isolated_workspace):
+    provider = ScriptedProvider([{"text": "must not be called"}])
+    settings = settings_for(isolated_workspace, context_limit=500)
+    host = RuntimeHost(settings, provider)
+    try:
+        result = await host.run(RunRequest("small prompt"))
+        assert result.status == "failed"
+        assert "fixed system/tool characters" in result.output
+        assert provider.requests == []
     finally:
         await host.close()

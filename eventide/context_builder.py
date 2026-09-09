@@ -36,14 +36,32 @@ def _folded_placeholder(name: str, omitted: int) -> str:
     return f"[{name} output folded to fit the context budget: {omitted} characters omitted]"
 
 
-def _describe_context(messages: list[dict[str, Any]], budget: int) -> str:
+def _describe_context(
+    messages: list[dict[str, Any]],
+    budget: int,
+    *,
+    system: str,
+    tools: list[dict[str, Any]],
+) -> str:
     """Budget breakdown for overflow diagnostics; never includes message text."""
-    total = len(json.dumps(messages, ensure_ascii=False))
+    total = len(
+        json.dumps(
+            {"system": system, "messages": messages, "tools": tools},
+            ensure_ascii=False,
+        )
+    )
+    fixed = len(
+        json.dumps(
+            {"system": system, "messages": [], "tools": tools},
+            ensure_ascii=False,
+        )
+    )
     results = [message for message in messages if _tool_result_blocks(message)]
     tool_chars = sum(len(json.dumps(message, ensure_ascii=False)) for message in results)
     return (
         f"{total} characters against a {budget} character budget "
-        f"({len(messages)} messages, {len(results)} tool-result messages "
+        f"({fixed} fixed system/tool characters, {len(messages)} messages, "
+        f"{len(results)} tool-result messages "
         f"totalling {tool_chars} characters)"
     )
 
@@ -112,7 +130,10 @@ class ContextBuilder:
         budget: int,
         force: bool = False,
         secrets: tuple[str, ...] = (),
+        system: str = "",
+        tools: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
+        request_tools = tools or []
         events = self.store.session_events(session_id)
         checkpoint = None
         for candidate in self.store.checkpoints(session_id):
@@ -139,7 +160,12 @@ class ContextBuilder:
         messages = materialize(checkpoint)
 
         def size(value: Any) -> int:
-            return len(json.dumps(value, ensure_ascii=False))
+            return len(
+                json.dumps(
+                    {"system": system, "messages": value, "tools": request_tools},
+                    ensure_ascii=False,
+                )
+            )
 
         if not force and size(messages) <= budget:
             return messages, None, None
@@ -208,7 +234,8 @@ class ContextBuilder:
                 )
             raise ContextOverflow(
                 f"context_overflow: {reason}; older tool results were folded but the context "
-                f"is still over budget: {_describe_context(current, budget)}"
+                "is still over budget: "
+                f"{_describe_context(current, budget, system=system, tools=request_tools)}"
             )
 
         compacted = None

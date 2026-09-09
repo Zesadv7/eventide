@@ -821,6 +821,8 @@ class RuntimeHost:
                     budget=self.settings.context_limit,
                     force=force_compact,
                     secrets=(self.settings.api_key or "",),
+                    system=system,
+                    tools=tools,
                 )
                 force_compact = False
                 if compacted:
