@@ -46,6 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     migrate.add_argument("source", nargs="?", type=Path)
     migrate.add_argument("--workspace", help="Workspace ID or existing path")
+    export = subparsers.add_parser("export", help="Export one Run as canonical JSONL")
+    export.add_argument("run_id")
+    export.add_argument("destination", type=Path)
+    export.add_argument("--force", action="store_true", help="Replace an existing file")
     workspace = subparsers.add_parser("workspace", help="Manage registered project directories")
     actions = workspace.add_subparsers(dest="workspace_action", required=True)
     actions.add_parser("list")
@@ -161,6 +165,15 @@ async def _manage(args: argparse.Namespace) -> int:
             value = import_v02_database(runtime.store, source, workspace.workspace_id)
             print(json.dumps(value, ensure_ascii=False, indent=2))
             return 0
+        if args.command == "export":
+            if runtime.store.get_run_identity(args.run_id) is None:
+                raise ValueError(f"Run not found: {args.run_id}")
+            destination = args.destination.expanduser().resolve()
+            if destination.exists() and not args.force:
+                raise ValueError(f"Destination already exists: {destination}; use --force")
+            runtime.store.export_jsonl(args.run_id, destination)
+            print(json.dumps({"run_id": args.run_id, "destination": str(destination)}))
+            return 0
         if args.workspace_action == "list":
             value = [asdict(w) for w in runtime.store.list_workspaces()]
         elif args.workspace_action == "remove":
@@ -204,7 +217,7 @@ def _main(argv: list[str] | None = None) -> int:
         return asyncio.run(_run_once(args))
     if args.command == "eval":
         return asyncio.run(_eval(args))
-    if args.command in {"workspace", "continue", "abandon", "migrate-v02"}:
+    if args.command in {"workspace", "continue", "abandon", "migrate-v02", "export"}:
         return asyncio.run(_manage(args))
     if args.command == "serve":
         try:

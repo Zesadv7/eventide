@@ -1,5 +1,6 @@
 """FastAPI session, run, event, and UI tests."""
 
+import json
 import time
 
 from fastapi.testclient import TestClient
@@ -60,7 +61,15 @@ def test_api_sse_and_missing_resources(isolated_workspace):
         events = client.get(f"/api/runs/{run_id}/events")
         assert events.status_code == 200
         assert "event: run.completed" in events.text
+        exported = client.get(f"/api/runs/{run_id}/export")
+        assert exported.status_code == 200
+        assert exported.headers["content-type"].startswith("application/x-ndjson")
+        assert f"eventide-{run_id}.jsonl" in exported.headers["content-disposition"]
+        facts = [json.loads(line) for line in exported.text.splitlines()]
+        assert facts[-1]["type"] == "run.completed"
+        assert "seq" not in facts[-1]
         assert client.get("/api/runs/missing").status_code == 404
+        assert client.get("/api/runs/missing/export").status_code == 404
         assert (
             client.post(
                 f"/api/runs/{run_id}/approvals/missing", json={"approved": False}

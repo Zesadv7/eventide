@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -459,6 +460,31 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             return await agent_runtime.cancel_run(run_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/runs/{run_id}/export")
+    async def export_run(run_id: str) -> StreamingResponse:
+        if not agent_runtime.store.get_run_identity(run_id):
+            raise HTTPException(status_code=404, detail="Run not found")
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", run_id)[:96] or "run"
+
+        async def stream() -> AsyncIterator[str]:
+            cursor = 0
+            while True:
+                events = agent_runtime.store.run_events(run_id, after=cursor, limit=100)
+                if not events:
+                    break
+                for event in events:
+                    cursor = event["session_seq"]
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+                await asyncio.sleep(0)
+
+        return StreamingResponse(
+            stream(),
+            media_type="application/x-ndjson",
+            headers={
+                "Content-Disposition": f'attachment; filename="eventide-{safe_id}.jsonl"'
+            },
+        )
 
     @app.get("/api/runs/{run_id}/events")
     async def run_events(run_id: str, request: Request, after: int = 0) -> StreamingResponse:

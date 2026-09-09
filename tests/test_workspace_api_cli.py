@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from eventide.api import create_app
 from eventide.cli import main
 from eventide.host import RuntimeHost
+from eventide.models import RunRequest
 from eventide.providers import ScriptedProvider
 from eventide.store import RuntimeStore
 from tests.test_api import wait_for_run
@@ -316,3 +317,25 @@ def test_cli_imports_v02_history_without_changing_source(
 
     assert main(["migrate-v02", str(source)]) == 1
     assert "already exists" in capsys.readouterr().out
+
+
+def test_cli_exports_canonical_jsonl_without_accidental_overwrite(
+    isolated_workspace, monkeypatch, capsys
+):
+    import eventide.cli as cli
+
+    settings = settings_for(isolated_workspace)
+    host = RuntimeHost(settings, ScriptedProvider([{"text": "exported"}]))
+    result = asyncio.run(host.run(RunRequest("keep history")))
+    asyncio.run(host.close())
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
+    destination = isolated_workspace / "audit.jsonl"
+
+    assert main(["export", result.run_id, str(destination)]) == 0
+    response = json.loads(capsys.readouterr().out)
+    assert response["destination"] == str(destination)
+    events = [json.loads(line) for line in destination.read_text(encoding="utf-8").splitlines()]
+    assert events[-1]["type"] == "run.completed"
+    assert main(["export", result.run_id, str(destination)]) == 1
+    assert "use --force" in capsys.readouterr().out
+    assert main(["export", result.run_id, str(destination), "--force"]) == 0
