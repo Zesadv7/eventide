@@ -364,6 +364,18 @@ class RuntimeHost:
     def _clean(self, value: Any) -> Any:
         return normalize(redact(value), (self.settings.api_key or "",))
 
+    def _semantic(self, value: Any) -> Any:
+        """Preserve model-visible data while removing values unsafe to persist.
+
+        Execution uses the provider's raw tool arguments. Semantic facts keep the
+        complete text so the event log and the next model request do not silently
+        change prompts, tool calls, results, or final answers.
+        """
+        return normalize(
+            redact(value, max_text=None),
+            (self.settings.api_key or "",),
+        )
+
     async def _emit(
         self,
         run_id: str,
@@ -578,7 +590,7 @@ class RuntimeHost:
                     run_id,
                     "message.user",
                     {
-                        "message": self._clean({"role": "user", "content": prompt}),
+                        "message": self._semantic({"role": "user", "content": prompt}),
                     },
                     sink,
                     role="user",
@@ -694,12 +706,13 @@ class RuntimeHost:
                     sink,
                 )
                 # Persist exactly the normalized response that the next model request sees.
-                content = self._clean(response.content_blocks())
+                raw_content = response.content_blocks()
                 calls = [
                     ToolCall(b["id"], b["name"], b["input"])
-                    for b in content
+                    for b in raw_content
                     if b["type"] == "tool_use"
                 ]
+                content = self._semantic(raw_content)
                 prior_ids = {
                     b["id"]
                     for e in self.store.run_events(run_id)
@@ -716,7 +729,7 @@ class RuntimeHost:
                     "model.response",
                     {
                         "step": steps,
-                        "text": self._clean(response.text),
+                        "text": self._semantic(response.text),
                         "message": {"role": "assistant", "content": content},
                         "stop_reason": response.stop_reason,
                         "tool_calls": len(calls),
@@ -734,7 +747,7 @@ class RuntimeHost:
                             f"Model output truncated ({response.stop_reason}); raise "
                             f"EVENTIDE_MAX_TOKENS (currently {self.settings.max_tokens})"
                         )
-                    output = self._clean(response.text)
+                    output = self._semantic(response.text)
                     break
                 for call in calls:
                     tool_count += 1
@@ -746,7 +759,7 @@ class RuntimeHost:
                         {
                             "call_id": call.id,
                             "name": call.name,
-                            "arguments": call.arguments,
+                            "arguments": self._semantic(call.arguments),
                             "readonly": readonly,
                         },
                         sink,
@@ -769,7 +782,7 @@ class RuntimeHost:
                         {
                             "call_id": call.id,
                             "name": call.name,
-                            "content": self._clean(result.content),
+                            "content": self._semantic(result.content),
                             "is_error": result.is_error,
                         },
                         sink,

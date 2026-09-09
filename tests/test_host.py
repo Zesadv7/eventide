@@ -220,6 +220,78 @@ async def test_event_and_model_normalization_are_identical(isolated_workspace):
         await host.close()
 
 
+async def test_execution_data_is_not_truncated_or_redacted(isolated_workspace):
+    long_prompt = "p" * 5_000
+    long_file = "x" * 5_000
+    long_answer = "y" * 5_000
+    captured = []
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "write",
+                        "name": "write_file",
+                        "arguments": {"path": "long.txt", "content": long_file},
+                    },
+                    {
+                        "id": "capture",
+                        "name": "capture",
+                        "arguments": {
+                            "token": "business-token",
+                            "max_tokens": 123,
+                            "content": long_file,
+                        },
+                    },
+                ]
+            },
+            {"text": long_answer},
+        ]
+    )
+    host = RuntimeHost(
+        replace(settings_for(isolated_workspace), context_limit=100_000),
+        provider,
+    )
+    host.tools.append(
+        {
+            "name": "capture",
+            "description": "Capture arguments for a runtime contract test.",
+            "input_schema": {"type": "object", "properties": {}},
+        }
+    )
+
+    def capture(**arguments):
+        captured.append(arguments)
+        return "captured"
+
+    host.handlers["capture"] = capture
+    try:
+        result = await host.run(RunRequest(long_prompt))
+        assert result.status == "completed"
+        assert result.output == long_answer
+        assert provider.requests[0].messages[0]["content"] == long_prompt
+        assert (isolated_workspace / "long.txt").read_text(encoding="utf-8") == long_file
+        assert captured == [
+            {"token": "business-token", "max_tokens": 123, "content": long_file}
+        ]
+
+        response_event = next(
+            event
+            for event in host.store.session_events(result.session_id)
+            if event["type"] == "model.response"
+        )
+        capture_block = next(
+            block
+            for block in response_event["payload"]["message"]["content"]
+            if block.get("id") == "capture"
+        )
+        assert capture_block["input"]["token"] == "[REDACTED]"
+        assert capture_block["input"]["max_tokens"] == "[REDACTED]"
+        assert capture_block["input"]["content"] == long_file
+    finally:
+        await host.close()
+
+
 async def test_long_turn_folds_older_tool_results_instead_of_failing(isolated_workspace):
     provider = ScriptedProvider(
         [

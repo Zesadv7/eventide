@@ -16,9 +16,9 @@ _USAGE_KEYS = {
 }
 
 
-def redact(value: Any, *, max_text: int = 4_000) -> Any:
+def redact(value: Any, *, max_text: int | None = 4_000) -> Any:
     if isinstance(value, dict):
-        limit = 200_000 if value.get("type") == "provider_state" else max_text
+        limit = 200_000 if max_text is not None and value.get("type") == "provider_state" else max_text
         return {
             key: "[REDACTED]"
             if str(key).lower().replace("-", "_") not in _USAGE_KEYS
@@ -28,7 +28,7 @@ def redact(value: Any, *, max_text: int = 4_000) -> Any:
         }
     if isinstance(value, (list, tuple)):
         return [redact(item, max_text=max_text) for item in value]
-    if isinstance(value, str) and len(value) > max_text:
+    if isinstance(value, str) and max_text is not None and len(value) > max_text:
         return value[:max_text] + f"… [{len(value) - max_text} chars truncated]"
     return value
 
