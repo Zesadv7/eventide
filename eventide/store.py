@@ -421,6 +421,20 @@ class RuntimeStore:
                 return {**payload, "content": content if isinstance(content, str) else str(content)}
         return None
 
+    def task_plan(self, session_id: str) -> list[dict[str, str]] | None:
+        """Project the latest task plan directly from its canonical event."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json FROM runtime_events "
+                "WHERE session_id=? AND type='task.plan_updated' AND partial=0 "
+                "ORDER BY session_seq DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        todos = json.loads(row[0]).get("todos", [])
+        return [dict(todo) for todo in todos]
+
     def get_run_identity(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._connection.execute(

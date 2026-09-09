@@ -33,6 +33,11 @@ from eventide.providers import Provider, ProviderError, build_provider
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skills import SkillCatalog
 from eventide.store import RuntimeStore
+from eventide.task_plan import GUIDANCE as TASK_PLAN_GUIDANCE
+from eventide.task_plan import TOOL as TODO_WRITE_TOOL
+from eventide.task_plan import normalize_todos
+from eventide.task_plan import prompt as task_plan_prompt
+from eventide.task_plan import summary as plan_summary
 from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
 from eventide.tool_results import reader as tool_result_reader
 from eventide.tools.runtime_catalog import HANDLERS, TOOLS
@@ -48,7 +53,7 @@ from eventide.workspace import (
 # stop_reason values that mean the provider cut the answer off at max_tokens.
 TRUNCATION_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
 BASE_RUNTIME_READONLY_TOOLS = frozenset(
-    {"read_file", "glob", "compact", "read_tool_result"}
+    {"read_file", "glob", "compact", "read_tool_result", "todo_write"}
 )
 
 
@@ -206,6 +211,7 @@ class RuntimeHost:
             if run
             else "idle",
             "latest_run": run,
+            "task_plan": self.store.task_plan(session_id) or [],
         }
 
     def workspace_status(self, workspace_id: str) -> dict[str, Any]:
@@ -884,11 +890,32 @@ class RuntimeHost:
                 raise ValueError("load_skill is reserved for Workspace Skill loading")
             if any(tool.get("name") == "read_tool_result" for tool in self.tools):
                 raise ValueError("read_tool_result is reserved for Runtime tool-result paging")
+            if any(tool.get("name") == "todo_write" for tool in self.tools):
+                raise ValueError("todo_write is reserved for Runtime task plans")
             skill_tools = [skills.tool()] if skills else []
-            tools = [*self.tools, READ_TOOL_RESULT_TOOL, *skill_tools, *manager.tools]
+
+            async def write_task_plan(todos: object) -> str:
+                normalized = normalize_todos(todos)
+                await self._emit(
+                    run_id,
+                    "task.plan_updated",
+                    self._semantic({"todos": normalized}),
+                    sink,
+                    author="model",
+                )
+                return plan_summary(normalized)
+
+            tools = [
+                *self.tools,
+                READ_TOOL_RESULT_TOOL,
+                TODO_WRITE_TOOL,
+                *skill_tools,
+                *manager.tools,
+            ]
             handlers = {
                 **self.handlers,
                 "read_tool_result": tool_result_reader(self.store, session_id),
+                "todo_write": write_task_plan,
                 **({"load_skill": skills.load} if skills else {}),
                 **manager.handlers,
             }
@@ -896,6 +923,7 @@ class RuntimeHost:
                 handlers,
                 {
                     "read_tool_result",
+                    "todo_write",
                     *manager.readonly_tools,
                     *({"load_skill"} if skills else set()),
                 },
@@ -906,11 +934,11 @@ class RuntimeHost:
                 runtime_readonly_tools.add("load_skill")
             instructions = self._clean(ContextBuilder.instructions(workspace_root))
             skill_prompt = skills.prompt()
-            system = (
+            base_system = (
                 "You are Eventide. Use tools to finish work, respect permissions, and never "
                 "claim success without evidence.\n"
                 f"Workspace: {workspace_root}\nWorking directory: {working_root}\n"
-                f"Project instructions:\n{instructions}"
+                f"Project instructions:\n{instructions}\n\nTask planning:\n{TASK_PLAN_GUIDANCE}"
                 + (f"\n\n{skill_prompt}" if skill_prompt else "")
             )
             catalog_hash = digest(tools)
@@ -959,6 +987,8 @@ class RuntimeHost:
 
             step_budget_exhausted = False
             for steps in range(1, self.settings.max_steps + 1):
+                plan_context = task_plan_prompt(self.store.task_plan(session_id))
+                system = base_system + (f"\n\n{plan_context}" if plan_context else "")
                 messages, compacted, trimmed = await self.context_builder.build(
                     session_id,
                     provider=self._provider(),

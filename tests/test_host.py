@@ -488,7 +488,7 @@ async def test_mcp_close_failure_does_not_overwrite_success(isolated_workspace, 
 
 async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace):
     provider = ScriptedProvider([{"text": "summary"}, {"text": "done"}])
-    settings = settings_for(isolated_workspace, context_limit=2_200)
+    settings = settings_for(isolated_workspace, context_limit=3_000)
     host = RuntimeHost(settings, provider)
     session = host.create_session()
     host.store.create_run("previous", session)
@@ -514,7 +514,7 @@ async def test_truncated_context_summary_is_never_persisted(isolated_workspace):
     provider = ScriptedProvider(
         [{"text": "partial summary", "stop_reason": "max_tokens"}]
     )
-    settings = settings_for(isolated_workspace, context_limit=2_200)
+    settings = settings_for(isolated_workspace, context_limit=3_000)
     host = RuntimeHost(settings, provider)
     session = host.create_session()
     host.store.create_run("previous", session)

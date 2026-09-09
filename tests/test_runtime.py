@@ -74,7 +74,7 @@ async def test_runtime_approval_handler(isolated_workspace):
 
 
 async def test_runtime_retries_and_compacts(isolated_workspace):
-    settings = settings_for(isolated_workspace, context_limit=2_200)
+    settings = settings_for(isolated_workspace, context_limit=3_000)
     provider = ScriptedProvider(
         [
             {"text": "Earlier goal retained."},

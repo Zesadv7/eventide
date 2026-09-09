@@ -38,6 +38,43 @@ def _folded_placeholder(name: str, omitted: int) -> str:
     return f"[{name} output folded to fit the context budget: {omitted} characters omitted]"
 
 
+def _elide_task_plan_updates(
+    messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
+    """Keep tool pairing while removing repeated full-plan arguments from requests."""
+    working = list(messages)
+    updates = 0
+    omitted = 0
+    for index, message in enumerate(messages):
+        content = message.get("content")
+        if message.get("role") != "assistant" or not isinstance(content, list):
+            continue
+        blocks = list(content)
+        changed = False
+        for position, block in enumerate(content):
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            if block.get("name") != "todo_write":
+                continue
+            arguments = block.get("input")
+            if not isinstance(arguments, dict) or not arguments.get("todos"):
+                continue
+            replacement: dict[str, list[Any]] = {"todos": []}
+            omitted += max(
+                0,
+                len(json.dumps(arguments, ensure_ascii=False))
+                - len(json.dumps(replacement, ensure_ascii=False)),
+            )
+            blocks[position] = {**block, "input": replacement}
+            updates += 1
+            changed = True
+        if changed:
+            working[index] = {**message, "content": blocks}
+    if not updates:
+        return messages, None
+    return working, {"elided_plan_updates": updates, "plan_omitted_chars": omitted}
+
+
 def _describe_context(
     messages: list[dict[str, Any]],
     budget: int,
@@ -175,13 +212,16 @@ class ContextBuilder:
                 return content
 
             messages = MessagesProjection.project(tail, tool_result_content=project_result)
+            messages, plan_trimmed = _elide_task_plan_updates(messages)
             if cp:
                 messages.insert(0, {"role": "user", "content": "[Prior context]\n" + cp["summary"]})
-            trimmed = (
+            trimmed: dict[str, Any] | None = (
                 {"previewed_call_ids": previewed, "preview_omitted_chars": omitted}
                 if previewed
                 else None
             )
+            if plan_trimmed:
+                trimmed = {**(trimmed or {}), **plan_trimmed}
             return messages, trimmed
 
         messages, preview_trimmed = materialize(checkpoint)
@@ -213,6 +253,7 @@ class ContextBuilder:
                 history = MessagesProjection.project(
                     prefix, tool_result_content=lambda event: preview(event)[0]
                 )
+                history, _ = _elide_task_plan_updates(history)
                 response = await provider.complete(
                     ModelRequest(
                         system="Summarize goals, work, constraints, decisions and next steps. "

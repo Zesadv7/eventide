@@ -301,3 +301,13 @@
 **决策：** canonical `tool.completed` 继续保存执行器返回的完整正文。ContextBuilder 对超过 12,000 字符的结果始终生成有界头尾预览，预览携带 run_id/call_id；Runtime 提供只读、Session 隔离的 `read_tool_result`，按字符 offset/limit 从 Event Log 读取任意页，单页上限 12,000 字符。若请求仍超预算，再沿用 ADR-018 的较早结果折叠。预览与折叠都记录 `context.trimmed`，不写回事件正文。
 
 **影响：** 最新的大结果不再单独占满请求，模型仍能按证据需要无损回读具体区间；审计导出、工作记录和默认 MessagesProjection 保持原文。分页身份必须同时匹配当前 Session、Run 和 call，不能跨 Session 探测结果。不引入外部 artifact 文件、数据库迁移或自动任务拆分；TodoWrite/Task System 属于后续调度层工作。
+
+## ADR-031：Session 计划以事件快照驱动执行
+
+**状态：Accepted**。
+
+**背景：** Runtime 已能压缩已结束 turn、分页大结果并在步数用尽后 Continue，但模型没有显式的中间任务状态。复杂请求只能从不断增长的对话重新推断剩余工作，容易漏步骤、重复探索或试图在一个 run 内完成全部内容。仓库中的旧 `eventide.tasks` 使用进程全局文件目录和 task graph，不满足 Workspace/Session 绑定及 canonical Event Log 约束。
+
+**决策：** 生产 Host 注入 `todo_write`，用于原子替换当前 Session 的完整计划。计划最多 20 项，状态限定为 pending、in_progress、completed、blocked，同时最多一个 in_progress。合法更新追加 `task.plan_updated`；最新事件是当前事实，Host 每个 step 只把未完成项及完成数量加入 system。ContextBuilder 将历史 `todo_write` 参数替换为空清单但保持 tool_use/tool_result 配对，完整参数仍留在模型响应事件、默认消息投影和审计导出。该工具只改变 Event Log，标记为 recovery-safe，不产生 Workspace checkpoint。
+
+**影响：** 计划可跨模型 step、Host 重启和 Continue 恢复，Session API 状态可读取最新完整清单；重复更新不会线性挤占模型上下文。计划是执行提示而非调度器：不自动运行任务、不创建 Subagent/worktree、不表达依赖图，也不把勾选完成当作外部验证证据。旧文件式 task graph 继续留在 compatibility layer，不进入生产 Host。
