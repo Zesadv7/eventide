@@ -238,6 +238,12 @@ async function createSession(workspace = state.workspace) {
   return result.session_id;
 }
 
+// An explicit user action must claim the view synchronously. A still-settling
+// auto-select tail from an earlier action (workspace add, initial load) bumps
+// viewVersion when it lands; without this claim that late bump would make
+// createSession's staleness guard silently skip selecting the new session.
+function claimView() { viewVersion++; }
+
 async function addWorkspace(event) {
   event.preventDefault();
   const path = $("#workspace-input").value.trim();
@@ -1026,7 +1032,11 @@ async function startRun(event) {
   const lock = owner || `new:${workspace}`;
   state.busy.add(lock); state.errors.delete(lock); render();
   try {
-    owner ||= await createSession(workspace);
+    if (!owner) {
+      // Submitting the first prompt of a brand-new work is also a navigation intent.
+      claimView();
+      owner = await createSession(workspace);
+    }
     const body = {prompt, mode: currentMode(), attachment_ids: (state.attachments.get(owner) || []).map((chip) => chip.attachment_id)};
     const accepted = await request(`/api/sessions/${owner}/runs`, {method: "POST", body: JSON.stringify(body)});
     state.drafts.delete(lock); state.drafts.delete(owner);
@@ -1299,7 +1309,9 @@ $("#session-dialog").addEventListener("close", () => { state.sessionEditing = nu
 async function createNewSession() {
   const workspace = state.workspace, lock = `new:${workspace}`;
   if (!workspace || state.busy.has(lock)) return;
-  state.busy.add(lock); render();
+  state.busy.add(lock);
+  claimView();
+  render();
   try { await createSession(workspace); } catch (error) { toastError(error, () => void createNewSession()); }
   finally { state.busy.delete(lock); scheduleRender(); }
 }
