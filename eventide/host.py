@@ -45,6 +45,7 @@ from eventide.tools.runtime_catalog import HANDLERS, TOOLS
 from eventide.workspace import (
     HostLease,
     canonical_workspace,
+    changed_since,
     digest,
     git_metadata,
     session_working_directory,
@@ -121,7 +122,7 @@ class RuntimeHost:
         self._lease = HostLease(store.path.parent if store else self.settings.state_dir)
         try:
             self.store = store or RuntimeStore(self.settings.state_dir / "runtime.sqlite")
-            self.store.recover_interrupted()
+            self._recover_interrupted_runs()
             self._secret_box = SecretBox(self.settings.state_dir)
             self._provider_secret_error: str | None = None
             self._load_persisted_provider()
@@ -733,6 +734,53 @@ class RuntimeHost:
                     self._run_tasks.pop(admitted_run_id, None)
         finally:
             self._active_tasks.discard(task)
+
+    def _recover_interrupted_runs(self) -> None:
+        """Close out runs the Host died inside, and keep the resumable ones resumable.
+
+        A crash can land between a completed side-effecting tool and the checkpoint
+        that records its result, which used to leave the Session parked with Continue
+        refusing forever. Append the checkpoint the filesystem can still justify; when
+        it cannot justify one, record which paths changed instead, so the user can see
+        what to check before deciding to abandon.
+        """
+        for run_id in self.store.unfinished_runs():
+            payload: dict[str, Any] = {"error": "Host stopped before terminal fact"}
+            evidence = self._crash_gap_evidence(run_id)
+            if evidence is not None:
+                files, checkpoint = evidence
+                if files:
+                    payload["gap_files"] = files
+                elif checkpoint is not None:
+                    self.store.append_event(
+                        run_id, "workspace.checkpoint", {"checkpoint": checkpoint}
+                    )
+            self.store.append_event(run_id, "run.interrupted", payload)
+
+    def _crash_gap_evidence(
+        self, run_id: str
+    ) -> tuple[list[str], dict[str, Any] | None] | None:
+        """What the filesystem still knows about a run that died without a checkpoint.
+
+        An empty file list means nothing in the Git-visible tree was touched since the
+        run's last durable fact, so the workspace is provably what it was when the Host
+        died and the checkpoint returned alongside it is the one that went missing. A
+        non-empty list is a change the Runtime cannot account for. `None` means there
+        was nothing trustworthy to measure.
+        """
+        run = self.store.get_run(run_id)
+        session = run and self.store.get_session(run["session_id"])
+        workspace = session and self.store.get_workspace(session["workspace_id"])
+        events = self.store.run_events(run_id)
+        if not workspace or not events:
+            return None
+        report = changed_since(Path(workspace.path), events[-1]["ts"])
+        if report is None:
+            return None
+        files, _truncated = report
+        if files:
+            return files, None
+        return [], workspace_checkpoint(Path(workspace.path))
 
     def _validate_continue(
         self,

@@ -614,6 +614,7 @@ class RuntimeStore:
                         "error",
                         "pending_approvals",
                         "reason",
+                        "gap_files",
                     )
                 },
             }
@@ -627,16 +628,15 @@ class RuntimeStore:
             records.append(record)
         return records
 
-    def recover_interrupted(self) -> None:
+    def unfinished_runs(self) -> list[str]:
+        """Runs that never reached a terminal fact, oldest first: the Host died mid-run."""
         with self._lock:
             rows = self._connection.execute(
                 "SELECT id FROM runs WHERE id NOT IN (SELECT run_id FROM runtime_events "
-                "WHERE type IN ('run.completed','run.failed','run.interrupted'))"
+                "WHERE type IN ('run.completed','run.failed','run.interrupted')) "
+                "ORDER BY started_at"
             ).fetchall()
-        for row in rows:
-            self.append_event(
-                row[0], "run.interrupted", {"error": "Host stopped before terminal fact"}
-            )
+        return [row["id"] for row in rows]
 
     def append_message(self, session_id: str, message: dict[str, Any]) -> None:
         self.create_session(session_id)

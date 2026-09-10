@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import os
 import subprocess
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -453,6 +455,84 @@ async def test_cancel_run_by_id_persists_interruption(isolated_workspace):
         assert record["status"] == "interrupted"
         assert "cancelled" in record["error"].lower()
         assert task.cancelled()
+    finally:
+        await host.close()
+
+
+async def crashed_before_checkpoint(root: Path):
+    """A run that died between a completed write_file and its workspace.checkpoint."""
+    repo = make_repo(root / "repo")
+    settings = replace(settings_for(repo), state_dir=root / "state")
+    host = RuntimeHost(settings, ScriptedProvider([]))
+    session = host.create_session()
+    host.store.create_run("crashed", session)
+    host.store.append_fact(
+        session,
+        "message.user",
+        {"message": {"role": "user", "content": "write it"}},
+        run_id="crashed",
+    )
+    host.store.append_fact(
+        session,
+        "model.response",
+        {
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "call",
+                        "name": "write_file",
+                        "input": {"path": "a.txt", "content": "x"},
+                    }
+                ],
+            }
+        },
+        run_id="crashed",
+    )
+    host.store.append_fact(
+        session,
+        "tool.prepared",
+        {"call_id": "call", "name": "write_file", "readonly": False},
+        run_id="crashed",
+    )
+    (repo / "a.txt").write_text("x", encoding="utf-8")
+    host.store.append_fact(
+        session,
+        "tool.completed",
+        {"call_id": "call", "name": "write_file", "content": "Wrote 1 bytes", "is_error": False},
+        run_id="crashed",
+    )
+    await host.close()
+    return settings, session, repo
+
+
+async def test_restart_replaces_a_lost_checkpoint_when_nothing_changed(isolated_workspace):
+    settings, session, _ = await crashed_before_checkpoint(isolated_workspace)
+    host = RuntimeHost(settings, ScriptedProvider([{"text": "continued"}]))
+    try:
+        events = host.store.run_events("crashed")
+        assert events[-1]["type"] == "run.interrupted"
+        assert "gap_files" not in events[-1]["payload"]
+        checkpoints = [e["session_seq"] for e in events if e["type"] == "workspace.checkpoint"]
+        completed = max(e["session_seq"] for e in events if e["type"] == "tool.completed")
+        assert len(checkpoints) == 1 and checkpoints[0] > completed
+        assert (await host.continue_session(session)).status == "completed"
+    finally:
+        await host.close()
+
+
+async def test_restart_stays_parked_when_the_gap_changed_a_file(isolated_workspace):
+    settings, session, repo = await crashed_before_checkpoint(isolated_workspace)
+    stamp = time.time() + 60
+    os.utime(repo / "a.txt", (stamp, stamp))
+    host = RuntimeHost(settings, ScriptedProvider([]))
+    try:
+        events = host.store.run_events("crashed")
+        assert host.store.get_run("crashed")["gap_files"] == ["a.txt"]
+        assert not [e for e in events if e["type"] == "workspace.checkpoint"]
+        with pytest.raises(ValueError, match="checkpoint"):
+            await host.continue_session(session)
     finally:
         await host.close()
 

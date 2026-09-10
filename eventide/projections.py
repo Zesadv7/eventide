@@ -69,6 +69,7 @@ class RuntimeStateProjection:
             "tools": {},
             "checkpoint": None,
             "reason": None,
+            "gap_files": None,
         }
         terminal = False
         for event in events:

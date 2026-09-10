@@ -2,9 +2,11 @@
 
 import asyncio
 import json
+import os
 import sqlite3
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -14,7 +16,7 @@ from eventide.models import ModelResponse, RunRequest, ToolCall
 from eventide.projections import MessagesProjection
 from eventide.providers import ScriptedProvider
 from eventide.store import RuntimeStore
-from eventide.workspace import HostLease, digest, workspace_checkpoint
+from eventide.workspace import HostLease, changed_since, digest, workspace_checkpoint
 from tests.test_host import make_repo
 from tests.test_runtime import settings_for
 
@@ -168,6 +170,39 @@ async def test_overflow_reports_the_active_turn_not_a_missing_checkpoint(isolate
         assert "1000 character budget" in message
     finally:
         await host.close()
+
+
+def test_changed_since_separates_touched_from_untouched_paths(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    (repo / "old.txt").write_text("x", encoding="utf-8")
+    (repo / "new.txt").write_text("y", encoding="utf-8")
+    stamp = time.time() - 600
+    for name in ("old.txt", "new.txt"):
+        os.utime(repo / name, (stamp, stamp))
+    assert changed_since(repo, stamp + 1) == ([], False)
+    os.utime(repo / "new.txt", None)
+    assert changed_since(repo, stamp + 1) == (["new.txt"], False)
+
+
+def test_changed_since_reports_a_tracked_file_deleted_after_the_crash(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    (repo / "tracked.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git", "-C", str(repo),
+            "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "commit", "-m", "add",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    stamp = time.time() - 600
+    os.utime(repo / "tracked.txt", (stamp, stamp))
+    os.utime(repo, (stamp, stamp))
+    assert changed_since(repo, stamp + 1) == ([], False)
+    (repo / "tracked.txt").unlink()
+    assert changed_since(repo, stamp + 1) == (["tracked.txt"], False)
 
 
 def test_checkpoint_survives_json_roundtrip_with_untracked_files(isolated_workspace):

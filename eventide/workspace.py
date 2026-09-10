@@ -131,3 +131,56 @@ def workspace_checkpoint(path: Path) -> dict[str, Any] | None:
         return {"head": head, **changes, "untracked": sorted(untracked)}
     except (ValueError, OSError, subprocess.TimeoutExpired):
         return None
+
+
+CRASH_GAP_FILE_LIMIT = 20
+CRASH_GAP_SCAN_LIMIT = 50_000
+
+
+def changed_since(path: Path, since: float) -> tuple[list[str], bool] | None:
+    """Return Git-visible paths touched strictly after `since`, and whether the list was cut.
+
+    A crash can kill the Host between a completed side-effecting tool and the
+    checkpoint that records its result, leaving no record of what the workspace
+    looked like. The filesystem can still answer what the lost checkpoint would have
+    answered: if nothing carries a newer mtime and no tracked file is missing, a
+    checkpoint taken now is the same evidence. Only the comparison against `since`
+    matters -- changes from before that moment are equally unknown to both.
+
+    The comparison is strict, with no tolerance subtracted from `since`: the files
+    the missing checkpoint was about were written microseconds before the last
+    durable fact, so `>=` would flag them on any coarse clock and the check could
+    never pass. The cost is that a change landing in the very same clock tick as the
+    crash is invisible here.
+    """
+    try:
+        names = [
+            os.fsdecode(raw)
+            for raw in git(
+                path, "ls-files", "-z", "--cached", "--others", "--exclude-standard"
+            ).split(b"\0")
+            if raw
+        ]
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        return None
+    if len(names) > CRASH_GAP_SCAN_LIMIT:
+        return None
+    changed: list[str] = []
+    for name in names:
+        candidate = path / name
+        try:
+            stamp = os.stat(candidate, follow_symlinks=False).st_mtime
+        except FileNotFoundError:
+            # A tracked file is gone. Its directory records when that happened, so a
+            # deletion from before the crash is not evidence of a later change.
+            try:
+                stamp = os.stat(candidate.parent, follow_symlinks=False).st_mtime
+            except OSError:
+                return None
+        except OSError:
+            return None
+        if stamp > since:
+            changed.append(name)
+            if len(changed) > CRASH_GAP_FILE_LIMIT:
+                return changed[:CRASH_GAP_FILE_LIMIT], True
+    return changed, False
