@@ -24,7 +24,7 @@ _PLAN_NOTE = (
 
 def normalize_mode(value: object) -> str:
     """Unknown or missing modes fall back to ``auto`` (contract: never reject)."""
-    return value if value in RUN_MODES else "auto"
+    return value if isinstance(value, str) and value in RUN_MODES else "auto"
 
 
 def filter_tool_catalog(tools: list[dict], mode: str) -> list[dict]:

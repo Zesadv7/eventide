@@ -13,7 +13,7 @@ import httpx
 _DEFAULT_TIMEOUT = 10.0
 _ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
 _ANTHROPIC_VERSION = "2023-06-01"
-_OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
+_OPENAI_MODELS_URL = "https://api.openai.com/v1"
 
 
 class ModelListError(RuntimeError):
@@ -49,7 +49,13 @@ async def list_models(
         response.raise_for_status()
         payload = response.json()
         items = payload.get("data", []) if isinstance(payload, dict) else []
-        ids = [item.get("id") for item in items if isinstance(item, dict) and item.get("id")]
+        ids = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            identifier = item.get("id")
+            if isinstance(identifier, str):
+                ids.append(identifier)
         return ids, None
     except Exception as exc:  # network/HTTP/parse failures degrade to a note
         return [], f"模型列表获取失败：{exc}"
