@@ -377,7 +377,7 @@ async function phase1() {
     if (!modelRequests.length) {
       fail(`事件流无 model.request；实际类型：${[...new Set(events.map((event) => event.type))].join(",")}`);
     }
-    const first = modelRequests[0].data || {};
+    const first = modelRequests[0].data?.payload || {};
     if (!("request_chars" in first)) pending("request_chars 字段未随当前后端构建部署（v2）");
     if (!(first.request_chars > 0)) fail(`request_chars=${JSON.stringify(first.request_chars)}`);
     if (!events.some((event) => event.type === "run.completed")) fail("事件流无 run.completed");
@@ -410,7 +410,7 @@ async function phase1() {
     const events = await collectSse(`/api/runs/${submit.json.run_id}/events`);
     const userMessage = events.find((event) => event.type === "message.user");
     if (!userMessage) fail(`事件流无 message.user：${[...new Set(events.map((event) => event.type))].join(",")}`);
-    const content = userMessage.data?.message?.content;
+    const content = userMessage.data?.payload?.message?.content;
     if (typeof content !== "string") fail(`message.user.content=${JSON.stringify(content)}`);
     if (!content.includes("--- 附件：hello.txt ---")) fail(`附件分隔符缺失：${JSON.stringify(content.slice(0, 200))}`);
     if (!content.includes("hello")) fail("附件内容未内联");
@@ -435,9 +435,10 @@ async function phase1() {
     if (parsed[parsed.length - 1].type !== "run.completed") fail("末行不是 run.completed");
   });
 
-  await check("GET /api/sessions/{id}/attachments 预留接口 404", async () => {
+  await check("GET /api/sessions/{id}/attachments 预留接口未实现", async () => {
     const resp = await api("GET", `/api/sessions/${shared.sessionId}/attachments`);
-    if (resp.status !== 404) fail(`状态码 ${resp.status} != 404（预留接口）`);
+    // POST 已占用同一路径，未实现的 GET 返回 405（预留清单见 api-contract.md）
+    if (resp.status !== 405) fail(`状态码 ${resp.status} != 405（预留接口）`);
   });
 
   await check("停驻场景：park -> continue -> 已恢复完成", async () => {
@@ -595,6 +596,12 @@ async function phase2() {
     }
     if (!opened) fail(`找不到“新建工作”入口，尝试过：${newWorkSelectors.join(" / ")}`);
     await page.waitForSelector("#prompt", { state: "visible", timeout: 10_000 });
+    // 新会话必须真正被选中（pill 回到"尚未开始"），否则后续会提交到旧会话上
+    await page.waitForFunction(
+      () => document.querySelector("#session-pill")?.dataset.status === "idle",
+      null,
+      { timeout: 10_000 },
+    );
 
     // -- 多步任务 -----------------------------------------------------------
     await page.fill("#prompt", `${MARK.multi}：请制定计划并执行`);

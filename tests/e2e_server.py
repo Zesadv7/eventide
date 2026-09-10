@@ -333,6 +333,19 @@ def main(argv: list[str] | None = None) -> int:
     provider = FakeProvider(max_steps=settings.max_steps)
     runtime = AgentRuntime(settings, provider)
     provider.attach(runtime)
+    # The UI refuses to submit while no model is configured; seed a dummy
+    # configuration so the journey passes the isConfigured gate, then put the
+    # fake provider back (configure_provider clears the live provider).
+    asyncio.run(
+        runtime.configure_provider(
+            provider="openai_responses",
+            model="e2e-fake-model",
+            api_key="dummy-key",
+            base_url=None,
+            persist=True,
+        )
+    )
+    runtime.provider = provider
     app = create_app(runtime)
 
     server = E2EUvicornServer(
