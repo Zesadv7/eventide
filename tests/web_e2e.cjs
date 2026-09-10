@@ -557,6 +557,17 @@ async function phase2() {
       text,
       { timeout },
     );
+  // The fake provider keeps per-session step counters (tests/e2e_server.py), so
+  // every scenario needs a fresh work record; submitting into the previous
+  // scenario's session would skip the approval card and the parking flow.
+  const newWork = async () => {
+    await page.click("#new-session");
+    await page.waitForFunction(
+      () => document.querySelector("#session-pill")?.dataset.status === "idle",
+      null,
+      { timeout: 10_000 },
+    );
+  };
 
   try {
     await page.goto(`${state.BASE}/`, { waitUntil: "domcontentloaded", timeout: 20_000 });
@@ -622,10 +633,17 @@ async function phase2() {
       null,
       { timeout: 15_000 },
     );
+    // 全部 4 次工具调用（todo_write/read_file/bash/todo_write）到齐后才算完整
+    await page.waitForFunction(
+      () => Boolean((document.querySelector("#tool-stats")?.textContent || "").includes("总 4")),
+      null,
+      { timeout: 10_000 },
+    );
     await page.waitForSelector("#outcome", { state: "visible", timeout: 15_000 });
     await shot("02-multistep-done.png");
 
     // -- 审批场景 -----------------------------------------------------------
+    await newWork();
     await page.fill("#prompt", `${MARK.approval}：删除临时文件`);
     await page.click("#run-button");
     const approveSelectors = ['button:has-text("本次允许")', 'button:has-text("允许")'];
@@ -646,6 +664,7 @@ async function phase2() {
     await waitText("审批场景已完成", 30_000);
 
     // -- 停驻场景 -----------------------------------------------------------
+    await newWork();
     await page.fill("#prompt", `${MARK.park}：一直读取文件`);
     await page.click("#run-button");
     await page.waitForSelector("#recovery", { state: "visible", timeout: 30_000 });
@@ -656,7 +675,7 @@ async function phase2() {
     await waitText("已恢复完成", 30_000);
 
     // -- 附件 ---------------------------------------------------------------
-    const uploadPath = path.join(SHOT_DIR, "hello-upload.txt");
+    const uploadPath = path.join(SHOT_DIR, "hello.txt");
     fs.writeFileSync(uploadPath, "hello", "utf8");
     await page.setInputFiles("#file-input", uploadPath);
     await waitText("hello.txt", 5_000); // chip 出现
