@@ -9,6 +9,7 @@ from eventide.models import ModelResponse, RunRequest, ToolCall
 from eventide.projections import TaskPlanProjection
 from eventide.task_plan import (
     MAX_CONTENT_CHARS,
+    MAX_SUMMARY_CHARS,
     MAX_TODOS,
     active_id,
     normalize_todos,
@@ -35,10 +36,18 @@ def test_task_plan_validation_and_compact_prompt():
         normalize_todos(
             [{"content": str(index), "status": "pending"} for index in range(MAX_TODOS + 1)]
         )
-    with pytest.raises(ValueError, match="only id, content and status"):
+    with pytest.raises(ValueError, match="only id, content, status and summary"):
         normalize_todos([{"content": "x", "status": "pending", "extra": True}])
     with pytest.raises(ValueError, match="must contain content and status"):
         normalize_todos([{"content": "x"}])
+    with pytest.raises(ValueError, match="must summarize what it completed"):
+        normalize_todos([{"content": "x", "status": "completed"}])
+    with pytest.raises(ValueError, match="only summarize a completed or blocked"):
+        normalize_todos([{"content": "x", "status": "pending", "summary": "did it"}])
+    with pytest.raises(ValueError, match="summary cannot exceed"):
+        normalize_todos(
+            [{"content": "x", "status": "blocked", "summary": "y" * (MAX_SUMMARY_CHARS + 1)}]
+        )
     with pytest.raises(ValueError, match="non-empty"):
         normalize_todos([{"content": " ", "status": "pending"}])
     with pytest.raises(ValueError, match="cannot exceed"):
@@ -62,7 +71,11 @@ def test_task_plan_validation_and_compact_prompt():
 
     plan = normalize_todos(
         [
-            {"content": "finished detail", "status": "completed"},
+            {
+                "content": "finished detail",
+                "status": "completed",
+                "summary": "Read host.py.",
+            },
             {"content": "current step", "status": "in_progress"},
             {"content": "later step", "status": "pending"},
         ]
@@ -71,6 +84,8 @@ def test_task_plan_validation_and_compact_prompt():
     rendered = prompt(plan)
     assert "1 completed" in rendered
     assert "finished detail" not in rendered
+    # The newest completion claim stays visible; the item text does not.
+    assert "last: t1 Read host.py." in rendered
     assert "[in_progress] t2: current step" in rendered
     assert "[pending] t3: later step" in rendered
 
@@ -90,7 +105,12 @@ def test_task_ids_survive_rewording_and_are_never_recycled():
 
     second, sequence = plan_update(
         [
-            {"id": "t1", "content": "Inspect every input", "status": "completed"},
+            {
+                "id": "t1",
+                "content": "Inspect every input",
+                "status": "completed",
+                "summary": "Read the inputs.",
+            },
             {"id": "t2", "content": "Implement change", "status": "in_progress"},
         ],
         first,
@@ -103,11 +123,17 @@ def test_task_ids_survive_rewording_and_are_never_recycled():
     ]
 
     third, sequence = plan_update(
-        [{"id": "t2", "content": "Implement change", "status": "completed"}],
+        [
+            {"id": "t2", "content": "Implement change", "status": "completed",
+             "summary": "Changed it."},
+            # Re-sending a settled item without its claim keeps the earlier one.
+            {"id": "t1", "content": "Inspect every input", "status": "completed"},
+        ],
         second,
         sequence,
     )
-    assert [item["id"] for item in third] == ["t2"]
+    assert [item["id"] for item in third] == ["t2", "t1"]
+    assert third[1]["summary"] == "Read the inputs."
 
     # A dropped id is never handed to a later item.
     fourth, sequence = plan_update(
@@ -218,9 +244,17 @@ async def test_task_plan_updates_system_and_elides_historical_arguments(isolated
         {"id": "t2", "content": "Implement change", "status": "pending"},
         {"id": "t3", "content": "Run validation", "status": "pending"},
     ]
-    finished = [{"content": item["content"], "status": "completed"} for item in initial]
+    finished = [
+        {"content": item["content"], "status": "completed", "summary": f"Done: {item['content']}"}
+        for item in initial
+    ]
     finished_ids = [
-        {"id": item["id"], "content": item["content"], "status": "completed"}
+        {
+            "id": item["id"],
+            "content": item["content"],
+            "status": "completed",
+            "summary": f"Done: {item['content']}",
+        }
         for item in identified
     ]
     requests = []
@@ -290,7 +324,15 @@ async def test_legacy_plan_gains_identity_without_rewriting_history(isolated_wor
                         ToolCall(
                             "plan",
                             "todo_write",
-                            {"todos": [{"content": "Legacy step", "status": "completed"}]},
+                            {
+                                "todos": [
+                                    {
+                                        "content": "Legacy step",
+                                        "status": "completed",
+                                        "summary": "Wrapped it up.",
+                                    }
+                                ]
+                            },
                         ),
                     )
                 )
@@ -319,7 +361,12 @@ async def test_legacy_plan_gains_identity_without_rewriting_history(isolated_wor
         assert recorded["payload"] == {"todos": legacy}
         latest = [event for event in events if event["type"] == "task.plan_updated"][-1]
         assert latest["payload"]["todos"] == [
-            {"id": "t1", "content": "Legacy step", "status": "completed"}
+            {
+                "id": "t1",
+                "content": "Legacy step",
+                "status": "completed",
+                "summary": "Wrapped it up.",
+            }
         ]
     finally:
         await host.close()
@@ -333,12 +380,17 @@ async def test_task_plan_survives_continue_without_repeating_user_intent(isolate
         max_steps=1,
     )
     plan = [
-        {"content": "Inspect", "status": "completed"},
+        {"content": "Inspect", "status": "completed", "summary": "Read the entry points."},
         {"content": "Implement", "status": "in_progress"},
         {"content": "Verify", "status": "pending"},
     ]
     identified = [
-        {"id": "t1", "content": "Inspect", "status": "completed"},
+        {
+            "id": "t1",
+            "content": "Inspect",
+            "status": "completed",
+            "summary": "Read the entry points.",
+        },
         {"id": "t2", "content": "Implement", "status": "in_progress"},
         {"id": "t3", "content": "Verify", "status": "pending"},
     ]
@@ -387,7 +439,7 @@ async def test_active_task_survives_park_and_continue(isolated_workspace):
         max_steps=1,
     )
     plan = [
-        {"content": "Inspect", "status": "completed"},
+        {"content": "Inspect", "status": "completed", "summary": "Read the entry points."},
         {"content": "Implement", "status": "in_progress"},
         {"content": "Verify", "status": "pending"},
     ]

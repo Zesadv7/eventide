@@ -27,10 +27,13 @@ def settings_for(path, **changes):
 # absolute Workspace path, plus the assembled tool catalog. Compaction and folding only
 # shrink messages, so a budget under this floor can never be satisfied -- the run fails with
 # "fixed system/tool characters" instead of exercising the path the test is about.
+# Measured at 2987 characters from this checkout's nested worktree path.
 # "test_tool_catalog_stays_within_its_budget" guards the catalog side of the number; raise
 # this constant on purpose rather than widening the tests that depend on it.
-REQUEST_FLOOR_CHARS = 2_900
-COMPACTION_BUDGET = REQUEST_FLOOR_CHARS + 100
+REQUEST_FLOOR_CHARS = 3_000
+# Operating budget for the compaction tests: the floor plus room for the compacted tail and
+# for path-length drift, so catalog growth trips the sentinel instead of these tests.
+COMPACTION_BUDGET = REQUEST_FLOOR_CHARS + 400
 
 
 async def test_runtime_direct_answer_and_trace(isolated_workspace):

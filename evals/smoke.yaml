@@ -80,3 +80,27 @@ cases:
           - {id: multi_2, name: read_file, arguments: {path: AGENTS.md, limit: 2}}
       - {text: multi-tool complete}
     expected: {final_contains: multi-tool, required_tools: [read_file]}
+
+  - id: task-plan
+    prompt: Plan a three-step change, then carry it out.
+    script:
+      - tool_calls:
+          - id: plan_1
+            name: todo_write
+            arguments:
+              todos:
+                - {content: Inspect inputs, status: in_progress}
+                - {content: Implement change, status: pending}
+                - {content: Run validation, status: pending}
+      - tool_calls:
+          - {id: plan_read, name: read_file, arguments: {path: README.md, limit: 2}}
+      - tool_calls:
+          - id: plan_2
+            name: todo_write
+            arguments:
+              todos:
+                - {id: t1, content: Inspect inputs, status: completed, summary: Read the README header.}
+                - {id: t2, content: Implement change, status: in_progress}
+                - {id: t3, content: Run validation, status: pending}
+      - {text: task plan complete}
+    expected: {final_contains: task plan complete, required_tools: [todo_write, read_file]}

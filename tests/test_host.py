@@ -17,8 +17,9 @@ from tests.test_runtime import COMPACTION_BUDGET, settings_for
 # What the assembled tool catalog may cost on every single model request, before any
 # conversation exists. This is a decision, not a measurement: a new tool or a longer
 # description has to be paid for here, deliberately, instead of quietly widening the
-# budget-sensitive tests that depend on REQUEST_FLOOR_CHARS.
-TOOL_CATALOG_BUDGET = 2_600
+# budget-sensitive tests that depend on REQUEST_FLOOR_CHARS. Raised 2_600 -> 2_700 when
+# todo_write gained the per-item completion `summary` (measured 2_609).
+TOOL_CATALOG_BUDGET = 2_700
 
 
 def make_repo(path: Path) -> Path:

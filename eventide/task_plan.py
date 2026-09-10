@@ -8,17 +8,20 @@ from typing import Any
 
 MAX_TODOS = 20
 MAX_CONTENT_CHARS = 200
+MAX_SUMMARY_CHARS = 300
+MAX_PROMPT_SUMMARY_CHARS = 120
 STATUSES = frozenset({"pending", "in_progress", "completed", "blocked"})
 ID_PATTERN = re.compile(r"t[1-9][0-9]{0,3}")
-ITEM_KEYS = frozenset({"id", "content", "status"})
+ITEM_KEYS = frozenset({"id", "content", "status", "summary"})
 
 TOOL = {
     "name": "todo_write",
     "description": (
-        "Replace the session task plan. Use it for three or more meaningful steps: call it "
-        "before execution, then again after each completion, block, or switch. Send the "
-        "complete plan, keep at most one item in_progress, and echo back the id of every item "
-        "you keep so its identity survives rewording. Skip plans for trivial requests."
+        "Replace the session task plan for three or more meaningful steps: call it before "
+        "execution, then again after each completion, block, or switch. Send the complete "
+        "plan, keep at most one item in_progress, and echo back the id of every item you keep "
+        "so identity survives rewording. When completing an item, summarize what you did -- "
+        "not whether it is correct. Skip trivial requests."
     ),
     "input_schema": {
         "type": "object",
@@ -32,6 +35,7 @@ TOOL = {
                         "id": {"type": "string", "maxLength": 16},
                         "content": {"type": "string", "maxLength": MAX_CONTENT_CHARS},
                         "status": {"type": "string", "enum": sorted(STATUSES)},
+                        "summary": {"type": "string", "maxLength": MAX_SUMMARY_CHARS},
                     },
                     "required": ["content", "status"],
                     "additionalProperties": False,
@@ -81,7 +85,7 @@ def plan_update(
     active = 0
     for index, item in enumerate(value, 1):
         if not isinstance(item, dict) or not set(item) <= ITEM_KEYS:
-            raise ValueError(f"todo {index} must contain only id, content and status")
+            raise ValueError(f"todo {index} must contain only id, content, status and summary")
         if "content" not in item or "status" not in item:
             raise ValueError(f"todo {index} must contain content and status")
         content = item.get("content")
@@ -122,10 +126,49 @@ def plan_update(
         claimed.add(task_id)
         seen_content.add(content)
         active += status == "in_progress"
-        todos.append({"id": task_id, "content": content, "status": str(status)})
+        todos.append(_item(task_id, content, str(status), item, available, index))
     if active > 1:
         raise ValueError("only one todo may be in_progress")
     return todos, sequence
+
+
+def _item(
+    task_id: str,
+    content: str,
+    status: str,
+    item: dict[str, Any],
+    available: dict[str, dict[str, Any]],
+    index: int,
+) -> dict[str, str]:
+    """Attach the model's completion claim, if this update is allowed to carry one."""
+    summary = item.get("summary")
+    prior = available.get(task_id)
+    settled = prior.get("status") if prior else None
+    if status == "completed":
+        if summary is None and settled == "completed":
+            # The plan is a full snapshot; keep the earlier claim rather than lose it.
+            summary = prior.get("summary") if prior else None
+        if not isinstance(summary, str) or not summary.strip():
+            raise ValueError(f"todo {index} must summarize what it completed")
+    elif status == "blocked":
+        if summary is not None and not isinstance(summary, str):
+            raise ValueError(f"todo {index} summary must be text")
+    elif summary is not None:
+        raise ValueError(f"todo {index} may only summarize a completed or blocked item")
+    if isinstance(summary, str):
+        summary = summary.strip()
+        if len(summary) > MAX_SUMMARY_CHARS:
+            raise ValueError(
+                f"todo {index} summary cannot exceed {MAX_SUMMARY_CHARS} characters"
+            )
+        if summary:
+            return {
+                "id": task_id,
+                "content": content,
+                "status": status,
+                "summary": summary,
+            }
+    return {"id": task_id, "content": content, "status": status}
 
 
 def normalize_todos(value: object) -> list[dict[str, str]]:
@@ -159,7 +202,22 @@ def prompt(todos: list[dict[str, Any]] | None) -> str:
     remaining = [todo for todo in todos if todo.get("status") != "completed"]
     if not remaining:
         return f"Current task plan: all {completed} items completed."
-    lines = [f"Current task plan ({completed} completed):"]
+    header = f"Current task plan ({completed} completed"
+    latest = next(
+        (
+            todo
+            for todo in reversed(todos)
+            if todo.get("status") == "completed" and todo.get("summary")
+        ),
+        None,
+    )
+    if latest:
+        # Keep the newest claim in view, capped so the plan block stays bounded.
+        claim = str(latest["summary"])
+        if len(claim) > MAX_PROMPT_SUMMARY_CHARS:
+            claim = claim[:MAX_PROMPT_SUMMARY_CHARS].rstrip() + "..."
+        header += f", last: {latest.get('id') or '?'} {claim}"
+    lines = [header + "):"]
     for index, todo in enumerate(remaining, 1):
         task_id = todo.get("id")
         label = f"{task_id}: " if task_id else ""
