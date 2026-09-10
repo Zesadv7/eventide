@@ -321,3 +321,23 @@
 **决策：** 每个计划项在写入时由 Runtime 分配稳定 `id`（`t1`、`t2`……），随 `task.plan_updated` payload 一并持久化。身份保留规则固定为：模型回传的 `id` 必须已存在于上一版计划，保留其身份（可同时改写 `content` 与 `status`）；省略 `id` 时按内容与尚未被认领的上一版项匹配并复用；两者都不成立才分配新 `id`。序号单调递增且**永不回收**，计数器随 payload 的 `next_task_seq` 落盘，因此删除一项不会让它的 `id` 之后指向另一个任务。未知 `id`、格式非法或同一份计划内重复使用 `id` 一律拒绝该次更新，返回一条可重试的工具错误。旧事件缺少 `id` 时只读兜底，**不回写日志**，由模型下一次提交计划时自然补齐。
 
 **影响：** 任务可以被事件稳定引用，且身份不随措辞变化。`prompt()` 因此需要渲染 `id`（模型没见过就无法回传），这部分开销只在存在计划时出现。不新增事件类型、不新增状态表：身份仍然是 canonical 计划事件的一部分，投影层不做 fold，`store.task_plan()` 保持 O(1)。代价是模型不回传 `id` 时会退化为新建身份，用工具描述中的显式要求缓解。
+
+## ADR-033：活跃任务由计划事件派生，不新增生命周期事件
+
+**状态：Accepted**，细化 ADR-031、ADR-032。
+
+**背景：** ADR-032 给了任务稳定身份，但"当前在做哪一条"仍然只是 system 里一行 `[in_progress]` 文本，模型可以一项都不标，外部也无法查询。直觉做法是新增 `task.activated` / `task.completed` / `task.blocked` 事件，但那会让同一件事同时存在于计划快照和生命周期事件里：崩溃、并发或模型乱写时两者可能不一致，而 Runtime 若靠 diff 计划补发激活事件，模型只要写一个 `pending → completed` 的计划就能得到一条"没有激活记录的完成"。
+
+**决策：** 不新增任何任务生命周期事件。`task.plan_updated` 保持唯一写入者，`TaskPlanProjection` 从计划快照折叠出任务列表与 `active_task_id`（最新计划里唯一的 `in_progress` 项）。该值通过 `session_status` 的 `active_task_id` / `task_state` 暴露，并写进续跑 run 的 `run.started.resumed_task_id`。计划里没有任何 `in_progress` 时，`prompt()` 追加一行提示让模型标出正在做的一项；不强制 `pending → in_progress → completed` 两段式，那样每个任务要多花一次工具调用，直接吃掉步数预算。
+
+**影响：** 不存在"计划说一件事、生命周期事件说另一件事"的分歧，也没有伪造激活记录的入口。投影是可重建的只读状态，不落库；`store.task_events()` 只读计划与工具结果三类事件。代价是每次查询要扫描该 Session 的这三类事件，而上下文构建本来就每步全量读取日志，当前规模下可接受；若日后成为瓶颈，再补一个 `(session_id, type, session_seq)` 索引，不改变事实模型。
+
+## ADR-034：单任务步数上限是 run 内软边界
+
+**状态：Accepted**，扩展 ADR-019。
+
+**背景：** 步数预算（`max_steps`，默认 30）是 run 级的。一条任务卡住会烧光整个 run 的预算，其他任务根本没有机会开始，用户只能重新描述目标。
+
+**决策：** Host 在 run 循环内维护一个影子计数：跟踪当前 `active_task_id`，它变化时把起点重设为当前 step；同一条任务连续占用超过 `task_max_steps`（默认 12，`EVENTIDE_TASK_MAX_STEPS` 可调，`0` 关闭）个 step 时，按 ADR-019 的既有路径停驻——先补 `workspace.checkpoint`，再写 `run.interrupted`，并把 `reason` 记为 `task_step_budget`，错误信息点名任务 id。该计数不落盘、不进事件 payload，因此 Continue 后自然归零。
+
+**影响：** 一条卡住的任务不再独占整个 run，用户 Continue 一次就能给它一段新预算，也可以把 `in_progress` 移到别的任务自助继续。`max_steps` 仍是硬上限，Host 不会因为单任务超时把 run 变成无限长。**Runtime 不代写 `blocked`**：`task.plan_updated` 的 `author="model"` 是日志诚实性的基础，由 Runtime 改写计划状态会让读者分不清"模型说自己卡住了"还是"系统判定它卡住了"。代价是一个持续卡住的任务在多次 Continue 下仍可续命，但每次都需要用户主动点一下。

@@ -142,6 +142,15 @@ def summary(todos: list[dict[str, str]]) -> str:
     )
 
 
+def active_id(todos: list[dict[str, Any]] | None) -> str | None:
+    """The one task the plan currently marks as being worked on."""
+    for todo in todos or []:
+        if todo.get("status") == "in_progress":
+            task_id = todo.get("id")
+            return task_id if isinstance(task_id, str) and task_id else None
+    return None
+
+
 def prompt(todos: list[dict[str, Any]] | None) -> str:
     """Render only unfinished work; completed details remain in the Event Log."""
     if todos is None:
@@ -157,4 +166,6 @@ def prompt(todos: list[dict[str, Any]] | None) -> str:
         lines.append(
             f"{index}. [{todo.get('status', 'pending')}] {label}{todo.get('content', '')}"
         )
+    if active_id(todos) is None:
+        lines.append("No task is in_progress; mark the one you are working on.")
     return "\n".join(lines)

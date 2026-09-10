@@ -68,6 +68,7 @@ class RuntimeStateProjection:
             "pending_approvals": {},
             "tools": {},
             "checkpoint": None,
+            "reason": None,
         }
         terminal = False
         for event in events:
@@ -100,3 +101,51 @@ class RuntimeStateProjection:
                 state["status"] = kind.split(".")[1]
                 state["completed_at"] = event["ts"]
         return state
+
+
+class TaskPlanProjection:
+    """Fold plan snapshots into the session's tasks and its one active task.
+
+    The plan event stays the only writer: nothing here is persisted, and a task id that
+    never appeared in a plan simply does not exist. Task status is scheduling state, not
+    evidence that the underlying work was verified.
+    """
+
+    @staticmethod
+    def project(events: list[dict[str, Any]]) -> dict[str, Any]:
+        tasks: dict[str, dict[str, Any]] = {}
+        active: str | None = None
+        updated_seq = 0
+        for event in events:
+            if event["partial"] or event["type"] != "task.plan_updated":
+                continue
+            updated_seq = event["session_seq"]
+            active = None
+            claimed: set[str] = set()
+            for index, todo in enumerate(event["payload"].get("todos", []), 1):
+                task_id = todo.get("id")
+                if not isinstance(task_id, str) or not task_id:
+                    # Plans written before task identity existed carry no id to project.
+                    continue
+                claimed.add(task_id)
+                record = tasks.setdefault(
+                    task_id, {"id": task_id, "first_seq": event["session_seq"]}
+                )
+                record["order"] = index
+                record["content"] = todo.get("content", "")
+                record["status"] = todo.get("status", "pending")
+                if todo.get("status") == "in_progress":
+                    active = task_id
+            for task_id, record in tasks.items():
+                if task_id not in claimed:
+                    # Dropped from the plan: keep the last known state, drop its position.
+                    record["order"] = None
+        ordered = sorted(
+            tasks.values(),
+            key=lambda item: (item["order"] is None, item["order"] or 0, item["first_seq"]),
+        )
+        return {
+            "tasks": [dict(item) for item in ordered],
+            "active_task_id": active,
+            "updated_seq": updated_seq,
+        }

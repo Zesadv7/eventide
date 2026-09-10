@@ -44,7 +44,7 @@ RuntimeEvent 包含 event_id、session_id、严格递增 session_seq、turn_id�
 - approval.required、approval.resolved；
 - workspace.checkpoint、context.configured、context.compacted、context.trimmed；
 - task.plan_updated（payload 为 `{todos, next_task_seq, step}`，每个 todo 含 `id`、`content`、`status`）；
-- run.completed、run.failed、run.interrupted。
+- run.completed、run.failed、run.interrupted（终态 payload 另带 `reason`：`step_budget`、`task_step_budget`、`cancelled` 或 `null`）。
 
 模型响应保存结构化 content blocks，包括 provider_state 与带稳定 ID 的 tool_use。工具执行前提交 prepared，结束后提交 completed；工具组收齐结果后才形成 provider-neutral tool_result 消息。副作用结果之后另存 workspace checkpoint；若两者之间崩溃，Continue 拒绝缺失 checkpoint 的历史。
 
@@ -54,7 +54,9 @@ SSE/get_events 为旧客户端把 prepared/completed 映射成 tool.request/tool
 
 MessagesProjection 只消费已提交消息和工具事实，保留工具配对、次序及 Responses 私有状态。未配对历史拒绝发送给模型；其他 Provider 按 adapter 契约忽略不适用的私有状态。
 
-RuntimeStateProjection 从事件得到 running、waiting_for_user、completed、failed、interrupted、usage、步骤、工具和待审批状态。SessionManager 将最新 interrupted run 展示为 parked；pending approval 保留历史证据，审批提交还必须匹配该 run 与当前进程的 pending future。
+RuntimeStateProjection 从事件得到 running、waiting_for_user、completed、failed、interrupted、usage、步骤、工具、停驻原因和待审批状态。SessionManager 将最新 interrupted run 展示为 parked；pending approval 保留历史证据，审批提交还必须匹配该 run 与当前进程的 pending future。
+
+TaskPlanProjection 折叠 `task.plan_updated` 快照，得到 Session 的任务列表、每项的首次出现序号，以及当前 `active_task_id`（= 最新计划里 `in_progress` 那一项）。被移出计划的项保留最后已知状态但失去位置。投影只读、不落库，`store.task_events()` 只读取计划与工具结果三类事件，不重放整个 Session 日志。计划事件始终是任务的唯一写入者：不存在独立的激活或完成事件，因此也不存在"计划说 A、生命周期事件说 B"的分歧。
 
 ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读取 4,000 字符，拒绝指向 Workspace 外的链接。每次 Run 还在 Workspace 根目录快照 `skills/*/SKILL.md`：system prompt 只加入名称和简介，完整内容由动态只读工具 `load_skill` 按需返回。Skill 路径必须留在 Workspace 内，运行中修改只影响下一次 Run。每轮 run 记录指令 hash、Skill 目录 hash 和工具目录 hash；实际 Skill 加载沿用 canonical tool prepared/completed 事件。消息与工具结果进入语义记录时会脱敏，但正文不静默截断；下一模型请求读取同一记录。Provider 返回的原始工具参数用于实际执行，持久事件中的敏感字段使用脱敏副本，避免审计规则改变工具行为。已知模型 API Key 在文本中也会替换。Host 每个 step 从最新 `task.plan_updated` 投影当前计划：system 只包含未完成项、它们的稳定 `id` 和完成数量；历史 `todo_write` 的完整参数在 ContextBuilder 请求投影中替换为合法空清单，默认 MessagesProjection 和 Event Log 不变。计划项身份由 Runtime 在写入时分配（`t1`、`t2`……），序号单调且不回收；模型回传已知 `id` 即保留身份，省略时按内容匹配复用，引用未知 `id` 或重复使用同一 `id` 则拒绝该次更新。旧事件缺少 `id` 与 `next_task_seq` 时按已见序号兜底，只读投影，不回写日志。单条工具结果超过 12,000 字符时，ContextBuilder 在所有模型请求（包括摘要请求）中只投影头尾预览，并写明稳定的 run_id/call_id；模型通过 session-scoped 的只读 `read_tool_result` 按字符 offset/limit 回读原结果。预算仍不足时，当前 turn 内较早的结果进一步折叠为占位串，保留最近三条预览或原文及 tool_use/tool_result 配对。请求侧省略与两层结果裁剪都记录 `context.trimmed`，Event Log、MessagesProjection 默认输出和审计导出保持完整。read_file 自行分页并报告文件总行数与下一页 offset。UI 可以独立裁剪展示。
 
@@ -62,14 +64,16 @@ ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读
 
 ## 中断与 Continue
 
-启动时扫描缺少终态的 run，追加 run.interrupted，不调用模型。单次 run 用尽步数预算（`max_steps`，默认 30）时所有工具结果已提交，Host 先记录工作区 checkpoint，再写入 run.interrupted，Session 停驻，用户可 Continue 到新 turn 并获得新的步数预算。用户主动 Continue 必须通过 Workspace 锁内检查：
+启动时扫描缺少终态的 run，追加 run.interrupted，不调用模型。单次 run 用尽步数预算（`max_steps`，默认 30）时所有工具结果已提交，Host 先记录工作区 checkpoint，再写入 run.interrupted，Session 停驻，用户可 Continue 到新 turn 并获得新的步数预算。存在计划时还有一条更小的软边界：同一条 `in_progress` 任务连续占用超过 `task_max_steps`（默认 12，`0` 关闭）个 step 时同样停驻，终态 `reason` 记为 `task_step_budget` 并在错误信息中点名任务 id。该计数只在本次 run 内存在、不落盘，因此 Continue 后重新计数；`max_steps` 始终是硬上限，Host 不因为单任务超时而改写计划状态。
+
+用户主动 Continue 必须通过 Workspace 锁内检查：
 
 1. 最新 run 为 interrupted，且 Workspace 为可验证的 Git 仓库。
 2. 当前 HEAD、暂存与未暂存 binary diff digest、未跟踪文件路径和内容 digest 与最后可信 checkpoint 相同。
 3. 不存在结果未知的非只读 prepared 调用；MCP 即使声明只读，也采用保守的恢复策略。
 4. 已完成副作用工具后存在 checkpoint；无法采集证据时拒绝继续。
 
-Continue 创建新 turn/run，并以唯一 continuation_of 关联来源 run；不会重放旧工具或重复用户消息。未完成 read_file/glob/compact 和确定尚未派发的调用写入 abandoned，补齐下一次模型请求的 tool-result 结构。只读结果也不伪装成成功。
+Continue 创建新 turn/run，并以唯一 continuation_of 关联来源 run；不会重放旧工具或重复用户消息。未完成 read_file/glob/compact 和确定尚未派发的调用写入 abandoned，补齐下一次模型请求的 tool-result 结构。只读结果也不伪装成成功。续跑的 `run.started` 记录 `resumed_task_id`（来源 run 停驻时的 `active_task_id`），system 中写明正在接续哪一条任务。
 
 没有 HEAD、非 Git、存在 submodule、证据采集失败、未知副作用或源码变化时维持 parked 并解释原因。用户可以显式 abandon：Runtime 创建一个不调用模型的关联 run，把未配对调用记录为结果未知且未重放，保留全部历史并解除 Session 停驻。范围仅为 Git 可见源码；ignored 文件、外部 MCP 服务和 OS 全局状态不在快照内。不是指令级恢复，也不是操作系统沙箱。
 

@@ -29,11 +29,13 @@ from eventide.models import (
 )
 from eventide.normalization import normalize, redact
 from eventide.policy import PolicyEngine
+from eventide.projections import TaskPlanProjection
 from eventide.providers import Provider, ProviderError, build_provider
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skills import SkillCatalog
 from eventide.store import RuntimeStore
 from eventide.task_plan import TOOL as TODO_WRITE_TOOL
+from eventide.task_plan import active_id as task_plan_active
 from eventide.task_plan import plan_update
 from eventide.task_plan import prompt as task_plan_prompt
 from eventide.task_plan import summary as plan_summary
@@ -193,6 +195,7 @@ class RuntimeHost:
         run = self.store.latest_run_summary(session_id)
         activity = self.store.session_activity(session_id)
         first_intent = activity["first_intent"]
+        task_state = TaskPlanProjection.project(self.store.task_events(session_id))
         title = str(session.get("title") or first_intent or "New session").replace(
             "\n", " "
         ).strip()
@@ -211,6 +214,8 @@ class RuntimeHost:
             else "idle",
             "latest_run": run,
             "task_plan": self.store.task_plan(session_id) or [],
+            "active_task_id": task_state["active_task_id"],
+            "task_state": task_state,
         }
 
     def workspace_status(self, workspace_id: str) -> dict[str, Any]:
@@ -828,7 +833,16 @@ class RuntimeHost:
         usage = {"input_tokens": 0, "output_tokens": 0}
         output, steps, tool_count = "", 0, 0
         force_compact = False
+        # Why the run parked, if it did; read by the terminal event on every exit path.
+        park_kind: str | None = None
+        park_message: str | None = None
         try:
+            # A parked run resumes the task it was on, so the continuation says which one.
+            resumed_task_id = (
+                task_plan_active(self.store.task_plan(session_id))
+                if continuation_of
+                else None
+            )
             await self._emit(
                 run_id,
                 "run.started",
@@ -838,6 +852,7 @@ class RuntimeHost:
                     "provider": self.settings.provider,
                     "model": self.settings.model,
                     "continuation_of": continuation_of,
+                    "resumed_task_id": resumed_task_id,
                 },
                 sink,
             )
@@ -992,13 +1007,37 @@ class RuntimeHost:
                 return approved
 
             step_budget_exhausted = False
+            # The run budget stays the hard ceiling; this only stops one task from eating it.
+            task_park: str | None = None
+            active_task_id: str | None = None
+            active_since_step = 1
+            resume_note = (
+                f"Resuming task {resumed_task_id} after a park. Continue it; do not repeat "
+                "completed work."
+                if resumed_task_id
+                else ""
+            )
             # Bound before the loop so the task-plan handler can stamp its own step.
             steps = 0
             for steps in range(1, self.settings.max_steps + 1):
                 plan_state = self.store.task_plan_state(session_id)
-                plan_context = task_plan_prompt(
-                    (plan_state["todos"] if plan_state else None) or None
-                )
+                plan_todos = (plan_state["todos"] if plan_state else None) or None
+                current_task = task_plan_active(plan_todos)
+                if current_task != active_task_id:
+                    active_task_id, active_since_step = current_task, steps
+                if (
+                    self.settings.task_max_steps
+                    and active_task_id
+                    and steps - active_since_step + 1 > self.settings.task_max_steps
+                ):
+                    task_park = self._clean(
+                        f"Task {active_task_id} reached its step budget "
+                        f"({self.settings.task_max_steps}); session parked"
+                    )
+                    break
+                plan_context = task_plan_prompt(plan_todos)
+                if resume_note:
+                    plan_context = f"{resume_note}\n\n{plan_context}"
                 system = base_system + (f"\n\n{plan_context}" if plan_context else "")
                 messages, compacted, trimmed = await self.context_builder.build(
                     session_id,
@@ -1147,6 +1186,14 @@ class RuntimeHost:
             else:
                 step_budget_exhausted = True
             if step_budget_exhausted:
+                park_kind = "step_budget"
+                park_message = self._clean(
+                    f"Maximum agent steps exceeded ({self.settings.max_steps})"
+                )
+            else:
+                park_kind = "task_step_budget" if task_park else None
+                park_message = task_park
+            if park_kind:
                 # Every tool result is already committed, so park instead of failing:
                 # the user can Continue into a fresh turn with a new step budget.
                 events = self.store.run_events(run_id)
@@ -1161,14 +1208,15 @@ class RuntimeHost:
                         },
                         sink,
                     )
-                status, error = "interrupted", self._clean(
-                    f"Maximum agent steps exceeded ({self.settings.max_steps})"
-                )
+                status, error = "interrupted", park_message
             else:
                 status, error = "completed", None
         except asyncio.CancelledError:
             await self._emit(
-                run_id, "run.interrupted", {"error": "Run cancelled; session parked"}, sink
+                run_id,
+                "run.interrupted",
+                {"error": "Run cancelled; session parked", "reason": "cancelled"},
+                sink,
             )
             raise
         except Exception as exc:
@@ -1196,6 +1244,7 @@ class RuntimeHost:
                 "tool_calls": tool_count,
                 "duration_ms": duration,
                 "usage": usage,
+                "reason": park_kind,
             },
             sink,
         )

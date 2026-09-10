@@ -449,6 +449,19 @@ class RuntimeStore:
         state = self.task_plan_state(session_id)
         return state["todos"] if state else None
 
+    def task_events(self, session_id: str) -> list[dict[str, Any]]:
+        """Read only the facts a task projection needs, not the whole session log."""
+        with self._lock:
+            return [
+                self._decode(row)
+                for row in self._connection.execute(
+                    "SELECT * FROM runtime_events WHERE session_id=? AND type IN "
+                    "('task.plan_updated', 'tool.completed', 'tool.abandoned') "
+                    "ORDER BY session_seq",
+                    (session_id,),
+                )
+            ]
+
     def get_run_identity(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._connection.execute(

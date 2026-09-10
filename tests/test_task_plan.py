@@ -6,15 +6,26 @@ import pytest
 
 from eventide.host import RuntimeHost
 from eventide.models import ModelResponse, RunRequest, ToolCall
+from eventide.projections import TaskPlanProjection
 from eventide.task_plan import (
     MAX_CONTENT_CHARS,
     MAX_TODOS,
+    active_id,
     normalize_todos,
     plan_update,
     prompt,
 )
 from tests.test_host import make_repo
 from tests.test_runtime import settings_for
+
+
+def plan_event(seq, todos):
+    return {
+        "type": "task.plan_updated",
+        "session_seq": seq,
+        "partial": False,
+        "payload": {"todos": todos},
+    }
 
 
 def test_task_plan_validation_and_compact_prompt():
@@ -141,6 +152,59 @@ def test_task_ids_reject_unknown_and_duplicate_references():
             previous,
             sequence,
         )
+
+
+def test_active_id_and_the_missing_in_progress_nudge():
+    assert active_id(None) is None
+    assert active_id([]) is None
+    assert active_id([{"id": "t1", "status": "pending"}]) is None
+    assert (
+        active_id(
+            [{"id": "t1", "status": "pending"}, {"id": "t2", "status": "in_progress"}]
+        )
+        == "t2"
+    )
+    # A plan predating task identity has no id to expose as the active task.
+    assert active_id([{"content": "legacy", "status": "in_progress"}]) is None
+
+    nudge = "No task is in_progress; mark the one you are working on."
+    assert nudge in prompt([{"id": "t1", "content": "Only step", "status": "pending"}])
+    assert nudge not in prompt([{"id": "t1", "content": "Only step", "status": "in_progress"}])
+    assert nudge not in prompt([{"id": "t1", "content": "Done", "status": "completed"}])
+
+
+def test_task_projection_folds_plan_snapshots_and_keeps_dropped_tasks():
+    state = TaskPlanProjection.project(
+        [
+            plan_event(1, [{"id": "t1", "content": "A", "status": "in_progress"}]),
+            plan_event(
+                2,
+                [
+                    {"id": "t1", "content": "A", "status": "completed"},
+                    {"id": "t2", "content": "B", "status": "in_progress"},
+                ],
+            ),
+        ]
+    )
+    assert state["active_task_id"] == "t2"
+    assert state["updated_seq"] == 2
+    assert [(task["id"], task["status"], task["order"]) for task in state["tasks"]] == [
+        ("t1", "completed", 1),
+        ("t2", "in_progress", 2),
+    ]
+
+    dropped = TaskPlanProjection.project(
+        [
+            plan_event(1, [{"id": "t1", "content": "A", "status": "in_progress"}]),
+            plan_event(2, [{"id": "t2", "content": "B", "status": "in_progress"}]),
+        ]
+    )
+    by_id = {task["id"]: task for task in dropped["tasks"]}
+    # A dropped task keeps its last known state but loses its position in the plan.
+    assert by_id["t1"]["order"] is None
+    assert by_id["t1"]["status"] == "in_progress"
+    assert by_id["t2"]["order"] == 1
+    assert dropped["active_task_id"] == "t2"
 
 
 async def test_task_plan_updates_system_and_elides_historical_arguments(isolated_workspace):
@@ -311,5 +375,139 @@ async def test_task_plan_survives_continue_without_repeating_user_intent(isolate
                 if event["type"] == "message.user"
             ]
         ) == 1
+    finally:
+        await host.close()
+
+
+async def test_active_task_survives_park_and_continue(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    settings = replace(
+        settings_for(repo),
+        state_dir=isolated_workspace / "state",
+        max_steps=1,
+    )
+    plan = [
+        {"content": "Inspect", "status": "completed"},
+        {"content": "Implement", "status": "in_progress"},
+        {"content": "Verify", "status": "pending"},
+    ]
+    requests = []
+
+    class Provider:
+        async def complete(self, request):
+            requests.append(request)
+            if len(requests) == 1:
+                return ModelResponse(
+                    tool_calls=(ToolCall("plan", "todo_write", {"todos": plan}),)
+                )
+            assert "Resuming task t2 after a park" in request.system
+            return ModelResponse("continued")
+
+    host = RuntimeHost(settings, Provider())
+    try:
+        first = await host.run(RunRequest("large task"))
+        assert first.status == "interrupted"
+        assert host.session_status(first.session_id)["active_task_id"] == "t2"
+        opening = next(
+            event
+            for event in host.store.run_events(first.run_id)
+            if event["type"] == "run.started"
+        )
+        assert opening["payload"]["resumed_task_id"] is None
+
+        host.settings = replace(host.settings, max_steps=2)
+        continued = await host.continue_session(first.session_id)
+        assert continued.status == "completed"
+        resumed = next(
+            event
+            for event in host.store.run_events(continued.run_id)
+            if event["type"] == "run.started"
+        )
+        assert resumed["payload"]["resumed_task_id"] == "t2"
+        assert len(
+            [
+                event
+                for event in host.store.session_events(first.session_id)
+                if event["type"] == "message.user"
+            ]
+        ) == 1
+    finally:
+        await host.close()
+
+
+async def test_task_step_budget_parks_the_run_and_names_the_task(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    settings = replace(
+        settings_for(repo),
+        state_dir=isolated_workspace / "state",
+        max_steps=10,
+        task_max_steps=2,
+    )
+    plan = [
+        {"content": "Roam the workspace", "status": "in_progress"},
+        {"content": "Later", "status": "pending"},
+    ]
+    requests = []
+
+    class Provider:
+        async def complete(self, request):
+            requests.append(request)
+            if len(requests) == 1:
+                return ModelResponse(
+                    tool_calls=(ToolCall("plan", "todo_write", {"todos": plan}),)
+                )
+            if len(requests) <= 3:
+                return ModelResponse(
+                    tool_calls=(ToolCall(f"g{len(requests)}", "glob", {"pattern": "*"}),)
+                )
+            return ModelResponse("stopped roaming")
+
+    host = RuntimeHost(settings, Provider())
+    try:
+        first = await host.run(RunRequest("roam"))
+        assert first.status == "interrupted"
+        assert "t1" in first.output
+        assert len(requests) == 3
+        terminal = host.store.run_events(first.run_id)[-1]
+        assert terminal["type"] == "run.interrupted"
+        assert terminal["payload"]["reason"] == "task_step_budget"
+
+        # The per-task budget is a run-scoped soft limit: a continuation starts it over.
+        continued = await host.continue_session(first.session_id)
+        assert continued.status == "completed"
+        assert continued.output == "stopped roaming"
+    finally:
+        await host.close()
+
+
+async def test_zero_task_step_budget_disables_the_per_task_limit(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    settings = replace(
+        settings_for(repo),
+        state_dir=isolated_workspace / "state",
+        max_steps=3,
+        task_max_steps=0,
+    )
+    plan = [{"content": "Roam", "status": "in_progress"}]
+    requests = []
+
+    class Provider:
+        async def complete(self, request):
+            requests.append(request)
+            if len(requests) == 1:
+                return ModelResponse(
+                    tool_calls=(ToolCall("plan", "todo_write", {"todos": plan}),)
+                )
+            return ModelResponse(
+                tool_calls=(ToolCall(f"g{len(requests)}", "glob", {"pattern": "*"}),)
+            )
+
+    host = RuntimeHost(settings, Provider())
+    try:
+        result = await host.run(RunRequest("roam"))
+        # The run budget still parks the session; only the per-task limit is off.
+        assert result.status == "interrupted"
+        terminal = host.store.run_events(result.run_id)[-1]
+        assert terminal["payload"]["reason"] == "step_budget"
     finally:
         await host.close()

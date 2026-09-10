@@ -37,6 +37,7 @@ class Settings:
     fallback_model: str | None
     max_tokens: int = 8_000
     max_steps: int = 30
+    task_max_steps: int = 12
     context_limit: int = 50_000
     approval_timeout: float = 60.0
     model_timeout: float = 300.0
@@ -62,6 +63,7 @@ class Settings:
             fallback_model=os.getenv("EVENTIDE_FALLBACK_MODEL") or os.getenv("FALLBACK_MODEL_ID"),
             max_tokens=int(os.getenv("EVENTIDE_MAX_TOKENS", "8000")),
             max_steps=int(os.getenv("EVENTIDE_MAX_STEPS", "30")),
+            task_max_steps=int(os.getenv("EVENTIDE_TASK_MAX_STEPS", "12")),
             context_limit=int(os.getenv("EVENTIDE_CONTEXT_LIMIT", "50000")),
             approval_timeout=float(os.getenv("EVENTIDE_APPROVAL_TIMEOUT", "60")),
             model_timeout=float(os.getenv("EVENTIDE_MODEL_TIMEOUT", "300")),

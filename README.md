@@ -88,7 +88,7 @@ uv run eventide export run_example ./eventide-run.jsonl
 
 省略 `--workspace` 时使用当前目录；Git 仓库内的子目录归一化到仓库根，非 Git 目录也可运行。每个 Session 固定绑定一个 Workspace 和其中的 working directory；`run/chat --cwd` 可显式选择，若 `--workspace` 本身传入仓库子目录则默认把该子目录作为 cwd。Shell 与文件工具从 cwd 运行，并把它作为文件访问边界；Git checkpoint 仍覆盖整个 Workspace。根目录 `AGENTS.md` 加入模型上下文（最多 4,000 字符），`mcp.json` 和 `skills/` 按 Workspace 加载。生产基础工具为 `bash/read_file/write_file/edit_file/glob/compact/read_tool_result/todo_write`；发现有效 Skill 时再增加只读的 `load_skill`。旧 task graph、worktree、teammate 等接口仍可导入，但不进入新 Runtime 默认工具目录。`workspace remove <id>` 只移除没有 Session 的注册记录，不删除项目文件。
 
-Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `parked`；单次 run 用尽步数预算（默认 30 步，`EVENTIDE_MAX_STEPS` 可调）时同样停驻，可由用户 Continue 继续，不会整轮失败。Continue 必须由用户发起；它检查 Git HEAD、暂存/未暂存改动及未跟踪文件是否匹配最后可信 checkpoint，并拒绝存在未知 Bash、MCP 或写工具结果的历史。通过检查后创建新 turn/run，旧用户消息不会重复写入，未完成的只读调用会标记为 abandoned。非 Git、未提交过的 Git 仓库、包含 submodule 的项目或缺少可信 checkpoint 时不支持 Continue。检查范围是 Git 可见源码，不覆盖 ignored 文件或外部系统状态。Continue 无法通过时，可以使用 Web 的“放弃恢复”或 `eventide abandon` 保留历史并解除停驻；结果未知的工具不会被视为成功或重新执行。
+Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `parked`；单次 run 用尽步数预算（默认 30 步，`EVENTIDE_MAX_STEPS` 可调）时同样停驻，可由用户 Continue 继续，不会整轮失败。存在任务计划时，同一条进行中的任务连续占用步数（默认 12 步，`EVENTIDE_TASK_MAX_STEPS` 可调，设为 `0` 关闭）也会停驻并点名该任务，避免一条卡住的任务烧光整个 run 的预算；这是 run 内的软上限，不改变 `max_steps` 这个硬上限，Continue 后重新计数。Continue 必须由用户发起；它检查 Git HEAD、暂存/未暂存改动及未跟踪文件是否匹配最后可信 checkpoint，并拒绝存在未知 Bash、MCP 或写工具结果的历史。通过检查后创建新 turn/run，旧用户消息不会重复写入，未完成的只读调用会标记为 abandoned。非 Git、未提交过的 Git 仓库、包含 submodule 的项目或缺少可信 checkpoint 时不支持 Continue。检查范围是 Git 可见源码，不覆盖 ignored 文件或外部系统状态。Continue 无法通过时，可以使用 Web 的“放弃恢复”或 `eventide abandon` 保留历史并解除停驻；结果未知的工具不会被视为成功或重新执行。
 
 上下文摘要只覆盖已结束的 turn，原始事件不变；达到模型输出上限的残缺摘要不会保存为 checkpoint。Prompt、模型正文和工具结果不会因日志展示限长而在执行前被静默截断；工具始终使用 Provider 返回的原始参数，审计事件中的敏感字段使用脱敏副本。预算按 system、messages 和完整工具目录的序列化请求计算。超过 12,000 字符的单条工具结果会先在模型请求中变成带 run/call 引用的头尾预览，模型可用只读 `read_tool_result(run_id, call_id, offset, limit)` 分页取回任意区间；TodoWrite 的历史整表参数也会在请求侧省略，只保留下方当前计划。canonical Event Log、审计导出和工作记录仍保留完整结果与计划。摘要之后仍超预算时，当前 turn 内较早的工具结果会继续折叠为占位串（保留最近三条预览或原文），并记录 `context.trimmed`。仍无法在预算内保留时返回 `context_overflow`，不会静默丢弃当前交互。预算单位保持为序列化请求的字符数。模型输出达到 `max_tokens` 被截断且没有工具调用时，run 以 `failed` 结束并提示提高 `EVENTIDE_MAX_TOKENS`，不会静默报成功。
 
@@ -159,6 +159,8 @@ uv run eventide run "调用 demo MCP echo 工具"
 生产 Runtime 会提示模型只为至少三步的复杂工作调用 `todo_write`。每次调用提交完整当前清单，最多 20 项；状态支持 `pending`、`in_progress`、`completed`、`blocked`，且同时最多一项为 `in_progress`。更新写入不可变的 `task.plan_updated` 事件，Session 状态返回最新完整计划；模型请求只注入未完成项和已完成数量。因此计划可以跨 step、Host 重启和 Continue 恢复，但不会把每次历史整表重复占用上下文。
 
 每个计划项带稳定 `id`（`t1`、`t2`……），由 Runtime 分配、随事件持久化，**序号只增不回收**。模型更新计划时回传它保留项的 `id`，因此改写措辞不会改变身份；省略 `id` 的项按内容匹配复用旧身份，仍是新任务才分配新 `id`。引用不存在的 `id`、或在同一份计划里重复使用 `id`，都会得到一条工具错误而不会静默新建。旧 Session 中不含 `id` 的历史计划保持原样，在模型下一次提交计划时自然补齐，历史事件永不改写。
+
+当前进行中的那一项由 Runtime 显式投影为 `active_task_id`（Session 状态与 `run.started.resumed_task_id` 都可见）；计划里没有任何 `in_progress` 时，system 会提示模型标出正在做的一项。停驻后 Continue 的 run 会在 system 中写明正在接续哪一条任务。
 
 这只是当前 Session 的执行计划，不会启动 Subagent、后台任务或依赖图；旧文件式 task graph 仍属于 compatibility layer。
 
