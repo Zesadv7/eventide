@@ -1212,6 +1212,25 @@ class RuntimeHost:
             else:
                 status, error = "completed", None
         except asyncio.CancelledError:
+            # A cancel can land between a completed side-effecting tool and the
+            # checkpoint that records its result: they are two separate facts, and
+            # only the first one gets written. Record the workspace here so the parked
+            # run stays resumable, exactly as the step-budget park path does. This
+            # does not loosen recovery -- Continue still compares the checkpoint
+            # against the live workspace and refuses if it changed.
+            with suppress(asyncio.CancelledError):
+                events = self.store.run_events(run_id)
+                if not events or events[-1]["type"] != "workspace.checkpoint":
+                    await self._emit(
+                        run_id,
+                        "workspace.checkpoint",
+                        {
+                            "checkpoint": await asyncio.to_thread(
+                                workspace_checkpoint, workspace_root
+                            ),
+                        },
+                        sink,
+                    )
             await self._emit(
                 run_id,
                 "run.interrupted",

@@ -457,6 +457,60 @@ async def test_cancel_run_by_id_persists_interruption(isolated_workspace):
         await host.close()
 
 
+async def test_cancel_after_a_side_effecting_tool_keeps_the_session_resumable(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "name": "write_file",
+                        "arguments": {"path": "a.txt", "content": "x"},
+                    }
+                ]
+            },
+        ]
+    )
+    settings = replace(settings_for(repo), state_dir=isolated_workspace / "state")
+    host = RuntimeHost(settings, provider)
+    try:
+        workspace = host.resolve_or_register_workspace(repo)
+        session = host.create_session(workspace_id=workspace.workspace_id)
+        emit = host._emit
+        cancelled = False
+
+        # tool.completed and its workspace.checkpoint are two separate facts, so a
+        # cancel can land between them and leave a completed mutating tool with no
+        # checkpoint -- which used to make the parked Session un-resumable forever.
+        async def emit_then_cancel(*args, **kwargs):
+            nonlocal cancelled
+            await emit(*args, **kwargs)
+            if args[1] == "tool.completed" and not cancelled:
+                cancelled = True
+                asyncio.current_task().cancel()
+
+        host._emit = emit_then_cancel
+        task = asyncio.create_task(host.run(RunRequest("write a file", session)))
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cancelled, "the test has to cancel inside the tool-completion window"
+
+        events = host.store.run_events(host.store.latest_run(session)["id"])
+        assert events[-1]["type"] == "run.interrupted"
+        checkpoint_seq = max(
+            (e["session_seq"] for e in events if e["type"] == "workspace.checkpoint"), default=0
+        )
+        completed_seq = max(
+            (e["session_seq"] for e in events if e["type"] == "tool.completed"), default=0
+        )
+        assert checkpoint_seq > completed_seq
+        resumed = await host.continue_session(session)
+        assert resumed.status == "completed"
+    finally:
+        await host.close()
+
+
 async def test_model_request_timeout_fails_with_durable_retries(isolated_workspace):
     class WaitingProvider:
         async def complete(self, _request):
