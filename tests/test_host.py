@@ -12,7 +12,13 @@ from eventide.host import RuntimeHost
 from eventide.models import ModelResponse, RunRequest, WorkspaceTarget
 from eventide.providers import ScriptedProvider
 from eventide.workspace import workspace_checkpoint
-from tests.test_runtime import settings_for
+from tests.test_runtime import COMPACTION_BUDGET, settings_for
+
+# What the assembled tool catalog may cost on every single model request, before any
+# conversation exists. This is a decision, not a measurement: a new tool or a longer
+# description has to be paid for here, deliberately, instead of quietly widening the
+# budget-sensitive tests that depend on REQUEST_FLOOR_CHARS.
+TOOL_CATALOG_BUDGET = 2_600
 
 
 def make_repo(path: Path) -> Path:
@@ -65,6 +71,20 @@ async def test_host_project_binding_and_lease(isolated_workspace):
     finally:
         await host.close()
     await host.close()
+
+
+async def test_tool_catalog_stays_within_its_budget(isolated_workspace):
+    provider = ScriptedProvider([{"text": "done"}])
+    host = RuntimeHost(settings_for(isolated_workspace), provider)
+    try:
+        assert (await host.run(RunRequest("hello"))).status == "completed"
+    finally:
+        await host.close()
+    catalog = len(json.dumps(provider.requests[0].tools, ensure_ascii=False))
+    assert catalog <= TOOL_CATALOG_BUDGET, (
+        f"the tool catalog now costs {catalog} characters on every request; trim a "
+        f"description or raise TOOL_CATALOG_BUDGET deliberately"
+    )
 
 
 async def test_workspace_serialization_and_cross_workspace_parallelism(isolated_workspace):
@@ -488,7 +508,7 @@ async def test_mcp_close_failure_does_not_overwrite_success(isolated_workspace, 
 
 async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace):
     provider = ScriptedProvider([{"text": "summary"}, {"text": "done"}])
-    settings = settings_for(isolated_workspace, context_limit=3_000)
+    settings = settings_for(isolated_workspace, context_limit=COMPACTION_BUDGET)
     host = RuntimeHost(settings, provider)
     session = host.create_session()
     host.store.create_run("previous", session)
@@ -514,7 +534,7 @@ async def test_truncated_context_summary_is_never_persisted(isolated_workspace):
     provider = ScriptedProvider(
         [{"text": "partial summary", "stop_reason": "max_tokens"}]
     )
-    settings = settings_for(isolated_workspace, context_limit=3_000)
+    settings = settings_for(isolated_workspace, context_limit=COMPACTION_BUDGET)
     host = RuntimeHost(settings, provider)
     session = host.create_session()
     host.store.create_run("previous", session)

@@ -23,6 +23,16 @@ def settings_for(path, **changes):
     return replace(settings, **changes)
 
 
+# Floor of one model request before any conversation: the system prompt including the
+# absolute Workspace path, plus the assembled tool catalog. Compaction and folding only
+# shrink messages, so a budget under this floor can never be satisfied -- the run fails with
+# "fixed system/tool characters" instead of exercising the path the test is about.
+# "test_tool_catalog_stays_within_its_budget" guards the catalog side of the number; raise
+# this constant on purpose rather than widening the tests that depend on it.
+REQUEST_FLOOR_CHARS = 2_900
+COMPACTION_BUDGET = REQUEST_FLOOR_CHARS + 100
+
+
 async def test_runtime_direct_answer_and_trace(isolated_workspace):
     runtime = AgentRuntime(
         settings_for(isolated_workspace),
@@ -74,7 +84,7 @@ async def test_runtime_approval_handler(isolated_workspace):
 
 
 async def test_runtime_retries_and_compacts(isolated_workspace):
-    settings = settings_for(isolated_workspace, context_limit=3_000)
+    settings = settings_for(isolated_workspace, context_limit=COMPACTION_BUDGET)
     provider = ScriptedProvider(
         [
             {"text": "Earlier goal retained."},

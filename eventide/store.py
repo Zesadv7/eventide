@@ -421,8 +421,12 @@ class RuntimeStore:
                 return {**payload, "content": content if isinstance(content, str) else str(content)}
         return None
 
-    def task_plan(self, session_id: str) -> list[dict[str, str]] | None:
-        """Project the latest task plan directly from its canonical event."""
+    def task_plan_state(self, session_id: str) -> dict[str, Any] | None:
+        """Project the latest plan payload, including its allocated id sequence.
+
+        Legacy payloads written before task identity existed carry no `next_task_seq`;
+        callers fall back to the highest id they can see. Nothing is ever written back.
+        """
         with self._lock:
             row = self._connection.execute(
                 "SELECT payload_json FROM runtime_events "
@@ -432,8 +436,18 @@ class RuntimeStore:
             ).fetchone()
         if row is None:
             return None
-        todos = json.loads(row[0]).get("todos", [])
-        return [dict(todo) for todo in todos]
+        payload = json.loads(row[0])
+        todos = payload.get("todos", [])
+        return {
+            "todos": [dict(todo) for todo in todos] if isinstance(todos, list) else [],
+            "next_task_seq": payload.get("next_task_seq"),
+            "step": payload.get("step"),
+        }
+
+    def task_plan(self, session_id: str) -> list[dict[str, str]] | None:
+        """Project the latest task plan directly from its canonical event."""
+        state = self.task_plan_state(session_id)
+        return state["todos"] if state else None
 
     def get_run_identity(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:

@@ -311,3 +311,13 @@
 **决策：** 生产 Host 注入 `todo_write`，用于原子替换当前 Session 的完整计划。计划最多 20 项，状态限定为 pending、in_progress、completed、blocked，同时最多一个 in_progress。合法更新追加 `task.plan_updated`；最新事件是当前事实，Host 每个 step 只把未完成项及完成数量加入 system。ContextBuilder 将历史 `todo_write` 参数替换为空清单但保持 tool_use/tool_result 配对，完整参数仍留在模型响应事件、默认消息投影和审计导出。该工具只改变 Event Log，标记为 recovery-safe，不产生 Workspace checkpoint。
 
 **影响：** 计划可跨模型 step、Host 重启和 Continue 恢复，Session API 状态可读取最新完整清单；重复更新不会线性挤占模型上下文。计划是执行提示而非调度器：不自动运行任务、不创建 Subagent/worktree、不表达依赖图，也不把勾选完成当作外部验证证据。旧文件式 task graph 继续留在 compatibility layer，不进入生产 Host。
+
+## ADR-032：任务身份由计划事件承载并在写入时分配
+
+**状态：Accepted**，细化 ADR-031。
+
+**背景：** ADR-031 的待办项只有 `content` 和 `status`，身份实际上是那串文字本身：改一个字的措辞就等于删掉旧项、新增一项。任何跨事件引用（激活、完成、证据）都无处挂载；内容相同的两项还会被判为重复而拒绝。
+
+**决策：** 每个计划项在写入时由 Runtime 分配稳定 `id`（`t1`、`t2`……），随 `task.plan_updated` payload 一并持久化。身份保留规则固定为：模型回传的 `id` 必须已存在于上一版计划，保留其身份（可同时改写 `content` 与 `status`）；省略 `id` 时按内容与尚未被认领的上一版项匹配并复用；两者都不成立才分配新 `id`。序号单调递增且**永不回收**，计数器随 payload 的 `next_task_seq` 落盘，因此删除一项不会让它的 `id` 之后指向另一个任务。未知 `id`、格式非法或同一份计划内重复使用 `id` 一律拒绝该次更新，返回一条可重试的工具错误。旧事件缺少 `id` 时只读兜底，**不回写日志**，由模型下一次提交计划时自然补齐。
+
+**影响：** 任务可以被事件稳定引用，且身份不随措辞变化。`prompt()` 因此需要渲染 `id`（模型没见过就无法回传），这部分开销只在存在计划时出现。不新增事件类型、不新增状态表：身份仍然是 canonical 计划事件的一部分，投影层不做 fold，`store.task_plan()` 保持 O(1)。代价是模型不回传 `id` 时会退化为新建身份，用工具描述中的显式要求缓解。

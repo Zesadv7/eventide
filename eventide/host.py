@@ -33,9 +33,8 @@ from eventide.providers import Provider, ProviderError, build_provider
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skills import SkillCatalog
 from eventide.store import RuntimeStore
-from eventide.task_plan import GUIDANCE as TASK_PLAN_GUIDANCE
 from eventide.task_plan import TOOL as TODO_WRITE_TOOL
-from eventide.task_plan import normalize_todos
+from eventide.task_plan import plan_update
 from eventide.task_plan import prompt as task_plan_prompt
 from eventide.task_plan import summary as plan_summary
 from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
@@ -895,11 +894,18 @@ class RuntimeHost:
             skill_tools = [skills.tool()] if skills else []
 
             async def write_task_plan(todos: object) -> str:
-                normalized = normalize_todos(todos)
+                state = self.store.task_plan_state(session_id)
+                normalized, following = plan_update(
+                    todos,
+                    state["todos"] if state else None,
+                    state["next_task_seq"] if state else None,
+                )
                 await self._emit(
                     run_id,
                     "task.plan_updated",
-                    self._semantic({"todos": normalized}),
+                    self._semantic(
+                        {"todos": normalized, "next_task_seq": following, "step": steps}
+                    ),
                     sink,
                     author="model",
                 )
@@ -938,7 +944,7 @@ class RuntimeHost:
                 "You are Eventide. Use tools to finish work, respect permissions, and never "
                 "claim success without evidence.\n"
                 f"Workspace: {workspace_root}\nWorking directory: {working_root}\n"
-                f"Project instructions:\n{instructions}\n\nTask planning:\n{TASK_PLAN_GUIDANCE}"
+                f"Project instructions:\n{instructions}"
                 + (f"\n\n{skill_prompt}" if skill_prompt else "")
             )
             catalog_hash = digest(tools)
@@ -986,8 +992,13 @@ class RuntimeHost:
                 return approved
 
             step_budget_exhausted = False
+            # Bound before the loop so the task-plan handler can stamp its own step.
+            steps = 0
             for steps in range(1, self.settings.max_steps + 1):
-                plan_context = task_plan_prompt(self.store.task_plan(session_id))
+                plan_state = self.store.task_plan_state(session_id)
+                plan_context = task_plan_prompt(
+                    (plan_state["todos"] if plan_state else None) or None
+                )
                 system = base_system + (f"\n\n{plan_context}" if plan_context else "")
                 messages, compacted, trimmed = await self.context_builder.build(
                     session_id,
