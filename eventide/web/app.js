@@ -2,24 +2,8 @@ import {chapters, contextPct, eventType, labels, mergeEvents, operationText, par
 import {EventFeed, request} from "./transport.js?v=11";
 import {el, button, reconcile, markdown} from "./view.js?v=11";
 
-// config.js queries dialog elements at import time. The dialog markup is owned by
-// another layer, so stub anything missing before the dynamic import; a failure to
-// import degrades to "unconfigured" instead of killing the whole app.
-function ensureConfigFallbackDom() {
-  const ids = ["model-config-button", "close-model-dialog", "model-form", "test-model-config", "clear-api-key", "reset-model-config", "toggle-key"];
-  const missing = ids.filter((id) => !document.getElementById(id));
-  if (!missing.length) return;
-  const host = el("div", "config-fallback");
-  host.hidden = true;
-  for (const id of missing) {
-    const node = id === "model-form" ? document.createElement("form") : el("button", "", id === "toggle-key" ? "显示" : "");
-    node.id = id;
-    if (node.tagName === "BUTTON") node.type = "button";
-    host.append(node);
-  }
-  document.body.append(host);
-}
-ensureConfigFallbackDom();
+// config.js is null-safe for nodes the v2 console dropped, so a failed import is
+// the only remaining degrade path: the app keeps running as "unconfigured".
 const config = await import("./config.js?v=11").catch(() => null);
 
 const $ = (selector) => document.querySelector(selector);
