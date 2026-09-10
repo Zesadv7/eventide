@@ -11,6 +11,37 @@ export const short = (value, limit = 100) => {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 };
 
+// Why a run parked, in user language. `reason` is the runtime's structured code from
+// the terminal event; the raw error text stays available in the Inspector. Labels
+// stay neutral: "cancelled" also covers runs cancelled by Host shutdown, so the UI
+// never claims who stopped the run.
+const parkLabels = {
+  step_budget: "步数预算用尽",
+  task_step_budget: "单任务步数超限",
+  cancelled: "执行已停止",
+};
+const parkTexts = {
+  step_budget: "本次执行用完了步数预算；已完成的工作已保存，可以从当前进度继续。",
+  task_step_budget: "同一条任务占用了过多步数，执行已暂停；可以先调整计划，再从该任务继续。",
+  cancelled: "这次执行被停止；已完成的工作已保存，可以继续。",
+};
+const hostStopped = "Host stopped before terminal fact";
+export function parkSummary(run) {
+  if (run?.status !== "interrupted") return null;
+  const error = typeof run.error === "string" ? run.error.trim() : "";
+  if (run.reason && parkTexts[run.reason]) return parkTexts[run.reason];
+  if (!run.reason && (!error || error === hostStopped)) {
+    return "服务在执行结束前停止；确认工作区状态后可以继续。";
+  }
+  return error || "执行被中断；可以尝试继续。";
+}
+export function parkLabel(run) {
+  if (run?.status !== "interrupted") return null;
+  if (parkLabels[run.reason]) return parkLabels[run.reason];
+  const error = typeof run.error === "string" ? run.error.trim() : "";
+  return !run.reason && (!error || error === hostStopped) ? "服务中断" : "执行中断";
+}
+
 export function runActivity(run, events = [], now = Date.now() / 1000) {
   const own = events.filter((event) => event.run_id === runId(run));
   const steps = Math.max(run?.steps || 0, ...own.filter((event) => event.type === "model.response").map((event) => event.payload?.step || 0));
@@ -92,7 +123,7 @@ export function operationText(op) {
   return `${short(target, 120)} · ${operationLabels[op.status]}`;
 }
 
-export function projectWork(runs, eventMap) {
+export function projectWork(runs, eventMap, taskContents = new Map()) {
   const operations = new Map();
   const approvals = new Map();
   const blocks = [];
@@ -117,7 +148,10 @@ export function projectWork(runs, eventMap) {
     if (type === "message.user" || (type === "message.imported" && p.message?.role === "user")) {
       if (typeof p.message?.content === "string") intent ||= p.message.content;
     } else if (type === "run.started" && p.continuation_of) {
-      note(event, "continuation", "接续上次停驻", "同一项工作继续执行，未重发原始指令。");
+      const resumed = p.resumed_task_id ? taskContents.get(p.resumed_task_id) : "";
+      note(event, "continuation", "接续上次停驻",
+        resumed ? `继续执行任务 ${p.resumed_task_id}：${short(resumed, 80)}。未重发原始指令。`
+          : "同一项工作继续执行，未重发原始指令。");
     } else if (type === "workspace.checkpoint") {
       checkpoint = p.checkpoint || null;
     } else if (type === "context.trimmed") {

@@ -93,15 +93,15 @@ Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `p
 
 上下文摘要只覆盖已结束的 turn，原始事件不变；达到模型输出上限的残缺摘要不会保存为 checkpoint。Prompt、模型正文和工具结果不会因日志展示限长而在执行前被静默截断；工具始终使用 Provider 返回的原始参数，审计事件中的敏感字段使用脱敏副本。预算按 system、messages 和完整工具目录的序列化请求计算。超过 12,000 字符的单条工具结果会先在模型请求中变成带 run/call 引用的头尾预览，模型可用只读 `read_tool_result(run_id, call_id, offset, limit)` 分页取回任意区间；TodoWrite 的历史整表参数也会在请求侧省略，只保留下方当前计划。canonical Event Log、审计导出和工作记录仍保留完整结果与计划。摘要之后仍超预算时，当前 turn 内较早的工具结果会继续折叠为占位串（保留最近三条预览或原文），并记录 `context.trimmed`。仍无法在预算内保留时返回 `context_overflow`，不会静默丢弃当前交互。预算单位保持为序列化请求的字符数。模型输出达到 `max_tokens` 被截断且没有工具调用时，run 以 `failed` 结束并提示提高 `EVENTIDE_MAX_TOKENS`，不会静默报成功。
 
-HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id` 和 Workspace 内的 `working_directory`；空请求继续绑定启动项目根目录。`PATCH /api/sessions/{id}` 可设置显式标题或归档状态；默认列表隐藏已归档 Session，传 `include_archived=true` 可查看。`DELETE /api/sessions/{id}` 只删除没有 Run 或事件历史的空 Session，有历史的工作记录必须归档。Run History 默认返回最近 100 条，可用 `limit`（最多 200）和 `before=<run_id>` 向前翻页；Web 提供“加载更早记录”。`GET /api/runs/{id}/export` 流式下载 canonical JSONL；CLI `export` 默认拒绝覆盖已有文件，显式 `--force` 才替换。`POST /api/sessions/{id}/continue` 先完成恢复校验并持久化新 Run，再返回 `202`、`run_id` 和 `status=accepted`；验证失败返回 409，执行继续通过 Run 查询与 SSE 观察。同 Workspace 的并发 HTTP 请求返回 409。Web 长任务状态显示已观察到的模型步数、运行时长和距最近持久事件的时间，并提供按 Run 停止；不虚构无法由事件证明的完成百分比。
+HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id` 和 Workspace 内的 `working_directory`；空请求继续绑定启动项目根目录。`PATCH /api/sessions/{id}` 可设置显式标题或归档状态；默认列表隐藏已归档 Session，传 `include_archived=true` 可查看。`DELETE /api/sessions/{id}` 只删除没有 Run 或事件历史的空 Session，有历史的工作记录必须归档。Run History 默认返回最近 100 条，可用 `limit`（最多 200）和 `before=<run_id>` 向前翻页；Web 提供“加载更早记录”。`GET /api/runs/{id}/export` 流式下载 canonical JSONL；CLI `export` 默认拒绝覆盖已有文件，显式 `--force` 才替换。`POST /api/sessions/{id}/continue` 先完成恢复校验并持久化新 Run，再返回 `202`、`run_id` 和 `status=accepted`；验证失败返回 409，执行继续通过 Run 查询与 SSE 观察。同 Workspace 的并发 HTTP 请求返回 409。Web 长任务状态显示已观察到的模型步数、正在执行的任务、运行时长和距最近持久事件的时间，并提供按 Run 停止；不虚构无法由事件证明的完成百分比。
 
 ## Web 工作记录页
 
-左侧选择 Workspace 和持续存在的工作（Session），正文优先展示工作目标、当前状态与最近成果；“本次执行结束”不代表 Session 被关闭。首次浏览不自动创建空 Session，点击“新建工作”或首次提交目标时才创建。刷新会恢复该 Workspace 上次选择的工作。
+左侧选择 Workspace 和持续存在的工作（Session），正文自上而下展示工作目标与状态、任务计划、最近成果与工作经过，任务计划仅在该工作存在计划时出现；“本次执行结束”不代表 Session 被关闭。首次浏览不自动创建空 Session，还没有任何工作区时提示先添加工作区，点击“新建工作”或首次提交目标时才创建。刷新会恢复该 Workspace 上次选择的工作。
 
-工作经过按用户意图及其 Continue 链分章，较早章节按需加载，工具操作默认折叠。工具请求与结果配对后展示对象和执行状态；“操作完成”不额外宣称测试全部通过。任务计划面板展示当前清单与每项的证据，completed 默认折叠，证据措辞始终是"发生过什么"。原始 Events、模型协议、工具参数和 checkpoint 通过临时右侧详情查看。结果支持标题、列表、代码和安全链接的 Markdown 子集，以及复制；原始 HTML 不执行。
+工作经过按用户意图及其 Continue 链分章，较早章节按需加载，工具操作默认折叠。工具请求与结果配对后展示对象和执行状态；“操作完成”不额外宣称测试全部通过。任务计划面板展示当前清单与每项的证据，completed 默认折叠，证据措辞始终是"发生过什么"。原始 Events、模型协议、工具参数和 checkpoint 通过临时右侧详情查看；整章入口在“工作经过”标题处，只有审批和需要注意的块（中断、放弃恢复、MCP 异常等）自带“查看详情”按钮。结果支持标题、列表、代码和安全链接的 Markdown 子集，以及复制；原始 HTML 不执行。
 
-停驻时输入区切换为 Continue 或放弃恢复操作，通过后立即展示接续过程；校验失败保留停驻状态与原因。仅最新停驻工作提供恢复操作。审批直接在正文提供“本次允许”和“拒绝”。运行中的工作可以单独停止，停止后按中断语义停驻并保留记录。同 Workspace 忙碌时不能再次提交；历史仍可浏览。正文独立滚动，底部操作区保持可达，小屏也可切换 Workspace、新建工作和查看详情。
+停驻时状态行与恢复区会说明原因（如“步数预算用尽”、“执行已停止”、“服务中断”），原始错误文本仍通过“查看中断详情”查看。输入区切换为 Continue 或放弃恢复操作，通过后立即展示接续过程，工作经过中的接续说明会点名正在继续的任务；校验失败保留停驻状态与原因。仅最新停驻工作提供恢复操作。审批直接在正文提供“本次允许”和“拒绝”。运行中的工作可以单独停止，停止后按中断语义停驻并保留记录。同 Workspace 忙碌时不能再次提交；历史仍可浏览。正文独立滚动，底部操作区保持可达，小屏也可切换 Workspace、新建工作和查看详情。
 
 Web 运行不依赖 Node 或前端构建。开发时可用 Node.js 22+ 运行 `node --test tests/web.test.mjs`；pytest 检测到合适的 Node 时也会执行这些离线投影和传输检查。另有 `node tests/web_browser.cjs` 浏览器验收，需预先提供 Playwright 与 Chromium；`EVENTIDE_PLAYWRIGHT_MODULE` 可指定已安装的包路径，`EVENTIDE_BROWSER_CHANNEL=msedge` 可使用已安装的 Edge。浏览器测试使用内存 HTTP/SSE 样例，不读取用户数据库或连接模型，截图写入忽略目录 `.task_outputs/`。
 
@@ -167,7 +167,7 @@ uv run eventide run "调用 demo MCP echo 工具"
 
 **任务证据只记录"发生过什么"，不表示验证通过**：出错的调用同样计入证据，`completed` 只是调度状态，不替代测试、文件或任何外部验证。system 中只注入最近一条完成摘要，因此计划再长也不会线性占用上下文。
 
-计划是只读展示的：CLI 提供 `eventide plan show <session_id>`，默认人类可读输出（各项状态、active 任务、完成 summary、证据列表），`--json` 直接返回与 Session 状态同构的 `task_plan`、`active_task_id` 和 `task_state`。Web 工作记录页在"已有成果"下方展示任务计划面板：完成数、进行中、待开始和受阻计数，active 任务高亮，`completed` 项默认折叠，summary 和工具证据可按需展开。前端收到 `task.plan_updated` SSE 后重新读取 Session 状态刷新面板，不在前端复制投影规则；计划没有任何人工编辑入口，唯一写入路径仍是 `todo_write`。
+计划是只读展示的：CLI 提供 `eventide plan show <session_id>`，默认人类可读输出（各项状态、active 任务、完成 summary、证据列表），`--json` 直接返回与 Session 状态同构的 `task_plan`、`active_task_id` 和 `task_state`。Web 工作记录页在“已有成果”上方展示任务计划面板：计数为总进度式“N / M 已完成”，仅当存在时追加“进行中”和“受阻”数量，不单独显示“待开始”（待开始任务仍逐条可见）；active 任务高亮，`completed` 项默认折叠进“已完成的任务”分组，summary 和工具证据可按需展开。前端收到 `task.plan_updated` SSE 后重新读取 Session 状态刷新面板，不在前端复制投影规则；计划没有任何人工编辑入口，唯一写入路径仍是 `todo_write`。
 
 这只是当前 Session 的执行计划，不会启动 Subagent、后台任务或依赖图；旧文件式 task graph 仍属于 compatibility layer。
 

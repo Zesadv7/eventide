@@ -518,7 +518,14 @@ class RuntimeStore:
             **row,
             **{
                 key: state[key]
-                for key in ("status", "output", "duration_ms", "error", "pending_approvals")
+                for key in (
+                    "status",
+                    "output",
+                    "duration_ms",
+                    "error",
+                    "pending_approvals",
+                    "reason",
+                )
             },
             "steps": activity["steps"],
             "tool_calls": activity["tool_calls"],
@@ -606,6 +613,7 @@ class RuntimeStore:
                         "duration_ms",
                         "error",
                         "pending_approvals",
+                        "reason",
                     )
                 },
             }

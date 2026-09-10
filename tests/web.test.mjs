@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {chapters, mergeEvents, planGroups, projectWork, runActivity} from "../eventide/web/projection.js";
+import {chapters, mergeEvents, parkLabel, parkSummary, planGroups, projectWork, runActivity} from "../eventide/web/projection.js";
 import {EventFeed, parseSse} from "../eventide/web/transport.js";
 
 const event = (seq, type, payload, run_id = "r1", extra = {}) => ({event_id: `e${seq}`, run_id, session_seq: seq, type, payload, ...extra});
@@ -60,6 +60,30 @@ test("unknown status and id-less legacy tasks stay visible without inventing ide
   assert.equal(plan.total, 1);
   assert.equal(plan.open[0].id, "旧计划项");
   assert.equal(plan.open[0].active, undefined);
+});
+
+test("park reasons are explained in user language, not developer text", () => {
+  assert.equal(parkSummary({status: "completed"}), null);
+  assert.equal(parkSummary({status: "interrupted", reason: "step_budget", error: "Maximum agent steps exceeded (30)"}), "本次执行用完了步数预算；已完成的工作已保存，可以从当前进度继续。");
+  assert.equal(parkSummary({status: "interrupted", reason: "task_step_budget", error: "Task t2 reached its step budget (12); session parked"}), "同一条任务占用了过多步数，执行已暂停；可以先调整计划，再从该任务继续。");
+  assert.equal(parkSummary({status: "interrupted", reason: "cancelled", error: "Run cancelled; session parked"}), "这次执行被停止；已完成的工作已保存，可以继续。");
+  assert.equal(parkSummary({status: "interrupted", reason: null, error: "Host stopped before terminal fact"}), "服务在执行结束前停止；确认工作区状态后可以继续。");
+  assert.equal(parkSummary({status: "interrupted", reason: null, error: "自定义原因"}), "自定义原因");
+  // "cancelled" also covers Host-shutdown cancels, so the label never claims a hand.
+  assert.deepEqual([parkLabel({status: "interrupted", reason: "step_budget"}), parkLabel({status: "interrupted", reason: "cancelled"}), parkLabel({status: "interrupted", reason: null}), parkLabel({status: "interrupted", reason: "future_code", error: "x"})], ["步数预算用尽", "执行已停止", "服务中断", "执行中断"]);
+});
+
+test("continuation names the resumed task when the plan knows it", () => {
+  const tasks = new Map([["t2", "检查失败场景"]]);
+  const runs = [{id: "r1", status: "interrupted"}, {id: "r2", continuation_of: "r1", status: "completed"}];
+  const events = new Map([["r2", [event(1, "run.started", {continuation_of: "r1", resumed_task_id: "t2"}, "r2")]]]);
+  const named = projectWork(runs, events, tasks).blocks[0];
+  assert.equal(named.title, "接续上次停驻");
+  assert.match(named.text, /继续执行任务 t2：检查失败场景/);
+  const anonymous = projectWork(runs, new Map([["r2", [event(1, "run.started", {continuation_of: "r1"}, "r2")]]])).blocks[0];
+  assert.equal(anonymous.text, "同一项工作继续执行，未重发原始指令。");
+  const unknown = projectWork(runs, events, new Map()).blocks[0];
+  assert.equal(unknown.text, "同一项工作继续执行，未重发原始指令。");
 });
 
 test("live activity reports observed steps and last durable event", () => {

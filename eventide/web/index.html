@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Eventide · 持续工作的 Workspace">
   <title>Eventide · 工作空间</title>
-  <link rel="stylesheet" href="/assets/style.css?v=9">
+  <link rel="stylesheet" href="/assets/style.css?v=10">
 </head>
 <body>
   <div class="app-shell">
@@ -32,14 +32,14 @@
           <header class="work-heading"><h1 id="session-title">从一项工作开始</h1><p id="session-status" class="session-status" role="status"></p></header>
           <p id="notice" class="notice" role="status" hidden></p>
           <section id="approvals" aria-label="待审批操作"></section>
-          <section id="outcome" class="outcome" aria-label="已有成果"></section>
           <section id="plan" class="plan" aria-label="任务计划" hidden></section>
+          <section id="outcome" class="outcome" aria-label="已有成果"></section>
           <section class="history-section"><div class="section-heading"><h2>工作经过</h2><button id="session-details" type="button" class="text-button">查看详情</button></div><button id="load-older" type="button" class="text-button" hidden>加载更早记录</button><div id="narrative"></div></section>
         </div>
       </div>
       <footer class="action-area">
         <div class="action-inner">
-          <div id="recovery" hidden><strong>工作已停驻</strong><p>Continue 将核验工作区与历史操作结果；若无法恢复，可以保留历史并放弃本次恢复。</p><div class="recovery-actions"><button id="continue-button" class="primary-button" type="button">尝试 Continue</button><button id="abandon-button" class="secondary-button" type="button">放弃恢复</button><button id="interruption-details" class="text-button" type="button">查看中断详情</button></div></div>
+          <div id="recovery" hidden><strong>工作已停驻</strong><p id="recovery-reason" class="recovery-reason"></p><p class="recovery-help">Continue 会核验工作区与历史操作结果；若无法恢复，可以保留历史并放弃本次恢复。</p><div class="recovery-actions"><button id="continue-button" class="primary-button" type="button">尝试 Continue</button><button id="abandon-button" class="secondary-button" type="button">放弃恢复</button><button id="interruption-details" class="text-button" type="button">查看中断详情</button></div></div>
           <form id="prompt-form" class="composer"><label for="prompt">下一步工作</label><div class="composer-row"><textarea id="prompt" rows="2" placeholder="描述希望完成的工作…" required></textarea><button id="cancel-run" class="secondary-button" type="button" hidden>停止</button><button id="run-button" class="primary-button" type="submit">开始</button></div><div class="composer-foot"><span id="composer-hint">Ctrl + Enter 提交</span></div></form>
           <p id="action-message" class="action-message" role="status" hidden></p>
         </div>
@@ -117,6 +117,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="/assets/app.js?v=9"></script>
+  <script type="module" src="/assets/app.js?v=10"></script>
 </body>
 </html>

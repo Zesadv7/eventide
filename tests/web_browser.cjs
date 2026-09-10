@@ -107,10 +107,12 @@ const server = http.createServer(async (req, res) => {
     if (continueRejected) return reply({detail: "Workspace changed; session remains parked"}, 409);
     const owner = match[1], old = sessions.get(owner).latest_run.id;
     const run = addRun("continued", owner, "waiting_for_user", old);
-    emit(run.id, "run.started", {continuation_of: old});
+    emit(run.id, "run.started", {continuation_of: old, resumed_task_id: "t2"});
+    // The SSE payload deliberately differs from session_status below: the panel must
+    // render the server projection, never fold the plan event itself.
     emit(run.id, "task.plan_updated", {todos: [
       {id: "t1", content: "梳理恢复逻辑", status: "completed", summary: "读取了恢复相关代码"},
-      {id: "t2", content: "尝试写入恢复笔记", status: "in_progress"},
+      {id: "t2", content: "事件负载里才有的一句话", status: "in_progress"},
       {id: "t3", content: "补充回归覆盖", status: "pending"},
     ], next_task_seq: 4, step: 1});
     const continuedPlan = planState([
@@ -183,8 +185,9 @@ const server = http.createServer(async (req, res) => {
     // collapsed completed, and evidence that never claims verified success.
     const plan = page.locator("#plan");
     await plan.filter({hasText: "任务计划"}).waitFor();
-    assert.match(await plan.innerText(), /1 已完成 · 1 进行中 · 1 待开始/);
+    assert.match(await plan.innerText(), /1 \/ 3 已完成 · 1 进行中/);
     assert.match(await plan.innerText(), /检查失败场景/);
+    assert.match(await page.locator("#recovery-reason").innerText(), /服务在执行结束前停止/);
     assert.doesNotMatch(await plan.innerText(), /梳理恢复逻辑/, "completed tasks stay hidden while collapsed");
     const completedGroup = plan.locator(".plan-completed");
     assert.equal(await completedGroup.count(), 1);
@@ -205,7 +208,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await completedGroup.evaluate((node) => node.open), true);
     await completedGroup.locator("> summary").click();
     assert.equal(await completedGroup.evaluate((node) => node.open), false, "completed group can be collapsed again");
-    assert.match(await plan.innerText(), /已完成 \(1\)/, "collapsed group still shows its count");
+    assert.match(await plan.innerText(), /已完成的任务 \(1\)/, "collapsed group still shows its count");
     assert.equal(await page.locator("#outcome script").count(), 0);
     assert.equal(await page.locator('#outcome a[href^="javascript:"]').count(), 0);
     assert.equal(await page.evaluate(() => window.injected), undefined);
@@ -229,6 +232,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.locator("#continue-button").isVisible(), false);
     assert.equal(await page.locator("#run-button").isDisabled(), true);
     assert.match(await page.locator("#narrative").innerText(), /接续上次停驻/);
+    await page.locator("#narrative").filter({hasText: "继续执行任务 t2：尝试写入恢复笔记"}).waitFor();
     await page.locator(".chapter[open] .operations>summary").last().click();
     const focusedOperation = page.locator(".chapter[open] .operation").last();
     await focusedOperation.click();
@@ -244,6 +248,7 @@ const server = http.createServer(async (req, res) => {
     // task now names the write attempt, without the frontend folding plan events.
     await page.locator("#plan").filter({hasText: "尝试写入恢复笔记"}).waitFor();
     assert.doesNotMatch(await page.locator("#plan").innerText(), /读取了恢复相关代码/, "completed summary stays folded after refresh");
+    assert.doesNotMatch(await page.locator("#plan").innerText(), /事件负载里才有的一句话/, "panel renders session_status, never the plan event payload");
 
     // s2 was renamed earlier, so select by its new title, then switch back to s1.
     await page.locator(".session-item").filter({hasText: "恢复体验审计"}).locator(".session-select").click();
@@ -270,8 +275,9 @@ const server = http.createServer(async (req, res) => {
     await page.locator("#workspace-switcher").selectOption("w1");
 
     // A rejected Continue leaves Parked visible and explains admission failure.
-    addRun("parked-again", "s1", "interrupted"); emit("parked-again", "run.interrupted", {error: "Interrupted"}); continueRejected = true;
+    addRun("parked-again", "s1", "interrupted"); emit("parked-again", "run.interrupted", {error: "Maximum agent steps exceeded (30)", reason: "step_budget"}); continueRejected = true;
     await page.reload(); await page.waitForLoadState("networkidle");
+    assert.match(await page.locator("#recovery-reason").innerText(), /步数预算/, "park reason is explained in user language");
     await page.locator("#continue-button").click();
     await page.locator("#action-message").filter({hasText: "Workspace changed"}).waitFor();
     assert.equal(await page.locator("#continue-button").isVisible(), true);
@@ -281,6 +287,7 @@ const server = http.createServer(async (req, res) => {
     await page.locator("#workspace-switcher").selectOption("empty");
     await page.locator("#session-title").filter({hasText: "从一项工作开始"}).waitFor();
     assert.equal(creations, 0);
+    assert.equal(await page.locator("#plan").isHidden(), true, "plan panel is scoped to sessions that have one");
     await page.locator("#open-nav").click();
     await page.locator("#new-session").click();
     await page.locator("#session-title").filter({hasText: "新的工作"}).waitFor();

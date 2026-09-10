@@ -95,13 +95,15 @@ CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/l
 
 Web 是原生 ES modules，无构建步骤。`app.js` 协调 Workspace 注册、Workspace/Session 选择与管理、API 状态、审批、Continue 与工作记录页；`projection.js` 提供纯展示投影；`transport.js` 消费同一 SSE 路由；`view.js` 处理稳定 DOM 与安全 Markdown 子集；`config.js` 管理 Host 模型配置。添加工作区对话框调用仅限本机的 Workspace POST，成功后刷新内存目录并直接切换，不自动创建空 Session。Session 行的可见“⋯”与 contextmenu 打开同一管理对话框；归档列表显式切换，删除冲突保留服务端说明。
 
-传输层将兼容 tool.request/result 名称归一化，按 event_id 或 run/seq 去重、按 session_seq 排序；流断开后从最后已消费游标补齐，即使 Run 已终止也不跳过尾部事件。Event cursor 在 SQLite 查询中直接过滤，不先重放旧事件。导航与历史索引只投影状态、审批和终态等轻量事实，Run History 按稳定 run_id cursor 分页；展开章节时才读取该 Run 的事件。最新 Run 摘要另用 SQL 聚合步骤、工具数和最后事件时间，Web 将其与已收到的 SSE 合并，显示经过时间和最近活动。运行状态和 pending approval 始终查询服务端 Runtime Projection，事件通知触发状态协调，周期查询发现其他入口启动的 Run。异步结果按所属 Workspace/Session 缓存，不写入当前选中 Session 的其他记录。
+传输层将兼容 tool.request/result 名称归一化，按 event_id 或 run/seq 去重、按 session_seq 排序；流断开后从最后已消费游标补齐，即使 Run 已终止也不跳过尾部事件。Event cursor 在 SQLite 查询中直接过滤，不先重放旧事件。导航与历史索引只投影状态、审批和终态等轻量事实，Run History 按稳定 run_id cursor 分页；展开章节时才读取该 Run 的事件。最新 Run 摘要另用 SQL 聚合步骤、工具数和最后事件时间；`get_run_summary` 与 `list_runs` 还把 RuntimeStateProjection 已派生的终态 `reason` 与 status/error 一并返回，供前端解释停驻原因，这只是字段透出，不新增事实源。Web 将摘要与已收到的 SSE 合并，显示经过时间和最近活动。运行状态和 pending approval 始终查询服务端 Runtime Projection，事件通知触发状态协调，周期查询发现其他入口启动的 Run。异步结果按所属 Workspace/Session 缓存，不写入当前选中 Session 的其他记录。
 
-Semantic Work Projection 从 canonical 事件证据与 Run 关联生成只读工作片段：工具 prepared/completed 按 run_id/call_id 配对，保留请求参数与结果；Continue 的 abandoned 沿 continuation_of 找到原操作，未派发调用可关联原 model.response。调用状态区分等待结果、中断时结果未确认、完成、失败、拒绝和 abandoned。普通 checkpoint 不切分阶段，也不在主视图占一行；null 不被描述成有效证据。有限的命令分类只识别明确调用，未知 Bash/MCP 保持中性措辞；操作完成不推导未记录的验证结论。
+Semantic Work Projection 从 canonical 事件证据与 Run 关联生成只读工作片段：工具 prepared/completed 按 run_id/call_id 配对，保留请求参数与结果；Continue 的 abandoned 沿 continuation_of 找到原操作，未派发调用可关联原 model.response。调用状态区分等待结果、中断时结果未确认、完成、失败、拒绝和 abandoned。Continue 的接续说明块在 `run.started.resumed_task_id` 命中当前计划时写明“继续执行任务 tX：<内容>”，任务内容取自 `session_status` 的 `task_state`；查不到该任务时保持“未重发原始指令”的原句。普通 checkpoint 不切分阶段，也不在主视图占一行；null 不被描述成有效证据。有限的命令分类只识别明确调用，未知 Bash/MCP 保持中性措辞；操作完成不推导未记录的验证结论。
 
-每条用户意图和其 Continue 链组成一个章节；最新章节默认展开，旧章节的终态事件按需加载，工具详情默认折叠。Execution Block 包含稳定 ID、来源事件、Run、操作状态和可读描述，不写 SQLite。最终输出只在最新成果区或对应旧章节展示一次。界面显示的“本次执行结束”区别于 Session 生命周期结束。
+每条用户意图和其 Continue 链组成一个章节；最新章节默认展开，旧章节的终态事件按需加载，工具详情默认折叠。首章识别不到意图时标签回退为“最初的目标”，后续章节为“后续工作”。Execution Block 包含稳定 ID、来源事件、Run、操作状态和可读描述，不写 SQLite；只有 attention 与 approval 类块保留独立“查看详情”按钮，continuation、context 等说明块不再各带按钮，整章详情仍从“工作经过”标题处的入口进入。最终输出只在最新成果区或对应旧章节展示一次。界面显示的“本次执行结束”区别于 Session 生命周期结束。
 
-工作记录页的任务计划面板是 `session_status` 中 `task_state` 的纯展示投影：`projection.js` 的 `planGroups` 只做分组与计数（completed/in_progress/pending/blocked、active 高亮、completed 默认折叠、summary 与证据展开），不复制 TaskPlanProjection 的身份与窗口规则。收到 `task.plan_updated` SSE 时与状态类事件一样触发 `session_status` 重新查询，面板随之刷新；证据措辞与 CLI 相同，只描述发生过的调用，不推导验证结论，也不提供任何编辑入口。
+工作记录页的任务计划面板是 `session_status` 中 `task_state` 的纯展示投影，位于目标状态与已有成果之间：`projection.js` 的 `planGroups` 只做分组与计数（“N / M 已完成”总进度，非零时追加进行中、受阻数量，不单独显示待开始；active 高亮，completed 折叠进“已完成的任务”分组，summary 与证据展开），不复制 TaskPlanProjection 的身份与窗口规则。Session 状态行在运行中复用同一投影显示“正在做：<active 任务内容>”。收到 `task.plan_updated` SSE 时与状态类事件一样触发 `session_status` 重新查询，面板随之刷新；证据措辞与 CLI 相同，只描述发生过的调用，不推导验证结论，也不提供任何编辑入口。
+
+停驻原因由 `projection.js` 的 `parkLabel`/`parkSummary` 做纯展示翻译：状态行短语与恢复区首句按终态结构化 `reason` 映射为用户可读中文（`step_budget`、`task_step_budget`、`cancelled` 各有措辞，无 `reason` 且错误为 "Host stopped before terminal fact" 时按服务中断处理）。`cancelled` 同时覆盖用户停止与 Host 关停引发的后台取消，措辞不指明是谁停止；未识别的 `reason` 回退显示原始错误文本，原始错误文本也始终可在 Inspector 查看。
 
 Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订阅，包括处理新审批。仅最新 parked Session 提供 Continue；409 留在恢复区，不发普通 Prompt 绕过。审批按钮提交前检查服务端 pending 状态。历史展开、草稿、阅读位置按 Session/章节保存于页面内存；选择项保存在 localStorage。按稳定 key 更新发生变化的 DOM，Inspector 以 ID 获取最新投影，使用原生 dialog 支持 Escape 和焦点返回。Markdown 通过 DOM 文本构造，禁用原始 HTML 和非 HTTP(S)/mailto 链接协议。
 

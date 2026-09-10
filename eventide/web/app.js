@@ -1,4 +1,4 @@
-import {chapters, planGroups, projectWork, runActivity, runId, terminal, labels, short, operationText} from "./projection.js";
+import {chapters, parkLabel, parkSummary, planGroups, projectWork, runActivity, runId, terminal, labels, short, operationText} from "./projection.js";
 import {EventFeed, request} from "./transport.js";
 import {el, button, reconcile, markdown} from "./view.js";
 import {loadProviderConfig, isConfigured, showConfig} from "./config.js";
@@ -13,6 +13,7 @@ const state = {
 };
 const sessionJobs = new Map(), workspaceJobs = new Map(), loadingChapters = new Map();
 const sessionRecord = (id = state.session) => [...state.sessions.values()].flat().find((s) => s.session_id === id);
+const taskContents = (id = state.session) => new Map((sessionRecord(id)?.task_state?.tasks || []).filter((t) => t.id).map((t) => [t.id, t.content]));
 const currentRuns = () => state.runs.get(state.session) || [];
 const time = (timestamp) => timestamp ? new Date(timestamp * 1000).toLocaleString("zh-CN", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "";
 const duration = (seconds) => seconds < 60 ? `${Math.floor(seconds)} 秒` : seconds < 3600 ? `${Math.floor(seconds / 60)} 分 ${Math.floor(seconds % 60)} 秒` : `${Math.floor(seconds / 3600)} 小时 ${Math.floor((seconds % 3600) / 60)} 分`;
@@ -297,15 +298,17 @@ function renderPlan(session) {
         const details = el("details", "plan-completed");
         details.open = row.open;
         details.addEventListener("toggle", () => { state.planCompletedOpen = details.open; });
-        details.append(el("summary", "", `已完成 (${row.count})`));
+        details.append(el("summary", "", `已完成的任务 (${row.count})`));
         for (const task of row.rows) details.append(planRow(task, true));
         return details;
       }
       return planRow(row, false);
     });
     const heading = el("div", "section-heading");
-    heading.append(el("h2", "", "任务计划"), el("span", "plan-counts",
-      `${counts.completed} 已完成 · ${counts.in_progress ? ` ${counts.in_progress} 进行中 ·` : ""} ${counts.pending} 待开始${counts.blocked ? ` · ${counts.blocked} 受阻` : ""}`.trim()));
+    const parts = [`${counts.completed} / ${plan.total} 已完成`];
+    if (counts.in_progress) parts.push(`${counts.in_progress} 进行中`);
+    if (counts.blocked) parts.push(`${counts.blocked} 受阻`);
+    heading.append(el("h2", "", "任务计划"), el("span", "plan-counts", parts.join(" · ")));
     node.prepend(heading);
     return node;
   });
@@ -316,7 +319,6 @@ function planRow(task, settled) {
   const head = el("div", "plan-task-head");
   head.append(el("span", "plan-status", task.label), el("span", "plan-content", task.content));
   item.append(head);
-  if (task.active) item.append(el("p", "plan-active-note", "当前进行中的任务"));
   if (task.summary) item.append(el("p", "plan-summary", task.summary));
   if (task.evidence.length || task.evidenceOmitted) {
     const details = el("details", "plan-evidence");
@@ -371,7 +373,9 @@ function renderBlock(block, chapterId) {
       action.dataset.focus = op.id; details.append(action);
     }
     node.append(details);
-  } else {
+  } else if (block.kind === "attention" || block.kind === "approval") {
+    // Only facts a user may need to act on keep a dedicated entry point; the whole
+    // chapter remains inspectable from the section heading.
     const action = button("查看详情", (event) => openInspector({chapterId, blockId: block.id}, event.currentTarget));
     action.dataset.focus = block.id; node.append(action);
   }
@@ -386,7 +390,10 @@ function renderHistory(runs) {
   const groups = chapters(runs);
   const latestResult = [...runs].reverse().find((r) => r.status === "completed" && r.output);
   if (!groups.length) {
-    reconcile($("#narrative"), [owner || "empty"], (id) => id, () => "empty", () => el("p", "empty-work", owner ? "还没有执行记录。描述下一步要完成的工作，记录将在这里持续展开。" : "选择左侧的工作，或直接描述一个目标。首次提交时创建工作记录。"));
+    const emptyText = owner ? "还没有执行记录。描述下一步要完成的工作，记录将在这里持续展开。"
+      : state.workspace ? "选择左侧的工作，或直接描述一个目标。首次提交时创建工作记录。"
+        : "先在左侧添加一个工作区，再描述第一个目标。";
+    reconcile($("#narrative"), [owner || "empty"], (id) => id, () => "empty", () => el("p", "empty-work", emptyText));
     return;
   }
   reconcile($("#narrative"), groups, (g) => g.id, (g) => g.id, (g) => {
@@ -407,8 +414,8 @@ function renderHistory(runs) {
     const node = [...$("#narrative").children].find((n) => n.dataset.key === chapter.id);
     const expanded = state.expanded.get(chapter.id);
     if (expanded !== undefined && node.open !== expanded) node.open = expanded;
-    const work = projectWork(chapter.runs, feed.events);
-    const label = work.intent ? short(work.intent, 80) : chapter.id === groups[0].id ? title(sessionRecord()) : "后续工作";
+    const work = projectWork(chapter.runs, feed.events, taskContents());
+    const label = work.intent ? short(work.intent, 80) : chapter.id === groups[0].id ? "最初的目标" : "后续工作";
     const summary = node.firstElementChild;
     const summaryText = `${label} · ${labels[chapter.runs.at(-1).status]} · ${time(chapter.runs[0].started_at)}`;
     if (summary.textContent !== summaryText) summary.textContent = summaryText;
@@ -437,6 +444,7 @@ function renderActions(session) {
     [...state.busy].some((id) => id === `new:${state.workspace}` || sessionRecord(id)?.workspace_id === state.workspace);
   const parked = session?.status === "parked";
   $("#recovery").hidden = !parked;
+  $("#recovery-reason").textContent = parked ? parkSummary(session?.latest_run) || "执行被中断；可以尝试继续。" : "";
   $("#prompt-form").hidden = parked;
   $("#continue-button").disabled = workspaceBusy;
   $("#abandon-button").disabled = workspaceBusy;
@@ -457,11 +465,15 @@ function render() {
   const session = sessionRecord();
   const active = session?.latest_run && !terminal(session.latest_run) ? session.latest_run : null;
   const activity = active ? runActivity(active, feed.events.get(runId(active)) || []) : null;
+  const plan = session ? planGroups(session.task_state) : null;
+  const activeTask = plan && plan.activeId && plan.total ? plan.open.find((task) => task.id === plan.activeId) : null;
   renderNavigation();
   $("#session-title").textContent = session ? title(session) : "从一项工作开始";
+  const working = activeTask && session.status === "running" ? `正在做：${short(activeTask.content, 40)} · ` : "";
+  const parkedLabel = parkLabel(session?.latest_run);
   $("#session-status").textContent = activity
-    ? `${labels[session.status] || session.status} · ${activity.steps ? `第 ${activity.steps} 步 · ` : ""}已运行 ${duration(activity.elapsedSeconds)} · ${activity.idleSeconds < 5 ? "刚刚有活动" : `${duration(activity.idleSeconds)}前有活动`}`
-    : session ? `${labels[session.status] || session.status}${session.status === "completed" ? "，可继续追加工作" : ""}` : "一个工作区，一段持续的工作过程。";
+    ? `${labels[session.status] || session.status} · ${activity.steps ? `第 ${activity.steps} 步 · ` : ""}${working}已运行 ${duration(activity.elapsedSeconds)} · ${activity.idleSeconds < 5 ? "刚刚有活动" : `${duration(activity.idleSeconds)}前有活动`}`
+    : session ? `${labels[session.status] || session.status}${parkedLabel ? ` · ${parkedLabel}` : ""}${session.status === "completed" ? "，可继续追加工作" : ""}` : "一个工作区，一段持续的工作过程。";
   $("#session-status").className = `session-status status-${session?.status || "idle"}`;
   $("#notice").hidden = !state.notices.get(state.session);
   $("#notice").textContent = state.notices.get(state.session) || "";
@@ -482,7 +494,7 @@ function renderInspector() {
   if (!selection) return;
   const runs = state.runs.get(selection.owner) || [];
   const group = chapters(runs).find((g) => g.id === selection.chapterId);
-  const work = projectWork(group?.runs || runs, feed.events);
+  const work = projectWork(group?.runs || runs, feed.events, taskContents(selection.owner));
   const op = work.operations.get(selection.operationId);
   const block = work.blocks.find((b) => b.id === selection.blockId);
   const events = op?.events || block?.events || work.events;
