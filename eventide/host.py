@@ -13,7 +13,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from eventide import attachments, run_policy
+from eventide import attachments, model_catalog, run_policy
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
 from eventide.executor import ApprovalHandler, LocalCommandExecutor, ToolContext, ToolExecutor
@@ -269,6 +269,14 @@ class RuntimeHost:
             },
             "notes": notes,
         }
+
+    async def available_models(self) -> dict[str, Any]:
+        """Best-effort model ids for the composer picker; provider failures
+        degrade to an empty list with a note instead of raising."""
+        ids, error = await model_catalog.list_models(
+            self.settings.provider, self.settings.api_key, self.settings.base_url
+        )
+        return {"models": ids, "error": error}
 
     def session_runs(
         self,

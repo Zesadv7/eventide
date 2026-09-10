@@ -173,3 +173,32 @@ async def test_model_request_chars_use_the_shared_budget_measure(isolated_worksp
         assert payload["tool_catalog_chars"] > 0
     finally:
         await runtime.close()
+
+
+async def test_available_models_without_api_key_degrades_to_note(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    try:
+        result = await runtime.available_models()
+        assert result == {"models": [], "error": "未配置 API Key"}
+    finally:
+        await runtime.close()
+
+
+async def test_models_endpoint_returns_probed_ids(
+    isolated_workspace, monkeypatch
+):
+    from eventide import model_catalog
+
+    async def fake_list_models(provider, api_key, base_url, **kwargs):
+        assert provider == "scripted"
+        assert api_key == "test-key"
+        return ["model-a", "model-b"], None
+
+    monkeypatch.setattr(model_catalog, "list_models", fake_list_models)
+    settings = settings_for(isolated_workspace, api_key="test-key")
+    runtime = AgentRuntime(settings, ScriptedProvider([]))
+    try:
+        result = await runtime.available_models()
+        assert result == {"models": ["model-a", "model-b"], "error": None}
+    finally:
+        await runtime.close()

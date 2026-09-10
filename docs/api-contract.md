@@ -79,6 +79,16 @@ POST /api/sessions/{id}/attachments
 
 提交：RunBody 带 `attachment_ids: ["att_..."]`；校验归属（未知/不属于该会话 → 422）；Run 启动时内容内联进用户消息（分隔符 `--- 附件：{name} ---`），单附件超过 512KB 截断并标注。前端：「＋」按钮上传并把 chips 随消息发送；接口 404/失败时「＋」置灰并提示。
 
+### `GET /api/models` —— 已实现
+
+按当前 Provider 配置探测可用模型列表（`eventide/model_catalog.py`）：
+
+```json
+{"models": ["model-a", "model-b"], "error": null}
+```
+
+失败语义：未配置 API Key 或探测失败时返回空列表与 `error` 说明，不返回 5xx；响应不含任何密钥。前端：模型按钮当前仍打开配置弹窗（探测结果可用于后续把按钮升级为逐消息模型下拉）。
+
 ## 预留（前端未依赖，按需补齐）
 
 | 接口 | 说明 |
@@ -86,5 +96,3 @@ POST /api/sessions/{id}/attachments
 | `GET /api/sessions/{id}/attachments` | 附件清单，用于跨刷新恢复 chips；当前 POST 已占用同一路径，未实现的 GET 返回 405（Method Not Allowed），E2E 以此断言预留状态 |
 | `DELETE /api/sessions/{id}/attachments/{aid}` | 删除附件 |
 | 图片/二进制附件 | 需运行时多模态支持后开放 |
-
-模型列表（`eventide/model_catalog.py`）已具备探测式列表辅助（失败返回空列表与说明，不抛错），但当前没有对应 HTTP 端点；前端模型按钮暂只打开配置弹窗。

@@ -445,6 +445,10 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             "error_type": None,
         }
 
+    @app.get("/api/models")
+    async def list_models() -> dict[str, Any]:
+        return await agent_runtime.available_models()
+
     @app.post(
         "/api/sessions/{session_id}/attachments",
         status_code=status.HTTP_201_CREATED,
