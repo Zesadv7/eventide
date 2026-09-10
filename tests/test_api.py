@@ -283,3 +283,38 @@ def test_api_cancels_active_run(isolated_workspace):
         assert cancelled.status_code == 200
         assert cancelled.json()["status"] == "interrupted"
         assert client.post(f"/api/runs/{run_id}/cancel").status_code == 409
+
+
+def test_api_session_status_exposes_task_plan(isolated_workspace):
+    """GET /api/sessions/{id} carries the plan, active task, and evidence facts."""
+    initial = [
+        {"content": "Inspect", "status": "in_progress"},
+        {"content": "Follow up", "status": "pending"},
+    ]
+    settled = [
+        {"id": "t1", "content": "Inspect", "status": "completed", "summary": "Read the data file."},
+        {"content": "Follow up", "status": "in_progress"},
+    ]
+    provider = ScriptedProvider(
+        [
+            {"tool_calls": [{"id": "plan", "name": "todo_write", "arguments": {"todos": initial}}]},
+            {"tool_calls": [{"id": "read", "name": "read_file", "arguments": {"path": "data"}}]},
+            {"tool_calls": [{"id": "done", "name": "todo_write", "arguments": {"todos": settled}}]},
+            {"text": "done"},
+        ]
+    )
+    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    with TestClient(create_app(runtime)) as client:
+        (isolated_workspace / "data").write_text("x", encoding="utf-8")
+        session = client.post("/api/sessions").json()["session_id"]
+        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "plan"})
+        wait_for_run(client, accepted.json()["run_id"])
+        record = client.get(f"/api/sessions/{session}").json()
+        assert record["active_task_id"] == "t2"
+        tasks = record["task_state"]["tasks"]
+        assert [task["id"] for task in tasks] == ["t1", "t2"]
+        assert tasks[0]["status"] == "completed"
+        assert tasks[0]["summary"] == "Read the data file."
+        assert [entry["name"] for entry in tasks[0]["evidence"]] == ["read_file"]
+        assert tasks[1]["status"] == "in_progress"
+        assert record["task_plan"][0]["id"] == "t1"

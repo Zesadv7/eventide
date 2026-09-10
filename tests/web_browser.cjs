@@ -35,7 +35,18 @@ function emit(id, type, payload) {
 }
 const encode = (event) => `id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 function session(id, workspace_id, title) { sessions.set(id, {session_id: id, workspace_id, title, status: "idle", latest_run: null, updated_at: timestamp + seq, created_at: timestamp}); }
+const planState = (tasks, active) => ({tasks: tasks.map(([id, status, content, extra]) => ({id, status, content, ...extra})), active_task_id: active, updated_seq: 2});
 session("s1", "w1", "改善 Session 恢复体验");
+sessions.get("s1").task_plan = [{id: "t1", content: "梳理恢复逻辑", status: "completed", summary: "读取了恢复相关代码"}, {id: "t2", content: "检查失败场景", status: "in_progress"}, {id: "t3", content: "补充回归覆盖", status: "pending"}];
+sessions.get("s1").active_task_id = "t2";
+sessions.get("s1").task_state = planState([
+  ["t1", "completed", "梳理恢复逻辑", {summary: "读取了恢复相关代码", evidence: [
+    {run_id: "r1", call_id: "c1", name: "read_file", is_error: false, event_id: "e4", session_seq: 4},
+    {run_id: "r2", call_id: "check", name: "bash", is_error: true, event_id: "e8", session_seq: 8},
+  ], evidence_omitted: 1}],
+  ["t2", "in_progress", "检查失败场景", {}],
+  ["t3", "pending", "补充回归覆盖", {}],
+], "t2");
 addRun("r1", "s1", "completed", null, "### 已完成调查\n已读取 **恢复逻辑** 与相关测试。\n- 保留同一工作上下文\n- 检查 `host.py`\n\n[参考](https://example.com)\n<script>window.injected=true</script>\n[危险链接](javascript:alert(1))");
 emit("r1", "message.user", {message: {role: "user", content: "检查恢复逻辑与相关测试"}});
 emit("r1", "tool.prepared", {call_id: "c1", name: "read_file", arguments: {path: "host.py"}});
@@ -97,6 +108,23 @@ const server = http.createServer(async (req, res) => {
     const owner = match[1], old = sessions.get(owner).latest_run.id;
     const run = addRun("continued", owner, "waiting_for_user", old);
     emit(run.id, "run.started", {continuation_of: old});
+    emit(run.id, "task.plan_updated", {todos: [
+      {id: "t1", content: "梳理恢复逻辑", status: "completed", summary: "读取了恢复相关代码"},
+      {id: "t2", content: "尝试写入恢复笔记", status: "in_progress"},
+      {id: "t3", content: "补充回归覆盖", status: "pending"},
+    ], next_task_seq: 4, step: 1});
+    const continuedPlan = planState([
+      ["t1", "completed", "梳理恢复逻辑", {summary: "读取了恢复相关代码", evidence: [
+        {run_id: "r1", call_id: "c1", name: "read_file", is_error: false, event_id: "e4", session_seq: 4},
+        {run_id: "r2", call_id: "check", name: "bash", is_error: true, event_id: "e8", session_seq: 8},
+      ], evidence_omitted: 1}],
+      ["t2", "in_progress", "尝试写入恢复笔记", {}],
+      ["t3", "pending", "补充回归覆盖", {}],
+    ], "t2");
+    const sessionRecord = sessions.get(owner);
+    sessionRecord.task_plan = continuedPlan.tasks;
+    sessionRecord.active_task_id = "t2";
+    sessionRecord.task_state = continuedPlan;
     emit(run.id, "tool.prepared", {call_id: "write", name: "write_file", arguments: {path: "notes.txt"}});
     const approval = {approval_id: "approval-write", tool: "write_file", arguments: {path: "notes.txt"}, reason: "需要允许写入文件"};
     run.pending_approvals[approval.approval_id] = approval;
@@ -139,16 +167,45 @@ const server = http.createServer(async (req, res) => {
     await page.goto(base); await page.waitForLoadState("networkidle");
     await page.locator("#session-title").filter({hasText: "改善 Session"}).waitFor();
     assert.equal(creations, 0);
+    // Rename the unselected session listed first; the selected one keeps its title.
     await page.locator(".session-item").first().click({button: "right"});
     await page.locator("#session-dialog[open]").waitFor();
     await page.locator("#session-title-input").fill("恢复体验审计");
     await page.locator("#save-session").click();
-    await page.locator("#session-title").filter({hasText: "恢复体验审计"}).waitFor();
+    await page.locator(".session-item").filter({hasText: "恢复体验审计"}).waitFor();
+    await page.locator("#session-title").filter({hasText: "改善 Session"}).waitFor();
     assert.equal(await page.locator(".chapter").count(), 2);
     assert.equal(await page.locator(".chapter[open]").count(), 1);
     assert.equal(await page.locator(".operations[open]").count(), 0);
     assert.equal(await page.locator("#inspector").isVisible(), false);
     assert.match(await page.locator("#narrative").innerText(), /1 项失败/);
+    // The read-only task plan panel mirrors the server projection: counts, active,
+    // collapsed completed, and evidence that never claims verified success.
+    const plan = page.locator("#plan");
+    await plan.filter({hasText: "任务计划"}).waitFor();
+    assert.match(await plan.innerText(), /1 已完成 · 1 进行中 · 1 待开始/);
+    assert.match(await plan.innerText(), /检查失败场景/);
+    assert.doesNotMatch(await plan.innerText(), /梳理恢复逻辑/, "completed tasks stay hidden while collapsed");
+    const completedGroup = plan.locator(".plan-completed");
+    assert.equal(await completedGroup.count(), 1);
+    assert.equal(await completedGroup.getAttribute("open"), null, "completed group stays collapsed by default");
+    assert.ok(apiCalls.some(([, p]) => p === "/api/sessions/s1"), "plan facts come from session_status");
+    // The completed group's own summary, not the nested evidence summaries.
+    await completedGroup.locator("> summary").click();
+    await plan.locator(".plan-summary").filter({hasText: "读取了恢复相关代码"}).waitFor();
+    await completedGroup.locator(".plan-evidence>summary").first().click();
+    const evidenceText = await completedGroup.locator(".plan-evidence").first().innerText();
+    assert.match(evidenceText, /read_file/);
+    assert.match(evidenceText, /bash · 结果为错误/);
+    assert.match(evidenceText, /另有 1 条未列出/);
+    assert.match(evidenceText, /不代表验证通过/);
+    assert.doesNotMatch(evidenceText, /测试已通过|verified|passed/);
+    await page.locator(".plan-evidence-item.failed").waitFor();
+    assert.equal(await plan.locator(".plan-task.status-active").count(), 1);
+    assert.equal(await completedGroup.evaluate((node) => node.open), true);
+    await completedGroup.locator("> summary").click();
+    assert.equal(await completedGroup.evaluate((node) => node.open), false, "completed group can be collapsed again");
+    assert.match(await plan.innerText(), /已完成 \(1\)/, "collapsed group still shows its count");
     assert.equal(await page.locator("#outcome script").count(), 0);
     assert.equal(await page.locator('#outcome a[href^="javascript:"]').count(), 0);
     assert.equal(await page.evaluate(() => window.injected), undefined);
@@ -183,9 +240,14 @@ const server = http.createServer(async (req, res) => {
     await page.getByRole("button", {name: "拒绝", exact: true}).click();
     await page.locator("#outcome").filter({hasText: "已处理授权决定"}).waitFor();
     assert.equal(await page.locator("#continue-button").isVisible(), false);
+    // The SSE task.plan_updated cue refreshed the plan from session_status: the active
+    // task now names the write attempt, without the frontend folding plan events.
+    await page.locator("#plan").filter({hasText: "尝试写入恢复笔记"}).waitFor();
+    assert.doesNotMatch(await page.locator("#plan").innerText(), /读取了恢复相关代码/, "completed summary stays folded after refresh");
 
-    await page.getByRole("button", {name: /API 行为检查/}).click();
-    await page.getByRole("button", {name: /改善 Session 恢复体验/}).click();
+    // s2 was renamed earlier, so select by its new title, then switch back to s1.
+    await page.locator(".session-item").filter({hasText: "恢复体验审计"}).locator(".session-select").click();
+    await page.locator(".session-item").filter({hasText: "改善 Session 恢复体验"}).locator(".session-select").click();
     await page.waitForLoadState("networkidle");
     assert.equal(await page.locator("#session-title").innerText(), "改善 Session 恢复体验");
     assert.match(await page.locator("#outcome").innerText(), /已处理授权决定/);

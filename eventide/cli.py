@@ -50,6 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("run_id")
     export.add_argument("destination", type=Path)
     export.add_argument("--force", action="store_true", help="Replace an existing file")
+    plan = subparsers.add_parser("plan", help="Show the read-only task plan of a session")
+    plan_actions = plan.add_subparsers(dest="plan_action", required=True)
+    plan_show = plan_actions.add_parser(
+        "show", help="Show a session's current task plan, active task, and evidence"
+    )
+    plan_show.add_argument("session_id")
+    plan_show.add_argument("--json", action="store_true")
     workspace = subparsers.add_parser("workspace", help="Manage registered project directories")
     actions = workspace.add_subparsers(dest="workspace_action", required=True)
     actions.add_parser("list")
@@ -141,6 +148,58 @@ async def _eval(args: argparse.Namespace) -> int:
     return 0 if report["passed"] == report["total"] else 1
 
 
+def _render_plan_text(status: dict[str, Any]) -> str:
+    """Human-readable plan view over session_status facts; no editing, no new state."""
+    lines: list[str] = [f"Session: {status['session_id']} ({status['title']})"]
+    tasks = status.get("task_state", {}).get("tasks", [])
+    if not tasks:
+        lines.append("任务计划：尚无计划。只有模型调用 todo_write 才会创建计划。")
+        return "\n".join(lines)
+    counts: dict[str, int] = {}
+    for task in tasks:
+        counts[task.get("status", "pending")] = counts.get(task.get("status", "pending"), 0) + 1
+    status_label = {
+        "pending": "pending",
+        "in_progress": "in_progress",
+        "completed": "completed",
+        "blocked": "blocked",
+    }
+    lines.append(
+        "任务计划：{total} 项；completed {completed} · in_progress {active} · "
+        "pending {pending} · blocked {blocked}".format(
+            total=len(tasks),
+            completed=counts.get("completed", 0),
+            active=counts.get("in_progress", 0),
+            pending=counts.get("pending", 0),
+            blocked=counts.get("blocked", 0),
+        )
+    )
+    active = status.get("active_task_id")
+    for task in tasks:
+        task_status = task.get("status", "pending")
+        marker = status_label.get(task_status, task_status)
+        if task.get("id") and task.get("id") == active:
+            marker = f"{marker} · active"
+        lines.append(f"[{marker}] {task.get('id') or '-'} {task.get('content', '')}")
+        summary = task.get("summary")
+        if summary:
+            lines.append(f"  summary: {summary}")
+        for entry in task.get("evidence", []):
+            outcome = "error" if entry.get("is_error") else "ok"
+            lines.append(
+                f"  evidence: {entry.get('name')} {outcome} "
+                f"(run {entry.get('run_id')} call {entry.get('call_id')})"
+            )
+        omitted = task.get("evidence_omitted")
+        if omitted:
+            lines.append(f"  evidence: …and {omitted} more")
+    lines.append(
+        "注：completed 与 evidence 只说明发生过什么，不代表验证通过；"
+        "计划只读，更新只能由模型通过 todo_write 提交。"
+    )
+    return "\n".join(lines)
+
+
 async def _manage(args: argparse.Namespace) -> int:
     runtime = AgentRuntime(Settings.from_env())
     try:
@@ -164,6 +223,24 @@ async def _manage(args: argparse.Namespace) -> int:
             source = args.source or (Path(workspace.path) / ".nexus" / "nexus.db")
             value = import_v02_database(runtime.store, source, workspace.workspace_id)
             print(json.dumps(value, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "plan":
+            status = runtime.session_status(args.session_id)
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "session_id": status["session_id"],
+                            "task_plan": status["task_plan"],
+                            "active_task_id": status["active_task_id"],
+                            "task_state": status["task_state"],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                print(_render_plan_text(status))
             return 0
         if args.command == "export":
             if runtime.store.get_run_identity(args.run_id) is None:
@@ -217,7 +294,14 @@ def _main(argv: list[str] | None = None) -> int:
         return asyncio.run(_run_once(args))
     if args.command == "eval":
         return asyncio.run(_eval(args))
-    if args.command in {"workspace", "continue", "abandon", "migrate-v02", "export"}:
+    if args.command in {
+        "workspace",
+        "continue",
+        "abandon",
+        "migrate-v02",
+        "export",
+        "plan",
+    }:
         return asyncio.run(_manage(args))
     if args.command == "serve":
         try:

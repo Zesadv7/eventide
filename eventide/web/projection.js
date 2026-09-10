@@ -46,6 +46,37 @@ export function chapters(runs) {
   return result;
 }
 
+// Task plan display facts. The server's TaskPlanProjection stays the only business
+// rule owner; here we only split its task_state payload into visible groups and
+// describe evidence as what happened, never as verified success.
+const planStatusLabels = {pending: "待开始", in_progress: "进行中", completed: "已完成", blocked: "受阻"};
+export function planGroups(taskState) {
+  const tasks = taskState?.tasks || [];
+  const counts = {completed: 0, in_progress: 0, pending: 0, blocked: 0};
+  for (const task of tasks) if (task.status in counts) counts[task.status]++;
+  const settled = [];
+  const open = [];
+  for (const task of tasks) {
+    const evidence = (task.evidence || []).map((entry) => ({
+      failed: !!entry.is_error,
+      callId: entry.call_id || "",
+      runId: entry.run_id || "",
+      text: `${entry.name || "unknown"}${entry.is_error ? " · 结果为错误" : ""}`,
+    }));
+    const row = {
+      id: task.id || task.content,
+      content: task.content || "",
+      label: planStatusLabels[task.status] || task.status,
+      summary: task.summary || "",
+      evidence,
+      evidenceOmitted: task.evidence_omitted || 0,
+    };
+    if (task.status === "in_progress" && task.id) row.active = true;
+    (task.status === "completed" ? settled : open).push(row);
+  }
+  return {counts, total: tasks.length, activeId: taskState?.active_task_id || null, open, settled};
+}
+
 function category(name, args) {
   if (["read_file", "glob"].includes(name)) return "explore";
   if (["write_file", "edit_file"].includes(name)) return "modify";

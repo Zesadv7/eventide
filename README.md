@@ -83,6 +83,7 @@ uv run eventide chat --workspace ws_example
 uv run eventide serve --workspace /path/to/project
 uv run eventide continue session_example --json
 uv run eventide abandon session_example --json
+uv run eventide plan show session_example --json
 uv run eventide export run_example ./eventide-run.jsonl
 ```
 
@@ -98,7 +99,7 @@ HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、�
 
 左侧选择 Workspace 和持续存在的工作（Session），正文优先展示工作目标、当前状态与最近成果；“本次执行结束”不代表 Session 被关闭。首次浏览不自动创建空 Session，点击“新建工作”或首次提交目标时才创建。刷新会恢复该 Workspace 上次选择的工作。
 
-工作经过按用户意图及其 Continue 链分章，较早章节按需加载，工具操作默认折叠。工具请求与结果配对后展示对象和执行状态；“操作完成”不额外宣称测试全部通过。原始 Events、模型协议、工具参数和 checkpoint 通过临时右侧详情查看。结果支持标题、列表、代码和安全链接的 Markdown 子集，以及复制；原始 HTML 不执行。
+工作经过按用户意图及其 Continue 链分章，较早章节按需加载，工具操作默认折叠。工具请求与结果配对后展示对象和执行状态；“操作完成”不额外宣称测试全部通过。任务计划面板展示当前清单与每项的证据，completed 默认折叠，证据措辞始终是"发生过什么"。原始 Events、模型协议、工具参数和 checkpoint 通过临时右侧详情查看。结果支持标题、列表、代码和安全链接的 Markdown 子集，以及复制；原始 HTML 不执行。
 
 停驻时输入区切换为 Continue 或放弃恢复操作，通过后立即展示接续过程；校验失败保留停驻状态与原因。仅最新停驻工作提供恢复操作。审批直接在正文提供“本次允许”和“拒绝”。运行中的工作可以单独停止，停止后按中断语义停驻并保留记录。同 Workspace 忙碌时不能再次提交；历史仍可浏览。正文独立滚动，底部操作区保持可达，小屏也可切换 Workspace、新建工作和查看详情。
 
@@ -165,6 +166,8 @@ uv run eventide run "调用 demo MCP echo 工具"
 标记某项 `completed` 时必须同时给出 `summary`（≤300 字符），说明**做了什么**；后续重复提交计划时可以省略，Runtime 会沿用已保存的那一条。Session 状态另提供 `task_state`：每项任务带首次出现序号、结算序号，以及该任务存续期间真实发生过的工具调用证据（`run_id`、`call_id`、工具名、是否出错，最多 8 条并报告被省略的数量）。
 
 **任务证据只记录"发生过什么"，不表示验证通过**：出错的调用同样计入证据，`completed` 只是调度状态，不替代测试、文件或任何外部验证。system 中只注入最近一条完成摘要，因此计划再长也不会线性占用上下文。
+
+计划是只读展示的：CLI 提供 `eventide plan show <session_id>`，默认人类可读输出（各项状态、active 任务、完成 summary、证据列表），`--json` 直接返回与 Session 状态同构的 `task_plan`、`active_task_id` 和 `task_state`。Web 工作记录页在"已有成果"下方展示任务计划面板：完成数、进行中、待开始和受阻计数，active 任务高亮，`completed` 项默认折叠，summary 和工具证据可按需展开。前端收到 `task.plan_updated` SSE 后重新读取 Session 状态刷新面板，不在前端复制投影规则；计划没有任何人工编辑入口，唯一写入路径仍是 `todo_write`。
 
 这只是当前 Session 的执行计划，不会启动 Subagent、后台任务或依赖图；旧文件式 task graph 仍属于 compatibility layer。
 

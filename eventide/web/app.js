@@ -1,4 +1,4 @@
-import {chapters, projectWork, runActivity, runId, terminal, labels, short, operationText} from "./projection.js";
+import {chapters, planGroups, projectWork, runActivity, runId, terminal, labels, short, operationText} from "./projection.js";
 import {EventFeed, request} from "./transport.js";
 import {el, button, reconcile, markdown} from "./view.js";
 import {loadProviderConfig, isConfigured, showConfig} from "./config.js";
@@ -9,7 +9,7 @@ const state = {
   sessions: new Map(), runs: new Map(), expanded: new Map(), manualExpansion: new Set(), errors: new Map(), notices: new Map(),
   drafts: new Map(), positions: new Map(), busy: new Set(), approvals: new Set(), inspector: null,
   hasOlder: new Map(), loadingOlder: new Set(),
-  showArchived: new Set(), sessionEditing: null,
+  showArchived: new Set(), sessionEditing: null, planCompletedOpen: false,
 };
 const sessionJobs = new Map(), workspaceJobs = new Map(), loadingChapters = new Map();
 const sessionRecord = (id = state.session) => [...state.sessions.values()].flat().find((s) => s.session_id === id);
@@ -27,7 +27,9 @@ function scheduleRender() {
 }
 const feed = new EventFeed((owner, event) => {
   scheduleRender();
-  if (["approval.required", "approval.resolved", "run.started", "run.completed", "run.failed", "run.interrupted", "stream.settled"].includes(event.type)) {
+  // task.plan_updated refreshes the authoritative plan from session_status, so the
+  // UI never folds plan events itself; other state facts keep their existing cues.
+  if (["approval.required", "approval.resolved", "run.started", "run.completed", "run.failed", "run.interrupted", "task.plan_updated", "stream.settled"].includes(event.type)) {
     void refreshSession(owner).catch((error) => report(owner, error));
   }
 }, (owner, message) => { state.notices.set(owner, message); scheduleRender(); });
@@ -279,6 +281,57 @@ function renderOutcome(runs) {
   });
 }
 
+function renderPlan(session) {
+  const plan = session ? planGroups(session.task_state) : null;
+  const section = $("#plan");
+  section.hidden = !plan || !plan.total;
+  if (!plan || !plan.total) { reconcile(section, [], () => "", () => "", () => el("div")); return; }
+  const counts = plan.counts;
+  const version = JSON.stringify([plan, state.planCompletedOpen]);
+  reconcile(section, [version], (key) => key, () => version, () => {
+    const node = el("div");
+    const completedOpen = state.planCompletedOpen;
+    const rows = [...plan.open, {planGroup: "completed", open: completedOpen, count: plan.settled.length, rows: plan.settled}];
+    reconcile(node, rows, (r) => r.id || r.planGroup, (r) => JSON.stringify(r), (row) => {
+      if (row.planGroup === "completed") {
+        const details = el("details", "plan-completed");
+        details.open = row.open;
+        details.addEventListener("toggle", () => { state.planCompletedOpen = details.open; });
+        details.append(el("summary", "", `已完成 (${row.count})`));
+        for (const task of row.rows) details.append(planRow(task, true));
+        return details;
+      }
+      return planRow(row, false);
+    });
+    const heading = el("div", "section-heading");
+    heading.append(el("h2", "", "任务计划"), el("span", "plan-counts",
+      `${counts.completed} 已完成 · ${counts.in_progress ? ` ${counts.in_progress} 进行中 ·` : ""} ${counts.pending} 待开始${counts.blocked ? ` · ${counts.blocked} 受阻` : ""}`.trim()));
+    node.prepend(heading);
+    return node;
+  });
+}
+
+function planRow(task, settled) {
+  const item = el("div", `plan-task status-${settled ? "completed" : task.label === "受阻" ? "blocked" : task.active ? "active" : "open"}`);
+  const head = el("div", "plan-task-head");
+  head.append(el("span", "plan-status", task.label), el("span", "plan-content", task.content));
+  item.append(head);
+  if (task.active) item.append(el("p", "plan-active-note", "当前进行中的任务"));
+  if (task.summary) item.append(el("p", "plan-summary", task.summary));
+  if (task.evidence.length || task.evidenceOmitted) {
+    const details = el("details", "plan-evidence");
+    details.append(el("summary", "", `工作证据 (${task.evidence.length}${task.evidenceOmitted ? `，另有 ${task.evidenceOmitted} 条未列出` : ""})`));
+    for (const entry of task.evidence) {
+      const line = el("div", `plan-evidence-item${entry.failed ? " failed" : ""}`);
+      line.textContent = entry.text;
+      details.append(line);
+    }
+    details.append(el("p", "plan-evidence-note", "证据只记录发生过的工具调用，不代表验证通过。"));
+    item.append(details);
+  }
+  return item;
+}
+
 function renderApprovals(session) {
   const run = session?.latest_run;
   const pending = run && !terminal(run) ? Object.entries(run.pending_approvals || {}) : [];
@@ -413,7 +466,7 @@ function render() {
   $("#notice").hidden = !state.notices.get(state.session);
   $("#notice").textContent = state.notices.get(state.session) || "";
   $("#session-details").disabled = !state.session;
-  renderApprovals(session); renderOutcome(currentRuns()); renderHistory(currentRuns()); renderActions(session);
+  renderApprovals(session); renderPlan(session); renderOutcome(currentRuns()); renderHistory(currentRuns()); renderActions(session);
   if (state.inspector) renderInspector();
 }
 
