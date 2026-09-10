@@ -73,6 +73,21 @@ test("park reasons are explained in user language, not developer text", () => {
   assert.deepEqual([parkLabel({status: "interrupted", reason: "step_budget"}), parkLabel({status: "interrupted", reason: "cancelled"}), parkLabel({status: "interrupted", reason: null}), parkLabel({status: "interrupted", reason: "future_code", error: "x"})], ["步数预算用尽", "执行已停止", "服务中断", "执行中断"]);
 });
 
+test("a restart gap that changed files is not offered as resumable", () => {
+  const quiet = parkSummary({status: "interrupted", reason: null, error: "Host stopped before terminal fact"});
+  assert.match(quiet, /可以继续/);
+  const dirty = parkSummary({
+    status: "interrupted",
+    reason: null,
+    error: "Host stopped before terminal fact",
+    gap_files: ["a.py", "b.py", "c.py", "d.py"],
+  });
+  assert.match(dirty, /4 个文件被改动/);
+  assert.match(dirty, /a\.py、b\.py、c\.py 等/);
+  assert.match(dirty, /无法验证/);
+  assert.doesNotMatch(dirty, /可以继续/);
+});
+
 test("continuation names the resumed task when the plan knows it", () => {
   const tasks = new Map([["t2", "检查失败场景"]]);
   const runs = [{id: "r1", status: "interrupted"}, {id: "r2", continuation_of: "r1", status: "completed"}];

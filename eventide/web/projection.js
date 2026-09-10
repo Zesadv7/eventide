@@ -30,6 +30,11 @@ export function parkSummary(run) {
   if (run?.status !== "interrupted") return null;
   const error = typeof run.error === "string" ? run.error.trim() : "";
   if (run.reason && parkTexts[run.reason]) return parkTexts[run.reason];
+  const gap = Array.isArray(run.gap_files) ? run.gap_files : [];
+  if (!run.reason && gap.length) {
+    const names = gap.slice(0, 3).join("、");
+    return `服务在执行结束前停止，之后有 ${gap.length} 个文件被改动（${names}${gap.length > 3 ? " 等" : ""}）；工作区无法验证，只能放弃恢复或自行确认。`;
+  }
   if (!run.reason && (!error || error === hostStopped)) {
     return "服务在执行结束前停止；确认工作区状态后可以继续。";
   }
