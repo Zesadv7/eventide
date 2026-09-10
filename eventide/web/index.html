@@ -5,48 +5,123 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Eventide · 持续工作的 Workspace">
   <title>Eventide · 工作空间</title>
-  <link rel="stylesheet" href="/assets/style.css?v=11">
+  <link rel="stylesheet" href="/assets/style.css?v=12">
 </head>
 <body>
   <div class="app-shell">
-    <aside id="navigation" class="navigation" aria-label="工作导航">
-      <div class="nav-brand"><a href="/" aria-label="Eventide">EVENTIDE<span>Agent</span></a><button id="close-nav" class="icon-button" aria-label="收起导航" type="button">‹</button></div>
-      <label class="workspace-label" for="workspace-switcher">工作区</label>
-      <select id="workspace-switcher" aria-label="切换 Workspace"></select>
-      <button id="add-workspace" class="text-button workspace-add" type="button">＋ 添加工作区</button>
-      <p id="workspace-path" class="workspace-path"></p>
-      <p id="workspace-git" class="workspace-git"></p>
+    <aside id="sidebar" class="sidebar" aria-label="工作导航">
+      <div class="sidebar-head">
+        <a href="/" class="brand" aria-label="Eventide">EVENTIDE<span>Agent</span></a>
+        <button id="collapse-sidebar" class="icon-button" type="button" aria-label="收起导航">‹</button>
+      </div>
+      <div class="workspace-block">
+        <button id="workspace-switcher-button" class="workspace-trigger" type="button" aria-haspopup="true" aria-expanded="false">
+          <span id="workspace-name"></span>
+          <span id="workspace-git" class="workspace-git"></span>
+        </button>
+        <div id="workspace-menu" class="workspace-menu" hidden>
+          <ul id="workspace-options"></ul>
+          <button id="manage-workspace" class="text-button" type="button">移除工作区</button>
+        </div>
+        <button id="add-workspace" class="text-button" type="button">＋ 添加工作区</button>
+        <p id="workspace-path" class="workspace-path"></p>
+      </div>
       <button id="new-session" class="new-work" type="button">＋ 新建工作</button>
-      <div class="nav-heading"><span>工作记录</span><button id="toggle-archived" class="text-button" type="button">显示已归档</button></div>
+      <div class="nav-heading">
+        <span>工作记录</span>
+        <button id="toggle-archived" class="text-button" type="button">显示已归档</button>
+      </div>
       <div id="session-list" class="session-list"></div>
-      <div class="nav-footer">工作与历史保存在本机</div>
+      <div class="sidebar-foot">
+        <button id="theme-toggle" class="text-button" type="button">切换主题</button>
+      </div>
     </aside>
     <main class="work-area">
       <header class="topbar">
-        <button id="open-nav" class="icon-button" type="button" aria-label="展开导航" aria-controls="navigation" aria-expanded="true">☰</button>
-        <span id="workspace-name">工作空间</span><span class="breadcrumb-divider">/</span><span>工作记录</span>
-        <button id="model-config-button" class="settings-button" type="button">设置 <span id="model-state"></span></button>
+        <button id="open-sidebar" class="icon-button" type="button" aria-label="展开导航" aria-controls="sidebar">☰</button>
+        <span id="crumb-workspace"></span>
+        <span class="breadcrumb-divider">/</span>
+        <span id="crumb-session"></span>
+        <span id="session-pill" class="status-pill" data-status="idle"></span>
+        <button id="capabilities-button" class="text-button" type="button">能力</button>
       </header>
       <div id="work-scroll" class="work-scroll">
         <div class="document">
-          <header class="work-heading"><h1 id="session-title">从一项工作开始</h1><p id="session-status" class="session-status" role="status"></p></header>
+          <header class="work-heading">
+            <h1 id="session-title">从一项工作开始</h1>
+            <p id="session-subtitle" class="session-subtitle"></p>
+          </header>
           <p id="notice" class="notice" role="status" hidden></p>
           <section id="approvals" aria-label="待审批操作"></section>
-          <section id="plan" class="plan" aria-label="任务计划" hidden></section>
           <section id="outcome" class="outcome" aria-label="已有成果"></section>
-          <section class="history-section"><div class="section-heading"><h2>工作经过</h2><button id="session-details" type="button" class="text-button">查看详情</button></div><button id="load-older" type="button" class="text-button" hidden>加载更早记录</button><div id="narrative"></div></section>
+          <section class="history-section">
+            <div class="section-heading">
+              <h2>工作经过</h2>
+              <button id="load-older" class="text-button" type="button" hidden>加载更早记录</button>
+            </div>
+            <div id="narrative"></div>
+          </section>
         </div>
       </div>
       <footer class="action-area">
         <div class="action-inner">
-          <div id="recovery" hidden><strong>工作已停驻</strong><p id="recovery-reason" class="recovery-reason"></p><p class="recovery-help">Continue 会核验工作区与历史操作结果；若无法恢复，可以保留历史并放弃本次恢复。</p><div class="recovery-actions"><button id="continue-button" class="primary-button" type="button">尝试 Continue</button><button id="abandon-button" class="secondary-button" type="button">放弃恢复</button><button id="interruption-details" class="text-button" type="button">查看中断详情</button></div></div>
-          <form id="prompt-form" class="composer"><label for="prompt">下一步工作</label><div class="composer-row"><textarea id="prompt" rows="2" placeholder="描述希望完成的工作…" required></textarea><button id="cancel-run" class="secondary-button" type="button" hidden>停止</button><button id="run-button" class="primary-button" type="submit">开始</button></div><div class="composer-foot"><span id="composer-hint">Ctrl + Enter 提交</span></div></form>
+          <div id="recovery" hidden>
+            <strong>工作已停驻</strong>
+            <p id="recovery-reason" class="recovery-reason"></p>
+            <p class="recovery-help">Continue 会核验工作区与历史操作结果；若无法恢复，可以保留历史并放弃本次恢复。</p>
+            <div class="recovery-actions">
+              <button id="continue-button" class="primary-button" type="button">尝试 Continue</button>
+              <button id="abandon-button" class="secondary-button" type="button">放弃恢复</button>
+              <button id="interruption-details" class="text-button" type="button">查看中断详情</button>
+            </div>
+          </div>
+          <div id="toasts" class="toasts" aria-live="polite"></div>
+          <form id="prompt-form" class="composer">
+            <div id="attachment-chips" class="attachment-chips" hidden></div>
+            <textarea id="prompt" rows="2" aria-label="下一步工作" placeholder="描述希望完成的工作…（Enter 发送，Shift+Enter 换行）"></textarea>
+            <div class="composer-bar">
+              <button id="attach-button" class="icon-button" type="button" aria-label="添加附件">＋</button>
+              <button id="mode-select" class="mode-select text-button" type="button">Auto</button>
+              <button id="context-meter" class="context-meter text-button" type="button" hidden>上下文 --</button>
+              <span class="action-spacer"></span>
+              <button id="model-button" class="model-button text-button" type="button">模型</button>
+              <button id="cancel-run" class="secondary-button" type="button" hidden>停止</button>
+              <button id="run-button" class="primary-button" type="submit">发送</button>
+            </div>
+            <input id="file-input" type="file" multiple hidden>
+          </form>
           <p id="action-message" class="action-message" role="status" hidden></p>
         </div>
       </footer>
     </main>
+    <aside id="work-panel" class="work-panel" aria-label="工作面板">
+      <div class="panel-head">
+        <h2>工作面板</h2>
+        <button id="close-panel" class="icon-button" type="button" aria-label="关闭工作面板">×</button>
+      </div>
+      <section id="panel-plan" class="panel-section">
+        <h3>任务计划</h3>
+        <div id="plan"></div>
+      </section>
+      <section id="panel-tools" class="panel-section">
+        <h3>工具活动</h3>
+        <div id="tool-stats" class="tool-stats"></div>
+        <div id="tool-list"></div>
+      </section>
+      <section id="panel-detail" class="panel-section">
+        <h3>详情</h3>
+        <div id="timeline" class="timeline"></div>
+        <div id="detail-filters" class="filter-bar"></div>
+        <div id="detail-content"></div>
+        <button id="export-run" class="text-button" type="button" hidden>导出本 Run JSONL</button>
+      </section>
+      <section id="panel-usage" class="panel-section">
+        <h3>用量</h3>
+        <div id="usage-content"></div>
+      </section>
+    </aside>
   </div>
-  <dialog id="inspector" class="inspector" aria-labelledby="inspector-title"><header class="inspector-header"><h2 id="inspector-title">工作详情</h2><button id="close-inspector" class="icon-button" type="button" aria-label="关闭详情">×</button></header><div id="inspector-content"></div></dialog>
+
   <dialog id="model-dialog" class="model-dialog">
     <form id="model-form" class="model-form">
       <div class="dialog-heading">
@@ -116,7 +191,15 @@
       <div class="dialog-actions"><button id="delete-session" class="text-button danger-button" type="button">删除空记录</button><button id="archive-session" class="secondary-button" type="button">归档</button><span class="action-spacer"></span><button id="save-session" class="primary-button" type="submit">保存标题</button></div>
     </form>
   </dialog>
+  <dialog id="capabilities-dialog" class="model-dialog">
+    <div class="dialog-heading">
+      <div><h2>工作区能力</h2></div>
+      <button id="close-capabilities" class="icon-button" type="button" aria-label="关闭工作区能力">×</button>
+    </div>
+    <p class="dialog-note">读取工作区内的 skills/ 与 mcp.json，只读展示。</p>
+    <div id="capabilities-content"></div>
+  </dialog>
 
-  <script type="module" src="/assets/app.js?v=11"></script>
+  <script type="module" src="/assets/app.js?v=12"></script>
 </body>
 </html>
