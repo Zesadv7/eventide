@@ -1,7 +1,7 @@
-import {chapters, parkLabel, parkSummary, planGroups, projectWork, runActivity, runId, terminal, labels, short, operationText} from "./projection.js";
-import {EventFeed, request} from "./transport.js";
-import {el, button, reconcile, markdown} from "./view.js";
-import {loadProviderConfig, isConfigured, showConfig} from "./config.js";
+import {chapters, parkLabel, parkSummary, planGroups, projectWork, runActivity, runId, terminal, labels, short, operationText} from "./projection.js?v=11";
+import {EventFeed, request} from "./transport.js?v=11";
+import {el, button, reconcile, markdown} from "./view.js?v=11";
+import {loadProviderConfig, isConfigured, showConfig} from "./config.js?v=11";
 
 const $ = (selector) => document.querySelector(selector);
 const state = {

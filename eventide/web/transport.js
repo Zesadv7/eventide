@@ -1,4 +1,4 @@
-import {mergeEvents, terminal} from "./projection.js";
+import {mergeEvents, terminal} from "./projection.js?v=11";
 
 export async function request(url, options = {}) {
   const response = await fetch(url, {headers: {"Content-Type": "application/json"}, ...options});
