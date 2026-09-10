@@ -61,8 +61,8 @@
 
 `"auto"`（默认）| `"plan"` | `"agent"`；未知值按 `auto` 处理，不拒绝。
 
-- `plan`：工具目录收敛为只读白名单（`read_file`/`glob`/`read_tool_result`/`compact`/`todo_write`/`load_skill`），system 追加只读声明；写/bash/MCP 不在目录中，模型无法调用。
-- `agent`：该 Run 内 ASK 决策自动允许，不再等待用户；审批审计事件照常写入，`approval.resolved` payload 带 `"auto": true`（前端时间线显示"agent 模式自动批准"）。
+- `plan`：工具目录收敛为只读白名单（`read_file`/`glob`/`read_tool_result`/`compact`/`todo_write`/`load_skill`），system 追加只读声明；写/bash/MCP 不在目录中，模型无法调用，executor handlers 同步受限，幻觉出的写调用不会命中处理器。注意：plan 模式仍会按 Workspace 配置连接 MCP 服务，只是其工具不进入目录。
+- `agent`：该 Run 内 ASK 决策自动允许，不再等待用户；审批审计事件照常写入，`approval.resolved` payload 带 `"auto": true` 且 `author="runtime"`（前端时间线显示“agent 模式自动批准”）。
 - `auto`：现状行为。
 
 ### RunBody 扩展 `attachment_ids` + `POST /api/sessions/{id}/attachments` —— 已实现
@@ -83,6 +83,8 @@ POST /api/sessions/{id}/attachments
 
 | 接口 | 说明 |
 |---|---|
-| `GET /api/sessions/{id}/attachments` | 附件清单，用于跨刷新恢复 chips |
+| `GET /api/sessions/{id}/attachments` | 附件清单，用于跨刷新恢复 chips；当前 POST 已占用同一路径，未实现的 GET 返回 405（Method Not Allowed），E2E 以此断言预留状态 |
 | `DELETE /api/sessions/{id}/attachments/{aid}` | 删除附件 |
 | 图片/二进制附件 | 需运行时多模态支持后开放 |
+
+模型列表（`eventide/model_catalog.py`）已具备探测式列表辅助（失败返回空列表与说明，不抛错），但当前没有对应 HTTP 端点；前端模型按钮暂只打开配置弹窗。
