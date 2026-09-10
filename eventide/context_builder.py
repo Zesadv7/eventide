@@ -25,6 +25,28 @@ INSTRUCTIONS_LIMIT = 4_000
 TRUNCATED_SUMMARY_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
 
 
+def request_size(
+    system: str, messages: Any, tools: list[dict[str, Any]] | None
+) -> int:
+    """The single serialization measure every context-budget decision compares.
+
+    Host-emitted ``request_chars`` must reuse this function instead of a local
+    approximation: two measures would drift and the composer indicator would
+    report a different denominator behavior than the budget enforces.
+    """
+    return len(
+        json.dumps(
+            {"system": system, "messages": messages, "tools": tools},
+            ensure_ascii=False,
+        )
+    )
+
+
+def tool_catalog_size(tools: list[dict[str, Any]]) -> int:
+    """Serialized tool-catalog size under the same measure as ``request_size``."""
+    return len(json.dumps(tools, ensure_ascii=False))
+
+
 def _tool_result_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
     content = message.get("content")
     if not isinstance(content, list):
@@ -83,18 +105,8 @@ def _describe_context(
     tools: list[dict[str, Any]],
 ) -> str:
     """Budget breakdown for overflow diagnostics; never includes message text."""
-    total = len(
-        json.dumps(
-            {"system": system, "messages": messages, "tools": tools},
-            ensure_ascii=False,
-        )
-    )
-    fixed = len(
-        json.dumps(
-            {"system": system, "messages": [], "tools": tools},
-            ensure_ascii=False,
-        )
-    )
+    total = request_size(system, messages, tools)
+    fixed = request_size(system, [], tools)
     results = [message for message in messages if _tool_result_blocks(message)]
     tool_chars = sum(len(json.dumps(message, ensure_ascii=False)) for message in results)
     return (
@@ -227,12 +239,7 @@ class ContextBuilder:
         messages, preview_trimmed = materialize(checkpoint)
 
         def size(value: Any) -> int:
-            return len(
-                json.dumps(
-                    {"system": system, "messages": value, "tools": request_tools},
-                    ensure_ascii=False,
-                )
-            )
+            return request_size(system, value, request_tools)
 
         if not force and size(messages) <= budget:
             return messages, None, preview_trimmed

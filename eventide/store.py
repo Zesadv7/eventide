@@ -525,6 +525,7 @@ class RuntimeStore:
                     "error",
                     "pending_approvals",
                     "reason",
+                    "usage",
                 )
             },
             "steps": activity["steps"],
@@ -612,11 +613,12 @@ class RuntimeStore:
                         "output",
                         "duration_ms",
                         "error",
-                        "pending_approvals",
-                        "reason",
-                        "gap_files",
-                    )
-                },
+                    "pending_approvals",
+                    "reason",
+                    "usage",
+                    "gap_files",
+                )
+            },
             }
             if "completed_at" in state:
                 record["completed_at"] = state["completed_at"]

@@ -13,8 +13,9 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Protocol
 
+from eventide import attachments, run_policy
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
-from eventide.context_builder import ContextBuilder
+from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
 from eventide.executor import ApprovalHandler, LocalCommandExecutor, ToolContext, ToolExecutor
 from eventide.mcp.client import MCPManager
 from eventide.models import (
@@ -223,6 +224,51 @@ class RuntimeHost:
         workspace = self.store.get_workspace(workspace_id)
         metadata = git_metadata(Path(workspace.path))
         return {**asdict(workspace), **metadata}
+
+    def workspace_capabilities(self, workspace_id: str) -> dict[str, Any]:
+        """Read-only capability introspection built from pure file parsing.
+
+        MCP configurations are parsed, never connected. Only names and
+        transports are reported: commands, environment variables, headers, and
+        credentials stay out of the response because they are secret-bearing.
+        """
+        workspace = self.store.get_workspace(workspace_id)
+        workspace_root = Path(workspace.path)
+        catalog = SkillCatalog.discover(workspace_root)
+        # Same resolution rule as _execute: an explicit config path belongs to
+        # the default workspace only; every other workspace owns its mcp.json.
+        mcp_config = (
+            self._config_path
+            if self._config_path and workspace == self.default_workspace
+            else workspace_root / "mcp.json"
+        )
+        notes: list[str] = []
+        servers: list[dict[str, str]] = []
+        if not mcp_config.exists():
+            notes.append("未配置 mcp.json")
+        else:
+            try:
+                configs = MCPManager.load_configs(mcp_config)
+            except (OSError, ValueError) as exc:
+                notes.append(f"mcp.json 解析失败：{type(exc).__name__}: {exc}")
+            else:
+                servers = [
+                    {"name": config.name, "transport": config.transport}
+                    for config in configs
+                ]
+        return {
+            "workspace_id": workspace.workspace_id,
+            "skills": [
+                {"name": skill.name, "description": skill.description}
+                for skill in catalog.skills
+            ],
+            "mcp": servers,
+            "paths": {
+                "mcp_config": str(mcp_config),
+                "skills_dir": str(workspace_root / "skills"),
+            },
+            "notes": notes,
+        }
 
     def session_runs(
         self,
@@ -724,7 +770,7 @@ class RuntimeHost:
                         session_id,
                         admitted_run_id,
                         workspace,
-                        request.prompt if request else None,
+                        request,
                         source_id,
                         sink,
                         approval_handler,
@@ -862,7 +908,7 @@ class RuntimeHost:
         session_id: str,
         run_id: str,
         workspace: WorkspaceRecord,
-        prompt: str | None,
+        request: RunRequest | None,
         continuation_of: str | None,
         sink: EventSink | None,
         approval_handler: ApprovalHandler | None,
@@ -881,6 +927,9 @@ class RuntimeHost:
         usage = {"input_tokens": 0, "output_tokens": 0}
         output, steps, tool_count = "", 0, 0
         force_compact = False
+        prompt = request.prompt if request else None
+        mode = run_policy.normalize_mode(request.mode) if request else "auto"
+        attachment_ids = list(request.attachment_ids) if request else []
         # Why the run parked, if it did; read by the terminal event on every exit path.
         park_kind: str | None = None
         park_message: str | None = None
@@ -910,6 +959,14 @@ class RuntimeHost:
                 # Resolve every unpaired advertised call, including calls never dispatched.
                 await self._resolve_interrupted_history(run_id, previous, sink)
             else:
+                # Missing or foreign attachments raise ValueError and fail the
+                # run loudly instead of silently dropping the user's context.
+                prompt = attachments.compose_prompt(
+                    prompt or "",
+                    attachments.load_attachments(
+                        self.settings.state_dir, session_id, attachment_ids
+                    ),
+                )
                 await self._emit(
                     run_id,
                     "message.user",
@@ -981,6 +1038,7 @@ class RuntimeHost:
                 *skill_tools,
                 *manager.tools,
             ]
+            tools = run_policy.filter_tool_catalog(tools, mode)
             handlers = {
                 **self.handlers,
                 "read_tool_result": tool_result_reader(self.store, session_id),
@@ -988,6 +1046,14 @@ class RuntimeHost:
                 **({"load_skill": skills.load} if skills else {}),
                 **manager.handlers,
             }
+            if mode == "plan":
+                # The catalog never advertised side-effecting tools, so a
+                # hallucinated call must stay a no-op: restrict execution to the
+                # visible names instead of trusting the model to comply.
+                visible = {tool.get("name") for tool in tools}
+                handlers = {
+                    name: handler for name, handler in handlers.items() if name in visible
+                }
             executor = ToolExecutor(
                 handlers,
                 {
@@ -1003,14 +1069,17 @@ class RuntimeHost:
                 runtime_readonly_tools.add("load_skill")
             instructions = self._clean(ContextBuilder.instructions(workspace_root))
             skill_prompt = skills.prompt()
+            mode_note = run_policy.mode_system_note(mode)
             base_system = (
                 "You are Eventide. Use tools to finish work, respect permissions, and never "
                 "claim success without evidence.\n"
                 f"Workspace: {workspace_root}\nWorking directory: {working_root}\n"
                 f"Project instructions:\n{instructions}"
                 + (f"\n\n{skill_prompt}" if skill_prompt else "")
+                + (f"\n\n{mode_note}" if mode_note else "")
             )
             catalog_hash = digest(tools)
+            tool_catalog_chars = tool_catalog_size(tools)
             await self._emit(
                 run_id,
                 "context.configured",
@@ -1035,6 +1104,18 @@ class RuntimeHost:
                     },
                     sink,
                 )
+                if run_policy.should_auto_approve(mode):
+                    # Agent mode owns the decision and the audit fact; the
+                    # handler (e.g. the HTTP broker) is never consulted, so
+                    # nothing waits on a user who was never asked.
+                    await self._emit(
+                        run_id,
+                        "approval.resolved",
+                        {"approval_id": approval_id, "approved": True, "auto": True},
+                        sink,
+                        author="runtime",
+                    )
+                    return True
                 approved = False
                 if approval_handler:
                     with suppress(asyncio.TimeoutError):
@@ -1114,6 +1195,8 @@ class RuntimeHost:
                         "tool_count": len(tools),
                         "context_hash": digest(messages),
                         "tool_catalog_hash": catalog_hash,
+                        "request_chars": request_size(system, messages, tools),
+                        "tool_catalog_chars": tool_catalog_chars,
                     },
                     sink,
                 )
