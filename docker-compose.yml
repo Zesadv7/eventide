@@ -1,0 +1,17 @@
+services:
+  eventide:
+    build: .
+    ports:
+      # 宿主侧保持回环边界（ADR-012）；容器内 serve 绑定 0.0.0.0
+      - "127.0.0.1:8000:8000"
+    environment:
+      EVENTIDE_STATE_DIR: /data/eventide
+    volumes:
+      # 状态根：runtime.sqlite、secret.key、host.lock 必须持久化
+      - eventide-state:/data/eventide
+      # 演示工作区；接入真实项目时可换成 bind mount（注意容器内 UID 的读写权限）
+      - eventide-workspace:/workspaces/demo
+
+volumes:
+  eventide-state:
+  eventide-workspace:
