@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Eventide · 持续工作的 Workspace">
   <title>Eventide · 工作空间</title>
-  <link rel="stylesheet" href="/assets/style.css?v=12">
+  <link rel="stylesheet" href="/assets/style.css?v=13">
 </head>
 <body>
   <div class="app-shell">
     <aside id="sidebar" class="sidebar" aria-label="工作导航">
       <div class="sidebar-head">
         <a href="/" class="brand" aria-label="Eventide">EVENTIDE<span>Agent</span></a>
-        <button id="collapse-sidebar" class="icon-button" type="button" aria-label="收起导航">‹</button>
+        <button id="collapse-sidebar" class="icon-button" type="button" aria-label="收起导航"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 4L5.5 8l4 4"/></svg></button>
       </div>
       <div class="workspace-block">
         <button id="workspace-switcher-button" class="workspace-trigger" type="button" aria-haspopup="true" aria-expanded="false">
@@ -23,10 +23,10 @@
           <ul id="workspace-options"></ul>
           <button id="manage-workspace" class="text-button" type="button">移除工作区</button>
         </div>
-        <button id="add-workspace" class="text-button" type="button">＋ 添加工作区</button>
+        <button id="add-workspace" class="text-button" type="button"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>添加工作区</button>
         <p id="workspace-path" class="workspace-path"></p>
       </div>
-      <button id="new-session" class="new-work" type="button">＋ 新建工作</button>
+      <button id="new-session" class="new-work" type="button"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>新建工作</button>
       <div class="nav-heading">
         <span>工作记录</span>
         <button id="toggle-archived" class="text-button" type="button">显示已归档</button>
@@ -38,7 +38,7 @@
     </aside>
     <main class="work-area">
       <header class="topbar">
-        <button id="open-sidebar" class="icon-button" type="button" aria-label="展开导航" aria-controls="sidebar">☰</button>
+        <button id="open-sidebar" class="icon-button" type="button" aria-label="展开导航" aria-controls="sidebar"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 5h10M3 8h10M3 11h10"/></svg></button>
         <span id="crumb-workspace"></span>
         <span class="breadcrumb-divider">/</span>
         <span id="crumb-session"></span>
@@ -80,13 +80,13 @@
             <div id="attachment-chips" class="attachment-chips" hidden></div>
             <textarea id="prompt" rows="2" aria-label="下一步工作" placeholder="描述希望完成的工作…（Enter 发送，Shift+Enter 换行）"></textarea>
             <div class="composer-bar">
-              <button id="attach-button" class="icon-button" type="button" aria-label="添加附件">＋</button>
+              <button id="attach-button" class="icon-button" type="button" aria-label="添加附件"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></button>
               <button id="mode-select" class="mode-select text-button" type="button">Auto</button>
               <button id="context-meter" class="context-meter text-button" type="button" hidden>上下文 --</button>
               <span class="action-spacer"></span>
-              <button id="model-button" class="model-button text-button" type="button">模型</button>
+              <button id="model-button" class="model-button text-button" type="button">模型<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
               <button id="cancel-run" class="secondary-button" type="button" hidden>停止</button>
-              <button id="run-button" class="primary-button" type="submit">发送</button>
+              <button id="run-button" class="primary-button" type="submit"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4"/></svg>发送</button>
             </div>
             <input id="file-input" type="file" multiple hidden>
           </form>
@@ -97,7 +97,7 @@
     <aside id="work-panel" class="work-panel" aria-label="工作面板">
       <div class="panel-head">
         <h2>工作面板</h2>
-        <button id="close-panel" class="icon-button" type="button" aria-label="关闭工作面板">×</button>
+        <button id="close-panel" class="icon-button" type="button" aria-label="关闭工作面板"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
       </div>
       <section id="panel-plan" class="panel-section">
         <h3>任务计划</h3>
@@ -126,7 +126,7 @@
     <form id="model-form" class="model-form">
       <div class="dialog-heading">
         <div><p class="section-kicker">MODEL CONNECTION</p><h2>配置大模型</h2></div>
-        <button id="close-model-dialog" class="icon-button" type="button" aria-label="关闭模型配置">×</button>
+        <button id="close-model-dialog" class="icon-button" type="button" aria-label="关闭模型配置"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
       </div>
       <p class="dialog-note">模型配置由这个 Eventide 服务的所有工作区共用。密钥在本机加密保存，不会回显。</p>
       <div class="config-grid">
@@ -163,7 +163,7 @@
     <form id="workspace-form" class="model-form">
       <div class="dialog-heading">
         <div><h2>添加工作区</h2></div>
-        <button id="close-workspace-dialog" class="icon-button" type="button" aria-label="关闭添加工作区">×</button>
+        <button id="close-workspace-dialog" class="icon-button" type="button" aria-label="关闭添加工作区"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
       </div>
       <p class="dialog-note">输入这台电脑上已有的项目目录。Git 子目录会归一到仓库根目录。</p>
       <div class="config-grid">
@@ -179,7 +179,7 @@
     <form id="session-form" class="model-form">
       <div class="dialog-heading">
         <div><h2>管理工作记录</h2></div>
-        <button id="close-session-dialog" class="icon-button" type="button" aria-label="关闭工作记录管理">×</button>
+        <button id="close-session-dialog" class="icon-button" type="button" aria-label="关闭工作记录管理"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
       </div>
       <p id="session-working-directory" class="dialog-note"></p>
       <div class="config-grid">
@@ -194,12 +194,12 @@
   <dialog id="capabilities-dialog" class="model-dialog">
     <div class="dialog-heading">
       <div><h2>工作区能力</h2></div>
-      <button id="close-capabilities" class="icon-button" type="button" aria-label="关闭工作区能力">×</button>
+      <button id="close-capabilities" class="icon-button" type="button" aria-label="关闭工作区能力"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
     </div>
     <p class="dialog-note">读取工作区内的 skills/ 与 mcp.json，只读展示。</p>
     <div id="capabilities-content"></div>
   </dialog>
 
-  <script type="module" src="/assets/app.js?v=12"></script>
+  <script type="module" src="/assets/app.js?v=13"></script>
 </body>
 </html>

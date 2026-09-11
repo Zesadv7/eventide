@@ -5,6 +5,23 @@ export function el(tag, className = "", text) {
   return node;
 }
 
+// Inline stroke icons replace text glyphs (＋ ⋯ × …) so chrome buttons stay
+// crisp at any zoom and screen-reader labels do the naming work instead.
+const ICONS = {
+  plus: '<path d="M8 3v10M3 8h10"/>',
+  close: '<path d="M4 4l8 8M12 4l-8 8"/>',
+  menu: '<path d="M3 5h10M3 8h10M3 11h10"/>',
+  dots: '<circle cx="4" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="12" cy="8" r="1.1"/>',
+  "chevron-left": '<path d="M9.5 4L5.5 8l4 4"/>',
+  "chevron-down": '<path d="M4 6l4 4 4-4"/>',
+  send: '<path d="M8 13V3M4 7l4-4 4 4"/>',
+};
+export function icon(name) {
+  const node = el("span", `icon icon-${name}`);
+  node.innerHTML = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+  return node;
+}
+
 export function button(text, action, className = "text-button") {
   const node = el("button", className, text);
   node.type = "button";

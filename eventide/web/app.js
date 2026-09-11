@@ -1,6 +1,6 @@
 import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=11";
 import {EventFeed, request} from "./transport.js?v=11";
-import {el, button, reconcile, markdown} from "./view.js?v=11";
+import {el, button, icon, reconcile, markdown} from "./view.js?v=13";
 
 // config.js is null-safe for nodes the v2 console dropped, so a failed import is
 // the only remaining degrade path: the app keeps running as "unconfigured".
@@ -41,7 +41,10 @@ function showToast(type, message, options = {}) {
   toast.setAttribute("role", type === "error" ? "alert" : "status");
   toast.append(el("span", "toast-message", message));
   if (options.retry) toast.append(button("重试", () => { toast.remove(); options.retry(); }, "toast-retry"));
-  toast.append(button("×", () => toast.remove(), "toast-close"));
+  const close = button("", () => toast.remove(), "toast-close");
+  close.setAttribute("aria-label", "关闭提示");
+  close.append(icon("close"));
+  toast.append(close);
   host.append(toast);
   if (type !== "error") setTimeout(() => toast.isConnected && toast.remove(), 5000);
   return toast;
@@ -411,8 +414,8 @@ function sessionItem(session) {
   }
   meta.append(el("time", "", `${session.archived ? "已归档 · " : ""}${time(session.updated_at)}`));
   select.append(el("strong", "", title(session)), meta);
-  const more = button("⋯", (event) => openSessionActions(session, event), "session-more");
-  more.setAttribute("aria-label", `管理 ${title(session)}`);
+  const more = button("", (event) => openSessionActions(session, event), "session-more");
+  more.append(icon("dots"));
   item.append(select, more);
   return item;
 }
@@ -592,10 +595,27 @@ function renderHistory(runs) {
   const groups = chapters(runs);
   const latestResult = [...runs].reverse().find((r) => r.status === "completed" && r.output);
   if (!groups.length) {
-    const emptyText = owner ? "还没有执行记录。描述下一步要完成的工作，记录将在这里持续展开。"
-      : state.workspace ? "选择左侧的工作，或直接描述一个目标。首次提交时创建工作记录。"
-        : "先在左侧添加一个工作区，再描述第一个目标。";
-    reconcile($("#narrative"), [owner || "empty"], (id) => id, () => "empty", () => el("p", "empty-work", emptyText));
+    reconcile($("#narrative"), [owner || "empty"], (id) => id, () => "empty", () => {
+      const emptyText = owner ? "还没有执行记录。描述下一步要完成的工作，记录将在这里持续展开。"
+        : state.workspace ? "选择左侧的工作，或直接描述一个目标。首次提交时创建工作记录。"
+          : "先添加一个工作区，再描述第一个目标。";
+      const wrap = el("div", "empty-state");
+      wrap.append(el("p", "empty-work", emptyText));
+      const actions = el("div", "empty-actions");
+      if (!state.workspace) {
+        actions.append(button("添加工作区", () => { $("#add-workspace").click(); }, "secondary-button"));
+      } else {
+        for (const sample of ["概括这个仓库的结构", "检查测试覆盖并补齐薄弱点", "审查最近的改动并给出建议"]) {
+          actions.append(button(sample, () => {
+            $("#prompt").value = sample;
+            state.drafts.set(draftKey(), sample);
+            $("#prompt").focus();
+          }, "example-task"));
+        }
+      }
+      wrap.append(actions);
+      return wrap;
+    });
     return;
   }
   reconcile($("#narrative"), groups, (g) => g.id, (g) => g.id, (g) => {
@@ -962,11 +982,15 @@ function renderChips() {
   reconcile(host, chips, (chip) => chip.attachment_id, (chip) => chip.name, (chip) => {
     const node = el("span", "attachment-chip");
     node.dataset.attachmentId = chip.attachment_id;
-    node.append(el("span", "", chip.name), button("×", () => {
+    node.append(el("span", "", chip.name));
+    const remove = button("", () => {
       const remaining = (state.attachments.get(state.session) || []).filter((item) => item.attachment_id !== chip.attachment_id);
       state.attachments.set(state.session, remaining);
       renderChips();
-    }, "chip-remove"));
+    }, "chip-remove");
+    remove.setAttribute("aria-label", `移除附件 ${chip.name}`);
+    remove.append(icon("close"));
+    node.append(remove);
     return node;
   });
 }
