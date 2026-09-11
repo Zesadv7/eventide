@@ -1,10 +1,10 @@
-import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=11";
-import {EventFeed, request} from "./transport.js?v=11";
-import {el, button, icon, reconcile, markdown} from "./view.js?v=13";
+import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=12";
+import {EventFeed, request} from "./transport.js?v=12";
+import {el, button, icon, reconcile, markdown} from "./view.js?v=14";
 
 // config.js is null-safe for nodes the v2 console dropped, so a failed import is
 // the only remaining degrade path: the app keeps running as "unconfigured".
-const config = await import("./config.js?v=11").catch(() => null);
+const config = await import("./config.js?v=12").catch(() => null);
 
 const $ = (selector) => document.querySelector(selector);
 const state = {
@@ -12,7 +12,7 @@ const state = {
   sessions: new Map(), runs: new Map(), expanded: new Map(), manualExpansion: new Set(), errors: new Map(), notices: new Map(),
   drafts: new Map(), positions: new Map(), busy: new Set(), approvals: new Set(),
   hasOlder: new Map(), loadingOlder: new Set(), showArchived: new Set(), sessionEditing: null, planCompletedOpen: false,
-  reconnecting: new Set(), workCache: new Map(), openToolDetails: new Map(), runNumbers: new Map(),
+  reconnecting: new Set(), workCache: new Map(), openToolDetails: new Map(), openToolGroups: new Set(), runNumbers: new Map(),
   detail: {chapterId: null, runId: null, target: null, eventSeq: null, filter: "all"},
   attachments: new Map(), attachmentsUnavailable: false, attachmentsToasted: false,
   capabilities: new Map(), usageData: null, usageRunId: null,
@@ -203,10 +203,10 @@ async function selectSession(id) {
   }
   $("#prompt").value = state.drafts.get(draftKey()) || "";
   resetPromptHeight();
-  state.workCache.clear(); state.openToolDetails.clear();
+  state.workCache.clear(); state.openToolDetails.clear(); state.openToolGroups.clear();
   state.detail = {...state.detail, chapterId: null, runId: null, target: null, eventSeq: null};
   state.usageData = null; state.usageRunId = null;
-  $("#sidebar").classList.remove("open");
+  $("#sidebar").classList.remove("open"); syncDrawerBackdrop();
   render();
   const host = scrollHost();
   if (host) host.scrollTop = state.positions.get(id) || 0;
@@ -219,7 +219,7 @@ async function selectWorkspace(id) {
   $("#prompt").value = state.drafts.get(draftKey()) || "";
   resetPromptHeight();
   localStorage.setItem("eventide.workspace", id);
-  state.workCache.clear(); state.openToolDetails.clear();
+  state.workCache.clear(); state.openToolDetails.clear(); state.openToolGroups.clear();
   state.detail = {...state.detail, chapterId: null, runId: null, target: null, eventSeq: null};
   state.usageData = null; state.usageRunId = null;
   closeWorkspaceMenu();
@@ -403,6 +403,7 @@ function sessionItem(session) {
   const meta = el("span", "session-meta");
   const dot = el("span", "status-dot");
   dot.dataset.status = session.status;
+  dot.title = labels[session.status] || session.status;
   meta.append(dot);
   const plan = planGroups(session.task_state);
   if (plan.total) {
@@ -434,20 +435,6 @@ function renderSessionList() {
 }
 
 // ---- document body ----
-function renderOutcome(runs) {
-  const completed = [...runs].reverse().find((r) => r.status === "completed" && r.output);
-  reconcile($("#outcome"), completed ? [completed] : [], runId, (r) => r.output, (r) => {
-    const section = el("div");
-    const heading = el("div", "section-heading");
-    const copy = button("复制", async () => {
-      try { await navigator.clipboard.writeText(r.output); copy.textContent = "已复制"; }
-      catch { copy.textContent = "复制失败，请选择文本复制"; }
-    });
-    heading.append(el("h2", "", "已有成果"), copy);
-    section.append(heading, markdown(r.output)); return section;
-  });
-}
-
 function renderPlan(session) {
   const plan = session ? planGroups(session.task_state) : null;
   const section = $("#plan");
@@ -497,6 +484,7 @@ function planRow(task, settled) {
       if (target) {
         const line = button(entry.text, () => openToolAt(target), `plan-evidence-item${failed}`);
         line.title = "在工具列表中查看这次调用";
+        line.dataset.panelOpen = "";
         details.append(line);
       } else {
         details.append(el("div", `plan-evidence-item${failed}`, entry.text));
@@ -548,6 +536,25 @@ function buildUserBubble(item) {
   bubble.append(copy);
   return bubble;
 }
+// 每轮工作的最终回复：内联轻卡片，头部小字带 run 定位、步数与复制。
+function buildResultCard(item) {
+  const card = el("section", "chapter-result");
+  const head = el("div", "chapter-result-head");
+  const runButton = el("button", "result-run", `run#${state.runNumbers.get(runId(item.run)) || "?"}`);
+  runButton.type = "button";
+  runButton.title = "在详情浮层查看这次执行";
+  runButton.dataset.panelOpen = "";
+  runButton.onclick = () => openDetailAtRun(item.chapterId, runId(item.run));
+  const seconds = runDurationSeconds(item.run);
+  head.append(runButton, el("span", "", `${item.run.steps || 0} 步${seconds == null ? "" : ` · ${duration(seconds)}`}`), el("time", "", time(item.run.started_at)));
+  const copy = button("复制", async () => {
+    try { await navigator.clipboard.writeText(item.text); copy.textContent = "已复制"; }
+    catch { copy.textContent = "复制失败，请选择文本复制"; }
+  }, "result-copy");
+  head.append(copy);
+  card.append(head, markdown(item.text));
+  return card;
+}
 function buildStatsLine(item) {
   const line = el("button", "chapter-stats-line");
   line.type = "button";
@@ -563,24 +570,28 @@ function buildStatsLine(item) {
   }
   line.append(document.createTextNode(parts.join(" · ")));
   line.title = "在工具面板中查看本章调用";
+  line.dataset.panelOpen = "";
   line.onclick = () => openToolsForChapter(item.chapterId);
   return line;
 }
 function buildNoteBlock(item) {
   const node = el("div", "work-block kind-attention");
   node.append(el("h3", "", item.block.title), el("p", "", item.block.text));
-  node.append(button("查看详情", () => openDetailAtBlock(item.chapterId, item.block.id), "block-details"));
+  const detailsButton = button("查看详情", () => openDetailAtBlock(item.chapterId, item.block.id), "text-button");
+  detailsButton.dataset.panelOpen = "";
+  node.append(detailsButton);
   return node;
 }
-function buildLineage(chapter) {
+function buildLineage(chapter, runs) {
   const container = el("div", "run-lineage");
-  for (const run of chapter.runs) {
+  for (const run of runs) {
     const badge = el("button", "lineage-badge");
     badge.type = "button";
     badge.dataset.runId = runId(run);
     badge.dataset.status = run.status;
     badge.textContent = `run#${state.runNumbers.get(runId(run)) || "?"} · ${run.steps || 0} 步 · ${labels[run.status] || run.status}${run.continuation_of ? " · 接续" : ""}`;
     badge.title = "在详情面板查看这次执行";
+    badge.dataset.panelOpen = "";
     badge.onclick = () => openDetailAtRun(chapter.id, runId(run));
     container.append(badge);
   }
@@ -593,7 +604,6 @@ function renderHistory(runs) {
   $("#load-older").disabled = state.loadingOlder.has(owner);
   $("#load-older").textContent = state.loadingOlder.has(owner) ? "正在加载…" : "加载更早记录";
   const groups = chapters(runs);
-  const latestResult = [...runs].reverse().find((r) => r.status === "completed" && r.output);
   if (!groups.length) {
     reconcile($("#narrative"), [owner || "empty"], (id) => id, () => "empty", () => {
       const emptyText = owner ? "还没有执行记录。描述下一步要完成的工作，记录将在这里持续展开。"
@@ -654,9 +664,10 @@ function renderHistory(runs) {
       items.push({id: "empty", kind: "empty", text: terminal(chapter.runs.at(-1)) ? loaded ? "本次执行没有工具活动。" : "正在读取工作记录…" : "正在准备执行，等待新的工作记录。"});
     }
     for (const run of chapter.runs) {
-      if (run.output && run.status === "completed" && runId(run) !== runId(latestResult)) items.push({id: `result:${runId(run)}`, kind: "result", text: run.output});
+      if (run.output && run.status === "completed") items.push({id: `result:${runId(run)}`, kind: "result", run, chapterId: chapter.id, text: run.output});
     }
-    items.push({id: "lineage", kind: "lineage", chapter, version: JSON.stringify(chapter.runs.map((r) => [runId(r), r.status, r.steps, r.continuation_of]))});
+    const lineageRuns = chapter.runs.filter((r) => !(r.status === "completed" && r.output));
+    if (lineageRuns.length) items.push({id: "lineage", kind: "lineage", chapter, runs: lineageRuns, version: JSON.stringify(lineageRuns.map((r) => [runId(r), r.status, r.steps, r.continuation_of]))});
     reconcile(node.lastElementChild, items, (item) => item.id, (item) => {
       if (item.kind === "user") return JSON.stringify([item.text, item.ts]);
       if (item.kind === "stats" || item.kind === "lineage") return item.version;
@@ -666,41 +677,60 @@ function renderHistory(runs) {
       if (item.kind === "user") return buildUserBubble(item);
       if (item.kind === "stats") return buildStatsLine(item);
       if (item.kind === "note") return buildNoteBlock(item);
-      if (item.kind === "result") { const section = el("section", "chapter-result"); section.append(el("h3", "", "当时的结果"), markdown(item.text)); return section; }
-      if (item.kind === "lineage") return buildLineage(item.chapter);
+      if (item.kind === "result") return buildResultCard(item);
+      if (item.kind === "lineage") return buildLineage(item.chapter, item.runs);
       return el("p", "", item.text);
     });
   }
 }
 
-// ---- right panel ----
-function expandPanel() {
-  const root = document.documentElement;
-  if (root.hasAttribute("data-panel-collapsed")) {
-    root.removeAttribute("data-panel-collapsed");
-    localStorage.setItem("eventide.panel", "open");
+// ---- floating panel: topbar capsules open one section at a time ----
+const CAPSULE_TITLES = {plan: "任务计划", tools: "工具活动", detail: "详情", usage: "用量"};
+let openCapsule = null;
+function openPanel(name) {
+  openCapsule = name;
+  renderFloatingPanel();
+  $("#floating-panel").focus({preventScroll: true});
+}
+function closePanel({restoreFocus = true} = {}) {
+  const previous = openCapsule;
+  openCapsule = null;
+  renderFloatingPanel();
+  if (restoreFocus && previous) $(`#capsule-${previous}`)?.focus({preventScroll: true});
+}
+function togglePanel(name) { if (openCapsule === name) closePanel(); else openPanel(name); }
+function renderFloatingPanel() {
+  $("#floating-panel").hidden = !openCapsule;
+  $("#floating-title").textContent = CAPSULE_TITLES[openCapsule] || "";
+  for (const name of Object.keys(CAPSULE_TITLES)) {
+    $(`#capsule-${name}`).setAttribute("aria-expanded", String(openCapsule === name));
+    $(`#panel-${name}`).hidden = openCapsule !== name;
   }
-  if (matchMedia("(max-width:760px)").matches) $("#work-panel").classList.add("open");
 }
 function openToolsForChapter(chapterId) {
-  expandPanel();
-  document.querySelector(`#tool-list .tool-group[data-chapter-id="${CSS.escape(chapterId)}"]`)?.scrollIntoView({block: "start"});
+  openPanel("tools");
+  state.openToolGroups.add(chapterId);
+  const group = document.querySelector(`#tool-list .tool-group[data-chapter-id="${CSS.escape(chapterId)}"]`);
+  if (group) { group.open = true; group.scrollIntoView({block: "start"}); }
 }
 function openToolAt(opId) {
-  expandPanel();
+  openPanel("tools");
   for (const chapter of chapters(currentRuns())) {
-    if (projectCached(chapter).operations.has(opId)) state.openToolDetails.set(chapter.id, opId);
+    if (projectCached(chapter).operations.has(opId)) {
+      state.openToolDetails.set(chapter.id, opId);
+      state.openToolGroups.add(chapter.id);
+    }
   }
   renderTools();
   document.querySelector(`#tool-list .tool-row[data-op-id="${CSS.escape(opId)}"]`)?.scrollIntoView({block: "nearest"});
 }
 function openDetailAtBlock(chapterId, blockId) {
-  expandPanel();
+  openPanel("detail");
   state.detail = {...state.detail, chapterId, runId: null, target: {type: "block", blockId}, eventSeq: null};
   renderDetail();
 }
 function openDetailAtRun(chapterId, id) {
-  expandPanel();
+  openPanel("detail");
   state.detail = {...state.detail, chapterId, runId: id, target: null, eventSeq: null};
   renderDetail();
 }
@@ -723,10 +753,18 @@ function applyToolDetail(group, item) {
   detail.hidden = false;
 }
 function buildToolGroup(item) {
-  const group = el("div", "tool-group");
+  const group = el("details", "tool-group");
   group.dataset.chapterId = item.chapter.id;
+  group.dataset.disclosure = `tool-group:${item.chapter.id}`;
+  group.open = state.openToolGroups.has(item.chapter.id);
+  group.addEventListener("toggle", () => {
+    if (group.open) state.openToolGroups.add(item.chapter.id);
+    else state.openToolGroups.delete(item.chapter.id);
+  });
   const label = item.work.intent ? short(item.work.intent, 30) : item.first ? "最初的目标" : "后续工作";
-  group.append(el("div", "tool-group-label", label));
+  const counts = toolStats(item.operations);
+  const problem = counts.failed ? `${counts.failed} 项失败` : counts.unknown ? `${counts.unknown} 项未确认` : counts.denied ? `${counts.denied} 项拒绝` : "";
+  group.append(el("summary", "tool-group-label", `${label} · ${item.operations.length} 次${problem ? ` · ${problem}` : ""}`));
   for (const op of item.operations) {
     const row = el("button", "tool-row");
     row.type = "button";
@@ -748,6 +786,7 @@ function buildToolGroup(item) {
   applyToolDetail(group, item);
   return group;
 }
+let lastToolTotals = null;
 function renderTools() {
   const stats = $("#tool-stats");
   const list = $("#tool-list");
@@ -765,13 +804,19 @@ function renderTools() {
     for (const [key, value] of Object.entries(toolStats(item.operations))) if (key !== "total") totals[key] += value;
   }
   if (!items.length) {
+    lastToolTotals = null;
     stats.hidden = true;
     list.replaceChildren(el("p", "", "还没有工具调用记录。"));
     return;
   }
+  lastToolTotals = totals;
   stats.hidden = false;
-  stats.replaceChildren(...[["总", totals.total], ["完成", totals.completed], ["失败", totals.failed], ["等待", totals.prepared], ["未知", totals.unknown]]
-    .map(([label, value]) => el("span", "tool-stat", `${label} ${value}`)));
+  stats.replaceChildren(...[["total", "总"], ["completed", "完成"], ["failed", "失败"], ["prepared", "等待"], ["unknown", "未知"]]
+    .map(([kind, label]) => {
+      const chip = el("span", "stat-chip", `${label} ${totals[kind]}`);
+      chip.dataset.kind = kind;
+      return chip;
+    }));
   reconcile(list, items, (item) => item.chapter.id, (item) => JSON.stringify([
     item.operations.map((op) => [op.id, op.status, op.name, toolTarget(op), toolDurationText(op)]),
     item.first, state.openToolDetails.get(item.chapter.id) || "",
@@ -945,7 +990,9 @@ function renderUsage() {
     rows.append(el("h4", "", "上下文"));
     const line = el("p", "", `已用约 ${pct}% 的上下文窗口（${contextLimit()} 字符）`);
     if (pct > 80) line.classList.add("warning");
-    rows.append(line, contextMeterNode(pct));
+    const bar = contextMeterNode(pct);
+    if (pct > 80) bar.classList.add("warning");
+    rows.append(line, bar);
   }
   host.replaceChildren(rows);
 }
@@ -974,7 +1021,7 @@ const currentMode = () => {
   const value = localStorage.getItem(modeKey());
   return modeOrder.includes(value) ? value : "auto";
 };
-function renderModeButton() { $("#mode-select").textContent = modeLabels[currentMode()]; }
+function renderModeButton() { $("#mode-label").textContent = modeLabels[currentMode()]; }
 function renderChips() {
   const host = $("#attachment-chips");
   const chips = state.attachments.get(state.session) || [];
@@ -1167,11 +1214,18 @@ function renderActions(session) {
   const activeRun = session?.latest_run && !terminal(session.latest_run) ? session.latest_run : null;
   $("#cancel-run").hidden = !activeRun;
   $("#cancel-run").disabled = activeRun ? state.busy.has(`cancel:${runId(activeRun)}`) : true;
-  $("#cancel-run").textContent = $("#cancel-run").disabled && activeRun ? "正在停止…" : "停止";
-  $("#run-button").textContent = session?.latest_run ? "提交" : "开始";
+  $("#cancel-run").title = $("#cancel-run").disabled && activeRun ? "正在停止…" : "停止运行";
   $("#prompt").disabled = workspaceBusy;
   $("#action-message").hidden = !state.errors.get(owner);
   $("#action-message").textContent = state.errors.get(owner) || "";
+}
+
+function syncDrawerBackdrop() { $("#drawer-backdrop").hidden = !$("#sidebar").classList.contains("open"); }
+
+function renderCapsules(session) {
+  const plan = planGroups(session?.task_state);
+  $("#capsule-plan").textContent = plan.total ? `计划 ${plan.counts.completed}/${plan.total}` : "计划";
+  $("#capsule-tools").textContent = lastToolTotals?.total ? `工具 ${lastToolTotals.total}` : "工具";
 }
 
 function render() {
@@ -1185,11 +1239,11 @@ function render() {
   renderPill();
   renderApprovals(session);
   renderPlan(session);
-  renderOutcome(currentRuns());
   renderHistory(currentRuns());
   renderTools();
   renderDetail();
   renderUsage();
+  renderCapsules(session);
   void syncUsage();
   renderChips();
   renderModeButton();
@@ -1212,19 +1266,15 @@ function initChrome() {
     root.dataset.sidebarCollapsed = String(collapsed);
     localStorage.setItem("eventide.sidebar", collapsed ? "collapsed" : "open");
   };
-  const stored = localStorage.getItem("eventide.panel");
-  root.toggleAttribute("data-panel-collapsed", stored ? stored === "collapsed" : matchMedia("(max-width:1100px)").matches);
-  $("#close-panel").onclick = () => {
-    if (matchMedia("(max-width:760px)").matches) {
-      $("#work-panel").classList.toggle("open");
-      return;
-    }
-    const collapsed = root.toggleAttribute("data-panel-collapsed");
-    localStorage.setItem("eventide.panel", collapsed ? "collapsed" : "open");
+  $("#drawer-backdrop").onclick = () => {
+    $("#sidebar").classList.remove("open");
+    syncDrawerBackdrop();
   };
   $("#open-sidebar").onclick = () => {
-    if (matchMedia("(max-width:760px)").matches) $("#sidebar").classList.toggle("open");
-    else if (root.dataset.sidebarCollapsed === "true") {
+    if (matchMedia("(max-width:760px)").matches) {
+      $("#sidebar").classList.toggle("open");
+      syncDrawerBackdrop();
+    } else if (root.dataset.sidebarCollapsed === "true") {
       root.dataset.sidebarCollapsed = "false";
       localStorage.setItem("eventide.sidebar", "open");
     }
@@ -1312,8 +1362,15 @@ $("#workspace-switcher-button").onclick = () => {
   } else closeWorkspaceMenu();
 };
 document.addEventListener("click", (event) => {
+  // 点击可能同步重建了目标节点（时间线/工具行），冒泡到此处时 target 已游离；
+  // 游离目标不能当作"点在面板外"处理，否则面板会被误关。
+  if (!(event.target instanceof Element) || !event.target.isConnected) return;
   const menu = $("#workspace-menu");
   if (!menu.hidden && !menu.contains(event.target) && !$("#workspace-switcher-button").contains(event.target)) closeWorkspaceMenu();
+  const modeMenu = $("#mode-menu");
+  if (!modeMenu.hidden && !modeMenu.contains(event.target) && !$("#mode-select").contains(event.target)) closeModeMenu();
+  if (openCapsule && !$("#floating-panel").contains(event.target) && !$("#panel-capsules").contains(event.target)
+    && !(event.target.closest?.("[data-panel-open]"))) closePanel({restoreFocus: false});
 });
 $("#manage-workspace").onclick = () => void removeCurrentWorkspace();
 $("#add-workspace").onclick = () => { $("#workspace-message").textContent = ""; $("#workspace-dialog").showModal(); $("#workspace-input").focus(); };
@@ -1353,10 +1410,32 @@ $("#prompt").addEventListener("keydown", (event) => {
   }
 });
 $("#mode-select").onclick = () => {
-  const next = modeOrder[(modeOrder.indexOf(currentMode()) + 1) % modeOrder.length];
-  localStorage.setItem(modeKey(), next);
-  renderModeButton();
+  const menu = $("#mode-menu");
+  menu.hidden = !menu.hidden;
+  $("#mode-select").setAttribute("aria-expanded", String(!menu.hidden));
+  if (!menu.hidden) { renderModeMenu(); positionModeMenu(); }
 };
+function renderModeMenu() {
+  for (const option of $("#mode-menu").querySelectorAll(".mode-option")) option.setAttribute("aria-checked", String(option.dataset.mode === currentMode()));
+}
+function closeModeMenu() {
+  $("#mode-menu").hidden = true;
+  $("#mode-select").setAttribute("aria-expanded", "false");
+}
+// fixed 定位按按钮实测位置计算，菜单向上展开且不再被 .action-area 的 overflow 裁剪。
+function positionModeMenu() {
+  const menu = $("#mode-menu"), button = $("#mode-select");
+  const rect = button.getBoundingClientRect();
+  menu.style.top = `${Math.max(8, rect.top - menu.offsetHeight - 8)}px`;
+  menu.style.left = `${Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8)}px`;
+}
+for (const option of $("#mode-menu").querySelectorAll(".mode-option")) {
+  option.onclick = () => {
+    localStorage.setItem(modeKey(), option.dataset.mode);
+    closeModeMenu();
+    renderModeButton();
+  };
+}
 $("#attach-button").onclick = () => { if (!$("#attach-button").disabled) $("#file-input").click(); };
 $("#file-input").onchange = async () => {
   await uploadAttachments([...$("#file-input").files]);
@@ -1370,7 +1449,7 @@ $("#load-older").onclick = () => void loadOlderRuns();
 $("#interruption-details").onclick = () => {
   const last = chapters(currentRuns()).at(-1);
   if (last) openDetailAtRun(last.id, runId(last.runs.at(-1)));
-  else expandPanel();
+  else openPanel("detail");
 };
 $("#export-run").onclick = () => {
   const chapter = chapters(currentRuns()).find((g) => g.id === state.detail.chapterId);
@@ -1379,14 +1458,21 @@ $("#export-run").onclick = () => {
 };
 $("#capabilities-button").onclick = () => { $("#capabilities-dialog").showModal(); void renderCapabilities(); };
 $("#close-capabilities").onclick = () => $("#capabilities-dialog").close();
+$("#close-panel").onclick = () => closePanel();
+for (const name of Object.keys(CAPSULE_TITLES)) $(`#capsule-${name}`).onclick = () => togglePanel(name);
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   closeWorkspaceMenu();
+  closeModeMenu();
+  if (openCapsule) closePanel();
   if (matchMedia("(max-width:760px)").matches) {
     $("#sidebar").classList.remove("open");
-    $("#work-panel").classList.remove("open");
+    syncDrawerBackdrop();
   }
 });
+
+window.addEventListener("resize", () => { if (!$("#mode-menu").hidden) positionModeMenu(); });
+$(".action-area").addEventListener("scroll", () => closeModeMenu(), {passive: true});
 
 async function bootstrap() {
   try {

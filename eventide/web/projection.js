@@ -161,8 +161,11 @@ export function projectWork(runs, eventMap, taskContents = new Map()) {
     } else if (type === "workspace.checkpoint") {
       checkpoint = p.checkpoint || null;
     } else if (type === "context.trimmed") {
-      const count = (p.call_ids || []).length;
-      note(event, "context", "已折叠较早的工具结果", `为控制上下文，折叠了 ${count} 条较早的工具结果；原文仍保留在事件日志与工作记录中。`);
+      const parts = [];
+      if (Array.isArray(p.call_ids) && p.call_ids.length) parts.push(`折叠了 ${p.call_ids.length} 条较早的工具结果`);
+      if (Array.isArray(p.previewed_call_ids) && p.previewed_call_ids.length) parts.push(`${p.previewed_call_ids.length} 条大型工具结果只随请求发送头尾预览`);
+      if (p.elided_plan_updates) parts.push(`${p.elided_plan_updates} 次历史任务计划只随请求发送空清单`);
+      if (parts.length) note(event, "context", "已折叠或省略较早的请求内容", `为控制上下文，${parts.join("；")}；原文仍保留在事件日志与工作记录中。`);
     } else if (type === "recovery.abandoned") {
       note(event, "attention", "已放弃本次恢复", "历史记录仍然保留；结果未知的操作没有被当作成功或重新执行。");
     } else if (type === "tool.prepared") {

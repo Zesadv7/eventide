@@ -1,4 +1,4 @@
-import {request} from "./transport.js?v=11";
+import {request} from "./transport.js?v=12";
 const $ = (selector) => document.querySelector(selector);
 let configured = false;
 function normalizeBaseUrl(value) {
