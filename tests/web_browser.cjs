@@ -1,5 +1,6 @@
-// Offline browser acceptance for the v2 three-column console: real HTTP/SSE,
-// in-memory facts, no Runtime state or keys.
+// Offline browser acceptance for the v2 capsule console: real HTTP/SSE, in-memory
+// facts, no Runtime state or keys. Panel facts live in a floating card toggled from
+// the top-bar capsules; run outputs render inline as chapter-result cards.
 // EVENTIDE_PLAYWRIGHT_MODULE optionally points at an installed Playwright package.
 const {chromium} = require(process.env.EVENTIDE_PLAYWRIGHT_MODULE || "playwright");
 const http = require("node:http");
@@ -189,6 +190,16 @@ const server = http.createServer(async (req, res) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const toolRows = page.locator("#tool-list .tool-row");
+  // Capsules drive a single floating card; re-clicking an active capsule toggles it
+  // closed, so content blocks only click a capsule while its section is hidden.
+  const showSection = async (capsule, section) => {
+    if (!(await page.locator(section).isVisible())) await page.locator(capsule).click();
+  };
+  // Tool groups ship collapsed; only open them while closed so a summary click
+  // never folds an already-expanded group.
+  const openToolGroup = async (group) => {
+    if (!(await group.evaluate((node) => node.open))) await group.locator("> summary").click();
+  };
   try {
     await page.addInitScript(() => { if (!localStorage.getItem("fixture-seeded")) { localStorage.setItem("eventide.workspace", "w1"); localStorage.setItem("eventide.session.w1", "s1"); localStorage.setItem("fixture-seeded", "yes"); } });
     await page.goto(base); await page.waitForLoadState("networkidle");
@@ -209,17 +220,48 @@ const server = http.createServer(async (req, res) => {
     assert.match(await page.locator("#narrative").innerText(), /1 项失败/);
     assert.match(await page.locator("#recovery-reason").innerText(), /服务在执行结束前停止/);
     assert.ok(apiCalls.some(([, p]) => p === "/api/sessions/s1"), "plan facts come from session_status");
+    const dot = page.locator(".status-dot").first();
+    assert.ok(await dot.getAttribute("data-status"), "session dots keep their status");
+    assert.ok(await dot.getAttribute("title"), "session dots explain the status in Chinese");
+    assert.ok(await page.locator(".chapter").last().locator(".lineage-badge").count() >= 1,
+      "non-completed runs keep their lineage badge");
 
-    // Right panel renders its four sections; tool group reflects the loaded chapter.
-    for (const section of ["#panel-plan", "#panel-tools", "#panel-detail", "#panel-usage"]) {
-      assert.equal(await page.locator(section).isVisible(), true, `${section} renders`);
-    }
-    assert.equal(await toolRows.count(), 1, "only the expanded chapter's calls are listed");
-    assert.match(await toolRows.first().innerText(), /uv run pytest -q/);
-    assert.equal((await page.locator("#tool-stats").innerText()).replace(/\s+/g, " ").trim(), "总 1 完成 0 失败 1 等待 0 未知 0");
+    // Capsules toggle one floating card; the ✕, Escape and outside clicks dismiss it.
+    assert.equal(await page.locator("#floating-panel").isHidden(), true, "floating card starts closed");
+    await page.locator("#capsule-plan").click();
+    assert.equal(await page.locator("#floating-panel").isVisible(), true, "capsule opens the floating card");
+    assert.equal(await page.locator("#panel-plan").isVisible(), true, "plan section shows");
+    assert.equal(await page.locator("#capsule-plan").getAttribute("aria-expanded"), "true", "capsule mirrors open state");
+    assert.match(String(await page.locator("#capsule-plan").textContent() || ""), /计划 1\s*\/\s*3/,
+      "plan capsule mirrors task counts");
+    await page.locator("#capsule-tools").click();
+    assert.equal(await page.locator("#panel-tools").isVisible(), true, "sections switch exclusively");
+    assert.equal(await page.locator("#panel-plan").isVisible(), false, "only one section stays open");
+    await page.locator("#close-panel").click();
+    assert.equal(await page.locator("#floating-panel").isHidden(), true, "✕ closes the card (old dead-button regression)");
+    assert.equal(await page.locator("#capsule-tools").getAttribute("aria-expanded"), "false", "capsule mirrors closed state");
+    await page.locator("#capsule-detail").click();
+    assert.equal(await page.locator("#floating-panel").isVisible(), true);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#floating-panel").isHidden(), true, "Escape closes the card");
+    await page.locator("#capsule-usage").click();
+    assert.equal(await page.locator("#floating-panel").isVisible(), true);
+    await page.locator("#session-title").click();
+    assert.equal(await page.locator("#floating-panel").isHidden(), true, "clicking outside closes the card");
+
+    // Tool activity needs its capsule open before anything is visible; rows live
+    // inside collapsed groups, so text assertions read textContent instead.
+    await showSection("#capsule-tools", "#panel-tools");
+    assert.equal(await toolRows.count(), 1, "only the loaded chapter's calls are listed");
+    assert.match(await toolRows.first().textContent(), /uv run pytest -q/);
+    const statChips = page.locator("#tool-stats .stat-chip");
+    assert.equal(await statChips.count(), 5, "stat chips cover total/completed/failed/prepared/unknown");
+    assert.equal((await page.locator('#tool-stats .stat-chip[data-kind="total"]').textContent()).trim(), "总 1");
+    assert.equal((await page.locator('#tool-stats .stat-chip[data-kind="failed"]').textContent()).trim(), "失败 1");
 
     // Read-only plan panel mirrors the server projection: counts, active task,
     // collapsed completed group, and evidence that never claims verified success.
+    await showSection("#capsule-plan", "#panel-plan");
     const plan = page.locator("#plan");
     assert.match(await plan.innerText(), /1 \/ 3 已完成 · 1 进行中/);
     assert.match(await plan.innerText(), /检查失败场景/);
@@ -242,12 +284,6 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await completedGroup.evaluate((node) => node.open), false, "completed group can be collapsed again");
     assert.match(await plan.innerText(), /已完成的任务 \(1\)/, "collapsed group still shows its count");
 
-    // Markdown safety on the durable outcome.
-    assert.equal(await page.locator("#outcome script").count(), 0);
-    assert.equal(await page.locator('#outcome a[href^="javascript:"]').count(), 0);
-    assert.equal(await page.evaluate(() => window.injected), undefined);
-    assert.ok(await page.locator("#outcome a[href='https://example.com']").count() === 0 || true);
-
     // Lazy history: the collapsed first chapter must not have been fetched.
     assert.ok(!apiCalls.some(([, p]) => p === "/api/runs/r1/events"), "old chapter must be lazy");
 
@@ -256,11 +292,13 @@ const server = http.createServer(async (req, res) => {
 
     // Context pressure: model.request chars / runtime context limit, shown twice.
     assert.match(await page.locator("#context-meter").innerText(), /上下文 25%/);
+    await showSection("#capsule-usage", "#panel-usage");
     assert.match(await page.locator("#usage-content").innerText(), /25%/);
     assert.match(await page.locator("#usage-content").innerText(), /输入 60 tokens · 输出 40 tokens/, "latest run usage");
     assert.match(await page.locator("#usage-content").innerText(), /2 次 run · 输入 110 tokens · 输出 70 tokens/, "session totals");
 
     // Timeline nodes render for the expanded chapter and drive the detail pane.
+    await showSection("#capsule-detail", "#panel-detail");
     const timelineNodes = page.locator("#timeline .tl-node");
     assert.equal(await timelineNodes.count(), 5, "step, tool, tool, checkpoint, terminal nodes");
     await timelineNodes.first().click();
@@ -280,15 +318,20 @@ const server = http.createServer(async (req, res) => {
     const popup = await popupPromise;
     if (popup) await popup.close().catch(() => {});
 
-    // Tool detail expands inline and keeps focus across async rebuilds.
+    // Tool detail expands inline inside its chapter group; groups ship collapsed.
+    await showSection("#capsule-tools", "#panel-tools");
+    const bashGroup = page.locator("#tool-list details.tool-group").filter({hasText: "检查失败场景"});
+    await bashGroup.waitFor();
+    await openToolGroup(bashGroup);
     const bashRow = toolRows.filter({hasText: "uv run pytest -q"}).first();
     await bashRow.click();
-    const detail = page.locator("#tool-list .tool-group").filter({hasText: "uv run pytest -q"}).locator(".tool-detail");
+    const detail = bashGroup.locator(".tool-detail");
     assert.equal(await detail.isVisible(), true);
     assert.match(await detail.innerText(), /uv run pytest/);
     await bashRow.click();
     assert.equal(await detail.isVisible(), false, "tool detail toggles closed");
     await bashRow.click();
+    await page.locator("#close-panel").click();
 
     // Async Continue returns its durable run identity before the UI handles approval.
     await page.locator("#continue-button").click();
@@ -297,6 +340,12 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.locator("#run-button").isDisabled(), true);
     assert.match(await page.locator("#narrative").innerText(), /接续上次停驻/);
     await page.locator("#narrative").filter({hasText: "继续执行任务 t2：尝试写入恢复笔记"}).waitFor();
+    // The write call joins the loaded chapter's group; reopen the tools card and the
+    // group (a rebuild may have re-collapsed it) before driving the row.
+    await showSection("#capsule-tools", "#panel-tools");
+    const writeGroup = page.locator("#tool-list details.tool-group").filter({hasText: "检查失败场景"});
+    await writeGroup.waitFor();
+    await openToolGroup(writeGroup);
     const writeRow = toolRows.filter({hasText: "notes.txt"}).first();
     await writeRow.waitFor();
     assert.ok(await writeRow.evaluate((node) => node === document.activeElement || document.activeElement.dataset.opId === node.dataset.opId) || true,
@@ -308,10 +357,11 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.evaluate(() => document.activeElement?.dataset?.opId), "continued:write",
       "row focus is restored after the async rebuild");
     await page.getByRole("button", {name: "拒绝", exact: true}).click();
-    await page.locator("#outcome").filter({hasText: "已处理授权决定"}).waitFor();
+    await page.locator(".chapter-result").filter({hasText: "已处理授权决定"}).waitFor();
     assert.equal(await page.locator("#continue-button").isVisible(), false);
     // The SSE task.plan_updated cue refreshed the plan from session_status: the active
     // task now names the write attempt, without the frontend folding plan events.
+    await showSection("#capsule-plan", "#panel-plan");
     await page.locator("#plan").filter({hasText: "尝试写入恢复笔记"}).waitFor();
     assert.doesNotMatch(await page.locator("#plan").innerText(), /读取了恢复相关代码/, "completed summary stays folded after refresh");
     assert.doesNotMatch(await page.locator("#plan").innerText(), /事件负载里才有的一句话/, "panel renders session_status, never the plan event payload");
@@ -325,26 +375,58 @@ const server = http.createServer(async (req, res) => {
     assert.match(await page.locator("#capabilities-content").innerText(), /MCP 服务 \(1\)/);
     await page.locator("#close-capabilities").click();
 
-    // Mode selection cycles Auto -> Plan -> Agent -> Auto and persists per session
-    // (asserted after recovery so the composer is reachable again).
+    // Mode selection is a menu, not a click-cycle; the picked mode rides on the next
+    // run (asserted after recovery so the composer is reachable again).
     const modeButton = page.locator("#mode-select");
     assert.equal(await modeButton.innerText(), "Auto");
+    const modeMenu = page.locator("#mode-menu");
     await modeButton.click();
-    assert.equal(await modeButton.innerText(), "Plan");
-    assert.equal(await page.evaluate(() => localStorage.getItem("eventide.mode.s1")), "plan");
-    await modeButton.click();
+    await modeMenu.waitFor({state: "visible", timeout: 5_000});
+    assert.equal(await modeMenu.locator('button.mode-option[data-mode="auto"]').getAttribute("aria-checked"), "true",
+      "the menu marks the current mode");
+    await modeMenu.locator('button.mode-option[data-mode="agent"]').click();
     assert.equal(await modeButton.innerText(), "Agent");
+    await modeMenu.waitFor({state: "hidden", timeout: 5_000});
     await modeButton.click();
-    assert.equal(await modeButton.innerText(), "Auto");
+    await modeMenu.waitFor({state: "visible", timeout: 5_000});
+    await modeMenu.locator('button.mode-option[data-mode="plan"]').click();
+    assert.equal(await modeButton.innerText(), "Plan");
+    await modeMenu.waitFor({state: "hidden", timeout: 5_000});
+    assert.equal(await page.evaluate(() => localStorage.getItem("eventide.mode.s1")), "plan");
+    assert.equal(await page.locator("#run-button").getAttribute("aria-label"), "发送", "submit is a labelled icon button");
+    assert.equal(await page.locator("#cancel-run").getAttribute("aria-label"), "停止运行");
 
     // Open the collapsed first chapter; only now may its history be fetched.
     await page.locator(".chapter").first().locator("> summary").click();
     await page.waitForResponse((response) => response.url().includes("/api/runs/r1/events"));
+    // Markdown safety now lives on the inline chapter-result card (r1's output).
+    const r1Result = page.locator(".chapter").first().locator(".chapter-result");
+    await r1Result.waitFor();
+    assert.equal(await r1Result.locator("script").count(), 0, "script tags never render");
+    assert.equal(await r1Result.locator('a[href^="javascript:"]').count(), 0, "javascript: links never render");
+    assert.equal(await page.evaluate(() => window.injected), undefined, "probe script never executed");
+    assert.equal(await r1Result.locator("a[href='https://example.com']").count(), 1, "https links render normally");
+    assert.ok(await r1Result.locator(".chapter-result-head").count() === 1, "result cards use a head row");
+    assert.equal(await r1Result.locator(".result-run").count(), 1);
+    assert.equal(await r1Result.locator(".result-copy").count(), 1);
+    assert.equal(await r1Result.getByText("当时的结果").count(), 0, "the old 当时 Result heading is gone");
+    assert.equal(await page.locator(".chapter").first().locator(".lineage-badge").count(), 0,
+      "completed runs with output leave the lineage row");
+    // The result card's run badge opens that run in the detail card.
+    await r1Result.locator(".result-run").click();
+    assert.equal(await page.locator("#floating-panel").isVisible(), true, "result-run opens the detail card");
+    assert.equal(await page.locator("#panel-detail").isVisible(), true);
+    await page.locator("#detail-content").filter({hasText: "r1"}).waitFor();
+    // Lazy chapter's tools: open the panel and its group before touching rows.
+    await showSection("#capsule-tools", "#panel-tools");
+    const firstGroup = page.locator("#tool-list details.tool-group").filter({hasText: "检查恢复逻辑"});
+    await firstGroup.waitFor();
+    await openToolGroup(firstGroup);
     await toolRows.filter({hasText: "host.py"}).waitFor();
     assert.ok(apiCalls.some(([, p]) => p === "/api/runs/r1/events"), "lazy chapter loads on expand");
     const readRow = toolRows.filter({hasText: "host.py"}).first();
     await readRow.click();
-    assert.match(await page.locator("#tool-list .tool-detail").first().innerText(), /host\.py/);
+    assert.match(await page.locator("#tool-list details.tool-group").filter({hasText: "检查恢复逻辑"}).locator(".tool-detail").innerText(), /host\.py/);
     await readRow.click(); // close the detail again for a stable screenshot
 
     // Refresh keeps the selection and the durable state.
@@ -359,13 +441,13 @@ const server = http.createServer(async (req, res) => {
     await page.locator(".session-item").filter({hasText: "改善 Session 恢复体验"}).locator(".session-select").click();
     await page.locator("#session-title").filter({hasText: "改善 Session"}).waitFor();
     await page.waitForLoadState("networkidle");
-    assert.match(await page.locator("#outcome").innerText(), /已处理授权决定/);
+    assert.match(await page.locator("#narrative").innerText(), /已处理授权决定/);
 
     // Workspace switching keeps the reading position and a reachable composer.
     runs.get("r-third").output = "另一个项目的结果\n" + "一段较长的工作结果，用于验证阅读位置。\n".repeat(90);
     await page.locator("#workspace-switcher-button").click();
     await page.locator(".workspace-option").filter({hasText: "other-project"}).click();
-    await page.locator("#outcome").filter({hasText: "另一个项目的结果"}).waitFor();
+    await page.locator(".chapter-result").filter({hasText: "另一个项目的结果"}).waitFor();
     await page.locator("#work-scroll").evaluate((node) => { node.scrollTop = 700; });
     await page.waitForTimeout(600);
     assert.equal(await page.locator("#work-scroll").evaluate((node) => node.scrollTop), 700, "reading position survives re-renders");
@@ -396,8 +478,8 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await promptBox.evaluate((node) => node.value), "带附件的工作\n第二行", "Shift+Enter inserts a newline");
     assert.equal(lastRunBody, null, "Shift+Enter must not submit");
     await promptBox.press("Enter");
-    await page.locator("#outcome").filter({hasText: "新的工作结果"}).waitFor();
-    assert.equal(lastRunBody.mode, "auto", "Enter submits with the selected mode");
+    await page.locator(".chapter-result").filter({hasText: "新的工作结果"}).waitFor();
+    assert.equal(lastRunBody.mode, "plan", "Enter submits with the mode picked in the menu");
     assert.deepEqual(lastRunBody.attachment_ids.length, 1, "the chip rides along with the run");
 
     // A 404 from the attachments endpoint disables the ＋ affordance once, with a reason.
@@ -405,6 +487,8 @@ const server = http.createServer(async (req, res) => {
     await page.setInputFiles("#file-input", uploadPath);
     await page.locator(".toast-message").filter({hasText: "附件不可用"}).waitFor();
     assert.equal(await page.locator("#attach-button").isDisabled(), true, "＋ button greys out when the endpoint is gone");
+    const toastClose = await page.locator(".toast-close").first().boundingBox();
+    assert.ok(toastClose && toastClose.width >= 24 && toastClose.height >= 24, "toast close stays a comfortable click target");
 
     // A rejected Continue leaves Parked visible and explains admission failure.
     addRun("parked-again", "s1", "interrupted"); emit("parked-again", "run.interrupted", {error: "Maximum agent steps exceeded (30)", reason: "step_budget"}); continueRejected = true;
@@ -418,11 +502,12 @@ const server = http.createServer(async (req, res) => {
     await page.setViewportSize({width: 390, height: 844});
     await page.locator("#open-sidebar").click();
     await page.locator("#sidebar.open").waitFor();
+    await page.locator("#drawer-backdrop").waitFor();
     await page.locator("#workspace-switcher-button").click();
     await page.locator(".workspace-option").filter({hasText: "empty"}).click();
     await page.locator("#session-title").filter({hasText: "从一项工作开始"}).waitFor();
     assert.equal(creations, 0, "empty workspace must not auto-create");
-    // The right panel is drawer-hidden on mobile; textContent still proves scoping.
+    // The plan card stays hidden behind its capsule on mobile; textContent still proves scoping.
     assert.match(await page.locator("#plan").textContent(), /本次工作没有任务计划。/, "plan panel is scoped to sessions that have one");
     await page.locator("#open-sidebar").click();
     await page.locator("#sidebar.open").waitFor();
@@ -432,8 +517,13 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.locator("#prompt").fill("检查当前项目");
     await page.locator("#prompt").press("Enter");
-    await page.locator("#outcome").filter({hasText: "新的工作结果"}).waitFor();
+    await page.locator(".chapter-result").filter({hasText: "新的工作结果"}).waitFor();
     await page.screenshot({path: path.join(output, "web-workspace-mobile.png")});
+    // The drawer backdrop is itself a close affordance; tap beside the drawer.
+    await page.locator("#open-sidebar").click();
+    await page.locator("#sidebar.open").waitFor();
+    await page.locator("#drawer-backdrop").click({position: {x: 350, y: 400}});
+    await page.waitForFunction(() => !document.querySelector("#sidebar")?.classList.contains("open"), null, {timeout: 5_000});
 
     // Theme toggle persists across reloads.
     await page.setViewportSize({width: 1440, height: 1000});
@@ -446,6 +536,6 @@ const server = http.createServer(async (req, res) => {
 
     await page.screenshot({path: path.join(output, "web-workspace-desktop.png"), fullPage: false});
     assert.deepEqual(errors, []);
-    console.log("PASS: lazy history, markdown safety, tool detail focus, plan projection, context meter, timeline, export, modes, theme, async Continue, capabilities, 409 recovery, attachments, workspace add/switch, scroll retention, mobile navigation and submission");
+    console.log("PASS: capsule floating card, lazy history, chapter-result markdown safety, tool group focus, plan projection, context meter, timeline, export, mode menu, theme, async Continue, capabilities, 409 recovery, attachments, workspace add/switch, scroll retention, mobile navigation and submission");
   } finally { await browser.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
 })().catch((error) => { console.error(error); process.exitCode = 1; server.closeAllConnections(); server.close(); });

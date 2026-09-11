@@ -25,6 +25,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline");
+const assert = require("node:assert/strict");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SHOT_DIR = path.join(REPO_ROOT, ".task_outputs", "e2e");
@@ -572,7 +573,7 @@ async function phase2() {
   try {
     await page.goto(`${state.BASE}/`, { waitUntil: "domcontentloaded", timeout: 20_000 });
     try {
-      await page.waitForSelector("#work-panel", { timeout: 5_000 });
+      await page.waitForSelector("#panel-capsules", { timeout: 5_000 });
     } catch {
       log("UI-V2-NOT-DEPLOYED: skip journeys");
       return 0;
@@ -617,18 +618,29 @@ async function phase2() {
     // -- 多步任务 -----------------------------------------------------------
     await page.fill("#prompt", `${MARK.multi}：请制定计划并执行`);
     await page.click("#run-button");
+    // 运行中原位停止键必须可见（v2 契约）。
+    await page.waitForFunction(
+      () => Boolean(document.querySelector("#cancel-run") && !document.querySelector("#cancel-run").hidden),
+      null,
+      { timeout: 10_000 },
+    );
+    // 面板事实移进悬浮卡：先点开对应胶囊再断言。工具组默认收起、非激活分区
+    // hidden，innerText 会丢内容，统一用 textContent。
+    await page.click("#capsule-plan");
     await page.waitForFunction(
       () => {
         const el = document.querySelector("#plan");
-        return Boolean(el && /3\s*\/\s*3/.test(el.innerText));
+        return Boolean(el && /3\s*\/\s*3/.test(el.textContent));
       },
       null,
       { timeout: 45_000 },
     );
+    assert.match(String(await page.textContent("#capsule-plan") || ""), /计划 3\s*\/\s*3/, "plan capsule mirrors task counts");
+    await page.click("#capsule-tools");
     await page.waitForFunction(
       () => {
         const el = document.querySelector("#tool-list");
-        return Boolean(el && el.innerText.includes("read_file") && el.innerText.includes("bash"));
+        return Boolean(el && el.textContent.includes("read_file") && el.textContent.includes("bash"));
       },
       null,
       { timeout: 15_000 },
@@ -639,7 +651,11 @@ async function phase2() {
       null,
       { timeout: 10_000 },
     );
-    await page.waitForSelector("#outcome", { state: "visible", timeout: 15_000 });
+    assert.match(String(await page.textContent("#capsule-tools") || ""), /工具 4/, "tools capsule counts loaded calls");
+    // 最新 run 的输出内联在最新章节的章节结果卡里（#outcome 已删除）。
+    await page.waitForSelector(".chapter-result", { state: "visible", timeout: 15_000 });
+    // 收起悬浮卡：fixed 卡片不能挡住后续场景的发送键。
+    if (await page.locator("#floating-panel").isVisible()) await page.click("#close-panel");
     await shot("02-multistep-done.png");
 
     // -- 审批场景 -----------------------------------------------------------
