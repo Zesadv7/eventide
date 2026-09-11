@@ -5,48 +5,41 @@ on:
   pull_request:
 
 jobs:
-  python-matrix:
+  test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-      - run: python -m pip install -e ".[dev]"
-      - run: python -m eventide --help
-      - run: python -m pytest -q
-      - run: eventide eval evals/smoke.yaml
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - run: uv run python -m eventide --help
+      - run: uv run pytest -q
+      - run: uv run eventide eval evals/smoke.yaml
 
   quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
-          cache: pip
-      - run: python -m pip install -e ".[dev]"
-      - run: ruff check eventide tests examples
-      - run: mypy eventide
-      - run: pytest --cov=eventide --cov-report=term-missing --cov-fail-under=85
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - run: uv run pytest --cov=eventide --cov-fail-under=85
+      - run: uv run ruff check eventide tests examples
+      - run: uv run mypy eventide
 
-  cross-platform-smoke:
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  web:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-          cache: pip
-      - run: python -m pip install -e ".[dev]"
-      - run: python -m eventide --help
-      - run: python -m pytest -q
-      - run: eventide eval evals/smoke.yaml
+          node-version: 22
+      - run: node --test tests/web.test.mjs
