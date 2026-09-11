@@ -21,6 +21,7 @@ def test_cli_subcommands_parse():
     assert serve.port == 9000
     evaluate = parser.parse_args(["eval", "evals/smoke.yaml", "--live"])
     assert evaluate.live
+    assert parser.parse_args(["eval", "evals/smoke.yaml", "--json"]).json
     plan = parser.parse_args(["plan", "show", "session_x", "--json"])
     assert plan.command == "plan" and plan.plan_action == "show"
     assert plan.session_id == "session_x" and plan.json
@@ -31,6 +32,83 @@ def test_help_needs_no_api_key(capsys):
         main(["--help"])
     assert caught.value.code == 0
     assert "eventide" in capsys.readouterr().out
+
+
+def test_eval_summary_output(monkeypatch, capsys):
+    import eventide.cli as cli
+
+    report = {
+        "mode": "offline",
+        "suite": "evals/tasks.yaml",
+        "passed": 1,
+        "total": 2,
+        "pass_rate": 0.5,
+        "task_completion_rate": 0.5,
+        "average_duration_ms": 1.0,
+        "tool_success_rate": 1.0,
+        "safety_blocks": 1,
+        "failure_reasons": {"status=failed": 1},
+        "average_steps": 2.5,
+        "duration_ms": 12.5,
+        "regression_smoke": True,
+        "results": [
+            {"id": "good", "passed": True, "reasons": []},
+            {"id": "bad", "passed": False, "reasons": ["status=failed"]},
+        ],
+    }
+
+    async def fake_eval(suite, live=False):
+        assert live is False
+        return report
+
+    monkeypatch.setattr(cli, "run_evaluations", fake_eval)
+    assert main(["eval", "evals/tasks.yaml"]) == 1
+    out = capsys.readouterr().out
+    assert "scripted 回归冒烟" in out
+    assert "任务完成率：1/2（50.0%）" in out
+    assert "平均步数：2.5" in out
+    assert "- status=failed × 1" in out
+    assert "- bad: status=failed" in out
+    assert "good" not in out
+
+    assert main(["eval", "evals/tasks.yaml", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["task_completion_rate"] == 0.5
+    assert payload["failure_reasons"] == {"status=failed": 1}
+
+
+def test_eval_live_summary_and_clean_report(monkeypatch, capsys):
+    import eventide.cli as cli
+
+    report = {
+        "mode": "live",
+        "suite": "evals/smoke.yaml",
+        "passed": 2,
+        "total": 2,
+        "pass_rate": 1.0,
+        "task_completion_rate": 1.0,
+        "average_duration_ms": 1.0,
+        "tool_success_rate": 1.0,
+        "safety_blocks": 0,
+        "failure_reasons": {},
+        "average_steps": 1.0,
+        "duration_ms": 99.5,
+        "total_input_tokens": 21,
+        "total_output_tokens": 7,
+        "results": [],
+    }
+
+    async def fake_eval(suite, live=False):
+        assert live is True
+        return report
+
+    monkeypatch.setattr(cli, "run_evaluations", fake_eval)
+    assert main(["eval", "evals/smoke.yaml", "--live"]) == 0
+    out = capsys.readouterr().out
+    assert "输入 tokens 21" in out
+    assert "输出 tokens 7" in out
+    assert "任务完成率：2/2" in out
+    assert "失败原因分布" not in out
 
 
 def test_plan_show_reports_server_task_state(isolated_workspace, monkeypatch, capsys):

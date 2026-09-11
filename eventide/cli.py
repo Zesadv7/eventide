@@ -30,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = subparsers.add_parser("eval", help="Run an offline or live evaluation suite")
     evaluate.add_argument("suite", type=Path, help="YAML evaluation suite")
     evaluate.add_argument("--live", action="store_true", help="Use the configured live provider")
+    evaluate.add_argument(
+        "--json", action="store_true", help="Print the full report JSON instead of the summary"
+    )
     serve = subparsers.add_parser("serve", help="Run the FastAPI service and Web console")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
@@ -142,9 +145,44 @@ async def _chat(
         await runtime.close()
 
 
+def _format_eval_summary(report: dict[str, Any]) -> str:
+    """Compact human-readable eval view; exit codes stay pass/fail only."""
+    lines = [f"评测套件：{report.get('suite', '?')}"]
+    if report.get("mode") == "live":
+        lines.append(
+            "模式：live · "
+            f"输入 tokens {report.get('total_input_tokens', 0)} · "
+            f"输出 tokens {report.get('total_output_tokens', 0)} · "
+            f"总耗时 {report.get('duration_ms', 0)} ms"
+        )
+    else:
+        lines.append("模式：offline · scripted 回归冒烟，不代表真实模型完成率")
+    passed, total = report.get("passed", 0), report.get("total", 0)
+    rate = report.get("task_completion_rate", report.get("pass_rate", 0))
+    lines.append(f"任务完成率：{passed}/{total}（{rate * 100:.1f}%）")
+    lines.append(
+        f"平均步数：{report.get('average_steps', 0)} · "
+        f"工具成功率：{report.get('tool_success_rate', 1.0)} · "
+        f"安全拦截：{report.get('safety_blocks', 0)}"
+    )
+    failures = report.get("failure_reasons") or {}
+    if failures:
+        lines.append("失败原因分布：")
+        for reason, count in sorted(failures.items(), key=lambda item: (-item[1], item[0])):
+            lines.append(f"  - {reason} × {count}")
+        lines.append("失败用例：")
+        for item in report.get("results", []):
+            if not item.get("passed"):
+                lines.append(f"  - {item.get('id')}: {'; '.join(item.get('reasons', []))}")
+    return "\n".join(lines)
+
+
 async def _eval(args: argparse.Namespace) -> int:
     report = await run_evaluations(args.suite, live=args.live)
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(_format_eval_summary(report))
     return 0 if report["passed"] == report["total"] else 1
 
 

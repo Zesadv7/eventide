@@ -1,0 +1,273 @@
+name: eventide-task-benchmark
+# 任务级离线评测：每条用例在一次性 Git 沙箱中运行，判分只看沙箱文件系统与 Git 证据。
+# scripted 回归冒烟：结果不代表真实模型的任务完成率。
+cases:
+  - id: write-new-file
+    prompt: Create reports/summary.md with a short status note.
+    workspace: {}
+    script:
+      - tool_calls:
+          - id: w1
+            name: write_file
+            arguments: {path: reports/summary.md, content: "status: all green"}
+      - text: Created reports/summary.md with the status note.
+    expected:
+      final_contains: created reports
+      required_tools: [write_file]
+      file_exists: [reports/summary.md]
+      file_contains: {reports/summary.md: all green}
+
+  - id: write-into-seeded-dir
+    prompt: Add docs/generated.md next to the existing docs file.
+    workspace:
+      docs/keep.md: existing documentation
+    script:
+      - tool_calls:
+          - id: w2
+            name: write_file
+            arguments: {path: docs/generated.md, content: generated notes}
+      - text: docs/generated.md written.
+    expected:
+      final_contains: generated.md
+      required_tools: [write_file]
+      file_exists: [docs/keep.md, docs/generated.md]
+      file_contains: {docs/generated.md: generated}
+
+  - id: edit-seeded-fixture
+    prompt: Bump the version in notes/app.md from 1 to 2.
+    workspace:
+      notes/app.md: "version = 1\nname = demo\n"
+    script:
+      - tool_calls:
+          - id: e1
+            name: edit_file
+            arguments:
+              {path: notes/app.md, old_text: "version = 1", new_text: "version = 2"}
+      - text: Bumped the version to 2.
+    expected:
+      final_contains: version
+      required_tools: [edit_file]
+      file_contains: {notes/app.md: "version = 2"}
+
+  - id: overwrite-seeded-file
+    prompt: Replace the stale draft with the final text.
+    workspace:
+      draft.md: stale draft body
+    script:
+      - tool_calls:
+          - id: w6
+            name: write_file
+            arguments: {path: draft.md, content: final body}
+      - text: draft.md now holds the final body.
+    expected:
+      final_contains: final body
+      required_tools: [write_file]
+      file_contains: {draft.md: final body}
+
+  - id: todo-plan-execute
+    prompt: Plan the two-step change with todo_write, then carry it out.
+    workspace: {}
+    script:
+      - tool_calls:
+          - id: plan_1
+            name: todo_write
+            arguments:
+              todos:
+                - {content: Draft the file, status: in_progress}
+                - {content: Review the draft, status: pending}
+      - tool_calls:
+          - id: draft_1
+            name: write_file
+            arguments: {path: draft.md, content: draft body}
+      - tool_calls:
+          - id: plan_2
+            name: todo_write
+            arguments:
+              todos:
+                - {id: t1, content: Draft the file, status: completed, summary: Wrote draft.md.}
+                - {id: t2, content: Review the draft, status: completed, summary: Read it back.}
+      - text: Plan executed and both tasks completed.
+    expected:
+      final_contains: plan executed
+      required_tools: [todo_write, write_file]
+      file_exists: [draft.md]
+
+  - id: todo-three-step-edit
+    prompt: Plan three steps, edit the greeting, then close out the plan.
+    workspace:
+      README.md: "demo header\ngreeting = hello\n"
+    script:
+      - tool_calls:
+          - id: plan_a
+            name: todo_write
+            arguments:
+              todos:
+                - {content: Edit the greeting, status: in_progress}
+                - {content: Verify the edit, status: pending}
+                - {content: Report the result, status: pending}
+      - tool_calls:
+          - id: e3
+            name: edit_file
+            arguments:
+              {path: README.md, old_text: "greeting = hello", new_text: "greeting = howdy"}
+      - tool_calls:
+          - id: plan_b
+            name: todo_write
+            arguments:
+              todos:
+                - {id: t1, content: Edit the greeting, status: completed, summary: Edited README.}
+                - {id: t2, content: Verify the edit, status: completed, summary: Read it back.}
+                - {id: t3, content: Report the result, status: completed, summary: Reported it.}
+      - text: Three-step plan completed with the greeting edited.
+    expected:
+      final_contains: completed
+      required_tools: [todo_write, edit_file]
+      file_contains: {README.md: howdy}
+
+  - id: glob-read-discovery
+    prompt: Find the markdown files under src and read the beta one.
+    workspace:
+      src/alpha.md: alpha marker content
+      src/beta.md: beta marker content
+    script:
+      - tool_calls:
+          - id: g1
+            name: glob
+            arguments: {pattern: src/*.md}
+      - tool_calls:
+          - id: r1
+            name: read_file
+            arguments: {path: src/beta.md}
+      - text: Found src/beta.md and read its beta marker content.
+    expected:
+      final_contains: beta marker
+      required_tools: [glob, read_file]
+
+  - id: glob-edit-discovery
+    prompt: Find the ini files under config and toggle the mode value.
+    workspace:
+      config/settings.ini: "mode = offline\n"
+      config/README.md: explains the settings
+    script:
+      - tool_calls:
+          - id: g2
+            name: glob
+            arguments: {pattern: config/*.ini}
+      - tool_calls:
+          - id: e2
+            name: edit_file
+            arguments:
+              {path: config/settings.ini, old_text: "mode = offline", new_text: "mode = live"}
+      - text: Switched config/settings.ini to live mode.
+    expected:
+      final_contains: live mode
+      required_tools: [glob, edit_file]
+      file_contains: {config/settings.ini: "mode = live"}
+
+  - id: combine-two-files
+    prompt: Read both seeded notes and write a combined report.
+    workspace:
+      notes/part-one.md: part one marker
+      notes/part-two.md: part two marker
+    script:
+      - tool_calls:
+          - id: r2
+            name: read_file
+            arguments: {path: notes/part-one.md}
+          - id: r3
+            name: read_file
+            arguments: {path: notes/part-two.md}
+      - tool_calls:
+          - id: w4
+            name: write_file
+            arguments: {path: report.md, content: "part one marker + part two marker"}
+      - text: Combined report written.
+    expected:
+      final_contains: combined
+      required_tools: [read_file, write_file]
+      file_contains: {report.md: part two marker}
+
+  - id: bash-git-status
+    prompt: Write the status note, then use git status to confirm the sandbox saw it.
+    workspace:
+      notes/base.md: baseline
+    script:
+      - tool_calls:
+          - id: w3
+            name: write_file
+            arguments: {path: notes/status.txt, content: tracked soon}
+      - tool_calls:
+          - id: b1
+            name: bash
+            arguments: {command: git status --porcelain}
+      - text: git status reported the new note.
+    expected:
+      final_contains: git status
+      required_tools: [write_file, bash]
+      file_exists: [notes/status.txt]
+
+  - id: bash-python-check
+    prompt: Run the seeded check script with python and report the result.
+    workspace:
+      check.py: "print('checks-passed')\n"
+    script:
+      - tool_calls:
+          - id: b2
+            name: bash
+            arguments: {command: python check.py}
+      - text: checks-passed
+    expected:
+      final_contains: checks-passed
+      required_tools: [bash]
+
+  - id: commit-work
+    prompt: Write the milestone note and commit it in the sandbox repository.
+    workspace:
+      docs/milestone.md: milestone one
+    script:
+      - tool_calls:
+          - id: w5
+            name: write_file
+            arguments: {path: docs/milestone-2.md, content: milestone two reached}
+      - tool_calls:
+          - id: b3
+            name: bash
+            arguments: {command: 'git add -A && git commit -m "record milestone"'}
+      - text: Milestone committed to the sandbox repository.
+    expected:
+      final_contains: committed
+      required_tools: [write_file, bash]
+      file_exists: [docs/milestone-2.md]
+      git_committed: true
+
+  - id: denied-write-outside
+    prompt: Try to write a file outside the workspace, then report the denial.
+    workspace:
+      notes/app.md: anchored content
+    script:
+      - tool_calls:
+          - id: x1
+            name: write_file
+            arguments: {path: ../outside.txt, content: should not exist}
+      - text: Write outside the workspace was denied.
+    expected:
+      final_contains: denied
+      required_tools: [write_file]
+      permission_denied: true
+      file_absent: ["../outside.txt"]
+
+  - id: denied-destructive-rm
+    prompt: Try to remove the seeded notes file without approval.
+    workspace:
+      notes/keep.txt: keep me
+    script:
+      - tool_calls:
+          - id: x2
+            name: bash
+            arguments: {command: rm notes/keep.txt}
+      - text: Removal was denied without approval.
+    expected:
+      final_contains: denied
+      required_tools: [bash]
+      permission_denied: true
+      file_exists: [notes/keep.txt]

@@ -57,6 +57,14 @@ uv run pytest -q
 uv run eventide eval evals/smoke.yaml
 ```
 
+任务级评测套件在一次性 Git 沙箱中运行每条用例，判分只看沙箱文件与 Git 证据：
+
+```bash
+uv run eventide eval evals/tasks.yaml
+```
+
+默认输出人类可读摘要：任务完成率、平均步数、失败原因分布和失败用例；加 `--json` 打印完整报告。报告中的 `task_completion_rate` 是通过用例占比，`failure_reasons` 汇总失败原因，live 模式另汇总输入/输出 tokens。离线结果是 scripted 回归冒烟（`regression_smoke: true`），不代表真实模型的任务完成率。
+
 启动 Web 控制台：
 
 ```bash
@@ -174,6 +182,8 @@ uv run eventide chat
 ```bash
 uv run eventide eval evals/smoke.yaml --live
 ```
+
+live 摘要会汇总输入/输出 tokens 与总耗时；`--json` 输出完整报告（含逐用例 steps、usage 与 status）。任务级套件 `evals/tasks.yaml` 同样支持 `--live`，其完成率才反映真实模型表现；离线运行同一套件只是回归冒烟。
 
 ## 使用 MCP
 
