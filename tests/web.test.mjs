@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {chapters, mergeEvents, parkLabel, parkSummary, planGroups, projectWork, runActivity} from "../eventide/web/projection.js";
+import {chapters, contextPct, mergeEvents, parkLabel, parkSummary, planGroups, planRevisions, projectWork, runActivity, timeline, toolStats} from "../eventide/web/projection.js";
 import {EventFeed, parseSse} from "../eventide/web/transport.js";
 
 const event = (seq, type, payload, run_id = "r1", extra = {}) => ({event_id: `e${seq}`, run_id, session_seq: seq, type, payload, ...extra});
@@ -199,6 +199,97 @@ test("unknown shell commands and model protocol events do not create invented wo
   assert.equal(work.blocks.length, 1);
   assert.equal(work.blocks[0].kind, "tools");
   assert.equal(work.operations.get("r1:c1").status, "prepared");
+});
+
+test("toolStats buckets every known status without inventing totals", () => {
+  const operations = [
+    {status: "completed"}, {status: "completed"}, {status: "failed"}, {status: "denied"},
+    {status: "prepared"}, {status: "unknown"}, {status: "abandoned"},
+  ];
+  assert.deepEqual(toolStats(operations), {total: 7, completed: 2, failed: 1, denied: 1, prepared: 1, unknown: 1, abandoned: 1});
+  assert.deepEqual(toolStats([]), {total: 0, completed: 0, failed: 0, denied: 0, prepared: 0, unknown: 0, abandoned: 0});
+  assert.equal(toolStats(undefined).total, 0);
+  const fromProject = toolStats([...project([prepared(1, "read_file", {path: "a"}), completed(2, "read_file", false)]).operations.values()]);
+  assert.deepEqual(fromProject, {total: 1, completed: 1, failed: 0, denied: 0, prepared: 0, unknown: 0, abandoned: 0});
+});
+
+test("contextPct clamps to 0-100 and refuses missing measurements", () => {
+  assert.equal(contextPct(25000, 50000), 50);
+  assert.equal(contextPct(0, 50000), 0);
+  assert.equal(contextPct(60000, 50000), 100);
+  assert.equal(contextPct(49900, 50000), 100);
+  for (const [chars, limit] of [[-1, 50000], [100, 0], [100, -5], [undefined, 50000], [100, undefined], ["100", 50000], [Number.NaN, 50000], [Number.POSITIVE_INFINITY, 50000]]) {
+    assert.equal(contextPct(chars, limit), null, `${chars}/${limit}`);
+  }
+});
+
+test("timeline maps event types to ordered, labelled nodes", () => {
+  const events = [
+    event(1, "message.user", {message: {role: "user", content: "hi"}}),
+    event(2, "model.request", {}),
+    event(3, "tool.request", {call_id: "c1", name: "read_file", arguments: {path: "a"}}),
+    event(4, "tool.result", {call_id: "c1", name: "read_file", is_error: false, content: "ok"}),
+    event(5, "model.request", {}),
+    event(6, "approval.required", {approval_id: "a1", tool: "write_file"}),
+    event(7, "approval.resolved", {approval_id: "a1", approved: true, auto: true}),
+    event(8, "workspace.checkpoint", {checkpoint: {commit: "abc"}}),
+    event(9, "run.completed", {}),
+  ];
+  const nodes = timeline(events, [{id: "r1", status: "completed"}]);
+  assert.deepEqual(nodes.map((n) => n.kind), ["step", "tool", "tool", "step", "approval", "approval", "checkpoint", "terminal"]);
+  assert.deepEqual(nodes.map((n) => n.seq), [2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(nodes[0], {kind: "step", seq: 2, label: "第 1 步", status: "completed", ts: undefined});
+  assert.deepEqual(nodes[1], {kind: "tool", seq: 3, label: "read_file", status: "prepared", ts: undefined});
+  assert.equal(nodes[2].status, "completed");
+  assert.equal(nodes[4].status, "pending");
+  assert.equal(nodes[5].status, "auto");
+  assert.equal(nodes[6].kind, "checkpoint");
+  assert.equal(nodes[7].label, "本次执行结束");
+  assert.equal(nodes[7].status, "completed");
+});
+
+test("timeline derives unknown and denied tool states from runs and payloads", () => {
+  assert.equal(timeline([prepared(1, "write_file", {path: "a"})], [{id: "r1", status: "interrupted"}])[0].status, "unknown");
+  assert.equal(timeline([completed(1, "bash", true)])[0].status, "failed");
+  assert.equal(timeline([event(1, "tool.completed", {call_id: "c1", name: "write_file", is_error: true, content: "Permission denied by policy"})])[0].status, "denied");
+  assert.equal(timeline([event(1, "tool.abandoned", {call_id: "c1", name: "read_file"})])[0].status, "unknown");
+});
+
+test("timeline marks continuations, skips partials and sorts by sequence", () => {
+  const events = [
+    event(6, "run.interrupted", {error: "stopped"}),
+    {event_id: "e3", run_id: "r1", session_seq: 3, type: "tool.prepared", payload: {call_id: "c9", name: "read_file"}, partial: true},
+    event(1, "run.started", {continuation_of: "r0"}),
+    event(4, "approval.required", {approval_id: "a1", tool: "bash"}),
+    event(5, "approval.resolved", {approval_id: "a1", approved: false}),
+  ];
+  const nodes = timeline(events, [{id: "r1", status: "interrupted"}]);
+  assert.deepEqual(nodes.map((n) => [n.kind, n.status]), [
+    ["continue", "completed"], ["approval", "pending"], ["approval", "denied"], ["terminal", "interrupted"],
+  ]);
+  const sorted = timeline([event(2, "model.request", {step: 2}), event(1, "model.request", {step: 1})]);
+  assert.deepEqual(sorted.map((n) => n.seq), [1, 2]);
+});
+
+test("plan revisions keep only identified todos in snapshot order", () => {
+  const events = [
+    event(3, "task.plan_updated", {todos: [{id: "t1", content: "a", status: "completed"}, {content: "no id", status: "pending"}], step: 2}),
+    event(1, "tool.completed", {call_id: "c1", name: "read_file", is_error: false}),
+    {event_id: "e4", run_id: "r1", session_seq: 4, type: "task.plan_updated", payload: {todos: [{id: "t1", content: "a", status: "in_progress"}]}, partial: true},
+    event(5, "task.plan_updated", {todos: [{id: "t1", content: "a", status: "in_progress"}, {id: "t2", content: "b", status: "pending"}]}),
+  ];
+  assert.deepEqual(planRevisions(events), [
+    {seq: 3, step: 2, todos: [{id: "t1", content: "a", status: "completed"}]},
+    {seq: 5, step: null, todos: [{id: "t1", content: "a", status: "in_progress"}, {id: "t2", content: "b", status: "pending"}]},
+  ]);
+  assert.deepEqual(planRevisions([]), []);
+  assert.deepEqual(planRevisions(undefined), []);
+});
+
+test("projected work records when the user intent was written", () => {
+  const work = project([event(1, "message.user", {message: {role: "user", content: "修复登录"}}, "r1", {ts: 500}), prepared(2, "read_file", {path: "a"})]);
+  assert.equal(work.intentTs, 500);
+  assert.equal(project([prepared(1, "read_file", {path: "a"})]).intentTs, null);
 });
 
 test("SSE parsing preserves canonical sequence and payload", () => {

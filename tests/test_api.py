@@ -1,11 +1,13 @@
 """FastAPI session, run, event, and UI tests."""
 
+import base64
 import json
 import time
 
 from fastapi.testclient import TestClient
 
 from eventide.api import _probe_error, create_app
+from eventide.attachments import MAX_INLINE_BYTES, MAX_UPLOAD_BYTES
 from eventide.models import ModelResponse
 from eventide.providers import ScriptedProvider
 from eventide.runtime import AgentRuntime
@@ -22,6 +24,10 @@ def wait_for_run(client: TestClient, run_id: str):
             return response.json()
         time.sleep(0.01)
     raise AssertionError("run did not finish")
+
+
+def encoded(text: str) -> str:
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
 
 
 def test_api_run_and_console(isolated_workspace):
@@ -318,3 +324,284 @@ def test_api_session_status_exposes_task_plan(isolated_workspace):
         assert [entry["name"] for entry in tasks[0]["evidence"]] == ["read_file"]
         assert tasks[1]["status"] == "in_progress"
         assert record["task_plan"][0]["id"] == "t1"
+
+
+def test_api_runtime_settings_exposes_budgets_without_secrets(isolated_workspace):
+    runtime = AgentRuntime(
+        settings_for(
+            isolated_workspace,
+            context_limit=1234,
+            approval_timeout=7.5,
+            max_steps=9,
+            task_max_steps=4,
+        ),
+        ScriptedProvider([]),
+    )
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/api/runtime/settings")
+        assert response.status_code == 200
+        assert response.json() == {
+            "context_limit": 1234,
+            "approval_timeout": 7.5,
+            "max_steps": 9,
+            "task_max_steps": 4,
+        }
+        assert "api_key" not in response.text
+
+
+def test_api_workspace_capabilities_empty_missing_and_broken_mcp_json(
+    isolated_workspace,
+):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    with TestClient(create_app(runtime)) as client:
+        workspace_id = runtime.default_workspace.workspace_id
+        empty = client.get(f"/api/workspaces/{workspace_id}/capabilities")
+        assert empty.status_code == 200
+        body = empty.json()
+        assert body["workspace_id"] == workspace_id
+        assert body["skills"] == []
+        assert body["mcp"] == []
+        assert body["notes"] == ["未配置 mcp.json"]
+        assert body["paths"]["skills_dir"].endswith("skills")
+        assert client.get("/api/workspaces/ws_missing/capabilities").status_code == 404
+
+        (isolated_workspace / "mcp.json").write_text("{not json", encoding="utf-8")
+        broken = client.get(f"/api/workspaces/{workspace_id}/capabilities")
+        assert broken.status_code == 200
+        body = broken.json()
+        assert body["mcp"] == []
+        assert len(body["notes"]) == 1
+        assert "解析失败" in body["notes"][0]
+
+
+def test_api_workspace_capabilities_configured_reports_no_secrets(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    workspace_id = runtime.default_workspace.workspace_id
+    (isolated_workspace / "mcp.json").write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "docs": {
+                        "command": "uvx",
+                        "args": ["docs-mcp"],
+                        "env": ["DOCS_TOKEN"],
+                    },
+                    "web": {
+                        "transport": "streamable-http",
+                        "url": "https://mcp.example/s",
+                        "headers": {"Authorization": "Bearer top-secret"},
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    skill_dir = isolated_workspace / "skills" / "code-review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: code-review\ndescription: Review code for problems\n---\n# Steps",
+        encoding="utf-8",
+    )
+    with TestClient(create_app(runtime)) as client:
+        response = client.get(f"/api/workspaces/{workspace_id}/capabilities")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["skills"] == [
+            {"name": "code-review", "description": "Review code for problems"}
+        ]
+        assert body["mcp"] == [
+            {"name": "docs", "transport": "stdio"},
+            {"name": "web", "transport": "streamable-http"},
+        ]
+        assert body["paths"]["mcp_config"].endswith("mcp.json")
+        # Commands, arguments, urls, env names, and headers never leak.
+        for secret in ("uvx", "docs-mcp", "DOCS_TOKEN", "top-secret", "mcp.example"):
+            assert secret not in response.text
+
+
+def test_api_upload_attachment_success_and_rejections(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        created = client.post(
+            f"/api/sessions/{session}/attachments",
+            json={"name": "notes.py", "content_base64": encoded("print(1)")},
+        )
+        assert created.status_code == 201
+        body = created.json()
+        assert body["attachment_id"].startswith("att_")
+        assert body["name"] == "notes.py"
+        assert body["size"] == len(b"print(1)")
+
+        assert (
+            client.post(
+                "/api/sessions/missing-session/attachments",
+                json={"name": "x.txt", "content_base64": ""},
+            ).status_code
+            == 404
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session}/attachments",
+                json={"name": "bad.txt", "content_base64": "not!!base64"},
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session}/attachments",
+                json={
+                    "name": "bin.bin",
+                    "content_base64": base64.b64encode(b"\xff\xfe\x00bin").decode("ascii"),
+                },
+            ).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session}/attachments",
+                json={"name": " ", "content_base64": ""},
+            ).status_code
+            == 422
+        )
+        oversized = base64.b64encode(b"x" * (MAX_UPLOAD_BYTES + 1)).decode("ascii")
+        assert (
+            client.post(
+                f"/api/sessions/{session}/attachments",
+                json={"name": "big.txt", "content_base64": oversized},
+            ).status_code
+            == 422
+        )
+
+
+def test_api_run_with_attachments_inlines_and_truncates(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        small = client.post(
+            f"/api/sessions/{session}/attachments",
+            json={"name": "notes.py", "content_base64": encoded("print('hi')")},
+        ).json()
+        big = client.post(
+            f"/api/sessions/{session}/attachments",
+            json={"name": "big.log", "content_base64": encoded("你" * 300_000)},
+        ).json()
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={
+                "prompt": "summarize",
+                "attachment_ids": [small["attachment_id"], big["attachment_id"]],
+            },
+        )
+        assert accepted.status_code == 202
+        run = wait_for_run(client, accepted.json()["run_id"])
+        message = next(
+            event
+            for event in runtime.store.run_events(run["id"])
+            if event["type"] == "message.user"
+        )
+        content = message["payload"]["message"]["content"]
+        assert content.startswith("summarize")
+        assert "--- 附件：notes.py ---" in content
+        assert "print('hi')" in content
+        assert "--- 附件：big.log ---" in content
+        assert "[附件内容过长，已截断]" in content
+        inlined = content.split("--- 附件：big.log ---\n", 1)[1].rsplit(
+            "\n[附件内容过长，已截断]", 1
+        )[0]
+        assert len(inlined.encode("utf-8")) <= MAX_INLINE_BYTES
+
+
+def test_api_run_rejects_unknown_and_foreign_attachments(isolated_workspace):
+    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        other = client.post("/api/sessions").json()["session_id"]
+        uploaded = client.post(
+            f"/api/sessions/{session}/attachments",
+            json={"name": "a.txt", "content_base64": encoded("hi")},
+        ).json()
+        missing = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "p", "attachment_ids": ["att_ffffffffffff"]},
+        )
+        assert missing.status_code == 422
+        foreign = client.post(
+            f"/api/sessions/{other}/runs",
+            json={"prompt": "p", "attachment_ids": [uploaded["attachment_id"]]},
+        )
+        assert foreign.status_code == 422
+        # A rejected attachment list must not leave a run behind.
+        assert client.get(f"/api/sessions/{session}/runs").json() == []
+
+
+def test_api_run_summary_includes_usage(isolated_workspace):
+    runtime = AgentRuntime(
+        settings_for(isolated_workspace),
+        ScriptedProvider([{"text": "done", "usage": {"input_tokens": 11, "output_tokens": 7}}]),
+    )
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
+        run = wait_for_run(client, accepted.json()["run_id"])
+        expected = {"input_tokens": 11, "output_tokens": 7}
+        listed = client.get(f"/api/sessions/{session}/runs").json()
+        assert listed[-1]["usage"] == expected
+        status = client.get(f"/api/sessions/{session}").json()
+        assert status["latest_run"]["usage"] == expected
+        assert run["usage"] == expected
+
+
+def test_api_run_plan_mode_blocks_write_tool(isolated_workspace):
+    provider = ScriptedProvider(
+        [
+            {
+                "tool_calls": [
+                    {
+                        "id": "w",
+                        "name": "write_file",
+                        "arguments": {"path": "evil.txt", "content": "nope"},
+                    }
+                ]
+            },
+            {"text": "planned"},
+        ]
+    )
+    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        accepted = client.post(
+            f"/api/sessions/{session}/runs", json={"prompt": "plan it", "mode": "plan"}
+        )
+        assert accepted.status_code == 202
+        run = wait_for_run(client, accepted.json()["run_id"])
+        assert run["status"] == "completed"
+        catalog = {tool["name"] for tool in provider.requests[0].tools}
+        assert not catalog & {"write_file", "edit_file", "bash"}
+        assert not (isolated_workspace / "evil.txt").exists()
+
+
+def test_api_run_agent_mode_auto_approves(isolated_workspace):
+    provider = ScriptedProvider(
+        [
+            {"tool_calls": [{"id": "d", "name": "bash", "arguments": {"command": "rm x"}}]},
+            {"text": "agent done"},
+        ]
+    )
+    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        accepted = client.post(
+            f"/api/sessions/{session}/runs", json={"prompt": "clean", "mode": "agent"}
+        )
+        run = wait_for_run(client, accepted.json()["run_id"])
+        assert run["status"] == "completed"
+        assert run["output"] == "agent done"
+        events = runtime.store.get_events(run["id"])
+        resolved = [event for event in events if event["type"] == "approval.resolved"]
+        assert len(resolved) == 1
+        assert resolved[0]["payload"]["approved"] is True
+        assert resolved[0]["payload"]["auto"] is True
+        assert resolved[0]["author"] == "runtime"
+        completed = next(event for event in events if event["type"] == "tool.result")
+        assert not completed["payload"]["content"].startswith("Permission denied")

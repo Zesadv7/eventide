@@ -1,4 +1,4 @@
-import {request} from "./transport.js?v=11";
+import {request} from "./transport.js?v=12";
 const $ = (selector) => document.querySelector(selector);
 let configured = false;
 function normalizeBaseUrl(value) {
@@ -24,9 +24,14 @@ function setConfigMessage(text, success = false) {
 
 function renderProviderStatus(config) {
   configured = config.api_key_configured && !config.configuration_error;
-  $("#model-state").textContent = config.configuration_error ? "配置异常" : configured ? "" : "需要配置";
-  $("#model-config-button").classList.toggle("configured", configured);
+  // The v2 console dropped the old topbar status nodes; the shared dialog is the
+  // only required surface now. Missing optional anchors are skipped, never fatal.
+  const stateNode = $("#model-state");
+  if (stateNode) stateNode.textContent = config.configuration_error ? "配置异常" : configured ? "" : "需要配置";
+  const configButton = $("#model-config-button");
+  if (configButton) configButton.classList.toggle("configured", configured);
   const providerSelect = $("#provider");
+  if (!providerSelect) return;
   const known = [...providerSelect.options].some((option) => option.value === config.provider);
   providerSelect.value = known ? config.provider : "openai_compatible";
   $("#model").value = config.model || "";
@@ -84,13 +89,15 @@ async function resetProviderConfig() {
 
 export const isConfigured = () => configured;
 export function showConfig(message = "") { $("#model-dialog").showModal(); setConfigMessage(message); }
-$("#model-config-button").addEventListener("click", () => showConfig());
-$("#close-model-dialog").addEventListener("click", () => $("#model-dialog").close());
-$("#model-form").addEventListener("submit", saveProviderConfig);
-$("#test-model-config").addEventListener("click", testProviderConfig);
-$("#clear-api-key").addEventListener("click", clearApiKey);
-$("#reset-model-config").addEventListener("click", resetProviderConfig);
-$("#toggle-key").addEventListener("click", () => {
+// The v2 topbar owns the model entry point (#model-button in app.js); the old
+// topbar trigger is gone, so optional listeners attach only when nodes exist.
+$("#model-config-button")?.addEventListener("click", () => showConfig());
+$("#close-model-dialog")?.addEventListener("click", () => $("#model-dialog").close());
+$("#model-form")?.addEventListener("submit", saveProviderConfig);
+$("#test-model-config")?.addEventListener("click", testProviderConfig);
+$("#clear-api-key")?.addEventListener("click", clearApiKey);
+$("#reset-model-config")?.addEventListener("click", resetProviderConfig);
+$("#toggle-key")?.addEventListener("click", () => {
   const input = $("#api-key");
   input.type = input.type === "password" ? "text" : "password";
   $("#toggle-key").textContent = input.type === "password" ? "显示" : "隐藏";

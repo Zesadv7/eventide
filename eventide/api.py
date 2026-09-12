@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
+from eventide import attachments
 from eventide.config import Settings, normalize_provider
 from eventide.models import RunRequest, ToolCall
 from eventide.normalization import normalize, redact
@@ -31,6 +32,13 @@ WEB_DIR = Path(__file__).with_name("web")
 
 class RunBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=100_000)
+    mode: str = "auto"
+    attachment_ids: list[str] = Field(default_factory=list)
+
+
+class AttachmentBody(BaseModel):
+    name: str = Field(min_length=1)
+    content_base64: str = ""
 
 
 class SessionBody(BaseModel):
@@ -218,6 +226,23 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             return agent_runtime.workspace_status(workspace_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/workspaces/{workspace_id}/capabilities")
+    async def get_workspace_capabilities(workspace_id: str) -> dict[str, Any]:
+        try:
+            return agent_runtime.workspace_capabilities(workspace_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/runtime/settings")
+    async def get_runtime_settings() -> dict[str, Any]:
+        settings = agent_runtime.settings
+        return {
+            "context_limit": settings.context_limit,
+            "approval_timeout": settings.approval_timeout,
+            "max_steps": settings.max_steps,
+            "task_max_steps": settings.task_max_steps,
+        }
 
     @app.delete("/api/workspaces/{workspace_id}")
     async def remove_workspace(workspace_id: str, request: Request) -> dict[str, str]:
@@ -420,6 +445,28 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
             "error_type": None,
         }
 
+    @app.get("/api/models")
+    async def list_models() -> dict[str, Any]:
+        return await agent_runtime.available_models()
+
+    @app.post(
+        "/api/sessions/{session_id}/attachments",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_attachment(session_id: str, body: AttachmentBody) -> dict[str, Any]:
+        # Uploads never auto-create a session: an unknown session is a 404.
+        await get_session(session_id)
+        try:
+            return attachments.save_attachment(
+                agent_runtime.state_dir,
+                session_id,
+                attachments.new_attachment_id(),
+                body.name,
+                body.content_base64,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(session_id: str, body: RunBody) -> dict[str, str]:
         # Keep the v0.2 behavior for callers that supply their own session identity.
@@ -428,13 +475,26 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         workspace_id = record["workspace_id"]
         if workspace_id in reserved or record["status"] == "parked":
             raise HTTPException(status_code=409, detail="Workspace busy or session parked")
+        # Validate ownership of every attachment before admitting the run, so a
+        # bad id cannot fail later inside the worker behind an opaque 202.
+        try:
+            for attachment_id in body.attachment_ids:
+                attachments.load_attachment(agent_runtime.state_dir, session_id, attachment_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         reserved.add(workspace_id)
         run_id = f"run_{uuid.uuid4().hex[:16]}"
 
         async def execute() -> None:
             try:
                 await agent_runtime.run(
-                    RunRequest(body.prompt, session_id=session_id, run_id=run_id),
+                    RunRequest(
+                        body.prompt,
+                        session_id=session_id,
+                        run_id=run_id,
+                        mode=body.mode,
+                        attachment_ids=list(body.attachment_ids),
+                    ),
                     approval_handler=broker.request,
                 )
             finally:

@@ -135,6 +135,7 @@ export function projectWork(runs, eventMap, taskContents = new Map()) {
   const allEvents = mergeEvents([], runs.flatMap((r) => eventMap.get(runId(r)) || [])).filter((e) => !e.partial);
   const records = new Map(runs.map((r) => [runId(r), r]));
   let intent = "";
+  let intentTs = null;
   let checkpoint = null;
   const findOperation = (id, callId) => {
     while (id) {
@@ -151,7 +152,7 @@ export function projectWork(runs, eventMap, taskContents = new Map()) {
     const p = event.payload || {};
     const type = event.type;
     if (type === "message.user" || (type === "message.imported" && p.message?.role === "user")) {
-      if (typeof p.message?.content === "string") intent ||= p.message.content;
+      if (typeof p.message?.content === "string") { intent ||= p.message.content; intentTs ||= event.ts; }
     } else if (type === "run.started" && p.continuation_of) {
       const resumed = p.resumed_task_id ? taskContents.get(p.resumed_task_id) : "";
       note(event, "continuation", "接续上次停驻",
@@ -160,8 +161,11 @@ export function projectWork(runs, eventMap, taskContents = new Map()) {
     } else if (type === "workspace.checkpoint") {
       checkpoint = p.checkpoint || null;
     } else if (type === "context.trimmed") {
-      const count = (p.call_ids || []).length;
-      note(event, "context", "已折叠较早的工具结果", `为控制上下文，折叠了 ${count} 条较早的工具结果；原文仍保留在事件日志与工作记录中。`);
+      const parts = [];
+      if (Array.isArray(p.call_ids) && p.call_ids.length) parts.push(`折叠了 ${p.call_ids.length} 条较早的工具结果`);
+      if (Array.isArray(p.previewed_call_ids) && p.previewed_call_ids.length) parts.push(`${p.previewed_call_ids.length} 条大型工具结果只随请求发送头尾预览`);
+      if (p.elided_plan_updates) parts.push(`${p.elided_plan_updates} 次历史任务计划只随请求发送空清单`);
+      if (parts.length) note(event, "context", "已折叠或省略较早的请求内容", `为控制上下文，${parts.join("；")}；原文仍保留在事件日志与工作记录中。`);
     } else if (type === "recovery.abandoned") {
       note(event, "attention", "已放弃本次恢复", "历史记录仍然保留；结果未知的操作没有被当作成功或重新执行。");
     } else if (type === "tool.prepared") {
@@ -233,5 +237,83 @@ export function projectWork(runs, eventMap, taskContents = new Map()) {
       counts("abandoned") ? `${counts("abandoned")} 项已放弃` : ""].filter(Boolean).join(" · ");
     block.events = mergeEvents([], ops.flatMap((op) => op.events));
   }
-  return {intent, blocks, operations, events: allEvents, checkpoint};
+  return {intent, intentTs, blocks, operations, events: allEvents, checkpoint};
+}
+
+// ---- v2 panel facts: pure mappings shared by the right-hand panel renders ----
+
+// Bucket counts for one chapter's operations (`projectWork().operations` values).
+// A future status still counts toward `total` but never toward an invented bucket.
+export function toolStats(operations) {
+  const stats = {total: 0, completed: 0, failed: 0, denied: 0, prepared: 0, unknown: 0, abandoned: 0};
+  for (const op of operations || []) {
+    if (!op || !(op.status in stats)) continue;
+    stats.total++;
+    stats[op.status]++;
+  }
+  return stats;
+}
+
+// Composer/usage context pressure. Either input missing or nonsensical means "no
+// measurement yet", never a fabricated 0%. The result is a clamped 0-100 integer.
+export function contextPct(requestChars, limit) {
+  const number = (value) => typeof value === "number" && Number.isFinite(value);
+  if (!number(requestChars) || requestChars < 0 || !number(limit) || limit <= 0) return null;
+  return Math.min(100, Math.max(0, Math.round((requestChars / limit) * 100)));
+}
+
+const terminalLabels = {"run.completed": "本次执行结束", "run.failed": "本次执行失败", "run.interrupted": "执行中断"};
+
+// One node per timeline-worthy event. `runs` supplies the interrupted-run facts that
+// turn a still-prepared call into "unknown" instead of a fake ongoing execution.
+export function timeline(events, runs = []) {
+  const interrupted = new Set((runs || []).filter((run) => run?.status === "interrupted").map((run) => runId(run)));
+  const nodes = [];
+  let countedSteps = 0;
+  for (const event of events || []) {
+    if (!event || event.partial) continue;
+    const p = event.payload || {};
+    const type = eventType(event.type);
+    const seq = event.session_seq ?? event.seq;
+    if (type === "model.request") {
+      const step = Number.isFinite(p.step) ? p.step : ++countedSteps;
+      nodes.push({kind: "step", seq, label: `第 ${step} 步`, status: "completed", ts: event.ts});
+    } else if (type === "tool.prepared") {
+      nodes.push({kind: "tool", seq, label: p.name || "工具调用", status: interrupted.has(event.run_id) ? "unknown" : "prepared", ts: event.ts});
+    } else if (type === "tool.completed") {
+      const content = typeof p.content === "string" ? p.content : "";
+      const status = p.is_error && /^Permission denied/.test(content) ? "denied" : p.is_error ? "failed" : "completed";
+      nodes.push({kind: "tool", seq, label: p.name || "工具调用", status, ts: event.ts});
+    } else if (type === "tool.abandoned") {
+      nodes.push({kind: "tool", seq, label: p.name || "工具调用", status: "unknown", ts: event.ts});
+    } else if (type === "approval.required") {
+      nodes.push({kind: "approval", seq, label: p.tool || "需要审批", status: "pending", ts: event.ts});
+    } else if (type === "approval.resolved") {
+      const status = p.auto ? "auto" : p.approved ? "approved" : "denied";
+      nodes.push({kind: "approval", seq, label: p.tool || "需要审批", status, ts: event.ts});
+    } else if (type === "workspace.checkpoint") {
+      nodes.push({kind: "checkpoint", seq, label: "记录工作区 checkpoint", status: "completed", ts: event.ts});
+    } else if (type === "run.started" && p.continuation_of) {
+      nodes.push({kind: "continue", seq, label: "接续上次停驻", status: "completed", ts: event.ts});
+    } else if (terminalLabels[type]) {
+      nodes.push({kind: "terminal", seq, label: terminalLabels[type], status: type.slice(4), ts: event.ts});
+    }
+  }
+  return nodes.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+}
+
+// task.plan_updated snapshots, in order. Legacy todo items without an id cannot be
+// referenced later, so they stay out of the revision history.
+export function planRevisions(events) {
+  const revisions = [];
+  for (const event of events || []) {
+    if (!event || event.partial || eventType(event.type) !== "task.plan_updated") continue;
+    const todos = Array.isArray(event.payload?.todos) ? event.payload.todos : [];
+    revisions.push({
+      seq: event.session_seq ?? event.seq,
+      step: typeof event.payload?.step === "number" ? event.payload.step : null,
+      todos: todos.filter((todo) => todo && todo.id),
+    });
+  }
+  return revisions;
 }
