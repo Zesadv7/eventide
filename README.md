@@ -1,7 +1,6 @@
 # Eventide
 
-<!-- 推送到 GitHub 后把 <owner>/<repo> 替换为实际仓库，再删除本行 -->
-[![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/<repo>/actions/workflows/ci.yml)
+[![CI](https://github.com/Zesadv7/eventide/actions/workflows/ci.yml/badge.svg)](https://github.com/Zesadv7/eventide/actions/workflows/ci.yml)
 
 Eventide v0.3 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHost 管理 Workspace 与 Session，运行事实统一写入 Event Log；消息、运行状态和模型上下文都从日志投影生成。CLI、HTTP API 和现有 Web 控制台使用同一执行主链。
 
