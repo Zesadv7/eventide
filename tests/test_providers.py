@@ -29,3 +29,22 @@ def test_openai_message_conversion_preserves_tool_roundtrip():
     converted = convert_messages(messages, "system")
     assert json.loads(converted[1]["tool_calls"][0]["function"]["arguments"]) == {"path": "x"}
     assert converted[2] == {"role": "tool", "tool_call_id": "c1", "content": "ok"}
+
+
+def test_openai_message_conversion_supports_images():
+    converted = convert_messages(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "look"},
+                    {"type": "image", "media_type": "image/png", "data": "aW1n"},
+                ],
+            }
+        ],
+        "system",
+    )
+    assert converted[1]["content"] == [
+        {"type": "text", "text": "look"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,aW1n"}},
+    ]

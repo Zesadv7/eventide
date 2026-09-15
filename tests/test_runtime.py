@@ -49,6 +49,22 @@ async def test_runtime_direct_answer_and_trace(isolated_workspace):
     await runtime.close()
 
 
+async def test_runtime_uses_per_run_model_without_changing_host_default(isolated_workspace):
+    provider = ScriptedProvider([{"text": "done"}])
+    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    result = await runtime.run(RunRequest("hello", model="message-model"))
+    assert result.status == "completed"
+    assert provider.requests[0].model == "message-model"
+    assert runtime.settings.model == "scripted"
+    started = next(
+        event
+        for event in runtime.store.run_events(result.run_id)
+        if event["type"] == "run.started"
+    )
+    assert started["payload"]["model"] == "message-model"
+    await runtime.close()
+
+
 async def test_runtime_tool_and_permission_denial(isolated_workspace):
     provider = ScriptedProvider(
         [

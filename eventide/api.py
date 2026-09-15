@@ -14,9 +14,10 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
@@ -34,11 +35,13 @@ class RunBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=100_000)
     mode: str = "auto"
     attachment_ids: list[str] = Field(default_factory=list)
+    model: str | None = Field(default=None, max_length=256)
 
 
 class AttachmentBody(BaseModel):
     name: str = Field(min_length=1)
     content_base64: str = ""
+    media_type: str | None = Field(default=None, max_length=128)
 
 
 class SessionBody(BaseModel):
@@ -458,14 +461,64 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         await get_session(session_id)
         try:
             return attachments.save_attachment(
-                agent_runtime.state_dir,
+                agent_runtime.settings.state_dir,
                 session_id,
                 attachments.new_attachment_id(),
                 body.name,
                 body.content_base64,
+                body.media_type,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/sessions/{session_id}/attachments")
+    async def list_session_attachments(
+        session_id: str, include_used: bool = False
+    ) -> list[dict[str, Any]]:
+        await get_session(session_id)
+        try:
+            return attachments.list_attachments(
+                agent_runtime.settings.state_dir, session_id, include_used=include_used
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/sessions/{session_id}/attachments/{attachment_id}")
+    async def download_attachment(session_id: str, attachment_id: str) -> Response:
+        await get_session(session_id)
+        try:
+            record = attachments.load_attachment(
+                agent_runtime.settings.state_dir, session_id, attachment_id
+            )
+            content = attachments.attachment_bytes(record)
+        except ValueError as exc:
+            code = 404 if str(exc).startswith("附件不存在") else 422
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        filename = quote(str(record["name"]), safe="")
+        return Response(
+            content=content,
+            media_type=str(record["media_type"]),
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+        )
+
+    @app.delete("/api/sessions/{session_id}/attachments/{attachment_id}")
+    async def delete_session_attachment(
+        session_id: str, attachment_id: str, request: Request
+    ) -> dict[str, Any]:
+        _require_local_request(request)
+        await get_session(session_id)
+        try:
+            deleted = attachments.delete_attachment(
+                agent_runtime.settings.state_dir, session_id, attachment_id
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if message.startswith("附件不存在"):
+                code = 404
+            else:
+                code = 409 if "不能删除" in message else 422
+            raise HTTPException(status_code=code, detail=message) from exc
+        return {"deleted": deleted["attachment_id"]}
 
     @app.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(session_id: str, body: RunBody) -> dict[str, str]:
@@ -478,10 +531,17 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
         # Validate ownership of every attachment before admitting the run, so a
         # bad id cannot fail later inside the worker behind an opaque 202.
         try:
-            for attachment_id in body.attachment_ids:
-                attachments.load_attachment(agent_runtime.state_dir, session_id, attachment_id)
+            attachment_records = attachments.load_attachments(
+                agent_runtime.settings.state_dir, session_id, body.attachment_ids
+            )
+            attachments.validate_for_provider(
+                attachment_records, agent_runtime.settings.provider
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        attachments.mark_attachments_used(
+            agent_runtime.settings.state_dir, session_id, body.attachment_ids
+        )
         reserved.add(workspace_id)
         run_id = f"run_{uuid.uuid4().hex[:16]}"
 
@@ -494,6 +554,7 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
                         run_id=run_id,
                         mode=body.mode,
                         attachment_ids=list(body.attachment_ids),
+                        model=body.model,
                     ),
                     approval_handler=broker.request,
                 )

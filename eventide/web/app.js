@@ -4,7 +4,7 @@ import {el, button, icon, reconcile, markdown} from "./view.js?v=14";
 
 // config.js is null-safe for nodes the v2 console dropped, so a failed import is
 // the only remaining degrade path: the app keeps running as "unconfigured".
-const config = await import("./config.js?v=12").catch(() => null);
+const config = await import("./config.js?v=13").catch(() => null);
 
 const $ = (selector) => document.querySelector(selector);
 const state = {
@@ -15,6 +15,7 @@ const state = {
   reconnecting: new Set(), workCache: new Map(), openToolDetails: new Map(), openToolGroups: new Set(), runNumbers: new Map(),
   detail: {chapterId: null, runId: null, target: null, eventSeq: null, filter: "all"},
   attachments: new Map(), attachmentsUnavailable: false, attachmentsToasted: false,
+  providerDefaultModel: "", availableModels: [],
   capabilities: new Map(), usageData: null, usageRunId: null,
 };
 const sessionJobs = new Map(), workspaceJobs = new Map(), loadingChapters = new Map();
@@ -210,7 +211,10 @@ async function selectSession(id) {
   render();
   const host = scrollHost();
   if (host) host.scrollTop = state.positions.get(id) || 0;
-  if (id) await refreshSession(id).catch((error) => toastError(error, () => void refreshSession(id).catch(() => {})));
+  if (id) await Promise.all([
+    refreshSession(id).catch((error) => toastError(error, () => void refreshSession(id).catch(() => {}))),
+    loadPendingAttachments(id),
+  ]);
 }
 async function selectWorkspace(id) {
   rememberView();
@@ -1030,16 +1034,35 @@ function renderChips() {
     const node = el("span", "attachment-chip");
     node.dataset.attachmentId = chip.attachment_id;
     node.append(el("span", "", chip.name));
-    const remove = button("", () => {
-      const remaining = (state.attachments.get(state.session) || []).filter((item) => item.attachment_id !== chip.attachment_id);
-      state.attachments.set(state.session, remaining);
-      renderChips();
-    }, "chip-remove");
+    const remove = button("", () => void removeAttachment(chip), "chip-remove");
     remove.setAttribute("aria-label", `移除附件 ${chip.name}`);
     remove.append(icon("close"));
     node.append(remove);
     return node;
   });
+}
+async function loadPendingAttachments(owner) {
+  if (!owner || state.attachmentsUnavailable) return;
+  try {
+    const records = await request(`/api/sessions/${owner}/attachments`);
+    state.attachments.set(owner, Array.isArray(records) ? records : []);
+    if (state.session === owner) renderChips();
+  } catch (error) {
+    if (/404|405|not found|method not allowed/i.test(error.message || "")) {
+      state.attachmentsUnavailable = true;
+      $("#attach-button").disabled = true;
+    }
+  }
+}
+async function removeAttachment(chip) {
+  const owner = state.session;
+  if (!owner) return;
+  try {
+    await request(`/api/sessions/${owner}/attachments/${chip.attachment_id}`, {method: "DELETE"});
+    const remaining = (state.attachments.get(owner) || []).filter((item) => item.attachment_id !== chip.attachment_id);
+    state.attachments.set(owner, remaining);
+    renderChips();
+  } catch (error) { toastError(error, () => void removeAttachment(chip)); }
 }
 function fileBase64(file) {
   return new Promise((resolve, reject) => {
@@ -1056,7 +1079,7 @@ async function uploadAttachments(files) {
       const content = await fileBase64(file);
       let owner = state.session;
       if (!owner) owner = await createSession(state.workspace);
-      const result = await request(`/api/sessions/${owner}/attachments`, {method: "POST", body: JSON.stringify({name: file.name, content_base64: content})});
+      const result = await request(`/api/sessions/${owner}/attachments`, {method: "POST", body: JSON.stringify({name: file.name, media_type: file.type || null, content_base64: content})});
       const chips = state.attachments.get(owner) || [];
       chips.push({attachment_id: result.attachment_id, name: result.name || file.name});
       state.attachments.set(owner, chips);
@@ -1089,6 +1112,32 @@ function renderContextMeter() {
   meter.classList.toggle("warning", pct > 80);
   meter.textContent = `上下文 ${pct}%`;
 }
+function renderRunModels() {
+  const select = $("#run-model");
+  const selected = select.value;
+  const models = [...new Set([state.providerDefaultModel, ...state.availableModels].filter(Boolean))];
+  select.replaceChildren();
+  const fallback = document.createElement("option");
+  fallback.value = "";
+  fallback.textContent = state.providerDefaultModel ? `默认 · ${state.providerDefaultModel}` : "默认模型";
+  select.append(fallback);
+  for (const model of models) {
+    if (model === state.providerDefaultModel) continue;
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    select.append(option);
+  }
+  select.value = models.includes(selected) ? selected : "";
+}
+async function loadRunModels(providerConfig = null) {
+  if (providerConfig?.model) state.providerDefaultModel = providerConfig.model;
+  try {
+    const catalog = await request("/api/models");
+    state.availableModels = Array.isArray(catalog.models) ? catalog.models : [];
+  } catch { state.availableModels = []; }
+  renderRunModels();
+}
 
 async function startRun(event) {
   event.preventDefault();
@@ -1109,6 +1158,8 @@ async function startRun(event) {
       owner = await createSession(workspace);
     }
     const body = {prompt, mode: currentMode(), attachment_ids: (state.attachments.get(owner) || []).map((chip) => chip.attachment_id)};
+    const selectedModel = $("#run-model").value;
+    if (selectedModel) body.model = selectedModel;
     const accepted = await request(`/api/sessions/${owner}/runs`, {method: "POST", body: JSON.stringify(body)});
     state.drafts.delete(lock); state.drafts.delete(owner);
     state.attachments.delete(owner);
@@ -1472,14 +1523,16 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("resize", () => { if (!$("#mode-menu").hidden) positionModeMenu(); });
+window.addEventListener("eventide:provider-config", (event) => void loadRunModels(event.detail));
 $(".action-area").addEventListener("scroll", () => closeModeMenu(), {passive: true});
 
 async function bootstrap() {
   try {
-    const [ , workspaces] = await Promise.all([
+    const [ providerConfig, workspaces] = await Promise.all([
       config?.loadProviderConfig().catch((error) => showToast("error", `模型配置状态读取失败：${error.message || error}`, {retry: () => void config?.loadProviderConfig().catch(() => {})})) ?? Promise.resolve(),
       request("/api/workspaces"),
     ]);
+    await loadRunModels(providerConfig);
     state.workspaces = workspaces;
     const workspace = workspaces.find((w) => w.workspace_id === state.workspace) || workspaces[0];
     if (workspace) await selectWorkspace(workspace.workspace_id);

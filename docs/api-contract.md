@@ -21,6 +21,8 @@
 | `GET /api/runs/{id}/events`（SSE） | 事件流（`after` 游标；prepared/completed 以 `tool.request`/`tool.result` 别名推送） |
 | `GET /api/runs/{id}/export` | NDJSON 审计导出 |
 | `POST /api/runs/{id}/approvals/{approval_id}` | 审批决定 |
+| `GET` / `POST /api/sessions/{id}/attachments` | 待提交附件清单 / 上传 |
+| `GET` / `DELETE /api/sessions/{id}/attachments/{aid}` | 下载 / 删除未使用附件 |
 | `GET`/`PUT`/`DELETE /api/config/provider`、`POST /api/config/provider/test` | 模型配置（仅回环） |
 
 ## v2 新增（全部已实现）
@@ -65,19 +67,22 @@
 - `agent`：该 Run 内 ASK 决策自动允许，不再等待用户；审批审计事件照常写入，`approval.resolved` payload 带 `"auto": true` 且 `author="runtime"`（前端时间线显示“agent 模式自动批准”）。
 - `auto`：现状行为。
 
-### RunBody 扩展 `attachment_ids` + `POST /api/sessions/{id}/attachments` —— 已实现
+### RunBody 扩展 `attachment_ids`、附件生命周期与多模态 —— 已实现
 
 上传（JSON，不引入 multipart 依赖）：
 
 ```json
 POST /api/sessions/{id}/attachments
-{"name": "notes.py", "content_base64": "..."}
-→ 201 {"attachment_id": "att_<12hex>", "name": "notes.py", "size": 1234}
+{"name": "notes.py", "media_type": "text/x-python", "content_base64": "..."}
+→ 201 {"attachment_id": "att_<12hex>", "name": "notes.py", "size": 1234,
+       "media_type": "text/x-python", "kind": "text", "used": false}
 ```
 
-约束：单文件 ≤ 10MB（413 语义，返回 422 与说明）；仅 UTF-8 文本（二进制 422）；base64 非法 422；会话不存在 404。存储于状态根 `attachments/{session_id}/{attachment_id}`。
+约束：单文件 ≤10MB；base64 或 media type 非法、声明为文本但不是 UTF-8 时返回 422；会话不存在返回 404。`media_type` 可省略并按文件名推断。内容存储于状态根 `attachments/{session_id}/{attachment_id}`，不进入 Workspace 或 Git。
 
-提交：RunBody 带 `attachment_ids: ["att_..."]`；校验归属（未知/不属于该会话 → 422）；Run 启动时内容内联进用户消息（分隔符 `--- 附件：{name} ---`），单附件超过 512KB 截断并标注。前端：「＋」按钮上传并把 chips 随消息发送；接口 404/失败时「＋」置灰并提示。
+生命周期：`GET /api/sessions/{id}/attachments` 默认只列出未使用项，传 `include_used=true` 查看全部；单项 GET 下载原始字节；DELETE 只删除未进入 Run 的附件，已使用附件返回 409。前端刷新时恢复未使用 chips，移除 chip 同步调用 DELETE。
+
+提交：RunBody 带 `attachment_ids: ["att_..."]`；202 前校验归属和当前 Provider 能力。UTF-8 文本内联进用户消息（分隔符 `--- 附件：{name} ---`），单附件超过 512KB 截断并标注。图片作为多模态块支持 Anthropic、OpenAI-compatible 和 OpenAI Responses；PDF 支持 Anthropic 与 OpenAI Responses；普通二进制可存取，但没有当前 Provider 协议映射时返回 422。事件日志只保存附件 id、名称、类型与大小，Provider 请求前从状态根水合 base64，因此审计导出不复制原始二进制。
 
 ### `GET /api/models` —— 已实现
 
@@ -87,12 +92,8 @@ POST /api/sessions/{id}/attachments
 {"models": ["model-a", "model-b"], "error": null}
 ```
 
-失败语义：未配置 API Key 或探测失败时返回空列表与 `error` 说明，不返回 5xx；响应不含任何密钥。前端：模型按钮当前仍打开配置弹窗（探测结果可用于后续把按钮升级为逐消息模型下拉）。
+失败语义：未配置 API Key 或探测失败时返回空列表与 `error` 说明，不返回 5xx；响应不含任何密钥。前端把结果放入 composer 的本次模型下拉，并始终保留 Host 默认模型作为回退。
 
-## 预留（前端未依赖，按需补齐）
+### RunBody 扩展 `model` —— 已实现
 
-| 接口 | 说明 |
-|---|---|
-| `GET /api/sessions/{id}/attachments` | 附件清单，用于跨刷新恢复 chips；当前 POST 已占用同一路径，未实现的 GET 返回 405（Method Not Allowed），E2E 以此断言预留状态 |
-| `DELETE /api/sessions/{id}/attachments/{aid}` | 删除附件 |
-| 图片/二进制附件 | 需运行时多模态支持后开放 |
+`model` 为可选的非空模型名（≤256 字符）。省略或空值使用 Host 默认模型；非空值只覆盖本次 Run 的模型请求、`run.started.model` 和上下文 checkpoint 身份，不修改持久 Provider 配置。Provider、Base URL 与 API Key 仍由 Host 配置决定。

@@ -56,6 +56,7 @@ class RunRequest:
     run_id: str | None = None
     mode: str = "auto"
     attachment_ids: list[str] = field(default_factory=list)
+    model: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -37,9 +37,14 @@ function renderProviderStatus(config) {
   $("#model").value = config.model || "";
   $("#base-url").value = config.base_url || "";
   $("#key-hint").textContent = config.api_key_status === "decrypt_error" ? config.configuration_error : configured ? "安全保存的 API Key 已配置" : "尚未保存 API Key";
+  window.dispatchEvent(new CustomEvent("eventide:provider-config", {detail: config}));
 }
 
-export async function loadProviderConfig() { renderProviderStatus(await request("/api/config/provider")); }
+export async function loadProviderConfig() {
+  const status = await request("/api/config/provider");
+  renderProviderStatus(status);
+  return status;
+}
 
 async function saveProviderConfig(event) {
   event.preventDefault();

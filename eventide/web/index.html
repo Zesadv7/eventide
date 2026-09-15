@@ -100,7 +100,8 @@
               </span>
               <button id="context-meter" class="context-meter text-button" type="button" hidden>上下文 --</button>
               <span class="action-spacer"></span>
-              <button id="model-button" class="model-button text-button" type="button">模型<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
+              <select id="run-model" class="run-model-select" aria-label="本次运行使用的模型" title="本次运行使用的模型"><option value="">默认模型</option></select>
+              <button id="model-button" class="model-button text-button" type="button" aria-label="配置模型连接">配置</button>
               <span class="send-slot">
                 <button id="cancel-run" class="send-button send-stop" type="button" aria-label="停止运行" hidden><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg></button>
                 <button id="run-button" class="send-button" type="submit" aria-label="发送" title="发送（Enter）"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4"/></svg></button>
@@ -218,6 +219,6 @@
     <div id="capabilities-content"></div>
   </dialog>
 
-  <script type="module" src="/assets/app.js?v=14"></script>
+  <script type="module" src="/assets/app.js?v=15"></script>
 </body>
 </html>

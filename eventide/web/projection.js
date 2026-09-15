@@ -152,7 +152,11 @@ export function projectWork(runs, eventMap, taskContents = new Map()) {
     const p = event.payload || {};
     const type = event.type;
     if (type === "message.user" || (type === "message.imported" && p.message?.role === "user")) {
-      if (typeof p.message?.content === "string") { intent ||= p.message.content; intentTs ||= event.ts; }
+      const content = p.message?.content;
+      const text = typeof content === "string" ? content : Array.isArray(content)
+        ? content.filter((block) => block?.type === "text").map((block) => block.text || "").join("\n")
+        : "";
+      if (text) { intent ||= text; intentTs ||= event.ts; }
     } else if (type === "run.started" && p.continuation_of) {
       const resumed = p.resumed_task_id ? taskContents.get(p.resumed_task_id) : "";
       note(event, "continuation", "接续上次停驻",

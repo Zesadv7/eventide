@@ -7,6 +7,9 @@
 .memory/
 .transcripts/
 .task_outputs/
+.zcode/
+.claude/
+.codex/
 .scheduled_tasks.json
 # Current Eventide runtime state
 .eventide/
@@ -19,10 +22,13 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 .venv/
 venv/
+node_modules/
 
 # IDEs
 .vscode/

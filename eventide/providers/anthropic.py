@@ -14,11 +14,38 @@ def _without_provider_state(messages: list[dict[str, Any]]) -> list[dict[str, An
     for message in messages:
         content = message.get("content")
         if isinstance(content, list):
-            content = [
-                block
-                for block in content
-                if not isinstance(block, dict) or block.get("type") != "provider_state"
-            ]
+            blocks: list[Any] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    blocks.append(block)
+                elif block.get("type") == "provider_state":
+                    continue
+                elif block.get("type") == "image":
+                    blocks.append(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": block["media_type"],
+                                "data": block["data"],
+                            },
+                        }
+                    )
+                elif block.get("type") == "file":
+                    blocks.append(
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": block["media_type"],
+                                "data": block["data"],
+                            },
+                            "title": block.get("name") or "attachment.pdf",
+                        }
+                    )
+                else:
+                    blocks.append(block)
+            content = blocks
         cleaned.append({**message, "content": content})
     return cleaned
 

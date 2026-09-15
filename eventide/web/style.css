@@ -250,6 +250,8 @@ button.user-bubble-copy:hover { background:var(--hover); color:var(--ink); }
 .mode-option-head { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; }
 .mode-option-head em { font-style:normal; font-size:11px; font-weight:500; color:var(--warning); }
 .mode-option-desc { display:block; margin-top:2px; font-size:12px; line-height:1.5; color:var(--muted); }
+.run-model-select { max-width:180px; min-width:110px; padding:6px 26px 6px 10px; border:1px solid var(--line); border-radius:999px; background:var(--paper); color:var(--ink); font-size:12px; text-overflow:ellipsis; }
+.run-model-select:hover,.run-model-select:focus-visible { border-color:var(--border-strong); background:var(--hover); }
 /* 上下文指示：pill 文案 + 底部细进度条 */
 .context-meter { position:relative; overflow:hidden; padding-bottom:10px; font-variant-numeric:tabular-nums; }
 .context-meter::before { content:""; position:absolute; left:10px; right:10px; bottom:4px; height:2px; border-radius:1px; background:var(--line); }

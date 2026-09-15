@@ -296,3 +296,56 @@ def test_anthropic_messages_drop_foreign_provider_state():
     assert _without_provider_state(messages)[0]["content"] == [
         {"type": "text", "text": "hello"}
     ]
+
+
+def test_anthropic_messages_convert_multimodal_blocks():
+    converted = _without_provider_state(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "look"},
+                    {"type": "image", "media_type": "image/png", "data": "aW1n"},
+                    {
+                        "type": "file",
+                        "name": "brief.pdf",
+                        "media_type": "application/pdf",
+                        "data": "cGRm",
+                    },
+                ],
+            }
+        ]
+    )[0]["content"]
+    assert converted[1]["source"] == {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "aW1n",
+    }
+    assert converted[2]["type"] == "document"
+    assert converted[2]["title"] == "brief.pdf"
+
+
+def test_responses_input_converts_multimodal_blocks():
+    converted = convert_response_input(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "look"},
+                    {"type": "image", "media_type": "image/png", "data": "aW1n"},
+                    {
+                        "type": "file",
+                        "name": "brief.pdf",
+                        "media_type": "application/pdf",
+                        "data": "cGRm",
+                    },
+                ],
+            }
+        ]
+    )
+    assert converted[0]["content"][1]["type"] == "input_image"
+    assert converted[0]["content"][2] == {
+        "type": "input_file",
+        "filename": "brief.pdf",
+        "file_data": "data:application/pdf;base64,cGRm",
+    }

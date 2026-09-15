@@ -48,7 +48,7 @@ cache_dir = ".task_outputs/pytest-cache"
 [tool.coverage.run]
 source = ["eventide"]
 # The v0.1 teaching harness remains for source compatibility; the 85% gate
-# measures the v0.2 runtime and its actively supported integration surfaces.
+# measures the v0.3 runtime and its actively supported integration surfaces.
 omit = [
     "eventide/agent.py",
     "eventide/context.py",

@@ -31,6 +31,34 @@ def convert_messages(messages: list[dict[str, Any]], system: str) -> list[dict[s
         if isinstance(content, str):
             converted.append({"role": role, "content": content})
             continue
+        if role == "user" and any(
+            isinstance(block, dict) and block.get("type") in {"image", "file"}
+            for block in content
+        ):
+            parts: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text":
+                    parts.append({"type": "text", "text": str(block.get("text", ""))})
+                elif block.get("type") == "image":
+                    parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{block['media_type']};base64,{block['data']}"
+                            },
+                        }
+                    )
+                elif block.get("type") == "file":
+                    parts.append(
+                        {
+                            "type": "text",
+                            "text": f"[Earlier file attachment: {block.get('name', 'file')}]",
+                        }
+                    )
+            converted.append({"role": role, "content": parts})
+            continue
         if role == "assistant":
             text = "\n".join(b.get("text", "") for b in content if b.get("type") == "text")
             calls = [b for b in content if b.get("type") == "tool_use"]

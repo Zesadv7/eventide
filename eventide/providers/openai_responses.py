@@ -30,6 +30,33 @@ def convert_response_input(messages: list[dict[str, Any]]) -> list[dict[str, Any
         if isinstance(content, str):
             converted.append({"role": role, "content": content})
             continue
+        if role == "user" and any(
+            isinstance(block, dict) and block.get("type") in {"image", "file"}
+            for block in content
+        ):
+            parts: list[dict[str, Any]] = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text":
+                    parts.append({"type": "input_text", "text": str(block.get("text", ""))})
+                elif block.get("type") == "image":
+                    parts.append(
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:{block['media_type']};base64,{block['data']}",
+                        }
+                    )
+                elif block.get("type") == "file":
+                    parts.append(
+                        {
+                            "type": "input_file",
+                            "filename": block.get("name") or "attachment.pdf",
+                            "file_data": f"data:{block['media_type']};base64,{block['data']}",
+                        }
+                    )
+            converted.append({"role": role, "content": parts})
+            continue
         for block in content:
             if (
                 isinstance(block, dict)

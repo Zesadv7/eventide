@@ -447,16 +447,16 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
             ).status_code
             == 422
         )
-        assert (
-            client.post(
-                f"/api/sessions/{session}/attachments",
-                json={
-                    "name": "bin.bin",
-                    "content_base64": base64.b64encode(b"\xff\xfe\x00bin").decode("ascii"),
-                },
-            ).status_code
-            == 422
+        binary = client.post(
+            f"/api/sessions/{session}/attachments",
+            json={
+                "name": "bin.bin",
+                "content_base64": base64.b64encode(b"\xff\xfe\x00bin").decode("ascii"),
+                "media_type": "application/octet-stream",
+            },
         )
+        assert binary.status_code == 201
+        assert binary.json()["kind"] == "file"
         assert (
             client.post(
                 f"/api/sessions/{session}/attachments",
@@ -464,6 +464,19 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
             ).status_code
             == 422
         )
+
+        listed = client.get(f"/api/sessions/{session}/attachments").json()
+        assert {item["name"] for item in listed} == {"notes.py", "bin.bin"}
+        binary_id = binary.json()["attachment_id"]
+        downloaded = client.get(f"/api/sessions/{session}/attachments/{binary_id}")
+        assert downloaded.content == b"\xff\xfe\x00bin"
+        assert downloaded.headers["content-type"] == "application/octet-stream"
+        assert client.delete(
+            f"/api/sessions/{session}/attachments/{binary_id}"
+        ).status_code == 200
+        assert {item["name"] for item in client.get(
+            f"/api/sessions/{session}/attachments"
+        ).json()} == {"notes.py"}
         oversized = base64.b64encode(b"x" * (MAX_UPLOAD_BYTES + 1)).decode("ascii")
         assert (
             client.post(
@@ -512,6 +525,47 @@ def test_api_run_with_attachments_inlines_and_truncates(isolated_workspace):
         assert len(inlined.encode("utf-8")) <= MAX_INLINE_BYTES
 
 
+def test_api_image_attachment_is_hydrated_only_for_provider(isolated_workspace):
+    provider = ScriptedProvider([{"text": "done"}])
+    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        image = client.post(
+            f"/api/sessions/{session}/attachments",
+            json={
+                "name": "diagram.png",
+                "media_type": "image/png",
+                "content_base64": base64.b64encode(b"png-bytes").decode("ascii"),
+            },
+        ).json()
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "look", "attachment_ids": [image["attachment_id"]]},
+        )
+        assert accepted.status_code == 202
+        run = wait_for_run(client, accepted.json()["run_id"])
+        assert run["status"] == "completed"
+        provider_block = provider.requests[0].messages[0]["content"][1]
+        assert provider_block["type"] == "image"
+        assert provider_block["data"] == base64.b64encode(b"png-bytes").decode("ascii")
+        event = next(
+            item
+            for item in runtime.store.run_events(run["id"])
+            if item["type"] == "message.user"
+        )
+        stored_block = event["payload"]["message"]["content"][1]
+        assert stored_block["type"] == "attachment"
+        assert "data" not in stored_block
+        assert client.get(f"/api/sessions/{session}/attachments").json() == []
+        history = client.get(
+            f"/api/sessions/{session}/attachments?include_used=true"
+        ).json()
+        assert history[0]["used"] is True
+        assert client.delete(
+            f"/api/sessions/{session}/attachments/{image['attachment_id']}"
+        ).status_code == 409
+
+
 def test_api_run_rejects_unknown_and_foreign_attachments(isolated_workspace):
     runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
@@ -550,6 +604,20 @@ def test_api_run_summary_includes_usage(isolated_workspace):
         status = client.get(f"/api/sessions/{session}").json()
         assert status["latest_run"]["usage"] == expected
         assert run["usage"] == expected
+
+
+def test_api_run_accepts_per_message_model(isolated_workspace):
+    provider = ScriptedProvider([{"text": "done"}])
+    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    with TestClient(create_app(runtime)) as client:
+        session = client.post("/api/sessions").json()["session_id"]
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "hello", "model": "one-off-model"},
+        )
+        assert accepted.status_code == 202
+        wait_for_run(client, accepted.json()["run_id"])
+        assert provider.requests[0].model == "one-off-model"
 
 
 def test_api_run_plan_mode_blocks_write_tool(isolated_workspace):

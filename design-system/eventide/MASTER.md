@@ -45,6 +45,7 @@
 | #floating-panel 悬浮卡 | paper 面 + 圆角 16 + 遮罩级阴影（`0 12px 40px var(--shadow-overlay)`），自带滚动，窄屏近全屏 |
 | 顶栏胶囊按钮 | pill 造型（圆角 999），12px，hover 与 aria-expanded 态有区分 |
 | 模式菜单 | 浮层圆角 10，选项行含 12px muted 说明，Agent 选项带警示标注 |
+| 本次模型选择 | 原生紧凑 select，pill 外形；相邻“配置”按钮进入 Host 级连接设置 |
 | 圆形发送键 | 36-40px 圆形，primary 底、↑ 图标；运行中原位变 ■ 停止，停止态 danger 描边 |
 | Composer | 大卡片（圆角 12），操作区底改 canvas |
 | 回复卡 .chapter-result | 轻卡片（圆角 12） |

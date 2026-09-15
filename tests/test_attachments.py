@@ -7,11 +7,17 @@ import pytest
 from eventide.attachments import (
     MAX_INLINE_BYTES,
     MAX_UPLOAD_BYTES,
+    attachment_bytes,
     attachment_path,
+    compose_message,
     compose_prompt,
     decode_attachment,
+    delete_attachment,
+    hydrate_messages,
+    list_attachments,
     load_attachment,
     load_attachments,
+    mark_attachments_used,
     new_attachment_id,
     save_attachment,
 )
@@ -38,18 +44,71 @@ def test_attachment_ids_match_the_public_format():
 
 def test_attachment_save_and_load_roundtrip(state_dir):
     payload = save_attachment(state_dir, "sess1", VALID_ID, "笔记.py", encoded("你好\nworld"))
-    assert payload == {
-        "attachment_id": VALID_ID,
-        "name": "笔记.py",
-        "size": len("你好\nworld".encode()),
-    }
+    assert payload["attachment_id"] == VALID_ID
+    assert payload["name"] == "笔记.py"
+    assert payload["size"] == len("你好\nworld".encode())
+    assert payload["kind"] == "text"
+    assert payload["media_type"].startswith("text/")
+    assert payload["used"] is False
     loaded = load_attachment(state_dir, "sess1", VALID_ID)
-    assert loaded == {
-        "attachment_id": VALID_ID,
-        "name": "笔记.py",
-        "content": "你好\nworld",
-    }
+    assert loaded["attachment_id"] == VALID_ID
+    assert loaded["name"] == "笔记.py"
+    assert loaded["content"] == "你好\nworld"
     assert load_attachments(state_dir, "sess1", [VALID_ID]) == [loaded]
+
+
+def test_binary_lifecycle_and_multimodal_reference_hydration(state_dir):
+    raw = b"\x89PNG\r\n\x1a\nimage"
+    payload = save_attachment(
+        state_dir,
+        "sess1",
+        VALID_ID,
+        "diagram.png",
+        base64.b64encode(raw).decode("ascii"),
+        "image/png",
+    )
+    assert payload["kind"] == "image"
+    assert list_attachments(state_dir, "sess1") == [payload]
+    loaded = load_attachment(state_dir, "sess1", VALID_ID)
+    assert attachment_bytes(loaded) == raw
+
+    message = compose_message("看图", [loaded])
+    reference = message["content"][1]
+    assert reference == {
+        "type": "attachment",
+        "attachment_id": VALID_ID,
+        "name": "diagram.png",
+        "media_type": "image/png",
+        "kind": "image",
+        "size": len(raw),
+    }
+    hydrated = hydrate_messages(state_dir, "sess1", [message])
+    assert hydrated[0]["content"][1] == {
+        "type": "image",
+        "name": "diagram.png",
+        "media_type": "image/png",
+        "data": base64.b64encode(raw).decode("ascii"),
+    }
+
+    mark_attachments_used(state_dir, "sess1", [VALID_ID])
+    assert list_attachments(state_dir, "sess1") == []
+    assert list_attachments(state_dir, "sess1", include_used=True)[0]["used"] is True
+    with pytest.raises(ValueError, match="不能删除"):
+        delete_attachment(state_dir, "sess1", VALID_ID)
+
+
+def test_pending_attachment_can_be_deleted(state_dir):
+    save_attachment(
+        state_dir,
+        "sess1",
+        VALID_ID,
+        "a.bin",
+        encoded("raw"),
+        "application/octet-stream",
+    )
+    deleted = delete_attachment(state_dir, "sess1", VALID_ID)
+    assert deleted["kind"] == "file"
+    assert list_attachments(state_dir, "sess1", include_used=True) == []
 
 
 def test_decode_attachment_rejects_bad_base64_oversize_and_binary():

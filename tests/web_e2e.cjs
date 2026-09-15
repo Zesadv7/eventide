@@ -335,6 +335,7 @@ async function phase1() {
   await check("POST /api/sessions/{id}/runs -> 202 + run_id", async () => {
     const resp = await api("POST", `/api/sessions/${shared.sessionId}/runs`, {
       prompt: `${MARK.multi}：请制定计划并执行`,
+      model: "per-run-e2e",
     });
     if (resp.status !== 202) fail(`状态码 ${resp.status}：${resp.text.slice(0, 200)}`);
     if (typeof resp.json?.run_id !== "string") fail(`响应缺少 run_id：${resp.text.slice(0, 200)}`);
@@ -381,6 +382,8 @@ async function phase1() {
     const first = modelRequests[0].data?.payload || {};
     if (!("request_chars" in first)) pending("request_chars 字段未随当前后端构建部署（v2）");
     if (!(first.request_chars > 0)) fail(`request_chars=${JSON.stringify(first.request_chars)}`);
+    const started = events.find((event) => event.type === "run.started");
+    if (started?.data?.payload?.model !== "per-run-e2e") fail(`逐消息模型未进入 run.started：${JSON.stringify(started?.data?.payload)}`);
     if (!events.some((event) => event.type === "run.completed")) fail("事件流无 run.completed");
   });
 
@@ -436,10 +439,22 @@ async function phase1() {
     if (parsed[parsed.length - 1].type !== "run.completed") fail("末行不是 run.completed");
   });
 
-  await check("GET /api/sessions/{id}/attachments 预留接口未实现", async () => {
+  await check("附件清单、下载与删除接口", async () => {
     const resp = await api("GET", `/api/sessions/${shared.sessionId}/attachments`);
-    // POST 已占用同一路径，未实现的 GET 返回 405（预留清单见 api-contract.md）
-    if (resp.status !== 405) fail(`状态码 ${resp.status} != 405（预留接口）`);
+    if (resp.status !== 200 || !Array.isArray(resp.json)) fail(`附件清单异常：${resp.status} ${resp.text.slice(0, 200)}`);
+    if (resp.json.length !== 0) fail(`已使用附件不应作为待提交 chip 恢复：${resp.text}`);
+    const history = await api("GET", `/api/sessions/${shared.sessionId}/attachments?include_used=true`);
+    if (!history.json?.some((item) => item.attachment_id === shared.attachmentId && item.used)) fail(`附件历史缺少已使用项：${history.text}`);
+    const pending = await api("POST", `/api/sessions/${shared.sessionId}/attachments`, {
+      name: "delete-me.bin",
+      media_type: "application/octet-stream",
+      content_base64: Buffer.from([0, 1, 2, 3]).toString("base64"),
+    });
+    if (pending.status !== 201 || pending.json?.kind !== "file") fail(`二进制上传失败：${pending.status} ${pending.text}`);
+    const download = await api("GET", `/api/sessions/${shared.sessionId}/attachments/${pending.json.attachment_id}`);
+    if (download.status !== 200 || download.text.length !== 4) fail(`附件下载失败：${download.status}`);
+    const deleted = await api("DELETE", `/api/sessions/${shared.sessionId}/attachments/${pending.json.attachment_id}`);
+    if (deleted.status !== 200) fail(`附件删除失败：${deleted.status} ${deleted.text}`);
   });
 
   await check("停驻场景：park -> continue -> 已恢复完成", async () => {

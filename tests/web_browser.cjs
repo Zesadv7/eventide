@@ -15,6 +15,7 @@ const streams = new Map();
 const runs = new Map();
 const sessions = new Map();
 const logs = new Map();
+const pendingAttachments = new Map();
 const apiCalls = [];
 let lastRunBody = null;
 function addRun(id, owner, status, continuation_of = null, output = "", extra = {}) {
@@ -77,6 +78,7 @@ const server = http.createServer(async (req, res) => {
   apiCalls.push([req.method, pathname]);
   if (pathname === "/api/runtime/settings") return reply({context_limit: 50000, approval_timeout: 60, max_steps: 8, task_max_steps: 20});
   if (pathname === "/api/config/provider") return reply({provider: "openai_compatible", model: "offline-fixture", api_key_configured: true});
+  if (pathname === "/api/models") return reply({models: ["offline-fixture", "offline-alt"], error: null});
   if (pathname === "/api/workspaces" && req.method === "POST") {
     const projectPath = JSON.parse(body).path;
     const workspace = {workspace_id: "w-added", name: "added-project", path: projectPath};
@@ -98,7 +100,14 @@ const server = http.createServer(async (req, res) => {
   if ((match = pathname.match(/^\/api\/sessions\/([^/]+)\/attachments$/)) && req.method === "POST") {
     if (attachmentsBroken) return reply({detail: "attachments endpoint is not available"}, 404);
     const parsed = JSON.parse(body);
-    return reply({attachment_id: `att-${++seq}`, name: parsed.name, size: Buffer.from(parsed.content_base64 || "", "base64").length}, 201);
+    const record = {attachment_id: `att-${++seq}`, name: parsed.name, size: Buffer.from(parsed.content_base64 || "", "base64").length, media_type: parsed.media_type || "text/plain", kind: "text", used: false};
+    const items = pendingAttachments.get(match[1]) || []; items.push(record); pendingAttachments.set(match[1], items);
+    return reply(record, 201);
+  }
+  if ((match = pathname.match(/^\/api\/sessions\/([^/]+)\/attachments$/)) && req.method === "GET") return reply(pendingAttachments.get(match[1]) || []);
+  if ((match = pathname.match(/^\/api\/sessions\/([^/]+)\/attachments\/([^/]+)$/)) && req.method === "DELETE") {
+    pendingAttachments.set(match[1], (pendingAttachments.get(match[1]) || []).filter((item) => item.attachment_id !== match[2]));
+    return reply({deleted: match[2]});
   }
   if ((match = pathname.match(/^\/api\/sessions\/([^/]+)$/))) {
     if (req.method === "PATCH") {
@@ -116,6 +125,7 @@ const server = http.createServer(async (req, res) => {
   if ((match = pathname.match(/^\/api\/sessions\/([^/]+)\/runs$/))) {
     if (req.method === "POST") {
       lastRunBody = JSON.parse(body);
+      pendingAttachments.set(match[1], []);
       const id = `submitted-${seq}`; addRun(id, match[1], "running", null, "", {steps: 1, tool_calls: 0});
       emit(id, "message.user", {message: {role: "user", content: lastRunBody.prompt}});
       emit(id, "model.request", {step: 1, request_chars: 11000});
@@ -471,6 +481,7 @@ const server = http.createServer(async (req, res) => {
     fs.writeFileSync(uploadPath, "hello", "utf8");
     await page.setInputFiles("#file-input", uploadPath);
     await page.locator(".attachment-chip").filter({hasText: "hello.txt"}).waitFor();
+    await page.selectOption("#run-model", "offline-alt");
     const promptBox = page.locator("#prompt");
     await promptBox.fill("带附件的工作");
     await promptBox.press("Shift+Enter");
@@ -480,6 +491,7 @@ const server = http.createServer(async (req, res) => {
     await promptBox.press("Enter");
     await page.locator(".chapter-result").filter({hasText: "新的工作结果"}).waitFor();
     assert.equal(lastRunBody.mode, "plan", "Enter submits with the mode picked in the menu");
+    assert.equal(lastRunBody.model, "offline-alt", "the selected model is scoped into the run body");
     assert.deepEqual(lastRunBody.attachment_ids.length, 1, "the chip rides along with the run");
 
     // A 404 from the attachments endpoint disables the ＋ affordance once, with a reason.

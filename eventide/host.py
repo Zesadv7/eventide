@@ -938,10 +938,14 @@ class RuntimeHost:
         prompt = request.prompt if request else None
         mode = run_policy.normalize_mode(request.mode) if request else "auto"
         attachment_ids = list(request.attachment_ids) if request else []
+        requested_model = request.model.strip() if request and request.model else ""
+        selected_model = requested_model or self.settings.model
         # Why the run parked, if it did; read by the terminal event on every exit path.
         park_kind: str | None = None
         park_message: str | None = None
         try:
+            if len(selected_model) > 256:
+                raise ValueError("Model name cannot exceed 256 characters")
             # A parked run resumes the task it was on, so the continuation says which one.
             resumed_task_id = (
                 task_plan_active(self.store.task_plan(session_id))
@@ -955,7 +959,7 @@ class RuntimeHost:
                     "session_id": session_id,
                     "workspace_id": workspace.workspace_id,
                     "provider": self.settings.provider,
-                    "model": self.settings.model,
+                    "model": selected_model,
                     "continuation_of": continuation_of,
                     "resumed_task_id": resumed_task_id,
                 },
@@ -969,21 +973,24 @@ class RuntimeHost:
             else:
                 # Missing or foreign attachments raise ValueError and fail the
                 # run loudly instead of silently dropping the user's context.
-                prompt = attachments.compose_prompt(
-                    prompt or "",
-                    attachments.load_attachments(
-                        self.settings.state_dir, session_id, attachment_ids
-                    ),
+                attachment_records = attachments.load_attachments(
+                    self.settings.state_dir, session_id, attachment_ids
                 )
+                attachments.validate_for_provider(attachment_records, self.settings.provider)
                 await self._emit(
                     run_id,
                     "message.user",
                     {
-                        "message": self._semantic({"role": "user", "content": prompt}),
+                        "message": self._semantic(
+                            attachments.compose_message(prompt or "", attachment_records)
+                        ),
                     },
                     sink,
                     role="user",
                     author="user",
+                )
+                attachments.mark_attachments_used(
+                    self.settings.state_dir, session_id, attachment_ids
                 )
             await self._emit(
                 run_id,
@@ -1180,7 +1187,7 @@ class RuntimeHost:
                     session_id,
                     provider=self._provider(),
                     provider_name=self.settings.provider,
-                    model=self.settings.model,
+                    model=selected_model,
                     budget=self.settings.context_limit,
                     force=force_compact,
                     secrets=(self.settings.api_key or "",),
@@ -1203,17 +1210,21 @@ class RuntimeHost:
                         "tool_count": len(tools),
                         "context_hash": digest(messages),
                         "tool_catalog_hash": catalog_hash,
+                        "model": selected_model,
                         "request_chars": request_size(system, messages, tools),
                         "tool_catalog_chars": tool_catalog_chars,
                     },
                     sink,
                 )
+                provider_messages = attachments.hydrate_messages(
+                    self.settings.state_dir, session_id, messages
+                )
                 response = await self._complete_with_retry(
                     ModelRequest(
                         system,
-                        messages,
+                        provider_messages,
                         tools,
-                        self.settings.model,
+                        selected_model,
                         self.settings.max_tokens,
                     ),
                     run_id,
