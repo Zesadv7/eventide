@@ -32,6 +32,11 @@ from eventide.normalization import normalize, redact
 from eventide.policy import PolicyEngine
 from eventide.projections import TaskPlanProjection
 from eventide.providers import Provider, ProviderError, build_provider
+from eventide.rag.embedding import provider_from_settings
+from eventide.rag.index import INDEX_RELATIVE_PATH
+from eventide.rag.tool import SEARCH_KNOWLEDGE_TOOL
+from eventide.rag.tool import handler as knowledge_search_handler
+from eventide.rag.tool import index_available as knowledge_index_available
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skills import SkillCatalog
 from eventide.store import RuntimeStore
@@ -56,7 +61,7 @@ from eventide.workspace import (
 # stop_reason values that mean the provider cut the answer off at max_tokens.
 TRUNCATION_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
 BASE_RUNTIME_READONLY_TOOLS = frozenset(
-    {"read_file", "glob", "compact", "read_tool_result", "todo_write"}
+    {"read_file", "glob", "compact", "read_tool_result", "todo_write", "search_knowledge"}
 )
 
 
@@ -1026,7 +1031,21 @@ class RuntimeHost:
                 raise ValueError("read_tool_result is reserved for Runtime tool-result paging")
             if any(tool.get("name") == "todo_write" for tool in self.tools):
                 raise ValueError("todo_write is reserved for Runtime task plans")
+            if any(tool.get("name") == "search_knowledge" for tool in self.tools):
+                raise ValueError("search_knowledge is reserved for Workspace knowledge retrieval")
             skill_tools = [skills.tool()] if skills else []
+            rag_tools: list[dict[str, Any]] = []
+            rag_handlers: dict[str, Any] = {}
+            if (workspace_root / INDEX_RELATIVE_PATH).is_file():
+                try:
+                    rag_embedder, rag_profile = provider_from_settings(self.settings)
+                    if knowledge_index_available(workspace_root, rag_profile):
+                        rag_tools.append(SEARCH_KNOWLEDGE_TOOL)
+                        rag_handlers["search_knowledge"] = knowledge_search_handler(
+                            workspace_root, rag_embedder, rag_profile
+                        )
+                except (OSError, RuntimeError, ValueError):
+                    pass
 
             async def write_task_plan(todos: object) -> str:
                 state = self.store.task_plan_state(session_id)
@@ -1051,6 +1070,7 @@ class RuntimeHost:
                 READ_TOOL_RESULT_TOOL,
                 TODO_WRITE_TOOL,
                 *skill_tools,
+                *rag_tools,
                 *manager.tools,
             ]
             tools = run_policy.filter_tool_catalog(tools, mode)
@@ -1059,6 +1079,7 @@ class RuntimeHost:
                 "read_tool_result": tool_result_reader(self.store, session_id),
                 "todo_write": write_task_plan,
                 **({"load_skill": skills.load} if skills else {}),
+                **rag_handlers,
                 **manager.handlers,
             }
             if mode == "plan":
@@ -1074,6 +1095,7 @@ class RuntimeHost:
                 {
                     "read_tool_result",
                     "todo_write",
+                    *({"search_knowledge"} if rag_tools else set()),
                     *manager.readonly_tools,
                     *({"load_skill"} if skills else set()),
                 },

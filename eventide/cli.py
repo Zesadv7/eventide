@@ -16,7 +16,7 @@ from eventide.migration import import_v02_database
 from eventide.models import RunRequest, ToolCall
 from eventide.rag.embedding import provider_from_settings
 from eventide.rag.index import IndexStore
-from eventide.rag.search import dense_search, format_results
+from eventide.rag.search import format_results, hybrid_search
 from eventide.runtime import AgentRuntime
 
 
@@ -336,14 +336,14 @@ def _rag(args: argparse.Namespace) -> int:
             f"skipped {stats.skipped}) in {stats.duration_ms:.2f} ms"
         )
         return 0
-    results = dense_search(
+    results = hybrid_search(
         workspace,
         args.query,
         k=args.k,
         embedder=embedder,
         profile=profile,
     )
-    print(format_results(results, mode="dense"))
+    print(format_results(results, mode="dense+sparse"))
     return 0
 
 

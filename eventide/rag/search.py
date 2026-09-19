@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from eventide.rag.embedding import EmbeddingProfile, EmbeddingProvider
-from eventide.rag.index import IndexedChunk, IndexStore
+from eventide.rag.index import DenseCandidate, IndexedChunk, IndexStore, SparseCandidate
+
+RRF_K = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +72,78 @@ def dense_search(
         )
         for candidate in candidates
     ]
+
+
+def rrf_fuse(
+    dense: list[DenseCandidate], sparse: list[SparseCandidate], *, k: int
+) -> list[SearchResult]:
+    """Fuse incomparable dense and BM25 scales using one-based ranks only."""
+    count = validate_k(k)
+    by_id: dict[int, SearchResult] = {}
+    for source, candidates in (("dense", dense), ("sparse", sparse)):
+        for candidate in candidates:
+            existing = by_id.get(candidate.chunk.id)
+            score = 1.0 / (RRF_K + candidate.rank)
+            if existing is None:
+                by_id[candidate.chunk.id] = SearchResult(
+                    chunk=candidate.chunk,
+                    score=score,
+                    sources=(source,),
+                    dense_rank=candidate.rank if source == "dense" else None,
+                    sparse_rank=candidate.rank if source == "sparse" else None,
+                )
+            else:
+                present = {*existing.sources, source}
+                sources = tuple(item for item in ("dense", "sparse") if item in present)
+                by_id[candidate.chunk.id] = SearchResult(
+                    chunk=existing.chunk,
+                    score=existing.score + score,
+                    sources=sources,
+                    dense_rank=(
+                        candidate.rank if source == "dense" else existing.dense_rank
+                    ),
+                    sparse_rank=(
+                        candidate.rank if source == "sparse" else existing.sparse_rank
+                    ),
+                )
+
+    def sort_key(result: SearchResult) -> tuple[float, int, str, int, int]:
+        ranks = [rank for rank in (result.dense_rank, result.sparse_rank) if rank is not None]
+        return (
+            -result.score,
+            min(ranks),
+            result.chunk.file,
+            result.chunk.start_line,
+            result.chunk.id,
+        )
+
+    return sorted(by_id.values(), key=sort_key)[:count]
+
+
+def hybrid_search(
+    workspace: Path,
+    query: str,
+    *,
+    embedder: EmbeddingProvider,
+    profile: EmbeddingProfile,
+    k: int = 5,
+) -> list[SearchResult]:
+    """Run dense and trigram/BM25 retrieval, then combine them with RRF."""
+    count = validate_k(k)
+    cleaned = query.strip()
+    if not cleaned:
+        raise ValueError("Search query must not be empty")
+    store = IndexStore(workspace)
+    stored_profile = store.validate_profile(profile)
+    vectors = embedder.embed([cleaned])
+    if len(vectors) != 1:
+        raise RuntimeError("Embedding response count does not match the request")
+    vector = vectors[0]
+    if stored_profile.dimension != len(vector):
+        raise ValueError("Knowledge index vector dimension is inconsistent; rebuild --force")
+    dense = store.dense_search(vector, limit=count * 2)
+    sparse = store.sparse_search(cleaned, limit=count * 2)
+    return rrf_fuse(dense, sparse, k=count)
 
 
 def format_results(results: list[SearchResult], *, mode: str) -> str:

@@ -28,7 +28,7 @@ def test_rag_build_and_search_cli(isolated_workspace: Path, capsys) -> None:
     assert "1 files / 1 chunks" in capsys.readouterr().out
     assert main(["rag", "search", "blue-green", "--workspace", str(root)]) == 0
     output = capsys.readouterr().out
-    assert "mode: dense" in output
+    assert "mode: dense+sparse" in output
     assert "knowledge.txt:1-1" in output
 
 

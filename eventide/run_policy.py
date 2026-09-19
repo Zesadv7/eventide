@@ -12,7 +12,15 @@ RUN_MODES = ("auto", "plan", "agent")
 # `plan` keeps research and plan bookkeeping; anything with side effects
 # (bash, write/edit, MCP) disappears from the catalog so the model cannot call it.
 PLAN_READONLY_TOOLS = frozenset(
-    {"read_file", "glob", "compact", "read_tool_result", "todo_write", "load_skill"}
+    {
+        "read_file",
+        "glob",
+        "compact",
+        "read_tool_result",
+        "todo_write",
+        "load_skill",
+        "search_knowledge",
+    }
 )
 
 _PLAN_NOTE = (

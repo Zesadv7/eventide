@@ -32,6 +32,7 @@ _REVIEW_COMMANDS = (
     re.compile(r"\b(chmod\s+777|drop\s+(table|database))\b", re.I),
 )
 _SAFE_FILE_TOOLS = {"read_file", "glob"}
+_SAFE_READ_TOOLS = {"search_knowledge"}
 _WRITE_FILE_TOOLS = {"write_file", "edit_file"}
 
 
@@ -72,6 +73,8 @@ class PolicyEngine:
                     PolicyDecision.ASK, "Command may delete or irreversibly alter data"
                 )
             return PolicyResult(PolicyDecision.ALLOW, "Command passed local policy")
+        if tool_name in _SAFE_READ_TOOLS:
+            return PolicyResult(PolicyDecision.ALLOW, "Read-only Runtime tool")
         if tool_name in _SAFE_FILE_TOOLS | _WRITE_FILE_TOOLS:
             raw_path = str(arguments.get("path", arguments.get("pattern", "")))
             if tool_name != "glob":

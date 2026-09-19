@@ -32,6 +32,14 @@ def test_path_scope_and_agent_names(isolated_workspace):
     assert validate_agent_name("../escape") is not None
 
 
+def test_knowledge_search_is_explicitly_read_only(isolated_workspace):
+    result = PolicyEngine().evaluate(
+        "search_knowledge", {"query": "auth", "k": 5}, isolated_workspace
+    )
+    assert result.decision == PolicyDecision.ALLOW
+    assert result.reason == "Read-only Runtime tool"
+
+
 def test_settings_custom_state_dir(isolated_workspace, monkeypatch):
     from eventide.config import Settings
 
