@@ -15,6 +15,7 @@ from eventide.config import Settings
 from eventide.models import RunRequest
 from eventide.observability import TraceStore
 from eventide.providers import ScriptedProvider, build_provider
+from eventide.rag.index import IndexStore
 from eventide.runtime import AgentRuntime
 
 
@@ -164,10 +165,15 @@ async def run_evaluations(
         case_store = suite_store
         sandbox: Path | None = None
         fixtures = case.get("workspace")
+        rag_index = case.get("rag_index") is True
+        if rag_index and not isinstance(fixtures, dict):
+            raise ValueError("rag_index requires an inline workspace fixture")
         if isinstance(fixtures, dict):
             sandbox = _create_sandbox(fixtures)
             case_settings = replace(settings, workdir=sandbox, state_dir=sandbox / ".eventide")
             case_store = TraceStore(case_settings.state_dir / "evals" / f"{mode}.db")
+            if rag_index:
+                IndexStore(sandbox).build()
         provider = (
             build_provider(case_settings) if live else ScriptedProvider(case.get("script", []))
         )

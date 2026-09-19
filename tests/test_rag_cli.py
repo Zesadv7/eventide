@@ -19,6 +19,8 @@ def test_rag_arguments_parse() -> None:
     assert build.rag_action == "build" and build.force
     search = parser.parse_args(["rag", "search", "rollout", "-k", "3"])
     assert search.rag_action == "search" and search.k == 3
+    evaluate = parser.parse_args(["rag", "eval", "evals/retrieval.yaml", "--json"])
+    assert evaluate.rag_action == "eval" and evaluate.json
 
 
 def test_rag_build_and_search_cli(isolated_workspace: Path, capsys) -> None:

@@ -1,0 +1,20 @@
+suite: retrieval
+index: ../tests/fixtures/retrieval-corpus
+cases:
+  - id: find-auth-logic
+    query: verify_token bearer signature
+    expect_files: [src/auth.py]
+    expect_contains: verify_token
+
+  - id: find-deployment-strategy
+    query: blue-green rollout
+    expect_files: [docs/deployment.md]
+
+  - id: find-database-pool
+    query: 数据库连接池配置
+    expect_files: [docs/database.md]
+
+  - id: find-auth-error
+    query: E_AUTH_401
+    expect_files: [docs/errors.md]
+

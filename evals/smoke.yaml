@@ -104,3 +104,16 @@ cases:
                 - {id: t3, content: Run validation, status: pending}
       - {text: task plan complete}
     expected: {final_contains: task plan complete, required_tools: [todo_write, read_file]}
+
+  - id: search-knowledge
+    prompt: Search the Workspace knowledge index for token verification.
+    workspace:
+      docs/auth.md: "# Authentication\nverify_token checks the bearer token signature.\n"
+    rag_index: true
+    script:
+      - tool_calls:
+          - id: search_1
+            name: search_knowledge
+            arguments: {query: verify_token, k: 5}
+      - {text: retrieval complete}
+    expected: {final_contains: retrieval complete, required_tools: [search_knowledge]}

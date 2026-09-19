@@ -15,6 +15,11 @@ from eventide.evaluation import run_evaluations
 from eventide.migration import import_v02_database
 from eventide.models import RunRequest, ToolCall
 from eventide.rag.embedding import provider_from_settings
+from eventide.rag.evaluation import (
+    format_retrieval_report,
+    report_json,
+    run_retrieval_evaluation,
+)
 from eventide.rag.index import IndexStore
 from eventide.rag.search import format_results, hybrid_search
 from eventide.runtime import AgentRuntime
@@ -78,6 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
     rag_search.add_argument("query")
     rag_search.add_argument("--workspace", type=Path, default=Path.cwd())
     rag_search.add_argument("-k", type=int, default=5)
+    rag_eval = rag_actions.add_parser("eval", help="Run an offline retrieval suite")
+    rag_eval.add_argument("suite", type=Path)
+    rag_eval.add_argument("--json", action="store_true")
     for name in ("run", "chat", "serve"):
         subparsers.choices[name].add_argument("--workspace", help="Workspace ID or existing path")
     for name in ("run", "chat"):
@@ -323,6 +331,10 @@ async def _manage(args: argparse.Namespace) -> int:
 
 
 def _rag(args: argparse.Namespace) -> int:
+    if args.rag_action == "eval":
+        report = run_retrieval_evaluation(args.suite)
+        print(report_json(report) if args.json else format_retrieval_report(report))
+        return 0 if report["passed"] == report["total"] else 1
     workspace = args.workspace.expanduser().resolve()
     embedder, profile = provider_from_settings(Settings.from_env(workdir=workspace))
     if args.rag_action == "build":
