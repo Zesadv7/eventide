@@ -14,6 +14,8 @@ from eventide.config import Settings
 from eventide.evaluation import run_evaluations
 from eventide.migration import import_v02_database
 from eventide.models import RunRequest, ToolCall
+from eventide.rag.index import IndexStore
+from eventide.rag.search import format_results, sparse_search
 from eventide.runtime import AgentRuntime
 
 
@@ -66,6 +68,15 @@ def build_parser() -> argparse.ArgumentParser:
     actions.add_parser("add").add_argument("target")
     actions.add_parser("show").add_argument("target")
     actions.add_parser("remove").add_argument("target")
+    rag = subparsers.add_parser("rag", help="Build and query a Workspace knowledge index")
+    rag_actions = rag.add_subparsers(dest="rag_action", required=True)
+    rag_build = rag_actions.add_parser("build", help="Build or update the knowledge index")
+    rag_build.add_argument("--workspace", type=Path, default=Path.cwd())
+    rag_build.add_argument("--force", action="store_true", help="Rebuild every indexed file")
+    rag_search = rag_actions.add_parser("search", help="Search the knowledge index")
+    rag_search.add_argument("query")
+    rag_search.add_argument("--workspace", type=Path, default=Path.cwd())
+    rag_search.add_argument("-k", type=int, default=5)
     for name in ("run", "chat", "serve"):
         subparsers.choices[name].add_argument("--workspace", help="Workspace ID or existing path")
     for name in ("run", "chat"):
@@ -310,6 +321,22 @@ async def _manage(args: argparse.Namespace) -> int:
         await runtime.close()
 
 
+def _rag(args: argparse.Namespace) -> int:
+    workspace = args.workspace.expanduser().resolve()
+    if args.rag_action == "build":
+        stats = IndexStore(workspace).build(force=args.force)
+        print(
+            "Indexed "
+            f"{stats.files} files / {stats.chunks} chunks "
+            f"(rebuilt {stats.rebuilt_files}, deleted {stats.deleted_files}, "
+            f"skipped {stats.skipped}) in {stats.duration_ms:.2f} ms"
+        )
+        return 0
+    results = sparse_search(workspace, args.query, k=args.k)
+    print(format_results(results, mode="sparse"))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         return _main(argv)
@@ -332,6 +359,8 @@ def _main(argv: list[str] | None = None) -> int:
         return asyncio.run(_run_once(args))
     if args.command == "eval":
         return asyncio.run(_eval(args))
+    if args.command == "rag":
+        return _rag(args)
     if args.command in {
         "workspace",
         "continue",
