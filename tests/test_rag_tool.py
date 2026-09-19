@@ -92,3 +92,19 @@ def test_tool_defends_against_a_missing_or_invalid_index(isolated_workspace: Pat
     assert index_available(repo, profile) is False
     result = handler(repo, HashEmbedder(), profile)("query")
     assert result == "Error: no knowledge index; run 'eventide rag build'"
+
+
+async def test_corrupt_index_does_not_break_an_unrelated_run(isolated_workspace: Path) -> None:
+    repo = make_repo(isolated_workspace / "repo")
+    index = repo / ".eventide" / "index.sqlite"
+    index.parent.mkdir()
+    index.write_bytes(b"not a sqlite database")
+    provider = ScriptedProvider([{"text": "still usable"}])
+    host = RuntimeHost(settings_for(repo), provider, enable_mcp=False)
+    try:
+        result = await host.run(RunRequest("hello"))
+        assert result.status == "completed"
+        assert "search_knowledge" not in {tool["name"] for tool in provider.requests[0].tools}
+        assert index.read_bytes() == b"not a sqlite database"
+    finally:
+        await host.close()

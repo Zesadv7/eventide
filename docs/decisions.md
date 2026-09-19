@@ -412,4 +412,14 @@
 
 **影响：** 检索调用继续经过 `ToolExecutor` 和 `PolicyEngine`，使用既有 `tool.prepared` / `tool.completed`，因此不新增事件类型、Runtime schema 或旁路审计。Plan 模式可以使用该工具，且只读调用不产生副作用 checkpoint。`eventide rag build|search|eval` 分别负责显式建索引、人工试检索和标注式 recall@5/MRR 评测；离线评测强制 HashEmbedder，不依赖网络或 API Key。索引构建耗时和文件变化不会被自动隐藏，调用方负责需要时重建。rerank、自动索引、PDF/Office ETL、Web 检索台和多租户留待后续决策。
 
+## ADR-042：检索融合以单一只读快照为一致性边界
+
+**状态：** Accepted
+
+**背景：** 原子提交只保证单次 SQL 读取完整，不能保证多个独立连接看到同一代索引。重建复用 chunk ID 时，跨代 dense/sparse 候选可能被错误融合；读取损坏数据库也不应阻断无关 Run。
+
+**决策：** 查询只使用 `mode=ro` 连接。embedding 请求在事务外完成，然后在一个 WAL 读事务内校验 fingerprint 并执行两路召回。构建持有写锁后重验 generation 和语料 manifest，再提交索引替换。读取不初始化 schema；Host 对损坏或不兼容的索引隐藏工具，不静默修复。离线评测覆盖 embedding 配置为 Hash，并将“调用发生”与“工具成功”分开判分。
+
+**影响：** 不新增依赖、数据库 schema 或事件类型。查询期间旧 WAL 页面需要保留，但网络调用不延长读事务；文件系统不受 SQLite 锁保护，因此该机制不是文件系统原子快照。并发重建、损坏索引、扫描漂移和环境配置污染均由离线回归测试覆盖。
+
 **备选方案：** LangChain/LlamaIndex 会带来与当前规模不相称的依赖和控制反转；外置向量数据库增加服务与运维成本；只做 dense 会削弱函数名、错误码和中文子串等精确匹配，只做 FTS 又无法扩展到语义 embedding；文件变更自动全量索引会把不可控耗时塞进 Runtime 主链。上述方案均不用于 v0.4。

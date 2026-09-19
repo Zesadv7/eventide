@@ -139,6 +139,14 @@ def _judge(
     for name in expected.get("required_tools", []):
         if name not in used:
             reasons.append(f"required tool not called: {name}")
+    successful = {
+        event["payload"].get("name")
+        for event in events
+        if event["type"] == "tool.result" and event["payload"].get("is_error") is False
+    }
+    for name in expected.get("successful_tools", []):
+        if name not in successful:
+            reasons.append(f"required tool did not succeed: {name}")
     denied = any(
         event["type"] == "tool.result"
         and "Permission denied" in str(event["payload"].get("content", ""))
@@ -154,6 +162,11 @@ async def run_evaluations(
     path: Path, *, live: bool = False, settings: Settings | None = None
 ) -> dict[str, Any]:
     settings = settings or Settings.from_env()
+    if not live:
+        settings = replace(
+            settings, embedding_provider="hash", embedding_model=None,
+            embedding_base_url=None, embedding_api_key=None, embedding_dim=256,
+        )
     cases = load_suite(path)
     mode = "live" if live else "offline"
     database = settings.state_dir / "evals" / f"{mode}.db"
@@ -173,6 +186,11 @@ async def run_evaluations(
             case_settings = replace(settings, workdir=sandbox, state_dir=sandbox / ".eventide")
             case_store = TraceStore(case_settings.state_dir / "evals" / f"{mode}.db")
             if rag_index:
+                # Fixture indexes are always deterministic, including live LLM runs.
+                case_settings = replace(
+                    case_settings, embedding_provider="hash", embedding_model=None,
+                    embedding_base_url=None, embedding_api_key=None, embedding_dim=256,
+                )
                 IndexStore(sandbox).build()
         provider = (
             build_provider(case_settings) if live else ScriptedProvider(case.get("script", []))

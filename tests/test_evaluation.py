@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,38 @@ def test_load_suite_validation(isolated_workspace):
     suite.write_text("cases: invalid\n", encoding="utf-8")
     with pytest.raises(ValueError, match="cases"):
         load_suite(suite)
+
+
+def test_successful_tool_grading_rejects_failed_or_missing_results():
+    expected = {"successful_tools": ["search_knowledge"]}
+    for events in ([], [{"type": "tool.result", "payload": {
+        "name": "search_knowledge", "is_error": True,
+    }}]):
+        passed, reasons = _judge(expected, events=events)
+        assert not passed
+        assert reasons == ("required tool did not succeed: search_knowledge",)
+    assert _judge(expected, events=[{"type": "tool.result", "payload": {
+        "name": "search_knowledge", "is_error": False,
+    }}])[0]
+
+
+async def test_offline_rag_ignores_remote_embedding_settings(isolated_workspace, monkeypatch):
+    from eventide.rag.embedding import OpenAICompatibleEmbedder
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("offline evaluation attempted remote embedding")
+
+    monkeypatch.setattr(OpenAICompatibleEmbedder, "embed", forbidden)
+    cases = load_suite(REPO_ROOT / "evals" / "smoke.yaml")
+    suite = isolated_workspace / "rag.json"
+    suite.write_text(json.dumps({"cases": [cases[-1]]}), encoding="utf-8")
+    settings = replace(
+        settings_for(isolated_workspace), embedding_provider="openai-compatible",
+        embedding_model="remote-model", embedding_api_key="do-not-use", embedding_dim=1024,
+    )
+    report = await run_evaluations(suite, settings=settings)
+    assert report["passed"] == report["total"] == 1, report["failure_reasons"]
+    assert report["results"][0]["tool_errors"] == 0
 
 
 async def test_offline_evaluation_writes_safe_metrics(isolated_workspace):

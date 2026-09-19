@@ -21,7 +21,7 @@ class SearchResult:
 
 
 def validate_k(k: int) -> int:
-    if not 1 <= k <= 10:
+    if type(k) is not int or not 1 <= k <= 10:
         raise ValueError("k must be between 1 and 10")
     return k
 
@@ -55,14 +55,16 @@ def dense_search(
     if not cleaned:
         raise ValueError("Search query must not be empty")
     store = IndexStore(workspace)
-    stored_profile = store.validate_profile(profile)
+    store.validate_profile(profile)
     vectors = embedder.embed([cleaned])
     if len(vectors) != 1:
         raise RuntimeError("Embedding response count does not match the request")
     vector = vectors[0]
-    if stored_profile.dimension != len(vector):
-        raise ValueError("Knowledge index vector dimension is inconsistent; rebuild --force")
-    candidates = store.dense_search(vector, limit=count)
+    with store.snapshot() as reader:
+        stored_profile = reader.validate_profile(profile)
+        if stored_profile.dimension != len(vector):
+            raise ValueError("Knowledge index vector dimension is inconsistent; rebuild --force")
+        candidates = reader.dense_search(vector, limit=count)
     return [
         SearchResult(
             chunk=candidate.chunk,
@@ -134,15 +136,19 @@ def hybrid_search(
     if not cleaned:
         raise ValueError("Search query must not be empty")
     store = IndexStore(workspace)
-    stored_profile = store.validate_profile(profile)
+    # Fail before a potentially remote embedding request, then revalidate the
+    # pinned snapshot in case a rebuild commits while the request is in flight.
+    store.validate_profile(profile)
     vectors = embedder.embed([cleaned])
     if len(vectors) != 1:
         raise RuntimeError("Embedding response count does not match the request")
     vector = vectors[0]
-    if stored_profile.dimension != len(vector):
-        raise ValueError("Knowledge index vector dimension is inconsistent; rebuild --force")
-    dense = store.dense_search(vector, limit=count * 2)
-    sparse = store.sparse_search(cleaned, limit=count * 2)
+    with store.snapshot() as reader:
+        stored_profile = reader.validate_profile(profile)
+        if stored_profile.dimension != len(vector):
+            raise ValueError("Knowledge index vector dimension is inconsistent; rebuild --force")
+        dense = reader.dense_search(vector, limit=count * 2)
+        sparse = reader.sparse_search(cleaned, limit=count * 2)
     return rrf_fuse(dense, sparse, k=count)
 
 

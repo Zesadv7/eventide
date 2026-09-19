@@ -3,11 +3,14 @@
 import hashlib
 import sqlite3
 import subprocess
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
+from eventide.rag.embedding import HashEmbedder
 from eventide.rag.index import IndexStore
+from eventide.rag.search import hybrid_search
 
 
 def _git_workspace(root: Path) -> Path:
@@ -137,3 +140,64 @@ def test_dense_search_rejects_corrupt_vector_dimension(isolated_workspace: Path)
         connection.close()
     with pytest.raises(ValueError, match="dimension is inconsistent"):
         store.dense_search([1.0] * 256, limit=5)
+
+
+def test_search_does_not_initialize_an_empty_database(isolated_workspace: Path) -> None:
+    store = IndexStore(_git_workspace(isolated_workspace))
+    store.path.parent.mkdir()
+    store.path.touch()
+    with pytest.raises(ValueError, match="version: 0"):
+        store.embedding_profile()
+    assert store.path.read_bytes() == b""
+
+
+def test_hybrid_search_uses_one_generation_during_rebuild(
+    isolated_workspace: Path, monkeypatch,
+) -> None:
+    root = _git_workspace(isolated_workspace)
+    source = root / "doc.txt"
+    source.write_text("original needle", encoding="utf-8")
+    store = IndexStore(root)
+    store.build()
+    profile = store.embedding_profile()
+    original_dense = IndexStore.dense_search
+
+    def rebuild_after_dense(self, vector, *, limit):
+        candidates = original_dense(self, vector, limit=limit)
+        source.write_text("replacement needle", encoding="utf-8")
+        store.build(force=True)
+        return candidates
+
+    monkeypatch.setattr(IndexStore, "dense_search", rebuild_after_dense)
+    hits = hybrid_search(root, "needle", embedder=HashEmbedder(), profile=profile)
+    assert len(hits) == 1
+    assert hits[0].chunk.text == "original needle"
+    assert hits[0].sources == ("dense", "sparse")
+    assert store.sparse_search("replacement", limit=5)[0].chunk.text == "replacement needle"
+
+
+def test_manifest_verification_holds_write_lock_and_rolls_back(
+    isolated_workspace: Path, monkeypatch,
+) -> None:
+    root = _git_workspace(isolated_workspace)
+    source = root / "doc.txt"
+    source.write_text("original needle", encoding="utf-8")
+    store = IndexStore(root)
+    store.build()
+    source.write_text("changed needle", encoding="utf-8")
+    original_scan = store._scan
+
+    def scan(*, include_chunks):
+        if not include_chunks:
+            with (
+                closing(sqlite3.connect(store.path, timeout=0)) as contender,
+                pytest.raises(sqlite3.OperationalError, match="locked"),
+            ):
+                contender.execute("BEGIN IMMEDIATE")
+            source.write_text("modified during build", encoding="utf-8")
+        return original_scan(include_chunks=include_chunks)
+
+    monkeypatch.setattr(store, "_scan", scan)
+    with pytest.raises(RuntimeError, match="Workspace changed"):
+        store.build()
+    assert store.sparse_search("original", limit=5)[0].chunk.text == "original needle"

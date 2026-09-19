@@ -99,6 +99,8 @@ RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户显式运�
 
 Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源码和普通文本再使用 600～800 字符窗口及约 100 字符 overlap；每块保存准确的 1-based 闭区间行号。默认 HashEmbedder 用 SHA-256 token hashing 生成确定性本地向量，只验证离线机制，不声称具备学习得到的语义能力；可选 OpenAI-compatible provider 只在显式配置后惰性调用。provider、model、base URL、dimension 和算法版本组成 fingerprint，任何变化都要求 `--force`，避免比较来自不同向量空间的 BLOB。
 
+读连接使用 SQLite URI `mode=ro`，不运行 schema 初始化。查询 embedding 在读事务外生成，随后在同一个 WAL 快照内重验 fingerprint、读取 dense 和 sparse 候选，防止重建复用 chunk ID 导致跨代融合。构建的第二次 manifest 检查在 `BEGIN IMMEDIATE` 之后、写入之前执行；它检测两次扫描之间的变化，但不等价于锁住工作区文件系统，用户仍应避免构建期间编辑语料。Host 将 SQLite 错误视为索引不可用。
+
 查询同时执行全量 float32 余弦 Top-2k 与 FTS5 BM25 Top-2k，再用一基排名、常量 60 的 Reciprocal Rank Fusion 合并。BM25 与余弦只贡献各自排名，不直接相加不同量纲的原始分数。Host 在**每次 Run**按当前 Session 的 Workspace 检查索引及 fingerprint；有效时动态加入 `search_knowledge(query, k)`，无效或不存在时不向模型暴露。该工具属于 Plan 可见的只读集合，仍由 `ToolExecutor` 和 `PolicyEngine` 执行，调用事实继续使用既有 `tool.prepared` / `tool.completed`，不新增事件类型或副作用 checkpoint。
 
 `eventide rag eval` 将标注语料复制到临时 Git Workspace，强制使用 HashEmbedder 建索引，按 query→期望文件计算 macro recall@5 与 MRR；普通 scripted smoke 通过显式 case 级 `rag_index: true` 在既有 Git sandbox 中预建索引。两条离线路径都不读取真实 embedding 配置、不访问网络，也不会在真实 checkout 写索引。
@@ -108,6 +110,8 @@ Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源
 评测套件是 YAML 的 `cases` 列表（`evals/smoke.yaml` 覆盖机制，`evals/tasks.yaml` 覆盖任务级完成）。每条用例包含 `id`、`prompt`、离线 `script`（ScriptedProvider 步骤）、`expected`，以及可选的 `workspace`（相对路径 → 文件内容的 fixture 映射）。声明 `workspace` 的用例各自创建一次性 Git 沙箱：写入 fixture、`git init` 并提交初始 commit（仓库级 user identity 和 `.eventide/` 排除规则写在沙箱内），Runtime 改用以沙箱为 `workdir`、沙箱内 `.eventide` 为状态根的独立 Settings 与评测数据库；沙箱保留不自动删除，便于排查失败。无 `workspace` 的用例沿用套件级设置，报告始终写回套件级状态根。
 
 判分（`_judge`）是确定性的 fs/git 证据检查，零模型调用：既有 `status`、`final_contains`、`required_tools`、`permission_denied`，任务级另有 `file_exists`、`file_absent`、`file_contains`（大小写不敏感子串）和 `git_committed`（初始提交之外存在新提交且 `git status --porcelain` 为空；非 Git 沙箱报 `git evidence unavailable`）。模型最终输出只参与 `final_contains`，从不作为完成证据。报告在 `mode/suite/passed/total/pass_rate/average_duration_ms/tool_success_rate/safety_blocks/duration_ms/results` 之外提供 `task_completion_rate`、`failure_reasons` 分布和 `average_steps`；live 模式另计 `total_input_tokens` / `total_output_tokens`，offline 模式带 `regression_smoke: true` 标记。CLI 默认打印人类可读摘要（完成率、失败原因分布、失败用例），`--json` 输出完整报告；退出码保持"全部通过才为 0"。每条 `EvalCaseResult` 透传 RunResult 的 `steps`、`usage`、`status`。
+
+评测的 `expected.successful_tools` 要求对应 `tool.result` 的 `is_error` 明确为 false；`required_tools` 仍仅检查调用是否发生，供拒绝策略测试使用。注意工具成功标志并不代替子进程退出码或文件内容验收。
 
 ## Web 展示投影与交互
 

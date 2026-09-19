@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
@@ -31,7 +32,7 @@ def index_available(workspace: Path, profile: EmbeddingProfile) -> bool:
         return False
     try:
         IndexStore(workspace).validate_profile(profile)
-    except (OSError, RuntimeError, ValueError):
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):
         return False
     return True
 

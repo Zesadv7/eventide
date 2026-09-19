@@ -7,6 +7,8 @@ import math
 import os
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -124,19 +126,48 @@ class IndexStore:
             raise ValueError("RAG indexing requires a Git workspace")
         self.workspace = root
         self.path = root / INDEX_RELATIVE_PATH
+        self._snapshot: sqlite3.Connection | None = None
 
     def _connect(self, *, create: bool) -> sqlite3.Connection:
         if create:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         elif not self.path.is_file():
             raise ValueError("No knowledge index; run 'eventide rag build'")
-        connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
+        target = str(self.path) if create else f"{self.path.as_uri()}?mode=ro"
+        connection = sqlite3.connect(target, uri=not create, timeout=5, isolation_level=None)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 5000")
         if create:
             connection.execute("PRAGMA journal_mode = WAL")
         return connection
+
+    @contextmanager
+    def snapshot(self) -> Iterator[IndexStore]:
+        """Pin metadata and both retrieval paths to one WAL read transaction."""
+        reader = IndexStore(self.workspace)
+        connection = reader._connect(create=False)
+        try:
+            connection.execute("BEGIN")
+            # BEGIN alone does not establish SQLite's snapshot; the first read does.
+            self._generation(connection)
+            reader._snapshot = connection
+            yield reader
+        finally:
+            reader._snapshot = None
+            connection.close()
+
+    @contextmanager
+    def _reader(self) -> Iterator[sqlite3.Connection]:
+        connection = self._snapshot or self._connect(create=False)
+        try:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version not in {1, 2}:
+                raise ValueError(f"Unsupported knowledge index version: {version}")
+            yield connection
+        finally:
+            if self._snapshot is None:
+                connection.close()
 
     def _ensure_schema(self, connection: sqlite3.Connection) -> None:
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
@@ -345,14 +376,13 @@ class IndexStore:
             if stored_dimension is not None and not force and dimension != stored_dimension:
                 raise ValueError("Embedding dimension changed; rebuild with --force")
             resolved_profile = profile.resolved(dimension)
-            verified = self._scan(include_chunks=False)
-            if verified.signature != scan.signature:
-                raise RuntimeError("Workspace changed during index build; retry")
-
             connection.execute("BEGIN IMMEDIATE")
             try:
                 if self._generation(connection) != generation:
                     raise RuntimeError("Knowledge index changed during build; retry")
+                verified = self._scan(include_chunks=False)
+                if verified.signature != scan.signature:
+                    raise RuntimeError("Workspace changed during index build; retry")
                 if force:
                     connection.execute("DELETE FROM files")
                 else:
@@ -442,20 +472,17 @@ class IndexStore:
             raise ValueError("Search query must not be empty")
         terms = [term for term in cleaned.split() if term]
         match = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
-        connection = self._connect(create=False)
         try:
-            self._ensure_schema(connection)
-            rows = connection.execute(
-                "SELECT chunks.id, chunks.file, chunks.start_line, chunks.end_line, "
-                "chunks.heading, chunks.text, bm25(fts) AS score "
-                "FROM fts JOIN chunks ON chunks.id = fts.rowid "
-                "WHERE fts MATCH ? ORDER BY score ASC, chunks.id ASC LIMIT ?",
-                (match, limit),
-            ).fetchall()
+            with self._reader() as connection:
+                rows = connection.execute(
+                    "SELECT chunks.id, chunks.file, chunks.start_line, chunks.end_line, "
+                    "chunks.heading, chunks.text, bm25(fts) AS score "
+                    "FROM fts JOIN chunks ON chunks.id = fts.rowid "
+                    "WHERE fts MATCH ? ORDER BY score ASC, chunks.id ASC LIMIT ?",
+                    (match, limit),
+                ).fetchall()
         except sqlite3.OperationalError as exc:
             raise ValueError(f"Invalid knowledge search query: {query}") from exc
-        finally:
-            connection.close()
         return [
             SparseCandidate(
                 chunk=IndexedChunk(
@@ -474,14 +501,10 @@ class IndexStore:
 
     def embedding_profile(self) -> EmbeddingProfile:
         """Read and verify the vector identity stored with the index."""
-        connection = self._connect(create=False)
-        try:
-            self._ensure_schema(connection)
+        with self._reader() as connection:
             if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 2:
                 raise ValueError("Knowledge index has no vectors; run 'eventide rag build'")
             meta = self._meta(connection)
-        finally:
-            connection.close()
         required = {
             "embedding_provider",
             "embedding_model",
@@ -525,15 +548,11 @@ class IndexStore:
         """Rank every stored float32 vector by cosine similarity."""
         if not vector or not any(vector):
             return []
-        connection = self._connect(create=False)
-        try:
-            self._ensure_schema(connection)
+        with self._reader() as connection:
             rows = connection.execute(
                 "SELECT id, file, start_line, end_line, heading, text, vec "
                 "FROM chunks WHERE vec IS NOT NULL"
             ).fetchall()
-        finally:
-            connection.close()
         query_norm = math.sqrt(sum(value * value for value in vector))
         scored: list[tuple[float, sqlite3.Row]] = []
         for row in rows:

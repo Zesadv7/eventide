@@ -116,4 +116,7 @@ cases:
             name: search_knowledge
             arguments: {query: verify_token, k: 5}
       - {text: retrieval complete}
-    expected: {final_contains: retrieval complete, required_tools: [search_knowledge]}
+    expected:
+      final_contains: retrieval complete
+      required_tools: [search_knowledge]
+      successful_tools: [search_knowledge]
