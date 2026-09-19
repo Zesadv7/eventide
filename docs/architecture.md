@@ -115,6 +115,8 @@ Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源
 
 评测的 `expected.successful_tools` 要求对应 `tool.result` 的 `is_error` 明确为 false；`required_tools` 仍仅检查调用是否发生，供拒绝策略测试使用。注意工具成功标志并不代替子进程退出码或文件内容验收。
 
+`examples/rag_repair.py` 是独立离线工程闭环：临时 Git fixture → 索引 → `search_knowledge` / `read_file` → 步数上限停驻 → 重开 Host → Continue → `edit_file` / 越界拒绝 / `bash` 测试。使用真实文件工具、策略、持久化与本地子进程，但 Provider 决策是 scripted。独立 verifier 通过当前 Python 的 unittest 退出码和测试源码完整性判定修复证据，不信任最终回复或 Shell 工具的成功标志；不修改生产 Shell 返回协议，也不新增事件。
+
 ## Web 展示投影与交互
 
 Web 是原生 ES modules，无构建步骤。`index.html` 定义两栏外壳：左侧导航（Workspace 切换与 Session 列表）与工作区（topbar、正文与 composer）；topbar 的任务计划、工具、详情、用量四个胶囊按钮各自弹出悬浮详情卡，替代原右侧常驻工作面板；`app.js` 协调 Workspace 注册、Workspace/Session 选择与管理、API 状态、审批、Continue、四个胶囊对应的浮层与 composer；`projection.js` 提供纯展示投影；`transport.js` 消费同一 SSE 路由；`view.js` 处理稳定 DOM 与安全 Markdown 子集；`config.js` 管理 Host 模型配置。composer 的模型下拉读取 `/api/models`，每次提交把非默认选择写入 RunBody；旁边“配置”按钮继续打开 Host 连接弹窗。添加工作区对话框调用仅限本机的 Workspace POST，成功后刷新内存目录并直接切换，不自动创建空 Session。Session 行的可见“⋯”与 contextmenu 打开同一管理对话框；归档列表显式切换，删除冲突保留服务端说明。左侧会话列表按“今天 / 7 天内 / 更早”分组，状态点来自 Session 投影，计划进度徽标复用 `planGroups` 计数。

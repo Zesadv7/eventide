@@ -164,7 +164,9 @@ def test_hybrid_search_uses_one_generation_during_rebuild(
 
     def rebuild_after_dense(self, vector, *, limit):
         candidates = original_dense(self, vector, limit=limit)
-        source.write_text("replacement needle", encoding="utf-8")
+        # The new generation no longer matches the sparse query. Reusing its
+        # candidates would lose the sparse source even though chunk IDs match.
+        source.write_text("replacement unrelated", encoding="utf-8")
         store.build(force=True)
         return candidates
 
@@ -173,7 +175,7 @@ def test_hybrid_search_uses_one_generation_during_rebuild(
     assert len(hits) == 1
     assert hits[0].chunk.text == "original needle"
     assert hits[0].sources == ("dense", "sparse")
-    assert store.sparse_search("replacement", limit=5)[0].chunk.text == "replacement needle"
+    assert store.sparse_search("replacement", limit=5)[0].chunk.text == "replacement unrelated"
 
 
 def test_manifest_verification_holds_write_lock_and_rolls_back(

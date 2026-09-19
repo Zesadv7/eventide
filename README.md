@@ -66,6 +66,16 @@ uv run eventide eval evals/tasks.yaml
 
 默认输出人类可读摘要：任务完成率、平均步数、失败原因分布和失败用例；加 `--json` 打印完整报告。报告中的 `task_completion_rate` 是通过用例占比，`failure_reasons` 汇总失败原因，live 模式另汇总输入/输出 tokens。离线结果是 scripted 回归冒烟（`regression_smoke: true`），不代表真实模型的任务完成率。
 
+### 一个可以复现的工程闭环
+
+```bash
+uv run python -m examples.rag_repair
+```
+
+示例在临时 Git 工作区创建一个折扣计算 bug 和 3 条 unittest，先确认测试失败，再通过真实 Runtime 工具检索带行号的约定、读取代码。达到两步预算后 Session 停驻；关闭并重新打开 Host，使用 Continue 恢复，执行预设补丁、拦截一次越界读取，再运行测试。最后独立子进程再次验收退出码，并确认测试文件未被修改。成功时 JSON 的 `passed` 为 true，`before_exit_code=1`、`after_exit_code=0`，临时文件自动清理。
+
+这展示的是**可检索、可审计、可恢复、可验证的执行机制**。决策和补丁由 ScriptedProvider 预设，不是模型自主修复能力的证明；路径校验也不是操作系统沙箱。真实模型能力需要另外显式运行 live 评测，不能把这个结果写成真实模型成功率。
+
 启动 Web 控制台：
 
 ```bash
