@@ -226,6 +226,24 @@ API Key 未单独配置时回退 `EVENTIDE_API_KEY`。Hash 模式可通过 `EVEN
 
 查询以只读事务固定索引快照，后台重建不会让两路候选混用不同代的 chunk。损坏或不兼容的索引会使工具暂不注册，不影响普通 Run；查询不会自动创建或修复数据库。离线评测强制本地 Hash embedding，忽略本机 API embedding 配置；smoke 还会检查检索工具确实返回成功，而不只是被调用过。
 
+### 检索对照实验
+
+`rag eval` 在同一索引上分别运行 sparse、dense、hybrid，JSON 报告保留逐题命中、语料与套件 SHA-256、embedding fingerprint、文件/chunk 数和查询 p50/p95 耗时。顶层结果与退出码仍以 hybrid 为准。内置语料有 16 份文档、16 个问题，包含 token/refresh、401/403、SQL/Redis 连接池等相近干扰项和多文件标签，文档数大于 top-5。
+
+```bash
+uv run eventide rag eval evals/retrieval.yaml --json
+```
+
+该固定语料上的离线基线（Hash 256 维）：
+
+| 路径 | recall@5 | MRR |
+| --- | ---: | ---: |
+| sparse | 1.0000 | 1.0000 |
+| dense | 0.9062 | 0.8958 |
+| hybrid | 1.0000 | 1.0000 |
+
+这是小型、以词面匹配为主的回归集，不是生产检索质量证明；目前 hybrid **没有超过 sparse 基线**。Hash 向量不能代表语义 embedding。耗时包含本机路径/索引校验，每题只采样一次、无预热，不能当作吞吐或容量结论。评估真实收益还需要独立业务语料、真实 embedding 和未参与调参的测试集。
+
 ## 使用任务计划
 
 生产 Runtime 会提示模型只为至少三步的复杂工作调用 `todo_write`。每次调用提交完整当前清单，最多 20 项；状态支持 `pending`、`in_progress`、`completed`、`blocked`，且同时最多一项为 `in_progress`。更新写入不可变的 `task.plan_updated` 事件，Session 状态返回最新完整计划；模型请求只注入未完成项和已完成数量。因此计划可以跨 step、Host 重启和 Continue 恢复，但不会把每次历史整表重复占用上下文。

@@ -105,6 +105,8 @@ Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源
 
 `eventide rag eval` 将标注语料复制到临时 Git Workspace，强制使用 HashEmbedder 建索引，按 query→期望文件计算 macro recall@5 与 MRR；普通 scripted smoke 通过显式 case 级 `rag_index: true` 在既有 Git sandbox 中预建索引。两条离线路径都不读取真实 embedding 配置、不访问网络，也不会在真实 checkout 写索引。
 
+检索评测在同一索引、同一组 query/标签上依次执行 sparse、dense 和 hybrid。文件召回以去重的相关文件数计算；MRR 以第一条相关 passage 的排名计算，`expect_contains` 可进一步限制相关 passage。聚合前不舍入。顶层指标和 CLI 退出码保持 hybrid 语义，`comparisons` 保留三路完整结果。JSON 还记录复制后语料 SHA-256、套件 SHA-256、embedding fingerprint、索引规模，以及每题耗时和 nearest-rank p50/p95；耗时是单次本机观测，不是性能基准。复制排除 `.git` / `.eventide`，拒绝 symlink，并拒绝不存在的期望文件标签。
+
 ## 评测
 
 评测套件是 YAML 的 `cases` 列表（`evals/smoke.yaml` 覆盖机制，`evals/tasks.yaml` 覆盖任务级完成）。每条用例包含 `id`、`prompt`、离线 `script`（ScriptedProvider 步骤）、`expected`，以及可选的 `workspace`（相对路径 → 文件内容的 fixture 映射）。声明 `workspace` 的用例各自创建一次性 Git 沙箱：写入 fixture、`git init` 并提交初始 commit（仓库级 user identity 和 `.eventide/` 排除规则写在沙箱内），Runtime 改用以沙箱为 `workdir`、沙箱内 `.eventide` 为状态根的独立 Settings 与评测数据库；沙箱保留不自动删除，便于排查失败。无 `workspace` 的用例沿用套件级设置，报告始终写回套件级状态根。

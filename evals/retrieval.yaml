@@ -18,3 +18,50 @@ cases:
     query: E_AUTH_401
     expect_files: [docs/errors.md]
 
+  - id: distinguish-token-refresh
+    query: refresh_token expired credential
+    expect_files: [docs/token-refresh.md]
+
+  - id: distinguish-password-reset
+    query: reset_password recovery email
+    expect_files: [docs/password-reset.md]
+
+  - id: distinguish-canary
+    query: canary_percentage gradual traffic
+    expect_files: [docs/canary.md]
+
+  - id: distinguish-rollback
+    query: rollback_release stable image
+    expect_files: [docs/rollback.md]
+
+  - id: distinguish-redis-pool
+    query: redis_pool_size 缓存连接池
+    expect_files: [docs/redis-pool.md]
+
+  - id: distinguish-sql-timeout
+    query: statement_timeout SQL
+    expect_files: [docs/database-timeout.md]
+
+  - id: distinguish-permission-error
+    query: E_AUTH_403 permission
+    expect_files: [docs/permission-error.md]
+
+  - id: distinguish-rate-limit
+    query: E_RATE_429 retry_after_seconds
+    expect_files: [docs/rate-limit.md]
+
+  - id: distinguish-cache-expiry
+    query: cache_ttl_seconds expiry
+    expect_files: [docs/cache-ttl.md]
+
+  - id: distinguish-backup
+    query: restore_snapshot nightly backup
+    expect_files: [docs/backup.md]
+
+  - id: find-both-health-probes
+    query: readiness_probe liveness_probe
+    expect_files: [docs/health.md]
+
+  - id: compare-pool-settings
+    query: 数据库连接池 redis_pool_size
+    expect_files: [docs/database.md, docs/redis-pool.md]
