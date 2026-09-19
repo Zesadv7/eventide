@@ -1,5 +1,7 @@
 """Sparse index build, incrementality, and UTF-8 filtering."""
 
+import hashlib
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -59,3 +61,35 @@ def test_non_git_workspace_is_rejected(isolated_workspace: Path) -> None:
     else:  # pragma: no cover - explicit assertion message is clearer than pytest.raises here
         raise AssertionError("non-Git Workspace was accepted")
 
+
+def test_p1_index_is_backfilled_atomically_on_next_build(isolated_workspace: Path) -> None:
+    root = _git_workspace(isolated_workspace)
+    source = root / "legacy.txt"
+    source.write_text("legacy searchable text", encoding="utf-8")
+    body = source.read_bytes()
+    store = IndexStore(root)
+    connection = store._connect(create=True)
+    try:
+        store._ensure_schema(connection)
+        stat = source.stat()
+        connection.execute(
+            "INSERT INTO files(path, mtime_ns, size, content_hash) VALUES (?, ?, ?, ?)",
+            ("legacy.txt", stat.st_mtime_ns, stat.st_size, hashlib.sha256(body).hexdigest()),
+        )
+        connection.execute(
+            "INSERT INTO chunks(file, ordinal, start_line, end_line, heading, text, vec) "
+            "VALUES ('legacy.txt', 0, 1, 1, '', ?, NULL)",
+            (body.decode(),),
+        )
+    finally:
+        connection.close()
+
+    stats = store.build()
+
+    assert stats.rebuilt_files == 0
+    check = sqlite3.connect(store.path)
+    try:
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert check.execute("SELECT COUNT(*) FROM chunks WHERE vec IS NULL").fetchone()[0] == 0
+    finally:
+        check.close()

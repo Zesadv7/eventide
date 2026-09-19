@@ -43,6 +43,11 @@ class Settings:
     model_timeout: float = 300.0
     mcp_timeout: float = 30.0
     command_timeout: float = 120.0
+    embedding_provider: str = "hash"
+    embedding_model: str | None = None
+    embedding_base_url: str | None = None
+    embedding_api_key: str | None = None
+    embedding_dim: int = 256
 
     @classmethod
     def from_env(cls, workdir: Path | None = None) -> Settings:
@@ -69,6 +74,15 @@ class Settings:
             model_timeout=float(os.getenv("EVENTIDE_MODEL_TIMEOUT", "300")),
             mcp_timeout=float(os.getenv("EVENTIDE_MCP_TIMEOUT", "30")),
             command_timeout=float(os.getenv("EVENTIDE_COMMAND_TIMEOUT", "120")),
+            embedding_provider=os.getenv("EVENTIDE_EMBEDDING_PROVIDER", "hash"),
+            embedding_model=os.getenv("EVENTIDE_EMBEDDING_MODEL") or None,
+            embedding_base_url=os.getenv("EVENTIDE_EMBEDDING_BASE_URL") or None,
+            embedding_api_key=(
+                os.getenv("EVENTIDE_EMBEDDING_API_KEY")
+                or os.getenv("EVENTIDE_API_KEY")
+                or None
+            ),
+            embedding_dim=int(os.getenv("EVENTIDE_EMBEDDING_DIM", "256")),
         )
 
     def require_api_key(self) -> str:

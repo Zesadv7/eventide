@@ -14,8 +14,9 @@ from eventide.config import Settings
 from eventide.evaluation import run_evaluations
 from eventide.migration import import_v02_database
 from eventide.models import RunRequest, ToolCall
+from eventide.rag.embedding import provider_from_settings
 from eventide.rag.index import IndexStore
-from eventide.rag.search import format_results, sparse_search
+from eventide.rag.search import dense_search, format_results
 from eventide.runtime import AgentRuntime
 
 
@@ -323,8 +324,11 @@ async def _manage(args: argparse.Namespace) -> int:
 
 def _rag(args: argparse.Namespace) -> int:
     workspace = args.workspace.expanduser().resolve()
+    embedder, profile = provider_from_settings(Settings.from_env(workdir=workspace))
     if args.rag_action == "build":
-        stats = IndexStore(workspace).build(force=args.force)
+        stats = IndexStore(workspace).build(
+            force=args.force, embedder=embedder, profile=profile
+        )
         print(
             "Indexed "
             f"{stats.files} files / {stats.chunks} chunks "
@@ -332,8 +336,14 @@ def _rag(args: argparse.Namespace) -> int:
             f"skipped {stats.skipped}) in {stats.duration_ms:.2f} ms"
         )
         return 0
-    results = sparse_search(workspace, args.query, k=args.k)
-    print(format_results(results, mode="sparse"))
+    results = dense_search(
+        workspace,
+        args.query,
+        k=args.k,
+        embedder=embedder,
+        profile=profile,
+    )
+    print(format_results(results, mode="dense"))
     return 0
 
 
