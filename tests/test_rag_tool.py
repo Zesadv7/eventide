@@ -6,7 +6,9 @@ from pathlib import Path
 from eventide.host import RuntimeHost
 from eventide.models import RunRequest
 from eventide.providers import ScriptedProvider
+from eventide.rag.embedding import HASH_ALGORITHM_VERSION, EmbeddingProfile, HashEmbedder
 from eventide.rag.index import IndexStore
+from eventide.rag.tool import handler, index_available
 from tests.test_host import make_repo
 from tests.test_runtime import settings_for
 
@@ -80,3 +82,13 @@ async def test_index_is_isolated_per_workspace(isolated_workspace: Path) -> None
         assert "search_knowledge" not in {tool["name"] for tool in provider.requests[1].tools}
     finally:
         await host.close()
+
+
+def test_tool_defends_against_a_missing_or_invalid_index(isolated_workspace: Path) -> None:
+    repo = make_repo(isolated_workspace / "repo")
+    profile = EmbeddingProfile(
+        "hash", "hash-v1", "local", HASH_ALGORITHM_VERSION, 256
+    )
+    assert index_available(repo, profile) is False
+    result = handler(repo, HashEmbedder(), profile)("query")
+    assert result == "Error: no knowledge index; run 'eventide rag build'"

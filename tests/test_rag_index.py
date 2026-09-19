@@ -5,6 +5,8 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from eventide.rag.index import IndexStore
 
 
@@ -44,10 +46,14 @@ def test_build_removes_deleted_files_and_skips_binary(isolated_workspace: Path) 
     text.write_text("searchable phrase", encoding="utf-8")
     binary = root / "binary.dat"
     binary.write_bytes(b"valid utf8\0but binary")
+    invalid = root / "invalid.txt"
+    invalid.write_bytes(b"\xff\xfe")
+    large = root / "large.txt"
+    large.write_bytes(b"x" * (1024 * 1024 + 1))
     store = IndexStore(root)
 
     first = store.build()
-    assert first.files == 1 and first.skipped == 1
+    assert first.files == 1 and first.skipped == 3
     text.unlink()
     second = store.build()
     assert second.files == 0 and second.deleted_files == 1 and second.chunks == 0
@@ -93,3 +99,41 @@ def test_p1_index_is_backfilled_atomically_on_next_build(isolated_workspace: Pat
         assert check.execute("SELECT COUNT(*) FROM chunks WHERE vec IS NULL").fetchone()[0] == 0
     finally:
         check.close()
+
+
+def test_index_errors_are_explicit_and_do_not_need_network(isolated_workspace: Path) -> None:
+    root = _git_workspace(isolated_workspace)
+    store = IndexStore(root)
+    with pytest.raises(ValueError, match="No knowledge index"):
+        store.sparse_search("missing", limit=5)
+
+    (root / "doc.txt").write_text("indexed content", encoding="utf-8")
+    store.build()
+    with pytest.raises(ValueError, match="must not be empty"):
+        store.sparse_search("  ", limit=5)
+
+    connection = sqlite3.connect(store.path)
+    try:
+        connection.execute(
+            "UPDATE meta SET value = 'bad' WHERE key = 'embedding_fingerprint'"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(ValueError, match="fingerprint"):
+        store.embedding_profile()
+
+
+def test_dense_search_rejects_corrupt_vector_dimension(isolated_workspace: Path) -> None:
+    root = _git_workspace(isolated_workspace)
+    (root / "doc.txt").write_text("indexed content", encoding="utf-8")
+    store = IndexStore(root)
+    store.build()
+    connection = sqlite3.connect(store.path)
+    try:
+        connection.execute("UPDATE chunks SET vec = ?", (b"\0\0\0\0",))
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(ValueError, match="dimension is inconsistent"):
+        store.dense_search([1.0] * 256, limit=5)

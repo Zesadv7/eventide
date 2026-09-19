@@ -401,3 +401,15 @@
 **决策：** 附件原始内容只存状态根的 Session 目录。文本继续按 512KB 上限内联；图片/PDF 的 canonical 用户消息仅保存不可变 attachment 引用，Host 在每次真实 Provider 请求前按 Session 身份重新读取并水合。图片映射到三种 Provider adapter，PDF 映射到 Anthropic Messages 与 OpenAI Responses；普通二进制可上传、列出和下载，但当前 Provider 没有协议映射时在 202 admission 前拒绝。附件一旦进入 Run 即标记 used，默认清单只恢复未使用 chips，DELETE 不允许破坏已被事件引用的内容。RunBody 另增可选 `model`，只影响本次 Run 的 ModelRequest、事件和 checkpoint identity，不改变 Host 配置或凭据。
 
 **影响：** Event Log 和导出仍是完整的运行事实，但不再充当二进制对象存储；恢复和重放多模态上下文依赖状态根附件文件与事件引用同时存在，因此状态根必须整体备份。字符预算衡量引用和文本，而不是 base64 传输体；这避免把图片字节误报为文本 token，但不估算各 Provider 的视觉 token。已使用附件不能通过附件 API 单独删除，只能随状态根生命周期清理。切换单次模型不重建 Provider 客户端，也不允许跨 Provider。
+
+## ADR-041：检索能力以只读工具渐进引入
+
+**状态：Accepted**。
+
+**背景：** Agent 面对较大的 Workspace 时，完整文件读取会快速消耗上下文，而仅靠文件名和精确文本搜索又无法覆盖换一种说法的查询。直接内嵌通用 RAG 框架会引入重依赖、外部服务和第二套工具执行路径，模糊 Eventide 作为 Workspace Agent Runtime 的边界。
+
+**决策：** 检索使用 Workspace 级、可重建的 `.eventide/index.sqlite`，并通过只读工具 `search_knowledge` 暴露给 Agent。索引只处理 Git 可见的 UTF-8 文本：结构感知切块保存文件、准确行号和标题路径；稠密路使用本地 HashEmbedder 或显式配置的 OpenAI-compatible embedding，稀疏路使用 SQLite FTS5 trigram，两路通过 RRF 按排名融合。向量保存为 SQLite float32 BLOB，Workspace 规模下查询时暴力余弦，暂不引入向量数据库或 ANN。embedding provider、model、base URL、维度和算法版本组成 fingerprint，变化时必须显式 `--force` 重建。默认 HashEmbedder 完全离线、确定性、零新增依赖，只保证机制和评测可复现，不宣称具有真实语义能力。Host 在每次 Run 按当前 Workspace 动态检查索引；索引不存在或不兼容时工具不进入目录。
+
+**影响：** 检索调用继续经过 `ToolExecutor` 和 `PolicyEngine`，使用既有 `tool.prepared` / `tool.completed`，因此不新增事件类型、Runtime schema 或旁路审计。Plan 模式可以使用该工具，且只读调用不产生副作用 checkpoint。`eventide rag build|search|eval` 分别负责显式建索引、人工试检索和标注式 recall@5/MRR 评测；离线评测强制 HashEmbedder，不依赖网络或 API Key。索引构建耗时和文件变化不会被自动隐藏，调用方负责需要时重建。rerank、自动索引、PDF/Office ETL、Web 检索台和多租户留待后续决策。
+
+**备选方案：** LangChain/LlamaIndex 会带来与当前规模不相称的依赖和控制反转；外置向量数据库增加服务与运维成本；只做 dense 会削弱函数名、错误码和中文子串等精确匹配，只做 FTS 又无法扩展到语义 embedding；文件变更自动全量索引会把不可控耗时塞进 Runtime 主链。上述方案均不用于 v0.4。

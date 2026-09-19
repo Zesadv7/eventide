@@ -178,7 +178,7 @@ def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Eventide Runtime",
-        version="0.3.0",
+        version="0.4.0",
         description="Traceable, policy-aware execution for tool-using agents.",
         lifespan=lifespan,
     )

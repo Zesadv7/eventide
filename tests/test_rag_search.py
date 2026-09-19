@@ -90,3 +90,19 @@ def test_hybrid_search_reports_both_sources(isolated_workspace: Path) -> None:
     assert result.sources == ("dense", "sparse")
     assert result.dense_rank == result.sparse_rank == 1
 
+
+def test_search_input_and_provider_count_are_validated(isolated_workspace: Path) -> None:
+    root = _workspace(isolated_workspace)
+    (root / "doc.txt").write_text("searchable", encoding="utf-8")
+    embedder = HashEmbedder(8)
+    profile = _profile(8)
+    IndexStore(root).build(embedder=embedder, profile=profile)
+    with pytest.raises(ValueError, match="must not be empty"):
+        hybrid_search(root, " ", embedder=embedder, profile=profile)
+
+    class EmptyEmbedder:
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return []
+
+    with pytest.raises(RuntimeError, match="count"):
+        hybrid_search(root, "searchable", embedder=EmptyEmbedder(), profile=profile)

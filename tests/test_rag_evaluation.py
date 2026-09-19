@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from eventide.cli import main
-from eventide.rag.evaluation import run_retrieval_evaluation
+from eventide.rag.evaluation import format_retrieval_report, report_json, run_retrieval_evaluation
 
 
 def _suite(root: Path) -> Path:
@@ -44,6 +44,8 @@ def test_retrieval_eval_reports_recall_and_mrr(isolated_workspace: Path) -> None
     assert report["recall_at_5"] == 1.0
     assert report["mrr"] == 1.0
     assert all(result["hits"][0]["relevant"] for result in report["results"])
+    assert "recall@5：1.0000" in format_retrieval_report(report)
+    assert json.loads(report_json(report))["mrr"] == 1.0
 
 
 def test_retrieval_eval_cli_json(isolated_workspace: Path, capsys) -> None:
@@ -61,4 +63,26 @@ def test_retrieval_suite_rejects_unknown_fields(isolated_workspace: Path) -> Non
         "suite: bad\nindex: corpus\nunknown: true\ncases: []\n", encoding="utf-8"
     )
     with pytest.raises(ValueError, match="Unknown retrieval suite fields"):
+        run_retrieval_evaluation(suite)
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("[]\n", "must be a mapping"),
+        ("suite: bad\ncases: []\n", "corpus path"),
+        ("suite: bad\nindex: corpus\ncases: []\n", "non-empty cases"),
+        (
+            "suite: bad\nindex: corpus\ncases:\n  - id: x\n    query: q\n    expect_files: []\n",
+            "expect_files",
+        ),
+    ],
+)
+def test_retrieval_suite_validation(
+    isolated_workspace: Path, body: str, message: str
+) -> None:
+    (isolated_workspace / "corpus").mkdir()
+    suite = isolated_workspace / "bad.yaml"
+    suite.write_text(body, encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
         run_retrieval_evaluation(suite)

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Zesadv7/eventide/actions/workflows/ci.yml/badge.svg)](https://github.com/Zesadv7/eventide/actions/workflows/ci.yml)
 
-Eventide v0.3 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHost 管理 Workspace 与 Session，运行事实统一写入 Event Log；消息、运行状态和模型上下文都从日志投影生成。CLI、HTTP API 和现有 Web 控制台使用同一执行主链。
+Eventide v0.4 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHost 管理 Workspace 与 Session，运行事实统一写入 Event Log；消息、运行状态和模型上下文都从日志投影生成。CLI、HTTP API 和现有 Web 控制台使用同一执行主链。
 
 主要能力：
 
@@ -11,6 +11,7 @@ Eventide v0.3 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHo
 - `ALLOW / ASK / DENY` 权限决策与 CLI、Web 一次性审批；
 - MCP stdio 与 Streamable HTTP 工具发现和调用；
 - Workspace 级 Skill 发现与按需加载；
+- Workspace 级混合知识检索（Hash/API embedding + FTS5 trigram + RRF）；
 - SQLite 追加式 Event Log、持久上下文 checkpoint 与 JSONL 导出；
 - 中断检测、停驻与用户主动 Continue，不自动重放工具副作用；
 - scripted provider 离线评测与真实模型 live eval；
@@ -54,6 +55,7 @@ python -m pip install -e ".[dev]"
 uv run python -m eventide --help
 uv run pytest -q
 uv run eventide eval evals/smoke.yaml
+uv run eventide rag eval evals/retrieval.yaml
 ```
 
 任务级评测套件在一次性 Git 沙箱中运行每条用例，判分只看沙箱文件与 Git 证据：
@@ -198,6 +200,29 @@ uv run eventide run "调用 demo MCP echo 工具"
 ```
 
 `mcp.json` 支持 stdio 和 Streamable HTTP。stdio 服务只会收到配置中显式列出的环境变量，发现的工具统一命名为 `mcp__server__tool`。每个服务独立连接；单个服务离线或超时会记录在工作经过中，但不会阻断其他 MCP 或内置工具。本地 `mcp.json` 默认不会提交到 Git。
+
+## 使用知识检索
+
+RAG 索引由用户显式构建，不会在文件变化时自动刷新。v0.4 只索引 Git Workspace 中已跟踪及未忽略的未跟踪 UTF-8 文本；二进制、符号链接、超过 1 MiB 的文件以及 `.git/`、`.eventide/` 会跳过。索引是可重建的派生数据，保存在 Workspace 的 `.eventide/index.sqlite`，不进入 Git：
+
+```bash
+uv run eventide rag build --workspace /path/to/project
+uv run eventide rag search "where is verify_token called" --workspace /path/to/project -k 5
+uv run eventide rag eval evals/retrieval.yaml
+```
+
+`rag build` 默认增量更新；embedding provider、模型、维度或算法身份变化时会拒绝混用旧向量，需要显式加 `--force`。默认 `HashEmbedder` 完全离线、确定性且零额外依赖，只用于验证切块、索引、融合、工具和评测机制，**不代表真实语义检索质量**。需要语义 embedding 时可配置 OpenAI-compatible endpoint：
+
+```dotenv
+EVENTIDE_EMBEDDING_PROVIDER=openai_compatible
+EVENTIDE_EMBEDDING_MODEL=your-embedding-model
+EVENTIDE_EMBEDDING_BASE_URL=https://provider.example/v1
+EVENTIDE_EMBEDDING_API_KEY=replace-me
+```
+
+API Key 未单独配置时回退 `EVENTIDE_API_KEY`。Hash 模式可通过 `EVENTIDE_EMBEDDING_DIM` 调整维度，默认 256。
+
+索引有效时，下一个 Run 会动态获得只读工具 `search_knowledge(query, k)`；没有索引时工具不会出现在模型目录中。检索工具在 Auto、Plan、Agent 三种模式下都沿用 `ToolExecutor`、`PolicyEngine` 和 canonical `tool.prepared` / `tool.completed` 事件，不新增旁路或专用事件。检索评测使用标注的 query→期望文件计算 recall@5 与 MRR，不调用模型评判检索质量。
 
 ## 使用任务计划
 
