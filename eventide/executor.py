@@ -40,7 +40,7 @@ class LocalCommandExecutor:
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
         else:
             process = await asyncio.create_subprocess_shell(
@@ -52,7 +52,7 @@ class LocalCommandExecutor:
             )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), self.timeout)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             await self._terminate(process)
             return f"Error: Timeout ({self.timeout:g}s)"
         except asyncio.CancelledError:
@@ -78,13 +78,16 @@ class LocalCommandExecutor:
             await killer.wait()
         else:
             with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGTERM)  # type: ignore[attr-defined]
+                # These POSIX-only names are absent from Windows type stubs.
+                getattr(os, "killpg")(process.pid, signal.SIGTERM)  # noqa: B009
         try:
             await asyncio.wait_for(process.wait(), 2)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             if os.name != "nt":
                 with suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)  # type: ignore[attr-defined]
+                    getattr(os, "killpg")(  # noqa: B009
+                        process.pid, getattr(signal, "SIGKILL")  # noqa: B009
+                    )
             else:
                 process.kill()
             await process.wait()

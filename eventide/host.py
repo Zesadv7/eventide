@@ -540,7 +540,7 @@ class RuntimeHost:
                     self._provider().complete(request),
                     timeout=self.settings.model_timeout,
                 )
-            except TimeoutError as exc:
+            except asyncio.TimeoutError as exc:
                 last_error = exc
                 await self._emit(
                     run_id,
