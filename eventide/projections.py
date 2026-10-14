@@ -76,9 +76,22 @@ class RuntimeStateProjection:
             if event["partial"]:
                 continue
             kind, payload = event["type"], event["payload"]
+            if kind in {"run.admitted", "run.started"} and payload.get("parent_run_id"):
+                state.update(
+                    {
+                        key: payload[key]
+                        for key in ("parent_run_id", "worker_role", "snapshot_id")
+                        if key in payload
+                    }
+                )
             if kind == "model.response":
                 state["steps"] = payload.get("step", state["steps"])
-            if kind in {"model.response", "context.compacted", "context.summary_generated"}:
+            if kind in {
+                "model.response",
+                "context.compacted",
+                "context.summary_generated",
+                "worker.completed",
+            }:
                 for key, value in payload.get("usage", {}).items():
                     state["usage"][key] = state["usage"].get(key, 0) + value
             if kind == "workspace.checkpoint":
@@ -174,9 +187,7 @@ class TaskPlanProjection:
                             "run_id": event.get("run_id"),
                             "call_id": payload.get("call_id"),
                             "name": payload.get("name"),
-                            "is_error": bool(
-                                payload.get("is_error", kind == "tool.abandoned")
-                            ),
+                            "is_error": bool(payload.get("is_error", kind == "tool.abandoned")),
                             "event_id": event.get("event_id"),
                             "session_seq": event["session_seq"],
                         },

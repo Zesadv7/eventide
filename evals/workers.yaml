@@ -1,0 +1,23 @@
+name: eventide-readonly-workers
+# Offline scripts verify the mechanism; live uses the same evidence checks.
+cases:
+  - id: researcher-cites-current-source
+    prompt: Delegate to a researcher to inspect code.py and cite the value assignment. Summarize the returned findings without changing files.
+    readonly_workers: true
+    workspace:
+      code.py: "value = 1\nprint(value)\n"
+    script:
+      - tool_calls:
+          - id: delegate
+            name: delegate_readonly
+            arguments:
+              tasks: [{role: researcher, goal: "Inspect code.py and cite the assignment."}]
+      - tool_calls:
+          - id: read
+            name: read_file
+            arguments: {path: code.py}
+      - text: '{"summary":"Located assignment","findings":[{"path":"code.py","start_line":1,"end_line":1,"message":"value is assigned 1"}]}'
+      - text: The researcher found the assignment on line 1.
+    expected:
+      successful_tools: [delegate_readonly]
+      file_contains: {code.py: "value = 1"}

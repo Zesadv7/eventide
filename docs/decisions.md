@@ -453,3 +453,13 @@
 摘要走 Host completion callback，与主请求共用超时、有限重试和用量累计；成功响应在校验和采用前计入，summary 事件不成为聊天消息或主步骤。可选 Run Token 软上限在下一次请求前检查已观测总量，达到则 checkpoint 后停驻；默认关闭，Continue 重置。未知失败请求消费不伪造，单响应允许越界，不承诺硬费用上限。
 
 **影响：** 202 是可查询、可停止的持久接收承诺，完成仍由终态与证据决定。进程 reservation 不构成第二事实源，不新增 schema 或依赖。安全旧附件目录只读兼容，不自动改名或清除；状态根备份必须包含附件。子 Agent 的共享预算和取消必须复用此所有者，不能另建无审计的执行链。
+
+## ADR-045：只读 Worker 借用父所有者，执行复用主链
+
+**状态：Accepted**，落实 ADR-043 的协作边界。
+
+**决策：** 首版仅 Researcher/Reviewer，通过 opt-in delegate_readonly 工具进入既有 Executor/Policy。独立子 Session/Run 与源码快照隔离消息和文件根；父持有源 Workspace 锁，内部子执行复用 `_execute` 并登记 Host Task 所有权，不再次获取同一锁。不注册消失的快照 Workspace，不提供第二循环或邮箱。子身份持久化，禁止普通 Run/Continue/附件，默认归档以便审计而不挤占日常工作列表。
+
+固定读取工具、禁止 MCP/custom/delegate、深度 1、并发 2、每父 Run 4 个任务，子步骤、Token 与时间均有界。成功结果先验证严格 JSON 和真实快照路径/行号才回传；合法引用不是独立验收。源码快照包含当前未提交源码，排除秘密、links和非文本，前后 Git checkpoint 检测漂移，不宣称文件系统原子性。父 usage 包含子消费，取消必须等子结束，未知消费不补造。
+
+**影响：** 可在没有 Key/网络时用 scripted 回归验证隔离、预算、取消和报告拒绝；真实模型质量需另跑 live。写入 Worker 使用 worktree 与独立验收，不扩大此只读 profile。

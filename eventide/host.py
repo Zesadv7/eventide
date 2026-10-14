@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import time
 import uuid
 from collections import defaultdict
@@ -48,6 +49,13 @@ from eventide.task_plan import summary as plan_summary
 from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
 from eventide.tool_results import reader as tool_result_reader
 from eventide.tools.runtime_catalog import HANDLERS, TOOLS
+from eventide.workers import (
+    READONLY_WORKER_TOOL,
+    ReadonlyProfile,
+    SourceSnapshot,
+    validate_report,
+    validate_tasks,
+)
 from eventide.workspace import (
     HostLease,
     canonical_workspace,
@@ -61,6 +69,7 @@ from eventide.worktrees import WorktreeService
 
 # stop_reason values that mean the provider cut the answer off at max_tokens.
 TRUNCATION_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
+READONLY_WORKER_TIMEOUT = 60.0
 BASE_RUNTIME_READONLY_TOOLS = frozenset(
     {"read_file", "glob", "compact", "read_tool_result", "todo_write", "search_knowledge"}
 )
@@ -391,6 +400,13 @@ class RuntimeHost:
                 ]
         return {
             "workspace_id": workspace.workspace_id,
+            "readonly_workers": {
+                "enabled": bool(self.settings.workers_enabled and workspace.git_root),
+                "roles": ["researcher", "reviewer"],
+                "max_concurrency": 2,
+                "max_depth": 1,
+                "max_tasks_per_run": 4,
+            },
             "skills": [
                 {"name": skill.name, "description": skill.description} for skill in catalog.skills
             ],
@@ -781,6 +797,12 @@ class RuntimeHost:
     def workspace_busy(self, workspace_id: str) -> bool:
         return workspace_id in self._admissions or self._workspace_locks[workspace_id].locked()
 
+    def is_worker_session(self, session_id: str) -> bool:
+        return any(
+            e["type"] == "run.admitted" and e["payload"].get("parent_run_id")
+            for e in self.store.session_events(session_id)
+        )
+
     @asynccontextmanager
     async def _workspace_execution(
         self, workspace_id: str, run_id: str | None = None
@@ -869,6 +891,8 @@ class RuntimeHost:
     async def _reserve_run(self, session_id: str, run_id: str, request: RunRequest | None) -> str:
         """Own a Workspace and atomically persist the request before transport acceptance."""
         await self.initialize()
+        if self.is_worker_session(session_id):
+            raise ValueError("Worker sessions cannot accept ordinary runs or Continue")
         if self._configuring:
             raise ValueError("Provider configuration is changing")
         workspace = self.sessions.workspace(session_id)
@@ -996,6 +1020,10 @@ class RuntimeHost:
                 run_id=run_id,
             )
         )
+        self._track_run_task(run_id, task)
+        return task
+
+    def _track_run_task(self, run_id: str, task: asyncio.Task[RunResult]) -> None:
         self._run_tasks[run_id] = task
         self._active_tasks.add(task)
 
@@ -1011,7 +1039,6 @@ class RuntimeHost:
             self._active_tasks.discard(finished)
 
         task.add_done_callback(done)
-        return task
 
     async def abandon_interruption(
         self,
@@ -1023,6 +1050,8 @@ class RuntimeHost:
         workspace = self.sessions.workspace(session_id)
         task = asyncio.current_task()
         assert task is not None
+        if self.is_worker_session(session_id):
+            raise ValueError("Worker sessions cannot accept ordinary runs or Continue")
         self._active_tasks.add(task)
         try:
             async with self._workspace_execution(workspace.workspace_id):
@@ -1102,6 +1131,8 @@ class RuntimeHost:
         *,
         run_id: str | None = None,
     ) -> RunResult:
+        if self.is_worker_session(session_id):
+            raise ValueError("Worker sessions cannot accept ordinary runs or Continue")
         admitted_run_id = (
             (request.run_id if request else None) or run_id or f"run_{uuid.uuid4().hex[:16]}"
         )
@@ -1315,6 +1346,8 @@ class RuntimeHost:
         approval_handler: ApprovalHandler | None,
         *,
         existing_turn_id: str | None = None,
+        readonly_profile: ReadonlyProfile | None = None,
+        snapshot_root: Path | None = None,
     ) -> RunResult:
         started = time.perf_counter()
         turn_id = existing_turn_id or self.store.create_run(
@@ -1322,8 +1355,8 @@ class RuntimeHost:
             session_id,
             continuation_of=continuation_of,
         )
-        workspace_root = Path(workspace.path)
-        working_root = self.sessions.working_directory(session_id)
+        workspace_root = snapshot_root or Path(workspace.path)
+        working_root = snapshot_root or self.sessions.working_directory(session_id)
         manager = MCPManager()
         usage = {"input_tokens": 0, "output_tokens": 0}
         output, steps, tool_count = "", 0, 0
@@ -1333,12 +1366,19 @@ class RuntimeHost:
         mode = "auto"
         attachment_ids = list(request.attachment_ids) if request else []
         selected_model = self.settings.model
+        max_steps = readonly_profile.max_steps if readonly_profile else self.settings.max_steps
+        token_limit = (
+            readonly_profile.token_limit if readonly_profile else self.settings.run_token_limit
+        )
+        max_tokens = readonly_profile.max_tokens if readonly_profile else self.settings.max_tokens
         # Why the run parked, if it did; read by the terminal event on every exit path.
         park_kind: str | None = None
         park_message: str | None = None
         try:
             intent = admitted_intent or self._run_intent(request, continuation_of)
             mode, selected_model = intent["mode"], intent["model"]
+            if readonly_profile:
+                mode = "plan"
             if len(selected_model) > 256:
                 raise ValueError("Model name cannot exceed 256 characters")
             # A parked run resumes the task it was on, so the continuation says which one.
@@ -1357,6 +1397,15 @@ class RuntimeHost:
                     "endpoint_hash": intent["endpoint_hash"],
                     "continuation_of": continuation_of,
                     "resumed_task_id": resumed_task_id,
+                    **(
+                        {
+                            "parent_run_id": readonly_profile.parent_run_id,
+                            "worker_role": readonly_profile.role,
+                            "snapshot_id": readonly_profile.snapshot_id,
+                        }
+                        if readonly_profile
+                        else {}
+                    ),
                 },
                 sink,
             )
@@ -1397,7 +1446,7 @@ class RuntimeHost:
                 sink,
             )
             skills = SkillCatalog.discover(workspace_root)
-            if self._enable_mcp:
+            if self._enable_mcp and not readonly_profile:
                 configs = manager.load_configs(
                     self._config_path
                     if workspace == self.default_workspace and self._config_path
@@ -1422,6 +1471,8 @@ class RuntimeHost:
                 raise ValueError("todo_write is reserved for Runtime task plans")
             if any(tool.get("name") == "search_knowledge" for tool in self.tools):
                 raise ValueError("search_knowledge is reserved for Workspace knowledge retrieval")
+            if any(tool.get("name") == "delegate_readonly" for tool in self.tools):
+                raise ValueError("delegate_readonly is reserved for Runtime workers")
             skill_tools = [skills.tool()] if skills else []
             rag_tools: list[dict[str, Any]] = []
             rag_handlers: dict[str, Any] = {}
@@ -1454,6 +1505,182 @@ class RuntimeHost:
                 )
                 return plan_summary(normalized)
 
+            delegated_count = 0
+
+            async def delegate_readonly(tasks: object) -> str:
+                nonlocal delegated_count
+                goals = validate_tasks(tasks)
+                if delegated_count + len(goals) > 4:
+                    raise ValueError("At most four read-only workers are allowed per Run")
+                ensure_token_budget()
+                remaining = token_limit - sum(usage.values()) if token_limit else 8_000
+                child_limit = min(4_000, remaining // len(goals))
+                if child_limit < 1:
+                    raise ValueError("Insufficient parent token budget for workers")
+                delegated_count += len(goals)
+                snapshots: list[SourceSnapshot] = []
+                children: list[tuple[str, asyncio.Task[RunResult], SourceSnapshot]] = []
+                settled_reports: dict[str, tuple[bool, str | None]] = {}
+                try:
+                    for _goal in goals:
+
+                        def make_snapshot() -> None:
+                            snapshots.append(
+                                SourceSnapshot.create(workspace_root, working_root, self.state_dir)
+                            )
+
+                        await self._admission_check(make_snapshot)
+                        snapshot = snapshots[-1]
+                        if snapshot.checkpoint != snapshots[0].checkpoint:
+                            raise ValueError("Source changed between worker snapshots")
+                    for goal, snapshot in zip(goals, snapshots, strict=True):
+                        child_session = self.create_session(
+                            workspace_id=workspace.workspace_id,
+                            working_directory=str(working_root),
+                        )
+                        self.store.update_session(
+                            child_session, title=f"Worker: {goal['role']}", archived=True
+                        )
+                        child_id = f"run_{uuid.uuid4().hex[:16]}"
+                        profile = ReadonlyProfile(
+                            parent_run_id=run_id,
+                            role=goal["role"],
+                            snapshot_id=snapshot.identity,
+                            token_limit=child_limit,
+                        )
+                        child_intent = {
+                            **intent,
+                            "workspace_id": workspace.workspace_id,
+                            "session_id": child_session,
+                            "mode": "plan",
+                            "attachment_ids": [],
+                            "parent_run_id": run_id,
+                            "worker_role": profile.role,
+                            "snapshot_id": snapshot.identity,
+                        }
+                        child_turn = self.store.admit_run(
+                            child_id,
+                            child_session,
+                            [
+                                ("run.admitted", child_intent, "system", "runtime"),
+                                (
+                                    "message.user",
+                                    {
+                                        "message": {
+                                            "role": "user",
+                                            "content": profile.prompt(goal["goal"]),
+                                        }
+                                    },
+                                    "user",
+                                    "runtime",
+                                ),
+                                (
+                                    "workspace.checkpoint",
+                                    {"checkpoint": {"available": False}},
+                                    "system",
+                                    "runtime",
+                                ),
+                            ],
+                        )
+                        child_task = asyncio.create_task(
+                            self._execute(
+                                child_session,
+                                child_id,
+                                workspace,
+                                None,
+                                None,
+                                None,
+                                None,
+                                existing_turn_id=child_turn,
+                                readonly_profile=profile,
+                                snapshot_root=snapshot.root,
+                            )
+                        )
+                        self._track_run_task(child_id, child_task)
+                        children.append((child_id, child_task, snapshot))
+                        await self._emit(
+                            run_id,
+                            "worker.started",
+                            {
+                                "child_run_id": child_id,
+                                "child_session_id": child_session,
+                                "role": profile.role,
+                                "snapshot_id": snapshot.identity,
+                                "source_checkpoint": snapshot.checkpoint,
+                                "manifest": snapshot.manifest,
+                                "skipped_files": snapshot.skipped,
+                            },
+                            sink,
+                        )
+                    timed_out = False
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*(child for _, child, _ in children)),
+                            READONLY_WORKER_TIMEOUT,
+                        )
+                    except asyncio.TimeoutError:
+                        timed_out = True
+                    reports = []
+                    for child_id, child, snapshot in children:
+                        record = self.store.get_run(child_id)
+                        assert record is not None
+                        report = None
+                        report_error = "Worker timed out" if timed_out else record.get("error")
+                        if not child.cancelled() and record["status"] == "completed":
+                            try:
+                                report = validate_report(child.result().output, snapshot)
+                            except ValueError as exc:
+                                report_error = str(exc)
+                        reports.append(
+                            {
+                                "child_run_id": child_id,
+                                "status": record["status"],
+                                "snapshot_id": snapshot.identity,
+                                "report": report,
+                                "error": report_error,
+                            }
+                        )
+                        settled_reports[child_id] = (report is not None, report_error)
+                    text = json.dumps({"workers": reports}, ensure_ascii=False)
+                    return "Error: " + text if any(r["report"] is None for r in reports) else text
+                finally:
+                    for _, child, _ in children:
+                        if not child.done():
+                            child.cancel()
+                    if children:
+                        settling = asyncio.gather(
+                            *(child for _, child, _ in children), return_exceptions=True
+                        )
+                        while not settling.done():
+                            with suppress(asyncio.CancelledError):
+                                await asyncio.shield(settling)
+                    for snapshot in snapshots:
+                        snapshot.cleanup()
+                    for child_id, _, _ in children:
+                        record = self.store.get_run(child_id)
+                        child_usage = record.get("usage", {}) if record else {}
+                        for key in usage:
+                            usage[key] += max(0, int(child_usage.get(key, 0)))
+                        await self._emit(
+                            run_id,
+                            "worker.completed",
+                            {
+                                "child_run_id": child_id,
+                                "status": record["status"] if record else "failed",
+                                "usage": child_usage,
+                                "report_valid": settled_reports.get(child_id, (False, None))[0],
+                                "error": settled_reports.get(child_id, (False, "Worker stopped"))[
+                                    1
+                                ],
+                            },
+                            sink,
+                        )
+
+            worker_tools = (
+                [READONLY_WORKER_TOOL]
+                if self.settings.workers_enabled and workspace.git_root and not readonly_profile
+                else []
+            )
             tools = [
                 *self.tools,
                 READ_TOOL_RESULT_TOOL,
@@ -1461,6 +1688,7 @@ class RuntimeHost:
                 *skill_tools,
                 *rag_tools,
                 *manager.tools,
+                *worker_tools,
             ]
             tools = run_policy.filter_tool_catalog(tools, mode)
             handlers = {
@@ -1470,7 +1698,19 @@ class RuntimeHost:
                 **({"load_skill": skills.load} if skills else {}),
                 **rag_handlers,
                 **manager.handlers,
+                **({"delegate_readonly": delegate_readonly} if worker_tools else {}),
             }
+            if readonly_profile:
+                names = {"read_file", "glob", "compact", "read_tool_result"}
+                tools = [tool for tool in [*TOOLS, READ_TOOL_RESULT_TOOL] if tool["name"] in names]
+                handlers = {
+                    name: handler
+                    for name, handler in {
+                        **HANDLERS,
+                        "read_tool_result": tool_result_reader(self.store, session_id),
+                    }.items()
+                    if name in names
+                }
             if mode == "plan":
                 # The catalog never advertised side-effecting tools, so a
                 # hallucinated call must stay a no-op: restrict execution to the
@@ -1482,6 +1722,7 @@ class RuntimeHost:
                 {
                     "read_tool_result",
                     "todo_write",
+                    *({"delegate_readonly"} if worker_tools else set()),
                     *({"search_knowledge"} if rag_tools else set()),
                     *manager.readonly_tools,
                     *({"load_skill"} if skills else set()),
@@ -1489,6 +1730,8 @@ class RuntimeHost:
                 self.executor.command_executor,
             )
             runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)
+            if worker_tools:
+                runtime_readonly_tools.add("delegate_readonly")
             if skills:
                 runtime_readonly_tools.add("load_skill")
             instructions = self._clean(ContextBuilder.instructions(workspace_root))
@@ -1564,13 +1807,10 @@ class RuntimeHost:
                     usage[key] += max(0, int(response.usage.get(key, 0)))
 
             def ensure_token_budget() -> None:
-                if (
-                    self.settings.run_token_limit
-                    and sum(usage.values()) >= self.settings.run_token_limit
-                ):
+                if token_limit and sum(usage.values()) >= token_limit:
                     raise _RunTokenBudgetExceeded(
                         f"Run token budget reached ({sum(usage.values())}/"
-                        f"{self.settings.run_token_limit}); session parked"
+                        f"{token_limit}); session parked"
                     )
 
             async def complete_summary(summary_request: ModelRequest) -> ModelResponse:
@@ -1617,7 +1857,7 @@ class RuntimeHost:
             )
             # Bound before the loop so the task-plan handler can stamp its own step.
             steps = 0
-            for steps in range(1, self.settings.max_steps + 1):
+            for steps in range(1, max_steps + 1):
                 ensure_token_budget()
                 plan_state = self.store.task_plan_state(session_id)
                 plan_todos = (plan_state["todos"] if plan_state else None) or None
@@ -1685,7 +1925,7 @@ class RuntimeHost:
                         provider_messages,
                         tools,
                         selected_model,
-                        self.settings.max_tokens,
+                        max_tokens,
                     ),
                     run_id,
                     sink,
@@ -1797,9 +2037,7 @@ class RuntimeHost:
                 step_budget_exhausted = True
             if step_budget_exhausted:
                 park_kind = "step_budget"
-                park_message = self._clean(
-                    f"Maximum agent steps exceeded ({self.settings.max_steps})"
-                )
+                park_message = self._clean(f"Maximum agent steps exceeded ({max_steps})")
             else:
                 park_kind = "task_step_budget" if task_park else None
                 park_message = task_park

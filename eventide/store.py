@@ -548,7 +548,7 @@ class RuntimeStore:
                 self._decode(event)
                 for event in self._connection.execute(
                     "SELECT * FROM runtime_events WHERE run_id=? AND type IN "
-                    "('approval.required','approval.resolved','run.completed',"
+                    "('run.admitted','run.started','approval.required','approval.resolved','run.completed',"
                     "'run.failed','run.interrupted') ORDER BY session_seq",
                     (run_id,),
                 )
@@ -580,6 +580,11 @@ class RuntimeStore:
             "steps": activity["steps"],
             "tool_calls": activity["tool_calls"],
             "last_activity_at": activity["last_activity_at"] or row["started_at"],
+            **{
+                key: state[key]
+                for key in ("parent_run_id", "worker_role", "snapshot_id")
+                if key in state
+            },
             **({"completed_at": state["completed_at"]} if "completed_at" in state else {}),
         }
 

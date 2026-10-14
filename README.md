@@ -152,6 +152,19 @@ HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、�
 
 附件按完整 Session ID 的 SHA-256 存入状态根 `attachments/~<hash>/`，内部记录再次验证精确归属。事件引用是已使用的依据，即使文件中的 used 缓存未写成功，也不能通过 API 删除。旧目录仅在能够确认安全身份时只读兼容；不自动搬移、覆盖或删除历史附件。
 
+## 受控只读 Agent 协作
+
+设置 `EVENTIDE_WORKERS=1` 后，有可信 Git HEAD 的 Workspace 增加 `delegate_readonly(tasks)`。模型可委派 Researcher 或 Reviewer；每批最多 2 个并发子任务，每个 Run 最多 4 个，子任务不能再委派。默认每个子 Run 最多 8 步、4,000 已观测 Tokens、60 秒，并从父 Run 剩余 Token 软预算中分配；父级用量包含子任务，子 Run 自身用量另可查询，汇总时不能重复相加。
+
+子任务读取当前 Git 可见源码的独立 UTF-8 快照，包括未提交和未跟踪源码，范围遵守 Session cwd；排除链接、秘密配置、二进制和过大文件，并记录排除数量。源码变动或快照超过容量限制时拒绝委派。子任务只开放 `read_file/glob/compact/read_tool_result`，不连接 MCP、不使用自定义处理器、不继承父聊天记录。报告必须为结构化 JSON，文件与行号必须存在于快照；通过验证仅表示引用合法，Researcher/Reviewer 的结论仍是模型声明。
+
+父任务停止或超时会等待所有子任务结束后清理快照。独立的子 Session 默认归档，父事件记录身份、源码 hash、关系和用量，子 Run 可通过既有查询/导出接口检查；子 Session 不接受普通 Run、Continue 或附件。源码快照和工具白名单是执行边界，不是 OS 沙箱。
+
+```bash
+EVENTIDE_WORKERS=1 uv run eventide run "委派 Researcher 定位调用链，并让 Reviewer 复查潜在问题"
+uv run eventide eval evals/workers.yaml
+```
+
 ## Git worktree 管理
 
 旧 worktree 能力已经迁入 Workspace 控制面，不再依赖 `.tasks`、`.worktrees` 或导入时的全局目录：

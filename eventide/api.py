@@ -455,6 +455,8 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
     async def upload_attachment(session_id: str, body: AttachmentBody) -> dict[str, Any]:
         # Uploads never auto-create a session: an unknown session is a 404.
         await get_session(session_id)
+        if agent_runtime.is_worker_session(session_id):
+            raise HTTPException(status_code=409, detail="Worker sessions do not accept attachments")
         try:
             return attachments.save_attachment(
                 agent_runtime.settings.state_dir,

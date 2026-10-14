@@ -33,6 +33,7 @@ def test_filter_tool_catalog_keeps_only_the_plan_whitelist_without_mutating():
         {"name": "todo_write", "description": "t"},
         {"name": "load_skill", "description": "s"},
         {"name": "search_knowledge", "description": "k"},
+        {"name": "delegate_readonly", "description": "d"},
         {"name": "edit_file", "description": "e"},
     ]
     snapshot = [dict(tool) for tool in tools]
@@ -46,6 +47,7 @@ def test_filter_tool_catalog_keeps_only_the_plan_whitelist_without_mutating():
         "todo_write",
         "load_skill",
         "search_knowledge",
+        "delegate_readonly",
     ]
     assert set(PLAN_READONLY_TOOLS) == {tool["name"] for tool in visible}
     # The caller's list is untouched, and other modes get a copy of everything.

@@ -111,3 +111,7 @@ POST /api/sessions/{id}/attachments
 Continue 保持原 Plan，只在相同 Provider 和 Base URL 下沿用选定模型；连接变化则使用当前默认模型。原 Agent 模式恢复为 Auto，自动审批不跨 Run。附件的归属以完整 Session ID 为准，DELETE 对 canonical 引用返回 409，不仅依赖文件 used 标记。
 
 `reason=token_budget` 表示已观测的输入+输出用量达到 `run_token_limit`，默认 0 关闭。摘要成功响应也计入，摘要事件不作为用户消息显示。单次响应可越过上限，Continue 重置预算；没有用量的失败请求不估算。前端用量继续消费 Run 的 usage，停驻区显示 Token 软上限原因。
+
+### 受控只读子任务 —— 已实现（显式开启）
+
+Workspace capabilities 增加 readonly_workers（enabled/roles/max_concurrency/max_depth/max_tasks_per_run）。父 Run 的 worker.started/completed 事件关联 child_run_id，子 Run 查询和 history 返回 parent_run_id/worker_role/snapshot_id。子Session默认归档且不能接收普通Run、Continue或附件。父usage含子消费，子usage仅自身；跨父子汇总需按exclusive模型事件计算。

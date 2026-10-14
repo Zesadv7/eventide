@@ -42,6 +42,7 @@ class Settings:
     mcp_timeout: float = 30.0
     command_timeout: float = 120.0
     run_token_limit: int = 0
+    workers_enabled: bool = False
     embedding_provider: str = "hash"
     embedding_model: str | None = None
     embedding_base_url: str | None = None
@@ -77,6 +78,7 @@ class Settings:
             mcp_timeout=float(os.getenv("EVENTIDE_MCP_TIMEOUT", "30")),
             command_timeout=float(os.getenv("EVENTIDE_COMMAND_TIMEOUT", "120")),
             run_token_limit=int(os.getenv("EVENTIDE_RUN_TOKEN_LIMIT", "0")),
+            workers_enabled=os.getenv("EVENTIDE_WORKERS", "0").lower() in {"1", "true"},
             embedding_provider=os.getenv("EVENTIDE_EMBEDDING_PROVIDER", "hash"),
             embedding_model=os.getenv("EVENTIDE_EMBEDDING_MODEL") or None,
             embedding_base_url=os.getenv("EVENTIDE_EMBEDDING_BASE_URL") or None,

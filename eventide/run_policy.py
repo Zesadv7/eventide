@@ -20,6 +20,7 @@ PLAN_READONLY_TOOLS = frozenset(
         "todo_write",
         "load_skill",
         "search_knowledge",
+        "delegate_readonly",
     }
 )
 

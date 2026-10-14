@@ -164,8 +164,12 @@ async def run_evaluations(
     settings = settings or Settings.from_env()
     if not live:
         settings = replace(
-            settings, embedding_provider="hash", embedding_model=None,
-            embedding_base_url=None, embedding_api_key=None, embedding_dim=256,
+            settings,
+            embedding_provider="hash",
+            embedding_model=None,
+            embedding_base_url=None,
+            embedding_api_key=None,
+            embedding_dim=256,
         )
     cases = load_suite(path)
     mode = "live" if live else "offline"
@@ -174,7 +178,7 @@ async def run_evaluations(
     results: list[EvalCaseResult] = []
     suite_started = time.perf_counter()
     for index, case in enumerate(cases, 1):
-        case_settings = settings
+        case_settings = replace(settings, workers_enabled=case.get("readonly_workers") is True)
         case_store = suite_store
         sandbox: Path | None = None
         fixtures = case.get("workspace")
@@ -183,13 +187,17 @@ async def run_evaluations(
             raise ValueError("rag_index requires an inline workspace fixture")
         if isinstance(fixtures, dict):
             sandbox = _create_sandbox(fixtures)
-            case_settings = replace(settings, workdir=sandbox, state_dir=sandbox / ".eventide")
+            case_settings = replace(case_settings, workdir=sandbox, state_dir=sandbox / ".eventide")
             case_store = RuntimeStore(case_settings.state_dir / "evals" / f"{mode}.db")
             if rag_index:
                 # Fixture indexes are always deterministic, including live LLM runs.
                 case_settings = replace(
-                    case_settings, embedding_provider="hash", embedding_model=None,
-                    embedding_base_url=None, embedding_api_key=None, embedding_dim=256,
+                    case_settings,
+                    embedding_provider="hash",
+                    embedding_model=None,
+                    embedding_base_url=None,
+                    embedding_api_key=None,
+                    embedding_dim=256,
                 )
                 IndexStore(sandbox).build()
         provider = (
