@@ -345,6 +345,7 @@ def test_api_runtime_settings_exposes_budgets_without_secrets(isolated_workspace
             "approval_timeout": 7.5,
             "max_steps": 9,
             "task_max_steps": 4,
+            "run_token_limit": 0,
         }
         assert "api_key" not in response.text
 

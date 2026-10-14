@@ -78,7 +78,7 @@ class RuntimeStateProjection:
             kind, payload = event["type"], event["payload"]
             if kind == "model.response":
                 state["steps"] = payload.get("step", state["steps"])
-            if kind in {"model.response", "context.compacted"}:
+            if kind in {"model.response", "context.compacted", "context.summary_generated"}:
                 for key, value in payload.get("usage", {}).items():
                     state["usage"][key] = state["usage"].get(key, 0) + value
             if kind == "workspace.checkpoint":

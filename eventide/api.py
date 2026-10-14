@@ -245,6 +245,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
             "approval_timeout": settings.approval_timeout,
             "max_steps": settings.max_steps,
             "task_max_steps": settings.task_max_steps,
+            "run_token_limit": settings.run_token_limit,
         }
 
     @app.delete("/api/workspaces/{workspace_id}")
@@ -331,7 +332,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
         # without creating a run that could hide the parked source run.
         record = await get_session(session_id)
         workspace_id = record["workspace_id"]
-        if workspace_id in reserved:
+        if workspace_id in reserved or agent_runtime.workspace_busy(workspace_id):
             raise HTTPException(status_code=409, detail="Workspace is busy")
         reserved.add(workspace_id)
         run_id = f"run_{uuid.uuid4().hex[:16]}"
@@ -344,26 +345,21 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
             reserved.discard(workspace_id)
             raise
 
-        async def execute() -> None:
-            try:
-                await agent_runtime.continue_session(
-                    session_id,
-                    approval_handler=broker.request,
-                    run_id=run_id,
-                )
-            finally:
-                reserved.discard(workspace_id)
-
-        task = asyncio.create_task(execute())
+        task = agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
         tasks.add(task)
-        task.add_done_callback(tasks.discard)
+
+        def done(finished: asyncio.Task[Any]) -> None:
+            tasks.discard(finished)
+            reserved.discard(workspace_id)
+
+        task.add_done_callback(done)
         return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
 
     @app.post("/api/sessions/{session_id}/abandon")
     async def abandon_interruption(session_id: str) -> dict[str, Any]:
         record = await get_session(session_id)
         workspace_id = record["workspace_id"]
-        if workspace_id in reserved:
+        if workspace_id in reserved or agent_runtime.workspace_busy(workspace_id):
             raise HTTPException(status_code=409, detail="Workspace is busy")
         reserved.add(workspace_id)
         try:
@@ -477,9 +473,14 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
     ) -> list[dict[str, Any]]:
         await get_session(session_id)
         try:
-            return attachments.list_attachments(
-                agent_runtime.settings.state_dir, session_id, include_used=include_used
+            records = attachments.list_attachments(
+                agent_runtime.settings.state_dir, session_id, include_used=True
             )
+            referenced = agent_runtime.store.referenced_attachments(session_id)
+            for record in records:
+                record["used"] = record["used"] or record["attachment_id"] in referenced
+            return records if include_used else [record for record in records if not record["used"]]
+
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -508,6 +509,8 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
         _require_local_request(request)
         await get_session(session_id)
         try:
+            if attachment_id in agent_runtime.store.referenced_attachments(session_id):
+                raise ValueError("附件已用于工作记录，不能删除")
             deleted = attachments.delete_attachment(
                 agent_runtime.settings.state_dir, session_id, attachment_id
             )
@@ -522,48 +525,46 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(session_id: str, body: RunBody) -> dict[str, str]:
-        # Keep the v0.2 behavior for callers that supply their own session identity.
+        # Keep custom Session identities while making transport acceptance durable.
         agent_runtime.create_session(session_id)
         record = agent_runtime.session_status(session_id)
         workspace_id = record["workspace_id"]
-        if workspace_id in reserved or record["status"] == "parked":
-            raise HTTPException(status_code=409, detail="Workspace busy or session parked")
-        # Validate ownership of every attachment before admitting the run, so a
-        # bad id cannot fail later inside the worker behind an opaque 202.
-        try:
-            attachment_records = attachments.load_attachments(
-                agent_runtime.settings.state_dir, session_id, body.attachment_ids
-            )
-            attachments.validate_for_provider(
-                attachment_records, agent_runtime.settings.provider
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        attachments.mark_attachments_used(
-            agent_runtime.settings.state_dir, session_id, body.attachment_ids
-        )
+        if workspace_id in reserved or agent_runtime.workspace_busy(workspace_id):
+            raise HTTPException(status_code=409, detail="Workspace is busy")
+        if record["status"] == "parked":
+            raise HTTPException(status_code=409, detail="Session is parked")
         reserved.add(workspace_id)
         run_id = f"run_{uuid.uuid4().hex[:16]}"
-
-        async def execute() -> None:
-            try:
-                await agent_runtime.run(
-                    RunRequest(
-                        body.prompt,
-                        session_id=session_id,
-                        run_id=run_id,
-                        mode=body.mode,
-                        attachment_ids=list(body.attachment_ids),
-                        model=body.model,
-                    ),
-                    approval_handler=broker.request,
+        try:
+            await agent_runtime.admit_run(
+                RunRequest(
+                    body.prompt,
+                    session_id,
+                    run_id,
+                    mode=body.mode,
+                    attachment_ids=list(body.attachment_ids),
+                    model=body.model,
                 )
-            finally:
-                reserved.discard(workspace_id)
-
-        task = asyncio.create_task(execute())
+            )
+            task = agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
+        except (ValueError, OSError) as exc:
+            reserved.discard(workspace_id)
+            code = (
+                409
+                if any(word in str(exc) for word in ("busy", "parked", "configuration"))
+                else 422
+            )
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        except BaseException:
+            reserved.discard(workspace_id)
+            raise
         tasks.add(task)
-        task.add_done_callback(tasks.discard)
+
+        def done(finished: asyncio.Task[Any]) -> None:
+            tasks.discard(finished)
+            reserved.discard(workspace_id)
+
+        task.add_done_callback(done)
         return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
 
     @app.get("/api/runs/{run_id}")
@@ -602,9 +603,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
         return StreamingResponse(
             stream(),
             media_type="application/x-ndjson",
-            headers={
-                "Content-Disposition": f'attachment; filename="eventide-{safe_id}.jsonl"'
-            },
+            headers={"Content-Disposition": f'attachment; filename="eventide-{safe_id}.jsonl"'},
         )
 
     @app.get("/api/runs/{run_id}/events")
@@ -621,10 +620,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
                     cursor = event["seq"]
                     encoded = json.dumps(event, ensure_ascii=False)
                     yield f"id: {cursor}\nevent: {event['type']}\ndata: {encoded}\n\n"
-                if (
-                    agent_runtime.store.run_is_terminal(run_id)
-                    and not events
-                ):
+                if agent_runtime.store.run_is_terminal(run_id) and not events:
                     break
                 if not events:
                     idle_ticks += 1

@@ -7,9 +7,9 @@ import inspect
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Iterator
-from contextlib import contextmanager, suppress
-from dataclasses import asdict, replace
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager, suppress
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -66,6 +66,16 @@ BASE_RUNTIME_READONLY_TOOLS = frozenset(
 )
 
 
+@dataclass(slots=True)
+class _Admission:
+    session_id: str
+    done: asyncio.Event
+
+
+class _RunTokenBudgetExceeded(RuntimeError):
+    pass
+
+
 class EventSink(Protocol):
     async def emit(self, event: dict[str, Any]) -> None: ...
 
@@ -85,9 +95,7 @@ class SessionManager:
             self.store.create_session(identity, workspace_id)
             return identity
         workspace = self.store.get_workspace(workspace_id)
-        relative, _ = session_working_directory(
-            Path(workspace.path), working_directory
-        )
+        relative, _ = session_working_directory(Path(workspace.path), working_directory)
         self.store.create_session(
             identity,
             workspace_id,
@@ -106,9 +114,7 @@ class SessionManager:
         if not session:
             raise ValueError(f"Session not found: {session_id}")
         workspace = self.store.get_workspace(session["workspace_id"])
-        _, path = session_working_directory(
-            Path(workspace.path), session["working_directory"]
-        )
+        _, path = session_working_directory(Path(workspace.path), session["working_directory"])
         return path
 
 
@@ -151,6 +157,8 @@ class RuntimeHost:
             command_executor=LocalCommandExecutor(self.settings.command_timeout),
         )
         self._workspace_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._admissions: dict[str, str] = {}
+        self._admission_done: dict[str, _Admission] = {}
         self._active_tasks: set[asyncio.Task[Any]] = set()
         self._run_tasks: dict[str, asyncio.Task[Any]] = {}
         self._closed = False
@@ -233,7 +241,7 @@ class RuntimeHost:
         self._active_tasks.add(task)
         removal_path: Path | None = None
         try:
-            async with self._workspace_locks[workspace.workspace_id]:
+            async with self._workspace_execution(workspace.workspace_id):
                 records = await asyncio.to_thread(service.list)
                 if action == "list":
                     return [record.to_dict() for record in records]
@@ -259,8 +267,10 @@ class RuntimeHost:
                 self.store.create_run(run_id, session_id)
                 intent = {"action": action, "name": name, "ref": ref}
                 await self._emit(
-                    run_id, "run.started",
-                    {"workspace_id": workspace.workspace_id, "source": "worktree"}, None,
+                    run_id,
+                    "run.started",
+                    {"workspace_id": workspace.workspace_id, "source": "worktree"},
+                    None,
                     author="user",
                 )
                 await self._emit(run_id, "worktree.requested", intent, None, author="user")
@@ -287,13 +297,22 @@ class RuntimeHost:
                                 self.store.remove_workspace(checkout.workspace_id)
                     await self._emit(run_id, "worktree.completed", result, None, author="user")
                     await self._emit(
-                        run_id, "run.completed",
-                        {"output": f"Worktree {action}: {result['name']} ({result['path']})",
-                         "steps": 0, "tool_calls": 0, "usage": {}}, None,
+                        run_id,
+                        "run.completed",
+                        {
+                            "output": f"Worktree {action}: {result['name']} ({result['path']})",
+                            "steps": 0,
+                            "tool_calls": 0,
+                            "usage": {},
+                        },
+                        None,
                     )
                 except Exception as exc:
                     await self._emit(
-                        run_id, "run.failed", {"error": self._clean(str(exc))}, None,
+                        run_id,
+                        "run.failed",
+                        {"error": self._clean(str(exc))},
+                        None,
                     )
                     raise
                 if cancelled:
@@ -313,9 +332,9 @@ class RuntimeHost:
         activity = self.store.session_activity(session_id)
         first_intent = activity["first_intent"]
         task_state = TaskPlanProjection.project(self.store.task_events(session_id))
-        title = str(session.get("title") or first_intent or "New session").replace(
-            "\n", " "
-        ).strip()
+        title = (
+            str(session.get("title") or first_intent or "New session").replace("\n", " ").strip()
+        )
         return {
             "session_id": session_id,
             "workspace_id": workspace.workspace_id,
@@ -368,14 +387,12 @@ class RuntimeHost:
                 notes.append(f"mcp.json 解析失败：{type(exc).__name__}: {exc}")
             else:
                 servers = [
-                    {"name": config.name, "transport": config.transport}
-                    for config in configs
+                    {"name": config.name, "transport": config.transport} for config in configs
                 ]
         return {
             "workspace_id": workspace.workspace_id,
             "skills": [
-                {"name": skill.name, "description": skill.description}
-                for skill in catalog.skills
+                {"name": skill.name, "description": skill.description} for skill in catalog.skills
             ],
             "mcp": servers,
             "paths": {
@@ -420,6 +437,9 @@ class RuntimeHost:
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+        for run_id in list(self._admission_done):
+            self._finish_admitted(run_id, asyncio.CancelledError())
+            self._release_admission(run_id)
         try:
             await self._close_provider()
         finally:
@@ -485,7 +505,7 @@ class RuntimeHost:
 
     @contextmanager
     def _configuration_change(self) -> Iterator[None]:
-        if self._configuring or self._active_tasks:
+        if self._configuring or self._active_tasks or self._admissions:
             raise ValueError("Wait for active runs or configuration changes")
         self._configuring = True
         try:
@@ -641,7 +661,12 @@ class RuntimeHost:
         return event
 
     async def _complete_with_retry(
-        self, request: ModelRequest, run_id: str, sink: EventSink | None
+        self,
+        request: ModelRequest,
+        run_id: str,
+        sink: EventSink | None,
+        *,
+        kind: str = "agent",
     ) -> ModelResponse:
         last_error: Exception | None = None
         for attempt in range(3):
@@ -657,6 +682,7 @@ class RuntimeHost:
                     "model.retry",
                     {
                         "attempt": attempt + 1,
+                        "kind": kind,
                         "retryable": attempt < 2,
                         "error": f"Model request timed out ({self.settings.model_timeout:g}s)",
                     },
@@ -674,6 +700,7 @@ class RuntimeHost:
                     "model.retry",
                     {
                         "attempt": attempt + 1,
+                        "kind": kind,
                         "retryable": exc.retryable,
                         "error": self._clean(str(exc)),
                     },
@@ -687,6 +714,18 @@ class RuntimeHost:
     async def cancel_run(self, run_id: str) -> dict[str, Any]:
         """Cancel one active run and wait until its interrupted fact is durable."""
         task = self._run_tasks.get(run_id)
+        intent = self._admitted_intent(run_id)
+        if (
+            task is None
+            and intent is not None
+            and self._admissions.get(intent["workspace_id"]) == run_id
+            and not self.store.run_is_terminal(run_id)
+        ):
+            self._finish_admitted(run_id, asyncio.CancelledError())
+            self._release_admission(run_id)
+            record = self.store.get_run(run_id)
+            assert record is not None
+            return record
         if task is None or task.done():
             record = self.store.get_run(run_id)
             if record is None:
@@ -739,21 +778,240 @@ class RuntimeHost:
         self._validate_continue(workspace, self.store.latest_run(session_id))
         return workspace
 
+    def workspace_busy(self, workspace_id: str) -> bool:
+        return workspace_id in self._admissions or self._workspace_locks[workspace_id].locked()
+
+    @asynccontextmanager
+    async def _workspace_execution(
+        self, workspace_id: str, run_id: str | None = None
+    ) -> AsyncIterator[None]:
+        lock = self._workspace_locks[workspace_id]
+        while True:
+            await lock.acquire()
+            reserved = self._admissions.get(workspace_id)
+            if reserved is None or reserved == run_id:
+                break
+            done = self._admission_done[reserved].done
+            lock.release()
+            await done.wait()
+        try:
+            yield
+        finally:
+            lock.release()
+
+    def _release_admission(self, run_id: str) -> None:
+        for workspace_id, reserved in list(self._admissions.items()):
+            if reserved == run_id:
+                self._admissions.pop(workspace_id)
+        done = self._admission_done.pop(run_id, None)
+        if done is not None:
+            done.done.set()
+
+    def _admitted_intent(self, run_id: str) -> dict[str, Any] | None:
+        return next(
+            (e["payload"] for e in self.store.run_events(run_id) if e["type"] == "run.admitted"),
+            None,
+        )
+
+    def _run_intent(
+        self, request: RunRequest | None, source_id: str | None = None
+    ) -> dict[str, Any]:
+        mode = run_policy.normalize_mode(request.mode) if request else "auto"
+        model = request.model.strip() if request and request.model else self.settings.model
+        model = model or self.settings.model
+        if source_id:
+            prior: dict[str, Any] = next(
+                (
+                    e["payload"]
+                    for e in reversed(self.store.run_events(source_id))
+                    if e["type"] in {"run.started", "run.admitted"}
+                ),
+                {},
+            )
+            mode = "plan" if prior.get("mode") == "plan" else "auto"
+            same_endpoint = prior.get("endpoint_hash", digest(self.settings.base_url)) == digest(
+                self.settings.base_url
+            )
+            if prior.get("provider") == self.settings.provider and same_endpoint:
+                model = prior.get("model") or model
+        if not isinstance(model, str) or len(model) > 256:
+            raise ValueError("Model name cannot exceed 256 characters")
+        return {
+            "mode": mode,
+            "model": model,
+            "provider": self.settings.provider,
+            "endpoint_hash": digest(self.settings.base_url),
+        }
+
+    async def admit_run(self, request: RunRequest) -> str:
+        session_id = self.create_session(request.session_id)
+        run_id = request.run_id or f"run_{uuid.uuid4().hex[:16]}"
+        await self._reserve_run(session_id, run_id, request)
+        return run_id
+
     async def admit_continue(self, session_id: str, run_id: str) -> str:
-        """Validate and durably reserve a continuation identity before HTTP 202."""
+        return await self._reserve_run(session_id, run_id, None)
+
+    async def _admission_check(self, function: Any, *args: Any) -> Any:
+        """Retain the Store/Workspace owner until a threaded check has finished."""
+        operation = asyncio.create_task(asyncio.to_thread(function, *args))
+        cancelled = False
+        while not operation.done():
+            try:
+                await asyncio.shield(operation)
+            except asyncio.CancelledError:
+                cancelled = True
+        result = operation.result()
+        if cancelled:
+            raise asyncio.CancelledError
+        return result
+
+    async def _reserve_run(self, session_id: str, run_id: str, request: RunRequest | None) -> str:
+        """Own a Workspace and atomically persist the request before transport acceptance."""
         await self.initialize()
         if self._configuring:
             raise ValueError("Provider configuration is changing")
         workspace = self.sessions.workspace(session_id)
-        async with self._workspace_locks[workspace.workspace_id]:
-            self.validate_continue(session_id)
-            previous = self.store.latest_run(session_id)
-            assert previous is not None
-            return self.store.create_run(
+        if run_id in self._admission_done or self.store.get_run_identity(run_id):
+            raise ValueError("Run identity already used")
+        if self.workspace_busy(workspace.workspace_id):
+            raise ValueError("Workspace is busy")
+        root = Path(workspace.path)
+        if not root.is_dir() or root.resolve() != root:
+            raise ValueError("Workspace missing or path identity changed")
+        self.sessions.working_directory(session_id)
+        task = asyncio.current_task()
+        assert task is not None
+        already_active = task in self._active_tasks
+        self._active_tasks.add(task)
+        try:
+            async with self._workspace_locks[workspace.workspace_id]:
+                self._admissions[workspace.workspace_id] = run_id
+                self._admission_done[run_id] = _Admission(session_id, asyncio.Event())
+                try:
+                    previous = self.store.latest_run(session_id)
+                    if request is None:
+                        await self._admission_check(self._validate_continue, workspace, previous)
+                    elif previous and previous["status"] == "interrupted":
+                        raise ValueError("Session is parked; use Continue")
+                    source_id = previous["id"] if request is None and previous else None
+                    intent = self._run_intent(request, source_id)
+                    checkpoint = await self._admission_check(workspace_checkpoint, root)
+                    ids = list(request.attachment_ids) if request else []
+                    # Validation, commit and used-cache write have no intervening await.
+                    records = attachments.load_attachments(self.state_dir, session_id, ids)
+                    attachments.validate_for_provider(records, self.settings.provider)
+                    payload = {
+                        **intent,
+                        "session_id": session_id,
+                        "workspace_id": workspace.workspace_id,
+                        "attachment_ids": ids,
+                        "continuation_of": source_id,
+                    }
+                    facts = [("run.admitted", self._semantic(payload), "system", "user")]
+                    if previous and request is None:
+                        facts.extend(self._recovery_facts(previous))
+                    if request:
+                        facts.append(
+                            (
+                                "message.user",
+                                {
+                                    "message": self._semantic(
+                                        attachments.compose_message(request.prompt, records)
+                                    ),
+                                    "attachment_ids": ids,
+                                },
+                                "user",
+                                "user",
+                            )
+                        )
+                    facts.append(
+                        ("workspace.checkpoint", {"checkpoint": checkpoint}, "system", "runtime")
+                    )
+                    turn_id = self.store.admit_run(
+                        run_id, session_id, facts, continuation_of=source_id
+                    )
+                    attachments.mark_attachments_used(self.state_dir, session_id, ids)
+                    return turn_id
+                except BaseException as exc:
+                    self._finish_admitted(run_id, exc)
+                    self._release_admission(run_id)
+                    raise
+        finally:
+            if not already_active:
+                self._active_tasks.discard(task)
+
+    def _finish_admitted(self, run_id: str, error: BaseException) -> None:
+        """Close accepted work that stopped before its execution could write a terminal."""
+        if (
+            self.store.get_run_identity(run_id)
+            and not self.store.run_is_terminal(run_id)
+            and self._admitted_intent(run_id) is not None
+        ):
+            cancelled = isinstance(error, asyncio.CancelledError)
+            self.store.append_event(
                 run_id,
-                session_id,
-                continuation_of=previous["id"],
+                "run.interrupted" if cancelled else "run.failed",
+                {
+                    "error": "Run cancelled before execution; session parked"
+                    if cancelled
+                    else self._clean(f"{type(error).__name__}: {error}"),
+                    "reason": "cancelled" if cancelled else "admission_failed",
+                },
             )
+
+    def start_admitted_run(
+        self, run_id: str, *, approval_handler: ApprovalHandler | None = None
+    ) -> asyncio.Task[RunResult]:
+        """Register cancellation ownership synchronously, before the worker can run."""
+        run = self.store.get_run_identity(run_id)
+        intent = self._admitted_intent(run_id)
+        if not run or not intent or self.store.run_is_terminal(run_id):
+            raise ValueError("Run is not awaiting execution")
+        if run_id in self._run_tasks:
+            raise ValueError("Run is already scheduled")
+        if self._admissions.get(intent["workspace_id"]) != run_id:
+            raise ValueError("Run admission is not owned by this Host")
+        if self._closed:
+            raise ValueError("Host is closed")
+        request = (
+            None
+            if run["continuation_of"]
+            else RunRequest(
+                "",
+                run["session_id"],
+                run_id,
+                mode=intent["mode"],
+                attachment_ids=list(intent["attachment_ids"]),
+                model=intent["model"],
+            )
+        )
+        task = asyncio.create_task(
+            self._admit(
+                run["session_id"],
+                request,
+                bool(run["continuation_of"]),
+                None,
+                approval_handler,
+                run_id=run_id,
+            )
+        )
+        self._run_tasks[run_id] = task
+        self._active_tasks.add(task)
+
+        def done(finished: asyncio.Task[RunResult]) -> None:
+            if finished.cancelled():
+                error: BaseException | None = asyncio.CancelledError()
+            else:
+                error = finished.exception()
+            if error is not None:
+                self._finish_admitted(run_id, error)
+            self._release_admission(run_id)
+            self._run_tasks.pop(run_id, None)
+            self._active_tasks.discard(finished)
+
+        task.add_done_callback(done)
+        return task
 
     async def abandon_interruption(
         self,
@@ -767,7 +1025,7 @@ class RuntimeHost:
         assert task is not None
         self._active_tasks.add(task)
         try:
-            async with self._workspace_locks[workspace.workspace_id]:
+            async with self._workspace_execution(workspace.workspace_id):
                 previous = self.store.latest_run(session_id)
                 if not previous or previous["status"] != "interrupted":
                     raise ValueError("Only an interrupted, parked session can be abandoned")
@@ -844,64 +1102,74 @@ class RuntimeHost:
         *,
         run_id: str | None = None,
     ) -> RunResult:
-        await self.initialize()
-        if self._configuring:
-            raise ValueError("Provider configuration is changing")
-        workspace = self.sessions.workspace(session_id)
-        root = Path(workspace.path)
-        if not root.is_dir() or root.resolve() != root:
-            raise ValueError("Workspace missing or path identity changed")
-        self.sessions.working_directory(session_id)
+        admitted_run_id = (
+            (request.run_id if request else None) or run_id or f"run_{uuid.uuid4().hex[:16]}"
+        )
         task = asyncio.current_task()
         assert task is not None
+        owner = self._run_tasks.get(admitted_run_id)
+        if owner is not None and owner is not task:
+            raise ValueError("Run is already scheduled")
+        identity = self.store.get_run_identity(admitted_run_id)
+        if identity and identity["session_id"] != session_id:
+            raise ValueError("Run/session identity mismatch")
+        reservation = self._admission_done.get(admitted_run_id)
+        if reservation is not None and (reservation.session_id != session_id or identity is None):
+            raise ValueError("Run identity is reserved by another admission")
         self._active_tasks.add(task)
         try:
-            async with self._workspace_locks[workspace.workspace_id]:
+            await self.initialize()
+            if self._configuring:
+                raise ValueError("Provider configuration is changing")
+            workspace = self.sessions.workspace(session_id)
+            root = Path(workspace.path)
+            if not root.is_dir() or root.resolve() != root:
+                raise ValueError("Workspace missing or path identity changed")
+            self.sessions.working_directory(session_id)
+            async with self._workspace_execution(workspace.workspace_id, admitted_run_id):
                 if self._closed:
                     raise RuntimeError("Host is closed")
-                admitted = (
-                    self.store.get_run_identity(run_id)
-                    if continuation and run_id
-                    else None
-                )
-                if admitted and admitted["session_id"] != session_id:
-                    raise ValueError("Run/session identity mismatch")
+                admitted = self.store.get_run_identity(admitted_run_id)
+                if admitted and (
+                    self._admitted_intent(admitted_run_id) is None
+                    or self.store.run_is_terminal(admitted_run_id)
+                ):
+                    raise ValueError("Run identity already used")
+                if admitted:
+                    continuation = bool(admitted["continuation_of"])
                 previous = (
                     self.store.get_run(admitted["continuation_of"])
-                    if admitted
+                    if admitted and admitted["continuation_of"]
                     else self.store.latest_run(session_id)
                 )
                 if continuation and not admitted:
-                    await asyncio.to_thread(self._validate_continue, workspace, previous)
+                    await self._admission_check(self._validate_continue, workspace, previous)
                 elif (
                     not continuation
+                    and not admitted
                     and previous
                     and previous["status"] == "interrupted"
                 ):
-                    raise ValueError(
-                        "Session is parked; use Continue after resolving interruption"
-                    )
-                admitted_run_id = (
-                    request.run_id
-                    if request and request.run_id
-                    else run_id or f"run_{uuid.uuid4().hex[:16]}"
-                )
+                    raise ValueError("Session is parked; use Continue after resolving interruption")
                 source_id = previous["id"] if continuation and previous else None
                 self._run_tasks[admitted_run_id] = task
-                try:
-                    return await self._execute(
-                        session_id,
-                        admitted_run_id,
-                        workspace,
-                        request,
-                        source_id,
-                        sink,
-                        approval_handler,
-                        existing_turn_id=admitted["turn_id"] if admitted else None,
-                    )
-                finally:
-                    self._run_tasks.pop(admitted_run_id, None)
+                return await self._execute(
+                    session_id,
+                    admitted_run_id,
+                    workspace,
+                    request,
+                    source_id,
+                    sink,
+                    approval_handler,
+                    existing_turn_id=admitted["turn_id"] if admitted else None,
+                )
+        except BaseException as exc:
+            self._finish_admitted(admitted_run_id, exc)
+            raise
         finally:
+            if self._run_tasks.get(admitted_run_id) is task:
+                self._run_tasks.pop(admitted_run_id, None)
+            self._release_admission(admitted_run_id)
             self._active_tasks.discard(task)
 
     def _recover_interrupted_runs(self) -> None:
@@ -926,9 +1194,7 @@ class RuntimeHost:
                     )
             self.store.append_event(run_id, "run.interrupted", payload)
 
-    def _crash_gap_evidence(
-        self, run_id: str
-    ) -> tuple[list[str], dict[str, Any] | None] | None:
+    def _crash_gap_evidence(self, run_id: str) -> tuple[list[str], dict[str, Any] | None] | None:
         """What the filesystem still knows about a run that died without a checkpoint.
 
         An empty file list means nothing in the Git-visible tree was touched since the
@@ -991,40 +1257,52 @@ class RuntimeHost:
         content: str = "Abandoned after interruption; not replayed.",
     ) -> None:
         """Pair unresolved calls and close ephemeral approvals in a successor run."""
-        old_events = self.store.run_events(previous["id"])
-        completed = {
-            event["payload"]["call_id"]
-            for event in old_events
-            if event["type"] == "tool.completed"
-        }
-        for event in old_events:
-            if event["type"] != "model.response":
+        for event_type, payload, role, author in self._recovery_facts(previous, content):
+            await self._emit(run_id, event_type, payload, sink, role=role, author=author)
+
+    def _recovery_facts(
+        self, previous: dict[str, Any], content: str = "Abandoned after interruption; not replayed."
+    ) -> list[tuple[str, dict[str, Any], str, str]]:
+        pending: dict[str, dict[str, Any]] = {}
+        approvals: set[str] = set()
+        for event in self.store.session_events(previous["session_id"]):
+            if event["partial"]:
                 continue
-            for block in event["payload"].get("message", {}).get("content", []):
-                if block.get("type") == "tool_use" and block["id"] not in completed:
-                    await self._emit(
-                        run_id,
-                        "tool.abandoned",
-                        {
-                            "call_id": block["id"],
-                            "name": block["name"],
-                            "is_error": True,
-                            "content": content,
-                        },
-                        sink,
-                    )
-        for approval_id in previous["pending_approvals"]:
-            await self._emit(
-                run_id,
-                "approval.resolved",
+            kind, payload = event["type"], event["payload"]
+            if kind == "model.response":
+                for block in payload.get("message", {}).get("content", []):
+                    if block.get("type") == "tool_use":
+                        pending[block["id"]] = block
+            elif kind in {"tool.completed", "tool.abandoned"}:
+                pending.pop(payload["call_id"], None)
+            elif kind == "approval.required":
+                approvals.add(payload["approval_id"])
+            elif kind == "approval.resolved":
+                approvals.discard(payload["approval_id"])
+        facts = [
+            (
+                "tool.abandoned",
                 {
-                    "approval_id": approval_id,
-                    "approved": False,
-                    "reason": "Host interrupted",
+                    "call_id": block["id"],
+                    "name": block["name"],
+                    "is_error": True,
+                    "content": content,
                 },
-                sink,
-                author="recovery",
+                "system",
+                "runtime",
             )
+            for block in pending.values()
+        ]
+        facts.extend(
+            (
+                "approval.resolved",
+                {"approval_id": identity, "approved": False, "reason": "Source run interrupted"},
+                "system",
+                "runtime",
+            )
+            for identity in sorted(approvals)
+        )
+        return facts
 
     async def _execute(
         self,
@@ -1051,21 +1329,21 @@ class RuntimeHost:
         output, steps, tool_count = "", 0, 0
         force_compact = False
         prompt = request.prompt if request else None
-        mode = run_policy.normalize_mode(request.mode) if request else "auto"
+        admitted_intent = self._admitted_intent(run_id)
+        mode = "auto"
         attachment_ids = list(request.attachment_ids) if request else []
-        requested_model = request.model.strip() if request and request.model else ""
-        selected_model = requested_model or self.settings.model
+        selected_model = self.settings.model
         # Why the run parked, if it did; read by the terminal event on every exit path.
         park_kind: str | None = None
         park_message: str | None = None
         try:
+            intent = admitted_intent or self._run_intent(request, continuation_of)
+            mode, selected_model = intent["mode"], intent["model"]
             if len(selected_model) > 256:
                 raise ValueError("Model name cannot exceed 256 characters")
             # A parked run resumes the task it was on, so the continuation says which one.
             resumed_task_id = (
-                task_plan_active(self.store.task_plan(session_id))
-                if continuation_of
-                else None
+                task_plan_active(self.store.task_plan(session_id)) if continuation_of else None
             )
             await self._emit(
                 run_id,
@@ -1075,17 +1353,19 @@ class RuntimeHost:
                     "workspace_id": workspace.workspace_id,
                     "provider": self.settings.provider,
                     "model": selected_model,
+                    "mode": mode,
+                    "endpoint_hash": intent["endpoint_hash"],
                     "continuation_of": continuation_of,
                     "resumed_task_id": resumed_task_id,
                 },
                 sink,
             )
-            if continuation_of:
+            if continuation_of and not admitted_intent:
                 previous = self.store.get_run(continuation_of)
                 assert previous is not None
                 # Resolve every unpaired advertised call, including calls never dispatched.
                 await self._resolve_interrupted_history(run_id, previous, sink)
-            else:
+            elif not admitted_intent:
                 # Missing or foreign attachments raise ValueError and fail the
                 # run loudly instead of silently dropping the user's context.
                 attachment_records = attachments.load_attachments(
@@ -1099,6 +1379,7 @@ class RuntimeHost:
                         "message": self._semantic(
                             attachments.compose_message(prompt or "", attachment_records)
                         ),
+                        "attachment_ids": attachment_ids,
                     },
                     sink,
                     role="user",
@@ -1111,9 +1392,7 @@ class RuntimeHost:
                 run_id,
                 "workspace.checkpoint",
                 {
-                    "checkpoint": await asyncio.to_thread(
-                        workspace_checkpoint, workspace_root
-                    ),
+                    "checkpoint": await asyncio.to_thread(workspace_checkpoint, workspace_root),
                 },
                 sink,
             )
@@ -1197,9 +1476,7 @@ class RuntimeHost:
                 # hallucinated call must stay a no-op: restrict execution to the
                 # visible names instead of trusting the model to comply.
                 visible = {tool.get("name") for tool in tools}
-                handlers = {
-                    name: handler for name, handler in handlers.items() if name in visible
-                }
+                handlers = {name: handler for name, handler in handlers.items() if name in visible}
             executor = ToolExecutor(
                 handlers,
                 {
@@ -1282,6 +1559,51 @@ class RuntimeHost:
                 )
                 return approved
 
+            def record_usage(response: ModelResponse) -> None:
+                for key in usage:
+                    usage[key] += max(0, int(response.usage.get(key, 0)))
+
+            def ensure_token_budget() -> None:
+                if (
+                    self.settings.run_token_limit
+                    and sum(usage.values()) >= self.settings.run_token_limit
+                ):
+                    raise _RunTokenBudgetExceeded(
+                        f"Run token budget reached ({sum(usage.values())}/"
+                        f"{self.settings.run_token_limit}); session parked"
+                    )
+
+            async def complete_summary(summary_request: ModelRequest) -> ModelResponse:
+                ensure_token_budget()
+                await self._emit(
+                    run_id,
+                    "context.summary_requested",
+                    {
+                        "model": summary_request.model,
+                        "request_chars": request_size(
+                            summary_request.system, summary_request.messages, summary_request.tools
+                        ),
+                        "context_hash": digest(summary_request.messages),
+                    },
+                    sink,
+                )
+                response = await self._complete_with_retry(
+                    summary_request, run_id, sink, kind="context_summary"
+                )
+                record_usage(response)
+                await self._emit(
+                    run_id,
+                    "context.summary_generated",
+                    {
+                        "text": self._semantic(response.text),
+                        "stop_reason": response.stop_reason,
+                        "usage": response.usage,
+                    },
+                    sink,
+                    author="model",
+                )
+                return response
+
             step_budget_exhausted = False
             # The run budget stays the hard ceiling; this only stops one task from eating it.
             task_park: str | None = None
@@ -1296,6 +1618,7 @@ class RuntimeHost:
             # Bound before the loop so the task-plan handler can stamp its own step.
             steps = 0
             for steps in range(1, self.settings.max_steps + 1):
+                ensure_token_budget()
                 plan_state = self.store.task_plan_state(session_id)
                 plan_todos = (plan_state["todos"] if plan_state else None) or None
                 current_task = task_plan_active(plan_todos)
@@ -1325,12 +1648,16 @@ class RuntimeHost:
                     secrets=(self.settings.api_key or "",),
                     system=system,
                     tools=tools,
+                    complete_summary=complete_summary,
                 )
                 force_compact = False
                 if compacted:
-                    await self._emit(run_id, "context.compacted", compacted, sink)
-                    for key in usage:
-                        usage[key] += int(compacted.get("usage", {}).get(key, 0))
+                    await self._emit(
+                        run_id,
+                        "context.compacted",
+                        {key: value for key, value in compacted.items() if key != "usage"},
+                        sink,
+                    )
                 if trimmed:
                     await self._emit(run_id, "context.trimmed", trimmed, sink)
                 await self._emit(
@@ -1348,6 +1675,7 @@ class RuntimeHost:
                     },
                     sink,
                 )
+                ensure_token_budget()
                 provider_messages = attachments.hydrate_messages(
                     self.settings.state_dir, session_id, messages
                 )
@@ -1362,6 +1690,7 @@ class RuntimeHost:
                     run_id,
                     sink,
                 )
+                record_usage(response)
                 # Persist exactly the normalized response that the next model request sees.
                 raw_content = response.content_blocks()
                 calls = [
@@ -1379,8 +1708,6 @@ class RuntimeHost:
                 }
                 if len({c.id for c in calls}) != len(calls) or prior_ids & {c.id for c in calls}:
                     raise ValueError("Duplicate tool call IDs in model response")
-                for key in usage:
-                    usage[key] += int(response.usage.get(key, 0))
                 await self._emit(
                     run_id,
                     "model.response",
@@ -1494,6 +1821,22 @@ class RuntimeHost:
                 status, error = "interrupted", park_message
             else:
                 status, error = "completed", None
+        except _RunTokenBudgetExceeded as exc:
+            await self._emit(
+                run_id,
+                "workspace.checkpoint",
+                {"checkpoint": await asyncio.to_thread(workspace_checkpoint, workspace_root)},
+                sink,
+            )
+            steps = max(
+                (
+                    e["payload"].get("step", 0)
+                    for e in self.store.run_events(run_id)
+                    if e["type"] == "model.response"
+                ),
+                default=0,
+            )
+            status, error, park_kind = "interrupted", str(exc), "token_budget"
         except asyncio.CancelledError:
             # A cancel can land between a completed side-effecting tool and the
             # checkpoint that records its result: they are two separate facts, and
@@ -1517,7 +1860,14 @@ class RuntimeHost:
             await self._emit(
                 run_id,
                 "run.interrupted",
-                {"error": "Run cancelled; session parked", "reason": "cancelled"},
+                {
+                    "error": "Run cancelled; session parked",
+                    "reason": "cancelled",
+                    "usage": usage,
+                    "steps": steps,
+                    "tool_calls": tool_count,
+                    "duration_ms": (time.perf_counter() - started) * 1000,
+                },
                 sink,
             )
             raise

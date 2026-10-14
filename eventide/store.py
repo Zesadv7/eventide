@@ -105,8 +105,7 @@ class RuntimeStore:
             version = max(version, 1)
             if version < 2:
                 columns = {
-                    row[1]
-                    for row in self._connection.execute("PRAGMA table_info(sessions)")
+                    row[1] for row in self._connection.execute("PRAGMA table_info(sessions)")
                 }
                 if "title" not in columns:
                     self._connection.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
@@ -120,8 +119,7 @@ class RuntimeStore:
                 version = 2
             if version < 3:
                 columns = {
-                    row[1]
-                    for row in self._connection.execute("PRAGMA table_info(sessions)")
+                    row[1] for row in self._connection.execute("PRAGMA table_info(sessions)")
                 }
                 if "working_directory" not in columns:
                     self._connection.execute(
@@ -266,16 +264,60 @@ class RuntimeStore:
         self, run_id: str, session_id: str, *, continuation_of: str | None = None
     ) -> str:
         self.create_session(session_id)
-        turn_id = f"turn_{uuid.uuid4().hex[:16]}"
         with self._lock, self._connection:
-            self._connection.execute(
-                "INSERT INTO turns VALUES (?, ?, ?, ?)",
-                (turn_id, session_id, continuation_of, time.time()),
-            )
-            self._connection.execute(
-                "INSERT INTO runs VALUES (?, ?, ?, ?)", (run_id, session_id, turn_id, time.time())
-            )
+            return self._create_run_locked(run_id, session_id, continuation_of)
+
+    def _create_run_locked(self, run_id: str, session_id: str, continuation_of: str | None) -> str:
+        turn_id = f"turn_{uuid.uuid4().hex[:16]}"
+        self._connection.execute(
+            "INSERT INTO turns VALUES (?, ?, ?, ?)",
+            (turn_id, session_id, continuation_of, time.time()),
+        )
+        self._connection.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?)", (run_id, session_id, turn_id, time.time())
+        )
         return turn_id
+
+    def admit_run(
+        self,
+        run_id: str,
+        session_id: str,
+        facts: list[tuple[str, dict[str, Any], str, str]],
+        *,
+        continuation_of: str | None = None,
+    ) -> str:
+        """Commit admission identity and all its facts together, or write nothing."""
+        if self.get_session(session_id) is None:
+            raise ValueError(f"Session not found: {session_id}")
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            turn_id = self._create_run_locked(run_id, session_id, continuation_of)
+            for event_type, payload, role, author in facts:
+                self._append_fact_locked(
+                    session_id, event_type, payload, run_id=run_id, role=role, author=author
+                )
+        return turn_id
+
+    def referenced_attachments(self, session_id: str) -> set[str]:
+        """Canonical references protect attachments even when the used cache was not written."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT payload_json FROM runtime_events WHERE session_id=? AND partial=0 "
+                "AND type IN ('run.admitted', 'message.user')",
+                (session_id,),
+            ).fetchall()
+        references: set[str] = set()
+        for row in rows:
+            payload = json.loads(row[0])
+            references.update(str(item) for item in payload.get("attachment_ids", []))
+            content = payload.get("message", {}).get("content", [])
+            if isinstance(content, list):
+                references.update(
+                    str(block["attachment_id"])
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "attachment"
+                )
+        return references
 
     def append_fact(
         self,
@@ -288,61 +330,80 @@ class RuntimeStore:
         author: str = "runtime",
         partial: bool = False,
     ) -> dict[str, Any]:
-        if partial and event_type in TERMINALS:
-            raise ValueError("Terminal facts cannot be partial")
         with self._lock, self._connection:
             self._connection.execute("BEGIN IMMEDIATE")
-            turn_id = None
-            if run_id:
-                run = self._connection.execute(
-                    "SELECT * FROM runs WHERE id=?", (run_id,)
-                ).fetchone()
-                if not run or run["session_id"] != session_id:
-                    raise ValueError("Run/session identity mismatch")
-                turn_id = run["turn_id"]
-                terminal = self._connection.execute(
-                    "SELECT * FROM runtime_events WHERE run_id=? AND type IN "
-                    "('run.completed', 'run.failed', 'run.interrupted')",
-                    (run_id,),
-                ).fetchone()
-                if terminal:
-                    if event_type in TERMINALS:
-                        return self._decode(terminal)
-                    raise ValueError("Run already terminated")
-            seq = self._connection.execute(
-                "SELECT COALESCE(MAX(session_seq),0)+1 FROM runtime_events WHERE session_id=?",
-                (session_id,),
-            ).fetchone()[0]
-            event = RuntimeEvent(
-                uuid.uuid4().hex,
+            return self._append_fact_locked(
+                session_id,
+                event_type,
+                payload,
+                run_id=run_id,
+                role=role,
+                author=author,
+                partial=partial,
+            )
+
+    def _append_fact_locked(
+        self,
+        session_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        run_id: str | None = None,
+        role: str = "system",
+        author: str = "runtime",
+        partial: bool = False,
+    ) -> dict[str, Any]:
+        if partial and event_type in TERMINALS:
+            raise ValueError("Terminal facts cannot be partial")
+        turn_id = None
+        if run_id:
+            run = self._connection.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+            if not run or run["session_id"] != session_id:
+                raise ValueError("Run/session identity mismatch")
+            turn_id = run["turn_id"]
+            terminal = self._connection.execute(
+                "SELECT * FROM runtime_events WHERE run_id=? AND type IN "
+                "('run.completed', 'run.failed', 'run.interrupted')",
+                (run_id,),
+            ).fetchone()
+            if terminal:
+                if event_type in TERMINALS:
+                    return self._decode(terminal)
+                raise ValueError("Run already terminated")
+        seq = self._connection.execute(
+            "SELECT COALESCE(MAX(session_seq),0)+1 FROM runtime_events WHERE session_id=?",
+            (session_id,),
+        ).fetchone()[0]
+        event = RuntimeEvent(
+            uuid.uuid4().hex,
+            session_id,
+            seq,
+            turn_id,
+            run_id,
+            time.time(),
+            event_type,
+            role,
+            author,
+            payload,
+            partial,
+        )
+        self._connection.execute(
+            "INSERT INTO runtime_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                event.event_id,
                 session_id,
                 seq,
                 turn_id,
                 run_id,
-                time.time(),
+                event.ts,
                 event_type,
                 role,
                 author,
-                payload,
-                partial,
-            )
-            self._connection.execute(
-                "INSERT INTO runtime_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    event.event_id,
-                    session_id,
-                    seq,
-                    turn_id,
-                    run_id,
-                    event.ts,
-                    event_type,
-                    role,
-                    author,
-                    json.dumps(payload, ensure_ascii=False),
-                    int(partial),
-                    1,
-                ),
-            )
+                json.dumps(payload, ensure_ascii=False),
+                int(partial),
+                1,
+            ),
+        )
         return asdict(event)
 
     @staticmethod
@@ -389,23 +450,15 @@ class RuntimeStore:
     def run_events(
         self, run_id: str, *, after: int = 0, limit: int | None = None
     ) -> list[dict[str, Any]]:
-        query = (
-            "SELECT * FROM runtime_events WHERE run_id=? AND session_seq>? "
-            "ORDER BY session_seq"
-        )
+        query = "SELECT * FROM runtime_events WHERE run_id=? AND session_seq>? ORDER BY session_seq"
         parameters: list[Any] = [run_id, after]
         if limit is not None:
             query += " LIMIT ?"
             parameters.append(limit)
         with self._lock:
-            return [
-                self._decode(row)
-                for row in self._connection.execute(query, parameters)
-            ]
+            return [self._decode(row) for row in self._connection.execute(query, parameters)]
 
-    def get_tool_result(
-        self, session_id: str, run_id: str, call_id: str
-    ) -> dict[str, Any] | None:
+    def get_tool_result(self, session_id: str, run_id: str, call_id: str) -> dict[str, Any] | None:
         """Return one completed result only when both identities belong to the session."""
         with self._lock:
             rows = self._connection.execute(
@@ -483,11 +536,7 @@ class RuntimeStore:
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         row = self.get_run_identity(run_id)
-        return (
-            {**row, **RuntimeStateProjection.project(self.run_events(run_id))}
-            if row
-            else None
-        )
+        return {**row, **RuntimeStateProjection.project(self.run_events(run_id))} if row else None
 
     def get_run_summary(self, run_id: str) -> dict[str, Any] | None:
         """Project only state needed by navigation and history indexes."""
@@ -576,9 +625,7 @@ class RuntimeStore:
             parameters.append(limit)
         with self._lock:
             rows = list(reversed(self._connection.execute(query, parameters).fetchall()))
-            events_by_run: dict[str, list[dict[str, Any]]] = {
-                row["id"]: [] for row in rows
-            }
+            events_by_run: dict[str, list[dict[str, Any]]] = {row["id"]: [] for row in rows}
             aggregates: dict[str, sqlite3.Row] = {}
             if rows:
                 placeholders = ",".join("?" for _ in rows)
@@ -613,12 +660,12 @@ class RuntimeStore:
                         "output",
                         "duration_ms",
                         "error",
-                    "pending_approvals",
-                    "reason",
-                    "usage",
-                    "gap_files",
-                )
-            },
+                        "pending_approvals",
+                        "reason",
+                        "usage",
+                        "gap_files",
+                    )
+                },
             }
             if "completed_at" in state:
                 record["completed_at"] = state["completed_at"]

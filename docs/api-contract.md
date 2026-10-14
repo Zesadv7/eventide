@@ -46,7 +46,7 @@
 ### `GET /api/runtime/settings` —— 已实现
 
 ```json
-{"context_limit": 50000, "approval_timeout": 60.0, "max_steps": 30, "task_max_steps": 12}
+{"context_limit": 50000, "approval_timeout": 60.0, "max_steps": 30, "task_max_steps": 12, "run_token_limit": 0}
 ```
 
 前端：上下文指示器分母、审批超时文案、停驻文案。请求失败前端使用默认值。
@@ -84,7 +84,7 @@ POST /api/sessions/{id}/attachments
        "media_type": "text/x-python", "kind": "text", "used": false}
 ```
 
-约束：单文件 ≤10MB；base64 或 media type 非法、声明为文本但不是 UTF-8 时返回 422；会话不存在返回 404。`media_type` 可省略并按文件名推断。内容存储于状态根 `attachments/{session_id}/{attachment_id}`，不进入 Workspace 或 Git。
+约束：单文件 ≤10MB；base64 或 media type 非法、声明为文本但不是 UTF-8 时返回 422；会话不存在返回 404。`media_type` 可省略并按文件名推断。内容存储于状态根 `attachments/~<sha256(session_id)>/{attachment_id}`，不进入 Workspace 或 Git。
 
 生命周期：`GET /api/sessions/{id}/attachments` 默认只列出未使用项，传 `include_used=true` 查看全部；单项 GET 下载原始字节；DELETE 只删除未进入 Run 的附件，已使用附件返回 409。前端刷新时恢复未使用 chips，移除 chip 同步调用 DELETE。
 
@@ -103,3 +103,11 @@ POST /api/sessions/{id}/attachments
 ### RunBody 扩展 `model` —— 已实现
 
 `model` 为可选的非空模型名（≤256 字符）。省略或空值使用 Host 默认模型；非空值只覆盖本次 Run 的模型请求、`run.started.model` 和上下文 checkpoint 身份，不修改持久 Provider 配置。Provider、Base URL 与 API Key 仍由 Host 配置决定。
+
+### Run 接收、Continue 与 Token 软上限 —— 已实现
+
+普通 Run 与 Continue 返回 202 前，Host 在同一事务写入 Run/turn 身份、`run.admitted`、用户消息或恢复事实及 checkpoint；返回后 GET 可立即查询，取消可以早于后台执行。接收和执行均占用 Workspace；同 Workspace 并发请求或停驻冲突返回 409，模式/模型/附件校验失败返回 422（Continue 恢复校验失败为 409）。重启只将未结束 Run 停驻，不自动执行。
+
+Continue 保持原 Plan，只在相同 Provider 和 Base URL 下沿用选定模型；连接变化则使用当前默认模型。原 Agent 模式恢复为 Auto，自动审批不跨 Run。附件的归属以完整 Session ID 为准，DELETE 对 canonical 引用返回 409，不仅依赖文件 used 标记。
+
+`reason=token_budget` 表示已观测的输入+输出用量达到 `run_token_limit`，默认 0 关闭。摘要成功响应也计入，摘要事件不作为用户消息显示。单次响应可越过上限，Continue 重置预算；没有用量的失败请求不估算。前端用量继续消费 Run 的 usage，停驻区显示 Token 软上限原因。

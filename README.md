@@ -146,6 +146,12 @@ Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `p
 
 HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id` 和 Workspace 内的 `working_directory`；空请求继续绑定启动项目根目录。`PATCH /api/sessions/{id}` 可设置显式标题或归档状态；默认列表隐藏已归档 Session，传 `include_archived=true` 可查看。`DELETE /api/sessions/{id}` 只删除没有 Run 或事件历史的空 Session，有历史的工作记录必须归档。Run History 默认返回最近 100 条，可用 `limit`（最多 200）和 `before=<run_id>` 向前翻页；Web 提供“加载更早记录”。`GET /api/runs/{id}/export` 流式下载 canonical JSONL；CLI `export` 默认拒绝覆盖已有文件，显式 `--force` 才替换。`POST /api/sessions/{id}/continue` 先完成恢复校验并持久化新 Run，再返回 `202`、`run_id` 和 `status=accepted`；验证失败返回 409，执行继续通过 Run 查询与 SSE 观察。同 Workspace 的并发 HTTP 请求返回 409。Web 长任务状态显示已观察到的模型步数、正在执行的任务和运行时长，并提供按 Run 停止；不虚构无法由事件证明的完成百分比。另有只读的能力自省（`GET /api/workspaces/{id}/capabilities`）、运行设置（`GET /api/runtime/settings`）以及 Session 附件上传、清单、下载和删除接口，见[接口契约](docs/api-contract.md)。
 
+普通 Run 与 Continue 都先把身份、运行模式、模型选择、用户消息或恢复事实及 checkpoint 作为一个事务提交，再返回 HTTP 202；因此收到 202 后可以立即查询和停止，即使后台执行尚未开始，目标也不会丢失。接收期间同样占用 Workspace，阻止其他入口与配置切换插入。Continue 继承 Plan 的只读限制；相同 Provider 和 Base URL 下继承原模型，切换 Provider 或 Base URL 后使用当前默认模型。Agent 模式的自动审批只授权原 Run，Continue 恢复为 Auto。
+
+摘要调用与主模型请求使用相同的超时和有限重试。已收到的摘要用量计入 Run，即使摘要残缺、没有采用或随后上下文溢出；失败请求未返回的账单用量不能由本地推测。可选 `EVENTIDE_RUN_TOKEN_LIMIT` 为每个 Run 的输入与输出 Token 总量软上限，默认 `0` 关闭：在下一次模型请求前检查已观测用量，达到时以 `token_budget` 停驻。单个响应可能越过上限，Continue 开启新预算；它不是硬性费用限额。
+
+附件按完整 Session ID 的 SHA-256 存入状态根 `attachments/~<hash>/`，内部记录再次验证精确归属。事件引用是已使用的依据，即使文件中的 used 缓存未写成功，也不能通过 API 删除。旧目录仅在能够确认安全身份时只读兼容；不自动搬移、覆盖或删除历史附件。
+
 ## Git worktree 管理
 
 旧 worktree 能力已经迁入 Workspace 控制面，不再依赖 `.tasks`、`.worktrees` 或导入时的全局目录：
@@ -195,6 +201,7 @@ EVENTIDE_MODEL=tool-capable-model
 EVENTIDE_MODEL_TIMEOUT=300
 EVENTIDE_MCP_TIMEOUT=30
 EVENTIDE_COMMAND_TIMEOUT=120
+EVENTIDE_RUN_TOKEN_LIMIT=0
 ```
 
 `EVENTIDE_PROVIDER` 支持：

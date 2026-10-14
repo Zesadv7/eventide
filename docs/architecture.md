@@ -39,12 +39,12 @@ RuntimeEvent 包含 event_id、session_id、严格递增 session_seq、turn_id�
 
 主要事件：
 
-- run.started、message.user、model.request、model.response、model.retry；
+- run.admitted、run.started、message.user、model.request、model.response、model.retry；
 - tool.prepared、tool.completed、tool.abandoned；
 - approval.required、approval.resolved；
-- workspace.checkpoint、context.configured、context.compacted、context.trimmed；
+- workspace.checkpoint、context.configured、context.compacted、context.trimmed、context.summary_requested、context.summary_generated；
 - task.plan_updated（payload 为 `{todos, next_task_seq, step}`，每个 todo 含 `id`、`content`、`status`）；
-- run.completed、run.failed、run.interrupted（终态 payload 另带 `reason`：`step_budget`、`task_step_budget`、`cancelled` 或 `null`）。
+- run.completed、run.failed、run.interrupted（终态 payload 另带 `reason`：`step_budget`、`task_step_budget`、`token_budget`、`cancelled` 或 `null`）。
 
 模型响应保存结构化 content blocks，包括 provider_state 与带稳定 ID 的 tool_use。工具执行前提交 prepared，结束后提交 completed；工具组收齐结果后才形成 provider-neutral tool_result 消息。副作用结果之后另存 workspace checkpoint；若两者之间崩溃，Continue 拒绝缺失 checkpoint 的历史。
 
@@ -64,6 +64,10 @@ ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读
 
 持久 checkpoint 保存 covered_seq、source_digest、summary、policy_version、provider、model。摘要只覆盖结束 turn 的完整前缀；模型调用使用 summary + 未覆盖 raw tail。checkpoint 来源 digest、策略和模型身份不符时忽略；空摘要、工具调用或达到 Provider 输出上限的残缺摘要都视为生成失败。摘要生成失败且旧投影仍在预算内时使用旧投影；摘要之后仍超预算时先折叠当前 turn 的旧工具结果，仍不够才返回 context_overflow。压缩与折叠都不改变原始事件。context_limit 计算 system、messages 和完整工具目录的 provider-neutral 序列化请求，仍以字符数近似，不宣称 token 精确计量。ContextBuilder 抽出模块级 `request_size()` 与 `tool_catalog_size()` 作为唯一序列化度量；Host 发出的 `model.request` payload 复用同一函数记录 `request_chars` 与 `tool_catalog_chars`，composer 的上下文指示器和用量分析因此与预算使用同一口径。
 
+Host 的两阶段接收由 `admit_run` / `admit_continue` 和 `start_admitted_run` 组成：先在 Workspace 锁内预留精确 Run/Session 身份，通过可取消但会等待线程结束的恢复和 checkpoint 检查，再由 `RuntimeStore.admit_run()` 在一个 SQLite 事务中写入 turn/run、`run.admitted`、用户消息或恢复事实和 checkpoint。附件验证、事务提交与 used 缓存写入之间没有 await；跨文件和 SQLite 仍不是共同事务，因此附件 API 同时查询 canonical 引用来保护生命周期。202 前同步登记执行 Task，使立即取消、关闭和配置切换都能找到所有者。Python 直接调用按 Workspace 排队，HTTP 重复请求拒绝；临时 reservation 只管理进程内所有权，重启事实仍以 Event Log 为准。
+
+ContextBuilder 的可选 completion callback 把生产摘要接入 Host 的模型 timeout/retry 和统一用量账本；不提供 callback 的离线调用者保持 Provider.complete 行为。`context.summary_requested/generated` 不进入 MessagesProjection，也不增加主 Agent 步数；成功生成的 usage 在是否采用判断前记账，新 `context.compacted` 不重复携带 usage。旧 compacted usage 仍可投影兼容。`run_token_limit`（默认 0）检查成功响应返回的 input+output tokens，包括摘要，在下一次主模型或摘要请求前停驻；它是按 Run 计数的软上限，不估计重试未返回的消费或视觉 token，不保证账单硬上限。
+
 ## 中断与 Continue
 
 启动时扫描缺少终态的 run，不调用模型。崩溃可能正好落在「副作用工具已提交 tool.completed、它的 checkpoint 还没写」之间，此时 Host 用文件系统本身当证据：`changed_since()` 比较 Git 可见路径（已跟踪加未忽略的未跟踪）的 mtime 与已跟踪文件是否缺失，基准是该 run 最后一条持久事实的时间戳。全部早于该时刻且没有缺失时，当前工作区就是 Host 死亡时的状态，Host 先补记 workspace.checkpoint 再写 run.interrupted，Session 停驻但仍可 Continue；查到改动则不补 checkpoint，并把改动路径写进终态 payload 的 `gap_files`（最多 20 条），让用户知道该核对什么。无法作答（非 Git、不可读、文件数超过扫描上限）时按没有证据处理，行为与本次修改前一致。单次 run 用尽步数预算（`max_steps`，默认 30）时所有工具结果已提交，Host 先记录工作区 checkpoint，再写入 run.interrupted，Session 停驻，用户可 Continue 到新 turn 并获得新的步数预算。存在计划时还有一条更小的软边界：同一条 `in_progress` 任务连续占用超过 `task_max_steps`（默认 12，`0` 关闭）个 step 时同样停驻，终态 `reason` 记为 `task_step_budget` 并在错误信息中点名任务 id。用户停止运行（`reason=cancelled`）时也先补记工作区 checkpoint 再写 `run.interrupted`：取消可能正好落在"副作用工具已提交、它的 checkpoint 还没写"之间，补记这一步保证停驻后仍可 Continue。该计数只在本次 run 内存在、不落盘，因此 Continue 后重新计数；`max_steps` 始终是硬上限，Host 不因为单任务超时而改写计划状态。
@@ -75,7 +79,7 @@ ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读
 3. 不存在结果未知的非只读 prepared 调用；MCP 即使声明只读，也采用保守的恢复策略。
 4. 已完成副作用工具后存在 checkpoint；无法采集证据时拒绝继续。
 
-Continue 创建新 turn/run，并以唯一 continuation_of 关联来源 run；不会重放旧工具或重复用户消息。未完成 read_file/glob/compact 和确定尚未派发的调用写入 abandoned，补齐下一次模型请求的 tool-result 结构。只读结果也不伪装成成功。续跑的 `run.started` 记录 `resumed_task_id`（来源 run 停驻时的 `active_task_id`），system 中写明正在接续哪一条任务。
+Continue 从来源 `run.admitted` / `run.started` 继承 Plan 的只读限制与相同 Provider/endpoint hash 下的模型；原 Agent 自动审批不延续，其他模式归为 Auto。Provider 或 Base URL 改变时使用当前默认模型，旧记录缺 mode 时按 Auto。恢复事实扫描整个 Session 未闭合的工具与审批，覆盖执行前已被停止的 Continue 链。Continue 创建新 turn/run，并以唯一 continuation_of 关联来源 run；不会重放旧工具或重复用户消息。未完成 read_file/glob/compact 和确定尚未派发的调用写入 abandoned，补齐下一次模型请求的 tool-result 结构。只读结果也不伪装成成功。续跑的 `run.started` 记录 `resumed_task_id`（来源 run 停驻时的 `active_task_id`），system 中写明正在接续哪一条任务。
 
 没有 HEAD、非 Git、存在 submodule、证据采集失败、未知副作用或源码变化时维持 parked 并解释原因。用户可以显式 abandon：Runtime 创建一个不调用模型的关联 run，把未配对调用记录为结果未知且未重放，保留全部历史并解除 Session 停驻。范围仅为 Git 可见源码；ignored 文件、外部 MCP 服务和 OS 全局状态不在快照内。不是指令级恢复，也不是操作系统沙箱。
 
@@ -83,7 +87,7 @@ Continue 创建新 turn/run，并以唯一 continuation_of 关联来源 run；�
 
 `RuntimeHost.run(RunRequest)`、create_session、Provider 配置和 RunResult 原字段保持当前契约；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。
 
-CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/list/show/remove、continue、abandon、export 和 plan show。`plan show <session_id>` 读取 session_status 中已有的计划事实，默认人类可读输出，`--json` 返回与 HTTP 同构的 `task_plan`、`active_task_id` 和 `task_state`；CLI 不重算投影，也不提供任何计划写入口。无指定 Workspace 时使用启动 cwd；Git 子目录可作为 Session cwd，同时 Workspace 身份仍归一到仓库根。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon、按 run_id 取消和 canonical JSONL export。Session POST 可传 working_directory，PATCH 可设置标题或归档；列表默认隐藏归档记录；DELETE 只允许没有运行历史的空 Session。普通 Run 与 Continue 都返回 202；Continue 在响应前完成安全校验并持久化 continuation Run 身份，执行结果通过 Run 查询与 SSE 获取。Export 按 session_seq 分页读取 canonical Event 并以 NDJSON 流响应，不使用 SSE 兼容别名；CLI 写文件默认不覆盖。轻量事实接口包括：`GET /api/workspaces/{id}/capabilities` 用纯文件解析返回 Workspace 的 Skill 名称/简介、MCP 服务名/transport 与配置路径提示，不连接 MCP 服务，也不返回 command/env/密钥，坏配置写入 `notes` 而非 500；`GET /api/runtime/settings` 透出 `context_limit`、`approval_timeout`、`max_steps`、`task_max_steps`；Run 摘要（`list_runs` 与 latest run summary）随状态字段透出 RuntimeStateProjection 已派生的 `usage`（input/output tokens）。这些只是字段透出，不新增事实源。模型列表辅助位于 `model_catalog.py`，`GET /api/models` 探测当前 Provider 的列表端点，失败返回空列表与说明而不抛错。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。
+CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/list/show/remove、continue、abandon、export 和 plan show。`plan show <session_id>` 读取 session_status 中已有的计划事实，默认人类可读输出，`--json` 返回与 HTTP 同构的 `task_plan`、`active_task_id` 和 `task_state`；CLI 不重算投影，也不提供任何计划写入口。无指定 Workspace 时使用启动 cwd；Git 子目录可作为 Session cwd，同时 Workspace 身份仍归一到仓库根。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon、按 run_id 取消和 canonical JSONL export。Session POST 可传 working_directory，PATCH 可设置标题或归档；列表默认隐藏归档记录；DELETE 只允许没有运行历史的空 Session。普通 Run 与 Continue 都返回 202；Continue 在响应前完成安全校验并持久化 continuation Run 身份，执行结果通过 Run 查询与 SSE 获取。Export 按 session_seq 分页读取 canonical Event 并以 NDJSON 流响应，不使用 SSE 兼容别名；CLI 写文件默认不覆盖。轻量事实接口包括：`GET /api/workspaces/{id}/capabilities` 用纯文件解析返回 Workspace 的 Skill 名称/简介、MCP 服务名/transport 与配置路径提示，不连接 MCP 服务，也不返回 command/env/密钥，坏配置写入 `notes` 而非 500；`GET /api/runtime/settings` 透出 `context_limit`、`approval_timeout`、`max_steps`、`task_max_steps`、`run_token_limit`；Run 摘要（`list_runs` 与 latest run summary）随状态字段透出 RuntimeStateProjection 已派生的 `usage`（input/output tokens）。这些只是字段透出，不新增事实源。模型列表辅助位于 `model_catalog.py`，`GET /api/models` 探测当前 Provider 的列表端点，失败返回空列表与说明而不抛错。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。
 
 `migrate-v02 [source] --workspace <target>` 显式导入旧 `.nexus/nexus.db`。旧 messages 变为 `message.imported`，工具事件名称映射到 canonical prepared/completed，Run 根据旧终态补成当前终态；无法确认结束的旧 running Run 作为 interrupted 导入。旧源文件不写入，身份冲突时整个导入回滚。Provider 名称、URL 和模型可在目标没有配置时导入，旧 `api_key_ciphertext` 不跨密钥根复制。
 
@@ -91,7 +95,7 @@ CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/l
 
 每个 run 按 Workspace 读取 mcp.json；MCP SDK transport 在同一 owning task 内连接和关闭，避免跨 task 的资源退出。各 MCP Server 独立连接和报告错误，单个 Server 的连接、发现或关闭异常不覆盖其他能力及已完成结果。模型请求、MCP 连接/调用和本地 Shell 分别受 `EVENTIDE_MODEL_TIMEOUT`、`EVENTIDE_MCP_TIMEOUT`、`EVENTIDE_COMMAND_TIMEOUT` 限制；取消 Shell 时终止其进程树。所有工具统一进入 ToolExecutor/PolicyEngine，文件工具内部再次检查路径。生产基础目录包含文件、Shell、compact、`read_tool_result` 和 `todo_write`；前者只能按当前 Session、指定 Run 和 call identity 读取 canonical `tool.completed`，单页最多 12,000 字符；后者替换当前 Session 计划，最多 20 项且只修改 Event Log，作为 recovery-safe 工具不会触发 Workspace checkpoint。Workspace 存在有效 Skill 时动态加入 `load_skill`；存在与当前 embedding fingerprint 匹配的知识索引时动态加入只读 `search_knowledge`。旧教学 task graph/teammate/cron、全局 Skill loader、同步 Agent/LLM、context/hooks、模拟 MCP 与全局注册表已经删除；不再提供 `AgentRuntime` / `TraceStore` 别名。Skills、摘要、恢复与审批均沿用已有生产实现。离线 Eval 显式关闭真实 MCP，使用独立评测数据库和 scripted Provider。
 
-RunBody 支持每次 Run 的 `mode`（auto/plan/agent，未知值按 auto 处理）、`attachment_ids` 与可选 `model`，策略在 `run_policy.py` 中保持为纯函数，wiring 在 Host。`plan` 把模型可见的工具目录收敛为只读白名单（`read_file`/`glob`/`read_tool_result`/`compact`/`todo_write`/`load_skill`/`search_knowledge`），system 追加只读声明；executor handlers 同步裁剪到可见名字，模型幻觉出的写调用不会命中处理器；MCP 服务仍按 Workspace 配置连接，只是其工具不进入目录。`agent` 在该 Run 内自动允许 ASK 决策，不再等待审批处理器，`approval.resolved` payload 带 `auto: true` 且 `author="runtime"`，审计事实完整。附件上传采用 JSON base64、单文件 ≤10MB，存储在状态根 `attachments/{session_id}/{attachment_id}`，不属于 SQLite schema；清单默认只返回未使用附件，下载保持原始媒体类型，删除只允许未使用附件。HTTP 在返回 202 前校验归属与当前 Provider 能力。UTF-8 文本以分隔符内联且单附件超过 512KB 时截断；图片和 PDF 在事件中只保存不可变引用，每次 Provider 请求前从状态根水合，避免 canonical Event Log、审计导出和字符预算复制 base64。图片映射到 Anthropic、OpenAI-compatible 与 OpenAI Responses 的各自多模态协议；PDF 只映射到 Anthropic 与 OpenAI Responses。普通二进制可以存取，但没有协议映射时明确拒绝提交。
+RunBody 支持每次 Run 的 `mode`（auto/plan/agent，未知值按 auto 处理）、`attachment_ids` 与可选 `model`，策略在 `run_policy.py` 中保持为纯函数，wiring 在 Host。`plan` 把模型可见的工具目录收敛为只读白名单（`read_file`/`glob`/`read_tool_result`/`compact`/`todo_write`/`load_skill`/`search_knowledge`），system 追加只读声明；executor handlers 同步裁剪到可见名字，模型幻觉出的写调用不会命中处理器；MCP 服务仍按 Workspace 配置连接，只是其工具不进入目录。`agent` 在该 Run 内自动允许 ASK 决策，不再等待审批处理器，`approval.resolved` payload 带 `auto: true` 且 `author="runtime"`，审计事实完整。附件上传采用 JSON base64、单文件 ≤10MB，存储在状态根 `attachments/~<sha256(session_id)>/{attachment_id}`，不属于 SQLite schema；内部 v3 记录保存精确 session_id，读取、标记、删除和水合均校验；新目录始终使用完整 ID 的 SHA-256，拒绝链接逃逸与重名覆盖。旧安全目录保守只读兼容，无法确认归属的旧记录拒绝访问。清单默认只返回未使用附件，used 由文件缓存或 canonical 引用共同确定；下载保持原始媒体类型，删除只允许未使用附件。HTTP 在返回 202 前校验归属与当前 Provider 能力。UTF-8 文本以分隔符内联且单附件超过 512KB 时截断；图片和 PDF 在事件中只保存不可变引用，每次 Provider 请求前从状态根水合，避免 canonical Event Log、审计导出和字符预算复制 base64。图片映射到 Anthropic、OpenAI-compatible 与 OpenAI Responses 的各自多模态协议；PDF 只映射到 Anthropic 与 OpenAI Responses。普通二进制可以存取，但没有协议映射时明确拒绝提交。
 
 ## Workspace 知识检索
 

@@ -441,3 +441,15 @@
 **决策：** 生产执行和存储统一为 `RuntimeHost` / `RuntimeStore`，删除 `AgentRuntime` / `TraceStore` 别名及旧教学模块、专属测试，同时移除没有生产消费者的 fallback model 配置。已经迁移的 Skills、摘要、审批、恢复沿用当前实现；有价值的任务前置依赖迁入 `todo_write` 原子快照，以稳定 id 校验且不新增状态源；worktree 迁入注入式 Workspace 控制面，通过现有 Host 锁和 Event Log 管理；Shell 只保留注入式异步执行器，使用结构化退出状态与有界头尾采集。旧 task owner/mailbox/cron/无限自主协作不复制，未来受控 worker 必须有独立上下文、预算、取消、产物采纳和写入隔离。LangGraph 只能作为可选外层 adapter；沙箱走执行器边界，观测只派生已有事实。
 
 **影响：** 旧 Python import 是明确的破坏性移除，Git 历史仍保存源码，不维护空壳或第二套状态。旧本地任务/worktree 文件不会自动迁移或删除；CLI worktree 必须从已有 Git ref 创建，状态在源项目外，拒绝丢弃修改或新增提交，遇到隐藏变动的索引标记也拒绝删除，并保留分支。计划依赖只约束模型的计划状态，不证明完成，也不自动调度。Shell 的省略部分会被明确丢弃，不能通过分页找回。覆盖率和类型检查不再排除 legacy/tools。后续功能以实际可靠性、隔离写入、独立验收和可复现评测决定优先级，不通过增加框架数量衡量成熟度。
+
+## ADR-044：先持久接收，再执行；恢复意图与模型用量由同一 Host 管理
+
+**状态：Accepted**，细化 ADR-019、ADR-038、ADR-040。
+
+**背景：** 普通 HTTP Run 返回 202 时尚无运行身份或目标；Continue 在安全检查与后台执行之间也缺少所有权。立即停止、配置切换、重复身份和重启可能使目标或只读限制丢失。摘要直接调用 Provider，绕过 Host timeout/retry，未采用的摘要消费也可能遗漏。
+
+**决策：** 接收在 Workspace 锁内预留精确 Run/Session 身份，线程校验完成后用单个 SQLite 事务提交 run.admitted、用户消息或恢复事实和 checkpoint，再同步登记可取消 Task，最后返回 202。配置切换拒绝接收和执行中的任务，Host 关闭等线程释放所有权后再关闭 Store。Continue 继承 Plan 及同 Provider/endpoint 的模型，Agent 自动审批仅原 Run 有效；恢复扫描 Session 未闭合历史，不重放副作用。附件新目录哈希完整 Session ID，内部保存精确归属，canonical 引用补足 used 缓存与数据库无法共同提交的窗口。
+
+摘要走 Host completion callback，与主请求共用超时、有限重试和用量累计；成功响应在校验和采用前计入，summary 事件不成为聊天消息或主步骤。可选 Run Token 软上限在下一次请求前检查已观测总量，达到则 checkpoint 后停驻；默认关闭，Continue 重置。未知失败请求消费不伪造，单响应允许越界，不承诺硬费用上限。
+
+**影响：** 202 是可查询、可停止的持久接收承诺，完成仍由终态与证据决定。进程 reservation 不构成第二事实源，不新增 schema 或依赖。安全旧附件目录只读兼容，不自动改名或清除；状态根备份必须包含附件。子 Agent 的共享预算和取消必须复用此所有者，不能另建无审计的执行链。

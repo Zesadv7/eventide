@@ -18,11 +18,13 @@ export const short = (value, limit = 100) => {
 const parkLabels = {
   step_budget: "步数预算用尽",
   task_step_budget: "单任务步数超限",
+  token_budget: "Token 预算用尽",
   cancelled: "执行已停止",
 };
 const parkTexts = {
   step_budget: "本次执行用完了步数预算；已完成的工作已保存，可以从当前进度继续。",
   task_step_budget: "同一条任务占用了过多步数，执行已暂停；可以先调整计划，再从该任务继续。",
+  token_budget: "本次执行已达到 Token 软上限；用量和当前进度已保存，继续会开启新的预算。",
   cancelled: "这次执行被停止；已完成的工作已保存，可以继续。",
 };
 const hostStopped = "Host stopped before terminal fact";

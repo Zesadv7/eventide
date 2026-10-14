@@ -41,11 +41,16 @@ class Settings:
     model_timeout: float = 300.0
     mcp_timeout: float = 30.0
     command_timeout: float = 120.0
+    run_token_limit: int = 0
     embedding_provider: str = "hash"
     embedding_model: str | None = None
     embedding_base_url: str | None = None
     embedding_api_key: str | None = None
     embedding_dim: int = 256
+
+    def __post_init__(self) -> None:
+        if self.run_token_limit < 0:
+            raise ValueError("run_token_limit must be zero or positive")
 
     @classmethod
     def from_env(cls, workdir: Path | None = None) -> Settings:
@@ -71,6 +76,7 @@ class Settings:
             model_timeout=float(os.getenv("EVENTIDE_MODEL_TIMEOUT", "300")),
             mcp_timeout=float(os.getenv("EVENTIDE_MCP_TIMEOUT", "30")),
             command_timeout=float(os.getenv("EVENTIDE_COMMAND_TIMEOUT", "120")),
+            run_token_limit=int(os.getenv("EVENTIDE_RUN_TOKEN_LIMIT", "0")),
             embedding_provider=os.getenv("EVENTIDE_EMBEDDING_PROVIDER", "hash"),
             embedding_model=os.getenv("EVENTIDE_EMBEDDING_MODEL") or None,
             embedding_base_url=os.getenv("EVENTIDE_EMBEDDING_BASE_URL") or None,
