@@ -110,11 +110,62 @@ class RuntimeEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class CommandResult:
+    """Outcome of a command, with bounded output and explicit process status."""
+
+    exit_code: int | None
+    stdout: str = ""
+    stderr: str = ""
+    timed_out: bool = False
+    duration_ms: float = 0.0
+    stdout_bytes: int = 0
+    stderr_bytes: int = 0
+    stdout_omitted_bytes: int = 0
+    stderr_omitted_bytes: int = 0
+
+    @property
+    def truncated(self) -> bool:
+        return self.stdout_omitted_bytes > 0 or self.stderr_omitted_bytes > 0
+
+    @property
+    def is_error(self) -> bool:
+        return self.timed_out or self.exit_code != 0
+
+    def render(self) -> str:
+        if self.timed_out:
+            status = "Command timed out"
+        else:
+            status = "Command failed" if self.is_error else "Command finished"
+        parts = [f"{status} (exit_code={self.exit_code})."]
+        if self.stdout:
+            parts.append(f"stdout:\n{self.stdout}")
+        if self.stderr:
+            parts.append(f"stderr:\n{self.stderr}")
+        if not self.stdout and not self.stderr:
+            parts.append("(no output)")
+        return "\n".join(parts)
+
+    def metadata(self) -> dict[str, Any]:
+        """Process facts; captured text already appears in the tool content."""
+        return {
+            "exit_code": self.exit_code,
+            "timed_out": self.timed_out,
+            "duration_ms": self.duration_ms,
+            "truncated": self.truncated,
+            "stdout_bytes": self.stdout_bytes,
+            "stderr_bytes": self.stderr_bytes,
+            "stdout_omitted_bytes": self.stdout_omitted_bytes,
+            "stderr_omitted_bytes": self.stderr_omitted_bytes,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ToolResult:
     call_id: str
     name: str
     content: str
     is_error: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def as_block(self) -> dict[str, Any]:
         return {

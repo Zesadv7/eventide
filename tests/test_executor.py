@@ -58,11 +58,13 @@ async def test_command_executor_is_replaceable(isolated_workspace):
 
 async def test_local_command_timeout_terminates_process(isolated_workspace):
     executor = LocalCommandExecutor(timeout=0.05)
-    output = await executor.execute(
+    result = await executor.execute(
         f'"{sys.executable}" -c "import time; time.sleep(30)"',
         isolated_workspace,
     )
-    assert output == "Error: Timeout (0.05s)"
+    assert result.timed_out and result.is_error
+    assert result.exit_code is not None
+    assert "Command timed out" in result.render()
 
 
 async def test_model_cannot_supply_its_own_mcp_approval(isolated_workspace):
