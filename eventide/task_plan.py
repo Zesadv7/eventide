@@ -12,16 +12,17 @@ MAX_SUMMARY_CHARS = 300
 MAX_PROMPT_SUMMARY_CHARS = 120
 STATUSES = frozenset({"pending", "in_progress", "completed", "blocked"})
 ID_PATTERN = re.compile(r"t[1-9][0-9]{0,3}")
-ITEM_KEYS = frozenset({"id", "content", "status", "summary"})
+ITEM_KEYS = frozenset({"id", "content", "status", "summary", "depends_on"})
 
 TOOL = {
     "name": "todo_write",
     "description": (
-        "Replace the session task plan for three or more meaningful steps: call it before "
-        "execution, then again after each completion, block, or switch. Send the complete "
-        "plan, keep at most one item in_progress, and echo back the id of every item you keep "
-        "so identity survives rewording. When completing an item, summarize what you did -- "
-        "not whether it is correct. Skip trivial requests."
+        "Replace the full plan for three or more meaningful steps before execution and "
+        "after state changes. Keep existing ids and at most one in_progress item; summarize "
+        "what you did, not correctness, on completion. Optional "
+        "depends_on lists prerequisite ids, which must be completed before starting or "
+        "completing the item. New plans allocate t1, t2, etc. in item order. Omitted "
+        "dependencies are kept; use [] to clear."
     ),
     "input_schema": {
         "type": "object",
@@ -36,6 +37,12 @@ TOOL = {
                         "content": {"type": "string", "maxLength": MAX_CONTENT_CHARS},
                         "status": {"type": "string", "enum": sorted(STATUSES)},
                         "summary": {"type": "string", "maxLength": MAX_SUMMARY_CHARS},
+                        "depends_on": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": MAX_TODOS,
+                            "uniqueItems": True,
+                        },
                     },
                     "required": ["content", "status"],
                     "additionalProperties": False,
@@ -62,7 +69,7 @@ def plan_update(
     value: object,
     previous: list[dict[str, Any]] | None = None,
     next_task_seq: int | None = None,
-) -> tuple[list[dict[str, str]], int]:
+) -> tuple[list[dict[str, Any]], int]:
     """Validate a full plan and give every item a stable identity.
 
     Identity survives rewording: an item keeps its id when the model echoes it back, or
@@ -79,13 +86,16 @@ def plan_update(
         next_task_seq if isinstance(next_task_seq, int) else 0,
         _claimed_sequence(previous) + 1,
     )
-    todos: list[dict[str, str]] = []
+    todos: list[dict[str, Any]] = []
     seen_content: set[str] = set()
     claimed: set[str] = set()
     active = 0
     for index, item in enumerate(value, 1):
         if not isinstance(item, dict) or not set(item) <= ITEM_KEYS:
-            raise ValueError(f"todo {index} must contain only id, content, status and summary")
+            raise ValueError(
+                f"todo {index} must contain only id, content, status and summary, "
+                "plus optional depends_on"
+            )
         if "content" not in item or "status" not in item:
             raise ValueError(f"todo {index} must contain content and status")
         content = item.get("content")
@@ -100,7 +110,7 @@ def plan_update(
             )
         if content in seen_content:
             raise ValueError(f"todo {index} duplicates another item")
-        if status not in STATUSES:
+        if not isinstance(status, str) or status not in STATUSES:
             raise ValueError(f"todo {index} has unsupported status")
         if task_id is None:
             # Reuse an unclaimed previous identity when the plan was rewritten verbatim.
@@ -129,6 +139,7 @@ def plan_update(
         todos.append(_item(task_id, content, str(status), item, available, index))
     if active > 1:
         raise ValueError("only one todo may be in_progress")
+    _validate_dependencies(todos)
     return todos, sequence
 
 
@@ -139,8 +150,8 @@ def _item(
     item: dict[str, Any],
     available: dict[str, dict[str, Any]],
     index: int,
-) -> dict[str, str]:
-    """Attach the model's completion claim, if this update is allowed to carry one."""
+) -> dict[str, Any]:
+    """Attach the completion claim and preserve or replace prerequisite references."""
     summary = item.get("summary")
     prior = available.get(task_id)
     settled = prior.get("status") if prior else None
@@ -161,22 +172,72 @@ def _item(
             raise ValueError(
                 f"todo {index} summary cannot exceed {MAX_SUMMARY_CHARS} characters"
             )
-        if summary:
-            return {
-                "id": task_id,
-                "content": content,
-                "status": status,
-                "summary": summary,
-            }
-    return {"id": task_id, "content": content, "status": status}
+    result: dict[str, Any] = {"id": task_id, "content": content, "status": status}
+    if summary:
+        result["summary"] = summary
+    if "depends_on" in item or (prior is not None and "depends_on" in prior):
+        dependencies = item.get("depends_on", prior.get("depends_on") if prior else [])
+        if not isinstance(dependencies, list):
+            raise ValueError(f"todo {index} depends_on must be an array")
+        if len(dependencies) > MAX_TODOS:
+            raise ValueError(f"todo {index} cannot have more than {MAX_TODOS} dependencies")
+        seen: set[str] = set()
+        for dependency in dependencies:
+            if not isinstance(dependency, str) or not ID_PATTERN.fullmatch(dependency):
+                raise ValueError(f"todo {index} has an invalid dependency id")
+            if dependency == task_id:
+                raise ValueError(f"todo {index} cannot depend on itself")
+            if dependency in seen:
+                raise ValueError(f"todo {index} has duplicate dependency {dependency}")
+            seen.add(dependency)
+        result["depends_on"] = list(dependencies)
+    return result
 
 
-def normalize_todos(value: object) -> list[dict[str, str]]:
+def _validate_dependencies(todos: list[dict[str, Any]]) -> None:
+    """Check the complete candidate snapshot before any plan event can be committed."""
+    by_id = {todo["id"]: todo for todo in todos}
+    for todo in todos:
+        for dependency in todo.get("depends_on", []):
+            if dependency not in by_id:
+                raise ValueError(f"task {todo['id']} references unknown dependency {dependency}")
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(task_id: str) -> None:
+        if task_id in visiting:
+            raise ValueError("task dependencies cannot contain a cycle")
+        if task_id in visited:
+            return
+        visiting.add(task_id)
+        for dependency in by_id[task_id].get("depends_on", []):
+            visit(dependency)
+        visiting.remove(task_id)
+        visited.add(task_id)
+
+    for task_id in by_id:
+        visit(task_id)
+    for todo in todos:
+        if todo["status"] not in {"in_progress", "completed"}:
+            continue
+        unmet = [
+            dependency
+            for dependency in todo.get("depends_on", [])
+            if by_id[dependency]["status"] != "completed"
+        ]
+        if unmet:
+            raise ValueError(
+                f"task {todo['id']} requires completed dependencies: {', '.join(unmet)}"
+            )
+
+
+def normalize_todos(value: object) -> list[dict[str, Any]]:
     """Validate a standalone plan without any previous identity to preserve."""
     return plan_update(value)[0]
 
 
-def summary(todos: list[dict[str, str]]) -> str:
+def summary(todos: list[dict[str, Any]]) -> str:
     counts = Counter(todo["status"] for todo in todos)
     return (
         f"Task plan updated: {len(todos)} items; {counts['completed']} completed, "
@@ -221,8 +282,10 @@ def prompt(todos: list[dict[str, Any]] | None) -> str:
     for index, todo in enumerate(remaining, 1):
         task_id = todo.get("id")
         label = f"{task_id}: " if task_id else ""
+        dependencies = todo.get("depends_on", [])
+        suffix = f" (depends on {', '.join(dependencies)})" if dependencies else ""
         lines.append(
-            f"{index}. [{todo.get('status', 'pending')}] {label}{todo.get('content', '')}"
+            f"{index}. [{todo.get('status', 'pending')}] {label}{todo.get('content', '')}{suffix}"
         )
     if active_id(todos) is None:
         lines.append("No task is in_progress; mark the one you are working on.")

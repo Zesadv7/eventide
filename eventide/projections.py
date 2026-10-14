@@ -151,6 +151,7 @@ class TaskPlanProjection:
                     record["content"] = todo.get("content", "")
                     record["status"] = todo.get("status", "pending")
                     record["summary"] = todo.get("summary")
+                    record["depends_on"] = list(todo.get("depends_on", []))
                     if todo.get("status") in {"completed", "blocked"}:
                         if record["settled_seq"] is None:
                             record["settled_seq"] = event["session_seq"]
