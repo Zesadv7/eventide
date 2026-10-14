@@ -1,0 +1,306 @@
+name: eventide-engineering-repairs
+# Offline scripts test the repair/acceptance mechanism, not model autonomy.
+# Live runs reuse these fixtures and fixed tests; they must be explicitly requested.
+cases:
+  - id: discount-boundaries
+    acceptance_tests: true
+    prompt: >-
+      Repair pricing.py so discounted_price follows README.md, including discount
+      boundaries and monetary rounding. Read and preserve the fixed tests.
+      Modify only pricing.py; do not change tests, README, or configuration, add
+      dependencies, or commit. The independent acceptance runner decides success.
+    workspace:
+      README.md: |
+        # Discount contract
+        discounted_price(amount, percent) returns a Decimal with two decimal places.
+        Convert numbers using Decimal(str(value)); amounts must be nonnegative and
+        discounts must be between 0 and 100 inclusive. Invalid, NaN, or infinite
+        inputs raise ValueError. A zero discount preserves the amount, a 100-percent
+        discount yields 0.00, and fractional discounts work. Round the final monetary
+        amount once using ROUND_HALF_UP. Fixed tests and configuration are immutable.
+      pricing.py: |
+        from decimal import Decimal, InvalidOperation
+
+
+        def discounted_price(amount, percent):
+            try:
+                total = Decimal(str(amount))
+                rate = Decimal(str(percent))
+            except (InvalidOperation, ValueError):
+                raise ValueError("amount and percent must be numbers") from None
+            if not total.is_finite() or not rate.is_finite():
+                raise ValueError("amount and percent must be finite")
+            if total < 0 or not Decimal("0") <= rate <= Decimal("100"):
+                raise ValueError("amount or percent is out of range")
+            discounted = total * (Decimal("1") - rate / Decimal("1000"))
+            return discounted.quantize(Decimal("0.01"))
+      tests/__init__.py: ""
+      tests/test_pricing.py: |
+        import unittest
+        from decimal import Decimal
+
+        from pricing import discounted_price
+
+
+        class DiscountTests(unittest.TestCase):
+            def test_zero_discount(self):
+                self.assertEqual(discounted_price("19.99", 0), Decimal("19.99"))
+
+            def test_full_discount(self):
+                self.assertEqual(discounted_price("19.99", 100), Decimal("0.00"))
+
+            def test_fractional_discount(self):
+                self.assertEqual(discounted_price("80", "12.5"), Decimal("70.00"))
+
+            def test_round_half_up(self):
+                self.assertEqual(discounted_price("1.005", 0), Decimal("1.01"))
+                self.assertEqual(discounted_price("2.675", 0), Decimal("2.68"))
+
+            def test_float_conversion_and_decimal_result(self):
+                actual = discounted_price(0.3, 10)
+                self.assertIsInstance(actual, Decimal)
+                self.assertEqual(actual, Decimal("0.27"))
+                self.assertEqual(actual.as_tuple().exponent, -2)
+
+            def test_zero_amount(self):
+                self.assertEqual(discounted_price(0, 75), Decimal("0.00"))
+
+            def test_rejects_invalid_amounts(self):
+                for amount in (-1, "NaN", "Infinity", "invalid", None):
+                    with self.subTest(amount=amount), self.assertRaises(ValueError):
+                        discounted_price(amount, 10)
+
+            def test_rejects_invalid_discounts(self):
+                for rate in (-1, 101, "NaN", "Infinity", "invalid", None):
+                    with self.subTest(rate=rate), self.assertRaises(ValueError):
+                        discounted_price(10, rate)
+    script:
+      - tool_calls:
+          - id: discount_divisor
+            name: edit_file
+            arguments:
+              path: pricing.py
+              old_text: 'rate / Decimal("1000")'
+              new_text: 'rate / Decimal("100")'
+          - id: discount_rounding
+            name: edit_file
+            arguments:
+              path: pricing.py
+              old_text: 'return discounted.quantize(Decimal("0.01"))'
+              new_text: 'return discounted.quantize(Decimal("0.01"), rounding="ROUND_HALF_UP")'
+      - text: Business source updated; independent acceptance decides the outcome.
+    expected:
+      status: completed
+
+  - id: ttl-cache-clock
+    acceptance_tests: true
+    prompt: >-
+      Repair ttl_cache.py so TTLCache follows README.md. The tests use a deterministic
+      injected clock; do not use sleeps or change the clock contract. Modify only
+      ttl_cache.py; do not change fixed tests, README, or configuration, add
+      dependencies, or commit. Independent acceptance decides success.
+    workspace:
+      README.md: |
+        # TTL cache contract
+        TTLCache(ttl, clock) uses a callable monotonic clock; ttl is finite and positive.
+        set(key, value) replaces a value and starts its TTL from the current clock.
+        get(key, default=None) returns the stored value strictly before its expiry.
+        At the exact expiry or later it returns the caller's default. Reads never
+        extend expiry. Missing keys return the supplied default;
+        a stored None is a real value. Do not change fixed tests or configuration.
+      ttl_cache.py: |
+        import math
+        import time
+
+
+        class TTLCache:
+            def __init__(self, ttl, clock=time.monotonic):
+                if not math.isfinite(ttl) or ttl <= 0:
+                    raise ValueError("ttl must be finite and positive")
+                self._ttl = ttl
+                self._clock = clock
+                self._entries = {}
+
+            def set(self, key, value):
+                self._entries[key] = (value, self._clock() + self._ttl)
+
+            def get(self, key, default=None):
+                entry = self._entries.get(key)
+                if entry is None:
+                    return default
+                value, deadline = entry
+                now = self._clock()
+                if now > deadline:
+                    del self._entries[key]
+                    return default
+                self._entries[key] = (value, now + self._ttl)
+                return value
+      tests/__init__.py: ""
+      tests/test_ttl_cache.py: |
+        import unittest
+
+        from ttl_cache import TTLCache
+
+
+        class Clock:
+            def __init__(self):
+                self.now = 100
+
+            def __call__(self):
+                return self.now
+
+
+        class CacheTests(unittest.TestCase):
+            def setUp(self):
+                self.clock = Clock()
+                self.cache = TTLCache(10, self.clock)
+
+            def test_read_before_expiry(self):
+                self.cache.set("key", "value")
+                self.clock.now = 109
+                self.assertEqual(self.cache.get("key"), "value")
+
+            def test_exact_expiry_returns_default(self):
+                self.cache.set("key", "value")
+                self.clock.now = 110
+                self.assertEqual(self.cache.get("key", "expired"), "expired")
+                self.assertIsNone(self.cache.get("key"))
+
+            def test_read_does_not_extend_ttl(self):
+                self.cache.set("key", "value")
+                self.clock.now = 109
+                self.assertEqual(self.cache.get("key"), "value")
+                self.clock.now = 111
+                self.assertEqual(self.cache.get("key", "expired"), "expired")
+
+            def test_replacing_value_restarts_ttl(self):
+                self.cache.set("key", "old")
+                self.clock.now = 109
+                self.cache.set("key", "new")
+                self.clock.now = 111
+                self.assertEqual(self.cache.get("key"), "new")
+                self.clock.now = 119
+                self.assertIsNone(self.cache.get("key"))
+
+            def test_missing_default_and_stored_none(self):
+                self.assertEqual(self.cache.get("missing", "fallback"), "fallback")
+                self.cache.set("key", None)
+                self.assertIsNone(self.cache.get("key", "fallback"))
+
+            def test_rejects_nonpositive_or_nonfinite_ttl(self):
+                for ttl in (0, -1, float("inf"), float("nan")):
+                    with self.subTest(ttl=ttl), self.assertRaises(ValueError):
+                        TTLCache(ttl, self.clock)
+    script:
+      - tool_calls:
+          - id: ttl_expiry
+            name: edit_file
+            arguments:
+              path: ttl_cache.py
+              old_text: 'if now > deadline:'
+              new_text: 'if now >= deadline:'
+          - id: ttl_no_refresh
+            name: edit_file
+            arguments:
+              path: ttl_cache.py
+              old_text: '        self._entries[key] = (value, now + self._ttl)'
+              new_text: '        # Reads preserve the deadline set by set().'
+      - text: Business source updated; independent acceptance decides the outcome.
+    expected:
+      status: completed
+
+  - id: config-merge-none
+    acceptance_tests: true
+    prompt: >-
+      Repair config_merge.py so merge_config follows README.md, including explicit
+      None overrides, nested dictionaries, and input ownership. Modify only
+      config_merge.py; do not change fixed tests, README, or configuration, add
+      dependencies, or commit. Independent acceptance decides success.
+    workspace:
+      README.md: |
+        # Configuration merge contract
+        merge_config(base, overrides) merges two dictionaries and returns a new one.
+        Missing override keys keep base values. An explicit None overrides a base
+        value with None. Dictionaries merge recursively when both values are dicts;
+        all other values, including lists, are replaced. Neither input may be changed,
+        and mutating nested lists/dicts in the result must not change either input.
+        Empty nested overrides preserve existing keys. Fixed tests/config are immutable.
+      config_merge.py: |
+        def merge_config(base, overrides):
+            result = base
+            for key, value in overrides.items():
+                if value is None:
+                    continue
+                if isinstance(value, dict) and isinstance(result.get(key), dict):
+                    result[key] = merge_config(result[key], value)
+                else:
+                    result[key] = value
+            return result
+      tests/__init__.py: ""
+      tests/test_config_merge.py: |
+        import unittest
+        from copy import deepcopy
+
+        from config_merge import merge_config
+
+
+        class MergeTests(unittest.TestCase):
+            def test_explicit_none_overrides_and_missing_key_stays(self):
+                result = merge_config({"timeout": 30, "retries": 2}, {"timeout": None})
+                self.assertEqual(result, {"timeout": None, "retries": 2})
+
+            def test_nested_precedence_and_preserved_keys(self):
+                base = {"database": {"host": "db", "port": 5432}, "enabled": True}
+                result = merge_config(base, {"database": {"port": 5433}})
+                self.assertEqual(result, {
+                    "database": {"host": "db", "port": 5433}, "enabled": True
+                })
+
+            def test_inputs_are_not_modified(self):
+                base = {"database": {"host": "db", "port": 5432}, "enabled": True}
+                overrides = {"database": {"port": 5433}, "enabled": False}
+                original_base, original_overrides = deepcopy(base), deepcopy(overrides)
+                merge_config(base, overrides)
+                self.assertEqual(base, original_base)
+                self.assertEqual(overrides, original_overrides)
+
+            def test_result_owns_nested_lists_from_both_inputs(self):
+                base = {"base_names": ["base"]}
+                overrides = {"feature": {"names": ["override"]}}
+                result = merge_config(base, overrides)
+                result["base_names"].append("changed")
+                result["feature"]["names"].append("changed")
+                self.assertEqual(base, {"base_names": ["base"]})
+                self.assertEqual(overrides, {"feature": {"names": ["override"]}})
+
+            def test_non_dictionary_values_replace(self):
+                result = merge_config({"value": {"old": True}}, {"value": [1, 2]})
+                self.assertEqual(result, {"value": [1, 2]})
+
+            def test_empty_nested_override_preserves_base(self):
+                base = {"database": {"host": "db"}}
+                result = merge_config(base, {"database": {}})
+                self.assertEqual(result, base)
+                result["database"]["host"] = "other"
+                self.assertEqual(base["database"]["host"], "db")
+    script:
+      - tool_calls:
+          - id: merge_copy
+            name: write_file
+            arguments:
+              path: config_merge.py
+              content: |
+                from copy import deepcopy
+
+
+                def merge_config(base, overrides):
+                    result = deepcopy(base)
+                    for key, value in overrides.items():
+                        if isinstance(value, dict) and isinstance(result.get(key), dict):
+                            result[key] = merge_config(result[key], value)
+                        else:
+                            result[key] = deepcopy(value)
+                    return result
+      - text: Business source updated; independent acceptance decides the outcome.
+    expected:
+      status: completed
