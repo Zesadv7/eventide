@@ -2,10 +2,10 @@
 
 import json
 
+from eventide.host import RuntimeHost
 from eventide.models import RunRequest
 from eventide.providers import ScriptedProvider
 from eventide.run_policy import mode_system_note
-from eventide.runtime import AgentRuntime
 from eventide.tools.runtime_catalog import TOOLS
 from tests.test_runtime import settings_for
 
@@ -13,7 +13,7 @@ from tests.test_runtime import settings_for
 async def test_capabilities_config_path_applies_only_to_default_workspace(
     isolated_workspace,
 ):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     try:
         explicit = isolated_workspace / "shared-mcp.json"
         explicit.write_text("{}", encoding="utf-8")
@@ -36,7 +36,7 @@ async def test_capabilities_config_path_applies_only_to_default_workspace(
 async def test_capabilities_skip_broken_skills_and_survive_bad_mcp_json(
     isolated_workspace,
 ):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     try:
         workspace_id = runtime.default_workspace.workspace_id
         broken = isolated_workspace / "skills" / "broken"
@@ -79,7 +79,7 @@ async def test_plan_mode_hides_writes_blocks_execution_and_appends_note(
             {"text": "plan ready"},
         ]
     )
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     try:
         result = await runtime.run(RunRequest("plan only", mode="plan"))
         assert result.status == "completed"
@@ -114,7 +114,7 @@ async def test_agent_mode_auto_approves_ask_without_a_handler(isolated_workspace
             {"text": "agent done"},
         ]
     )
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     try:
         # No approval handler at all: in auto mode an ASK decision is denied,
         # agent mode must resolve it without waiting for anyone.
@@ -138,7 +138,7 @@ async def test_agent_mode_auto_approves_ask_without_a_handler(isolated_workspace
 
 async def test_unknown_mode_falls_back_to_auto(isolated_workspace):
     provider = ScriptedProvider([{"text": "ok"}])
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     try:
         result = await runtime.run(RunRequest("hi", mode="yolo"))
         assert result.status == "completed"
@@ -151,7 +151,7 @@ async def test_unknown_mode_falls_back_to_auto(isolated_workspace):
 
 async def test_model_request_chars_use_the_shared_budget_measure(isolated_workspace):
     provider = ScriptedProvider([{"text": "ok"}])
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     try:
         result = await runtime.run(RunRequest("hi"))
         payload = next(
@@ -176,7 +176,7 @@ async def test_model_request_chars_use_the_shared_budget_measure(isolated_worksp
 
 
 async def test_available_models_without_api_key_degrades_to_note(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     try:
         result = await runtime.available_models()
         assert result == {"models": [], "error": "未配置 API Key"}
@@ -196,7 +196,7 @@ async def test_models_endpoint_returns_probed_ids(
 
     monkeypatch.setattr(model_catalog, "list_models", fake_list_models)
     settings = settings_for(isolated_workspace, api_key="test-key")
-    runtime = AgentRuntime(settings, ScriptedProvider([]))
+    runtime = RuntimeHost(settings, ScriptedProvider([]))
     try:
         result = await runtime.available_models()
         assert result == {"models": ["model-a", "model-b"], "error": None}

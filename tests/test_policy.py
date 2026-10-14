@@ -4,7 +4,6 @@ from eventide.policy import (
     PolicyDecision,
     PolicyEngine,
     resolve_scoped_path,
-    validate_agent_name,
 )
 
 
@@ -28,8 +27,6 @@ def test_path_scope_and_agent_names(isolated_workspace):
     assert resolve_scoped_path(isolated_workspace, "safe/file.txt").is_relative_to(
         isolated_workspace
     )
-    assert validate_agent_name("reviewer-1") is None
-    assert validate_agent_name("../escape") is not None
 
 
 def test_knowledge_search_is_explicitly_read_only(isolated_workspace):

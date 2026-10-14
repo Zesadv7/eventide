@@ -12,6 +12,8 @@
 
 **状态：Accepted**
 
+**后续修订：** [ADR-043](#adr-043统一生产入口并退役教学兼容层) 修订了本条的旧 Python 入口/兼容代码与执行边界；当前行为见 architecture.md。
+
 **背景：** CLI、HTTP API、SSE、审批等待和 MCP 都包含异步操作。同步编排会阻塞服务线程，并迫使不同入口复制并发处理逻辑。
 
 **决策：** 以 `AgentRuntime.run()` 作为 async-first 编排入口，CLI 使用 `asyncio.run()`，FastAPI 和评测直接 `await` Runtime。
@@ -110,7 +112,7 @@
 
 ## ADR-011：保留 legacy compatibility layer
 
-**状态：Accepted**
+**状态：Superseded**，由 [ADR-043](#adr-043统一生产入口并退役教学兼容层) 替代。
 
 **背景：** 仓库仍包含旧的工具、context、hooks、调度、协作和同步 Agent 接口，直接删除会扩大迁移范围。
 
@@ -286,6 +288,8 @@
 
 **状态：Accepted**。
 
+**后续修订：** [ADR-043](#adr-043统一生产入口并退役教学兼容层) 修订了本条的旧 Python 入口/兼容代码与执行边界；当前行为见 architecture.md。
+
 **背景：** 仓库已有 `skills/*/SKILL.md` 和进程全局 legacy loader，但 v0.3 Runtime 只读取根 AGENTS.md。把所有 Skill 全文提前塞入 system prompt 会浪费上下文，也无法稳定表达每次 Run 实际看到的 Skill 版本。
 
 **决策：** 每次 Run 从 Workspace 根目录发现并快照直接子目录中的 `SKILL.md`。system prompt 只暴露 Skill 名称和简介；存在有效 Skill 时动态注册只读 `load_skill`，由模型按需取得完整快照。目录和 manifest 解析不得逃出 Workspace。`context.configured` 记录 Skill 数量与包含内容摘要的目录 hash，加载操作继续使用 canonical tool 事件。
@@ -296,6 +300,8 @@
 
 **状态：Accepted**，扩展 ADR-018。
 
+**后续修订：** [ADR-043](#adr-043统一生产入口并退役教学兼容层) 对 Shell 引入有界采集：执行器丢弃的中段不会进入日志，分页只能读取实际保留的内容。
+
 **背景：** ADR-018 只在整个请求超预算后折叠较早结果，并固定保护最近三条。单次 Shell、MCP 或自定义工具可以返回接近完整 context limit 的正文；当它位于当前 turn 的受保护尾部时，摘要和旧结果折叠都无法避免 `context_overflow`。把完整正文反复发送给模型也会让大型任务快速消耗上下文。
 
 **决策：** canonical `tool.completed` 继续保存执行器返回的完整正文。ContextBuilder 对超过 12,000 字符的结果始终生成有界头尾预览，预览携带 run_id/call_id；Runtime 提供只读、Session 隔离的 `read_tool_result`，按字符 offset/limit 从 Event Log 读取任意页，单页上限 12,000 字符。若请求仍超预算，再沿用 ADR-018 的较早结果折叠。预览与折叠都记录 `context.trimmed`，不写回事件正文。
@@ -305,6 +311,8 @@
 ## ADR-031：Session 计划以事件快照驱动执行
 
 **状态：Accepted**。
+
+**后续修订：** [ADR-043](#adr-043统一生产入口并退役教学兼容层) 修订了本条的旧 Python 入口/兼容代码与执行边界；当前行为见 architecture.md。
 
 **背景：** Runtime 已能压缩已结束 turn、分页大结果并在步数用尽后 Continue，但模型没有显式的中间任务状态。复杂请求只能从不断增长的对话重新推断剩余工作，容易漏步骤、重复探索或试图在一个 run 内完成全部内容。仓库中的旧 `eventide.tasks` 使用进程全局文件目录和 task graph，不满足 Workspace/Session 绑定及 canonical Event Log 约束。
 
@@ -423,3 +431,13 @@
 **影响：** 不新增依赖、数据库 schema 或事件类型。查询期间旧 WAL 页面需要保留，但网络调用不延长读事务；文件系统不受 SQLite 锁保护，因此该机制不是文件系统原子快照。并发重建、损坏索引、扫描漂移和环境配置污染均由离线回归测试覆盖。
 
 **备选方案：** LangChain/LlamaIndex 会带来与当前规模不相称的依赖和控制反转；外置向量数据库增加服务与运维成本；只做 dense 会削弱函数名、错误码和中文子串等精确匹配，只做 FTS 又无法扩展到语义 embedding；文件变更自动全量索引会把不可控耗时塞进 Runtime 主链。上述方案均不用于 v0.4。
+
+## ADR-043：统一生产入口并退役教学兼容层
+
+**状态：Accepted**，替代 ADR-011；修订 ADR-013/014 的 Python 门面保留、ADR-029 的旧 Skill loader 保留和 ADR-031 的无依赖边界。既有 HTTP/SSE 协议与 ADR-024 的只读历史库导入保持有效。
+
+**背景：** 早期教学 Agent loop、context/hooks、全局任务/邮箱/定时器、同步 LLM、模拟 MCP 和工具注册表与生产 Host 并存。它们既不共享 Workspace/Session 身份，也不使用唯一 Event Log，部分 import 会创建目录；长期保留还要求覆盖率/type checker 排除大量模块。继续给旧接口套门面不能消除两套执行与状态。
+
+**决策：** 生产执行和存储统一为 `RuntimeHost` / `RuntimeStore`，删除 `AgentRuntime` / `TraceStore` 别名及旧教学模块、专属测试，同时移除没有生产消费者的 fallback model 配置。已经迁移的 Skills、摘要、审批、恢复沿用当前实现；有价值的任务前置依赖迁入 `todo_write` 原子快照，以稳定 id 校验且不新增状态源；worktree 迁入注入式 Workspace 控制面，通过现有 Host 锁和 Event Log 管理；Shell 只保留注入式异步执行器，使用结构化退出状态与有界头尾采集。旧 task owner/mailbox/cron/无限自主协作不复制，未来受控 worker 必须有独立上下文、预算、取消、产物采纳和写入隔离。LangGraph 只能作为可选外层 adapter；沙箱走执行器边界，观测只派生已有事实。
+
+**影响：** 旧 Python import 是明确的破坏性移除，Git 历史仍保存源码，不维护空壳或第二套状态。旧本地任务/worktree 文件不会自动迁移或删除；CLI worktree 必须从已有 Git ref 创建，状态在源项目外，拒绝丢弃修改或新增提交，遇到隐藏变动的索引标记也拒绝删除，并保留分支。计划依赖只约束模型的计划状态，不证明完成，也不自动调度。Shell 的省略部分会被明确丢弃，不能通过分页找回。覆盖率和类型检查不再排除 legacy/tools。后续功能以实际可靠性、隔离写入、独立验收和可复现评测决定优先级，不通过增加框架数量衡量成熟度。

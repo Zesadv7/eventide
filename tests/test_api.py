@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 
 from eventide.api import _probe_error, create_app
 from eventide.attachments import MAX_INLINE_BYTES, MAX_UPLOAD_BYTES
+from eventide.host import RuntimeHost
 from eventide.models import ModelResponse
 from eventide.providers import ScriptedProvider
-from eventide.runtime import AgentRuntime
 from tests.test_runtime import settings_for
 
 
@@ -31,7 +31,7 @@ def encoded(text: str) -> str:
 
 
 def test_api_run_and_console(isolated_workspace):
-    runtime = AgentRuntime(
+    runtime = RuntimeHost(
         settings_for(isolated_workspace), ScriptedProvider([{"text": "api done"}])
     )
     with TestClient(create_app(runtime)) as client:
@@ -51,7 +51,7 @@ def test_api_run_and_console(isolated_workspace):
 
 
 def test_api_rejects_empty_prompt(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         response = client.post(f"/api/sessions/{session}/runs", json={"prompt": ""})
@@ -59,7 +59,7 @@ def test_api_rejects_empty_prompt(isolated_workspace):
 
 
 def test_api_sse_and_missing_resources(isolated_workspace):
-    runtime = AgentRuntime(
+    runtime = RuntimeHost(
         settings_for(isolated_workspace), ScriptedProvider([{"text": "streamed"}])
     )
     with TestClient(create_app(runtime)) as client:
@@ -94,7 +94,7 @@ def test_api_resolves_pending_approval(isolated_workspace):
             {"text": "denial handled"},
         ]
     )
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "delete"})
@@ -116,7 +116,7 @@ def test_api_resolves_pending_approval(isolated_workspace):
 
 
 def test_api_configures_provider_without_echoing_secret(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
         initial = client.get("/api/config/provider").json()
         assert initial["api_key_configured"] is False
@@ -142,7 +142,7 @@ def test_api_configures_provider_without_echoing_secret(isolated_workspace):
 
 
 def test_api_tests_candidate_config_and_returns_latency(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     captured = {}
 
     async def probe_provider(**kwargs):
@@ -171,7 +171,7 @@ def test_api_tests_candidate_config_and_returns_latency(isolated_workspace):
 
 
 def test_api_probe_failure_is_stable_and_redacted(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
 
     async def probe_provider(**_kwargs):
         raise RuntimeError("401 invalid api key: highly-secret-value")
@@ -218,7 +218,7 @@ def test_probe_error_string_fallback():
 
 
 def test_api_clear_and_reset_persisted_config(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
         saved = client.put(
             "/api/config/provider",
@@ -240,7 +240,7 @@ def test_api_clear_and_reset_persisted_config(isolated_workspace):
 
 
 def test_provider_mutations_are_loopback_only(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime), client=("203.0.113.10", 50000)) as client:
         body = {"provider": "anthropic", "model": "model", "api_key": "secret"}
         assert client.put("/api/config/provider", json=body).status_code == 403
@@ -256,7 +256,7 @@ def test_provider_save_waits_for_active_run(isolated_workspace):
             await asyncio.sleep(0.2)
             return ModelResponse("done")
 
-    runtime = AgentRuntime(settings_for(isolated_workspace), SlowProvider())
+    runtime = RuntimeHost(settings_for(isolated_workspace), SlowProvider())
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "wait"})
@@ -275,7 +275,7 @@ def test_api_cancels_active_run(isolated_workspace):
 
             await asyncio.Future()
 
-    runtime = AgentRuntime(settings_for(isolated_workspace), WaitingProvider())
+    runtime = RuntimeHost(settings_for(isolated_workspace), WaitingProvider())
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "wait"})
@@ -309,7 +309,7 @@ def test_api_session_status_exposes_task_plan(isolated_workspace):
             {"text": "done"},
         ]
     )
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
         (isolated_workspace / "data").write_text("x", encoding="utf-8")
         session = client.post("/api/sessions").json()["session_id"]
@@ -327,7 +327,7 @@ def test_api_session_status_exposes_task_plan(isolated_workspace):
 
 
 def test_api_runtime_settings_exposes_budgets_without_secrets(isolated_workspace):
-    runtime = AgentRuntime(
+    runtime = RuntimeHost(
         settings_for(
             isolated_workspace,
             context_limit=1234,
@@ -352,7 +352,7 @@ def test_api_runtime_settings_exposes_budgets_without_secrets(isolated_workspace
 def test_api_workspace_capabilities_empty_missing_and_broken_mcp_json(
     isolated_workspace,
 ):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
         workspace_id = runtime.default_workspace.workspace_id
         empty = client.get(f"/api/workspaces/{workspace_id}/capabilities")
@@ -375,7 +375,7 @@ def test_api_workspace_capabilities_empty_missing_and_broken_mcp_json(
 
 
 def test_api_workspace_capabilities_configured_reports_no_secrets(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     workspace_id = runtime.default_workspace.workspace_id
     (isolated_workspace / "mcp.json").write_text(
         json.dumps(
@@ -420,7 +420,7 @@ def test_api_workspace_capabilities_configured_reports_no_secrets(isolated_works
 
 
 def test_api_upload_attachment_success_and_rejections(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         created = client.post(
@@ -488,7 +488,7 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
 
 
 def test_api_run_with_attachments_inlines_and_truncates(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         small = client.post(
@@ -527,7 +527,7 @@ def test_api_run_with_attachments_inlines_and_truncates(isolated_workspace):
 
 def test_api_image_attachment_is_hydrated_only_for_provider(isolated_workspace):
     provider = ScriptedProvider([{"text": "done"}])
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         image = client.post(
@@ -567,7 +567,7 @@ def test_api_image_attachment_is_hydrated_only_for_provider(isolated_workspace):
 
 
 def test_api_run_rejects_unknown_and_foreign_attachments(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+    runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         other = client.post("/api/sessions").json()["session_id"]
@@ -590,7 +590,7 @@ def test_api_run_rejects_unknown_and_foreign_attachments(isolated_workspace):
 
 
 def test_api_run_summary_includes_usage(isolated_workspace):
-    runtime = AgentRuntime(
+    runtime = RuntimeHost(
         settings_for(isolated_workspace),
         ScriptedProvider([{"text": "done", "usage": {"input_tokens": 11, "output_tokens": 7}}]),
     )
@@ -608,7 +608,7 @@ def test_api_run_summary_includes_usage(isolated_workspace):
 
 def test_api_run_accepts_per_message_model(isolated_workspace):
     provider = ScriptedProvider([{"text": "done"}])
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         accepted = client.post(
@@ -635,7 +635,7 @@ def test_api_run_plan_mode_blocks_write_tool(isolated_workspace):
             {"text": "planned"},
         ]
     )
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         accepted = client.post(
@@ -656,7 +656,7 @@ def test_api_run_agent_mode_auto_approves(isolated_workspace):
             {"text": "agent done"},
         ]
     )
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         accepted = client.post(

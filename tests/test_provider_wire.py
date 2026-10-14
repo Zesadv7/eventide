@@ -73,7 +73,6 @@ def _settings(base_url, isolated_workspace):
         api_key="test-key",
         base_url=base_url,
         model="test-model",
-        fallback_model=None,
     )
 
 

@@ -79,7 +79,10 @@ def test_mcp_config_parsing_and_validation(isolated_workspace):
         MCPServerConfig.from_dict("bad", {"transport": "streamable-http"})
 
 
-async def test_real_streamable_http_discovers_and_calls_tools():
+async def test_real_streamable_http_discovers_and_calls_tools(monkeypatch):
+    # httpx2 also reads macOS system proxies. Keep this offline loopback fixture
+    # independent of the user's proxy and its system bypass configuration.
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost,::1")
     server = Path(__file__).parents[1] / "examples" / "mcp_echo_server.py"
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))

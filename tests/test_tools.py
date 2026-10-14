@@ -1,16 +1,9 @@
 """Tests for basic tools."""
 
 import re
-import subprocess
-import sys
 
-from eventide.tools.bash import run_bash
 from eventide.tools.filesystem import run_edit, run_glob, run_read, run_write
 from eventide.utils import decode_output
-
-
-def test_run_bash():
-    assert run_bash("echo ok") == "ok"
 
 
 def test_decode_output_handles_utf8_and_console_encoding(monkeypatch):
@@ -20,23 +13,6 @@ def test_decode_output_handles_utf8_and_console_encoding(monkeypatch):
     assert isinstance(decode_output(b"\xff\xfe\xfa"), str)
     assert decode_output(None) == ""
     assert decode_output(b"") == ""
-
-
-def test_run_bash_survives_missing_streams(monkeypatch):
-    class Result:
-        stdout = None
-        stderr = None
-
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
-    assert run_bash("anything") == "(no output)"
-
-
-def test_run_bash_returns_utf8_child_output(isolated_workspace):
-    script = isolated_workspace / "emit_utf8.py"
-    script.write_text(
-        "import sys; sys.stdout.buffer.write('中文输出'.encode('utf-8'))", encoding="utf-8"
-    )
-    assert run_bash(f'"{sys.executable}" "{script}"', cwd=isolated_workspace) == "中文输出"
 
 
 def test_run_write_and_read(isolated_workspace):

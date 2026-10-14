@@ -1,11 +1,10 @@
-"""Configuration and backwards-compatible lazy client access."""
+"""Runtime configuration without process-global clients or workspace state."""
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from dotenv import load_dotenv
 
@@ -34,7 +33,6 @@ class Settings:
     api_key: str | None
     base_url: str | None
     model: str
-    fallback_model: str | None
     max_tokens: int = 8_000
     max_steps: int = 30
     task_max_steps: int = 12
@@ -65,7 +63,6 @@ class Settings:
             api_key=api_key,
             base_url=base_url or None,
             model=model,
-            fallback_model=os.getenv("EVENTIDE_FALLBACK_MODEL") or os.getenv("FALLBACK_MODEL_ID"),
             max_tokens=int(os.getenv("EVENTIDE_MAX_TOKENS", "8000")),
             max_steps=int(os.getenv("EVENTIDE_MAX_STEPS", "30")),
             task_max_steps=int(os.getenv("EVENTIDE_TASK_MAX_STEPS", "12")),
@@ -92,56 +89,3 @@ class Settings:
                 "or ANTHROPIC_API_KEY. Offline eval and --help do not need a key."
             )
         return self.api_key
-
-
-WORKDIR = Path.cwd().resolve()
-TASKS_DIR = WORKDIR / ".tasks"
-WORKTREES_DIR = WORKDIR / ".worktrees"
-MAILBOX_DIR = WORKDIR / ".mailboxes"
-MEMORY_DIR = WORKDIR / ".memory"
-TRANSCRIPT_DIR = WORKDIR / ".transcripts"
-TOOL_RESULTS_DIR = WORKDIR / ".task_outputs" / "tool-results"
-SKILLS_DIR = WORKDIR / "skills"
-
-MODEL = os.getenv("EVENTIDE_MODEL") or os.getenv("MODEL_ID", DEFAULT_MODEL)
-PRIMARY_MODEL = MODEL
-FALLBACK_MODEL = os.getenv("EVENTIDE_FALLBACK_MODEL") or os.getenv("FALLBACK_MODEL_ID")
-DEFAULT_MAX_TOKENS = 8_000
-ESCALATED_MAX_TOKENS = 16_000
-MAX_RETRIES = 3
-MAX_CONSECUTIVE_529 = 2
-MAX_RECOVERY_RETRIES = 2
-BASE_DELAY_MS = 500
-CONTEXT_LIMIT = 50_000
-KEEP_RECENT_TOOL_RESULTS = 3
-PERSIST_THRESHOLD = 30_000
-CONTINUATION_PROMPT = "Continue from the previous response. Do not repeat completed work."
-PROMPT = "\033[36meventide >> \033[0m"
-CLI_ACTIVE = False
-
-
-_legacy_client: Any | None = None
-
-
-def get_anthropic_client() -> Any:
-    """Construct the legacy synchronous Anthropic client only when used."""
-    global _legacy_client
-    if _legacy_client is None:
-        try:
-            from anthropic import Anthropic
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Install Eventide dependencies before live model use") from exc
-        settings = Settings.from_env()
-        _legacy_client = Anthropic(
-            api_key=settings.require_api_key(),
-            base_url=settings.base_url,
-        )
-    return _legacy_client
-
-
-class _LazyClient:
-    def __getattr__(self, name: str) -> Any:
-        return getattr(get_anthropic_client(), name)
-
-
-client = _LazyClient()

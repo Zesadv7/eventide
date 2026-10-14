@@ -202,13 +202,13 @@ def test_create_sandbox_seeds_fixtures_and_git():
 
 async def test_workspace_case_runs_in_isolated_sandbox(monkeypatch, isolated_workspace):
     captured = []
-    real_runtime = evaluation.AgentRuntime
+    real_runtime = evaluation.RuntimeHost
 
     def factory(**kwargs):
         captured.append(kwargs["settings"])
         return real_runtime(**kwargs)
 
-    monkeypatch.setattr(evaluation, "AgentRuntime", factory)
+    monkeypatch.setattr(evaluation, "RuntimeHost", factory)
     suite = isolated_workspace / "suite.yaml"
     suite.write_text(
         """

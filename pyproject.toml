@@ -36,6 +36,7 @@ eventide = "eventide.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["eventide*"]
+namespaces = false
 
 [tool.setuptools.package-data]
 eventide = ["web/*.html", "web/*.css", "web/*.js"]
@@ -47,21 +48,6 @@ cache_dir = ".task_outputs/pytest-cache"
 
 [tool.coverage.run]
 source = ["eventide"]
-# The v0.1 teaching harness remains for source compatibility; the 85% gate
-# measures the v0.3 runtime and its actively supported integration surfaces.
-omit = [
-    "eventide/agent.py",
-    "eventide/context.py",
-    "eventide/hooks.py",
-    "eventide/memory/*",
-    "eventide/scheduling/cron.py",
-    "eventide/teams/teammate.py",
-    "eventide/teams/subagent.py",
-    "eventide/tools/built_ins.py",
-    "eventide/tools/dispatch.py",
-    "eventide/tools/registry.py",
-    "eventide/utils.py",
-]
 
 [tool.coverage.report]
 fail_under = 85
@@ -80,18 +66,3 @@ warn_unused_ignores = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
 disable_error_code = ["import-untyped"]
-
-[[tool.mypy.overrides]]
-module = [
-    "eventide.agent",
-    "eventide.context",
-    "eventide.hooks",
-    "eventide.llm",
-    "eventide.memory.*",
-    "eventide.scheduling.*",
-    "eventide.tasks.*",
-    "eventide.teams.*",
-    "eventide.tools.*",
-    "eventide.utils",
-]
-ignore_errors = true

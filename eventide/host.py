@@ -57,6 +57,7 @@ from eventide.workspace import (
     session_working_directory,
     workspace_checkpoint,
 )
+from eventide.worktrees import WorktreeService
 
 # stop_reason values that mean the provider cut the answer off at max_tokens.
 TRUNCATION_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
@@ -125,6 +126,7 @@ class RuntimeHost:
         self.settings = settings or Settings.from_env()
         self._startup_settings = self.settings
         self._owns_store = store is None
+        self._worktree_removals: set[Path] = set()
         self._lease = HostLease(store.path.parent if store else self.settings.state_dir)
         try:
             self.store = store or RuntimeStore(self.settings.state_dir / "runtime.sqlite")
@@ -156,6 +158,11 @@ class RuntimeHost:
         self._config_path: Path | None = None
         self._enable_mcp = enable_mcp
 
+    @property
+    def state_dir(self) -> Path:
+        """State root for runtime-owned session files such as attachments."""
+        return self.settings.state_dir
+
     def _provider(self) -> Provider:
         if self.provider is None:
             self.provider = build_provider(self.settings)
@@ -168,12 +175,21 @@ class RuntimeHost:
             if bool(target.workspace_id) == bool(target.path):
                 raise ValueError("Choose exactly one workspace ID or path")
             if target.workspace_id:
-                return self.store.get_workspace(target.workspace_id)
+                record = self.store.get_workspace(target.workspace_id)
+                self._check_worktree_admission(Path(record.path))
+                return record
             target = str(target.path)
         if isinstance(target, str) and target.startswith("ws_"):
-            return self.store.get_workspace(target)
+            record = self.store.get_workspace(target)
+            self._check_worktree_admission(Path(record.path))
+            return record
         root, git_root = canonical_workspace(Path(target))
+        self._check_worktree_admission(root)
         return self.store.register_workspace(root, git_root)
+
+    def _check_worktree_admission(self, root: Path) -> None:
+        if any(root.is_relative_to(path) for path in self._worktree_removals):
+            raise ValueError("Worktree is being removed; Workspace/Session admission is closed")
 
     def create_session(
         self,
@@ -188,11 +204,105 @@ class RuntimeHost:
             or (existing["workspace_id"] if existing else None)
             or self.default_workspace.workspace_id
         )
+        self._check_worktree_admission(Path(self.store.get_workspace(target_workspace).path))
         return self.sessions.create(
             target_workspace,
             session_id,
             working_directory if working_directory is not None else None,
         )
+
+    async def manage_worktree(
+        self,
+        target: Path | str,
+        action: str,
+        *,
+        name: str | None = None,
+        ref: str = "HEAD",
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        """User control-plane operations; never advertised as model tools."""
+        if self._closed:
+            raise ValueError("RuntimeHost is closed")
+        if action not in {"list", "create", "keep", "remove"}:
+            raise ValueError(f"Unknown worktree action: {action}")
+        if action != "list" and name is None:
+            raise ValueError("Worktree name is required")
+        workspace = self.resolve_or_register_workspace(target)
+        service = WorktreeService(Path(workspace.path), self.state_dir, workspace.workspace_id)
+        task = asyncio.current_task()
+        assert task is not None
+        self._active_tasks.add(task)
+        removal_path: Path | None = None
+        try:
+            async with self._workspace_locks[workspace.workspace_id]:
+                records = await asyncio.to_thread(service.list)
+                if action == "list":
+                    return [record.to_dict() for record in records]
+                if action == "remove":
+                    record = next((item for item in records if item.name == name), None)
+                    if record is None:
+                        raise ValueError(f"Managed worktree not found: {name}")
+                    for checkout in self.store.list_workspaces():
+                        if checkout.path == record.path and self.store.list_sessions(
+                            workspace_id=checkout.workspace_id, include_archived=True
+                        ):
+                            raise ValueError(
+                                "Worktree has Session history; keep it for review and recovery"
+                            )
+                    # Admission is synchronous, so reserve before the next await.
+                    removal_path = Path(record.path)
+                    self._worktree_removals.add(removal_path)
+                session_id = self.create_session(
+                    f"worktrees_{workspace.workspace_id}", workspace_id=workspace.workspace_id
+                )
+                self.store.update_session(session_id, title="Worktree 管理")
+                run_id = f"run_{uuid.uuid4().hex[:16]}"
+                self.store.create_run(run_id, session_id)
+                intent = {"action": action, "name": name, "ref": ref}
+                await self._emit(
+                    run_id, "run.started",
+                    {"workspace_id": workspace.workspace_id, "source": "worktree"}, None,
+                    author="user",
+                )
+                await self._emit(run_id, "worktree.requested", intent, None, author="user")
+                cancelled = False
+                try:
+                    assert name is not None
+                    operation = asyncio.create_task(
+                        asyncio.to_thread(service.create, name, ref)
+                        if action == "create"
+                        else asyncio.to_thread(
+                            service.keep if action == "keep" else service.remove, name
+                        )
+                    )
+                    # Retain ownership of Git writes until their outcome is known, even on Stop.
+                    while True:
+                        try:
+                            result = (await asyncio.shield(operation)).to_dict()
+                            break
+                        except asyncio.CancelledError:
+                            cancelled = True
+                    if action == "remove":
+                        for checkout in self.store.list_workspaces():
+                            if checkout.path == result["path"]:
+                                self.store.remove_workspace(checkout.workspace_id)
+                    await self._emit(run_id, "worktree.completed", result, None, author="user")
+                    await self._emit(
+                        run_id, "run.completed",
+                        {"output": f"Worktree {action}: {result['name']} ({result['path']})",
+                         "steps": 0, "tool_calls": 0, "usage": {}}, None,
+                    )
+                except Exception as exc:
+                    await self._emit(
+                        run_id, "run.failed", {"error": self._clean(str(exc))}, None,
+                    )
+                    raise
+                if cancelled:
+                    raise asyncio.CancelledError
+                return result
+        finally:
+            if removal_path is not None:
+                self._worktree_removals.discard(removal_path)
+            self._active_tasks.discard(task)
 
     def session_status(self, session_id: str) -> dict[str, Any]:
         workspace = self.sessions.workspace(session_id)
@@ -1339,6 +1449,7 @@ class RuntimeHost:
                             "name": call.name,
                             "content": self._semantic(result.content),
                             "is_error": result.is_error,
+                            "metadata": self._semantic(result.metadata),
                         },
                         sink,
                     )

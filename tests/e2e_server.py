@@ -327,11 +327,11 @@ def main(argv: list[str] | None = None) -> int:
     # and any .env at import time).
     from eventide.api import create_app
     from eventide.config import Settings
-    from eventide.runtime import AgentRuntime
+    from eventide.host import RuntimeHost
 
     settings = Settings.from_env(workdir=fixtures["main"])
     provider = FakeProvider(max_steps=settings.max_steps)
-    runtime = AgentRuntime(settings, provider)
+    runtime = RuntimeHost(settings, provider)
     provider.attach(runtime)
     # The UI refuses to submit while no model is configured; seed a dummy
     # configuration so the journey passes the isConfigured gate, then put the

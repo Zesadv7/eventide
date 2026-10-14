@@ -45,11 +45,6 @@ def resolve_scoped_path(base: Path, raw_path: str) -> Path:
     return candidate
 
 
-def validate_agent_name(name: str) -> str | None:
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name or "") or name in {".", ".."}:
-        return "Agent name must use 1-64 letters, digits, dots, underscores, or dashes"
-    return None
-
 
 class PolicyEngine:
     """Classify tool calls. ASK requires a surface-specific approval handler."""

@@ -444,7 +444,7 @@ class RuntimeStore:
             "step": payload.get("step"),
         }
 
-    def task_plan(self, session_id: str) -> list[dict[str, str]] | None:
+    def task_plan(self, session_id: str) -> list[dict[str, Any]] | None:
         """Project the latest task plan directly from its canonical event."""
         state = self.task_plan_state(session_id)
         return state["todos"] if state else None

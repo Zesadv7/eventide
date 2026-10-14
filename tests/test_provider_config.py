@@ -5,14 +5,14 @@ import sqlite3
 import pytest
 from cryptography.fernet import Fernet
 
-from eventide.runtime import AgentRuntime
+from eventide.host import RuntimeHost
 from eventide.secrets import SecretKeyError
 from tests.test_runtime import settings_for
 
 
 async def test_provider_config_is_encrypted_and_restored(isolated_workspace):
     settings = settings_for(isolated_workspace)
-    runtime = AgentRuntime(settings)
+    runtime = RuntimeHost(settings)
     await runtime.configure_provider(
         provider="openai_responses",
         api_key="persistent-test-secret",
@@ -28,7 +28,7 @@ async def test_provider_config_is_encrypted_and_restored(isolated_workspace):
 
     raw_database = database.read_bytes()
     assert b"persistent-test-secret" not in raw_database
-    restored = AgentRuntime(settings)
+    restored = RuntimeHost(settings)
     assert restored.settings.provider == "openai_responses"
     assert restored.settings.api_key == "persistent-test-secret"
     status = restored.provider_config_status()
@@ -42,7 +42,7 @@ async def test_wrong_master_key_is_reported_without_plaintext_fallback(
 ):
     monkeypatch.setenv("EVENTIDE_SECRET_KEY", Fernet.generate_key().decode())
     settings = settings_for(isolated_workspace)
-    runtime = AgentRuntime(settings)
+    runtime = RuntimeHost(settings)
     await runtime.configure_provider(
         provider="anthropic",
         api_key="encrypted-value",
@@ -53,7 +53,7 @@ async def test_wrong_master_key_is_reported_without_plaintext_fallback(
     await runtime.close()
 
     monkeypatch.setenv("EVENTIDE_SECRET_KEY", Fernet.generate_key().decode())
-    restored = AgentRuntime(settings)
+    restored = RuntimeHost(settings)
     status = restored.provider_config_status()
     assert restored.settings.api_key is None
     assert status["api_key_status"] == "decrypt_error"
@@ -80,7 +80,7 @@ async def test_clear_key_and_reset_to_startup_config(isolated_workspace):
         api_key="environment-key",
         model="startup-model",
     )
-    runtime = AgentRuntime(settings)
+    runtime = RuntimeHost(settings)
     await runtime.configure_provider(
         provider="openai_compatible",
         api_key="saved-key",
@@ -108,7 +108,7 @@ async def test_clear_key_and_reset_to_startup_config(isolated_workspace):
 
 
 async def test_provider_config_table_contains_single_row(isolated_workspace):
-    runtime = AgentRuntime(settings_for(isolated_workspace))
+    runtime = RuntimeHost(settings_for(isolated_workspace))
     runtime.store.save_provider_config(
         provider="anthropic", base_url=None, model="one", api_key_ciphertext=None
     )

@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-from eventide.config import WORKDIR
 from eventide.policy import resolve_scoped_path
 
 READ_PAGE_CHARS = 3_600
@@ -30,7 +29,7 @@ def run_read(path: str, limit: int | None = None, offset: int = 0, cwd: Path | N
     count and the next offset. Small files are returned verbatim.
     """
     try:
-        base = cwd or WORKDIR
+        base = (cwd or Path.cwd()).resolve()
         file_path = resolve_scoped_path(base, path)
         lines = file_path.read_text(encoding="utf-8").splitlines()
         total = len(lines)
@@ -56,7 +55,7 @@ def run_read(path: str, limit: int | None = None, offset: int = 0, cwd: Path | N
 def run_write(path: str, content: str, cwd: Path | None = None) -> str:
     """Write content to a file, creating parent directories if needed."""
     try:
-        base = cwd or WORKDIR
+        base = (cwd or Path.cwd()).resolve()
         file_path = resolve_scoped_path(base, path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
@@ -68,7 +67,7 @@ def run_write(path: str, content: str, cwd: Path | None = None) -> str:
 def run_edit(path: str, old_text: str, new_text: str, cwd: Path | None = None) -> str:
     """Replace the first occurrence of old_text with new_text in a file."""
     try:
-        base = cwd or WORKDIR
+        base = (cwd or Path.cwd()).resolve()
         file_path = resolve_scoped_path(base, path)
         text = file_path.read_text(encoding="utf-8")
         if old_text not in text:
@@ -84,7 +83,7 @@ def run_glob(pattern: str, cwd: Path | None = None) -> str:
     import glob as g
 
     try:
-        base = cwd or WORKDIR
+        base = (cwd or Path.cwd()).resolve()
         results = []
         for match in g.glob(pattern, root_dir=base):
             if (base / match).resolve().is_relative_to(base):

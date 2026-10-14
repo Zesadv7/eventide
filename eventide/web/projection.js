@@ -104,6 +104,7 @@ export function planGroups(taskState) {
       content: task.content || "",
       label: planStatusLabels[task.status] || task.status,
       summary: task.summary || "",
+      dependsOn: task.depends_on || [],
       evidence,
       evidenceOmitted: task.evidence_omitted || 0,
     };

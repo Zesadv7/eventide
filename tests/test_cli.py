@@ -6,9 +6,9 @@ import json
 import pytest
 
 from eventide.cli import build_parser, main
+from eventide.host import RuntimeHost
 from eventide.models import RunRequest
 from eventide.providers import ScriptedProvider
-from eventide.runtime import AgentRuntime
 from tests.test_runtime import settings_for
 
 
@@ -151,7 +151,7 @@ def test_plan_show_reports_server_task_state(isolated_workspace, monkeypatch, ca
                 {"text": "done"},
             ]
         )
-        runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+        runtime = RuntimeHost(settings_for(isolated_workspace), provider)
         try:
             (isolated_workspace / "data").write_text("x", encoding="utf-8")
             result = await runtime.run(RunRequest("work with a plan"))
@@ -165,14 +165,14 @@ def test_plan_show_reports_server_task_state(isolated_workspace, monkeypatch, ca
     # plan show owns its Host per invocation; each main() call opens the same
     # isolated state root, and _manage closes it in its own finally. The outer
     # close is a no-op safety net for assertion failures.
-    current_host: list[AgentRuntime] = []
+    current_host: list[RuntimeHost] = []
 
     def host_factory(_settings):
-        host = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+        host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
         current_host.append(host)
         return host
 
-    monkeypatch.setattr(cli, "AgentRuntime", host_factory)
+    monkeypatch.setattr(cli, "RuntimeHost", host_factory)
 
     def run_plan(*argv) -> int:
         try:
@@ -200,7 +200,7 @@ def test_plan_show_without_plan(isolated_workspace, monkeypatch, capsys):
     import eventide.cli as cli
 
     async def make_session():
-        runtime = AgentRuntime(
+        runtime = RuntimeHost(
             settings_for(isolated_workspace), ScriptedProvider([{"text": "no plan needed"}])
         )
         try:
@@ -211,14 +211,14 @@ def test_plan_show_without_plan(isolated_workspace, monkeypatch, capsys):
 
     session_id = asyncio.run(make_session())
 
-    current_host: list[AgentRuntime] = []
+    current_host: list[RuntimeHost] = []
 
     def host_factory(_settings):
-        host = AgentRuntime(settings_for(isolated_workspace), ScriptedProvider([]))
+        host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
         current_host.append(host)
         return host
 
-    monkeypatch.setattr(cli, "AgentRuntime", host_factory)
+    monkeypatch.setattr(cli, "RuntimeHost", host_factory)
 
     def run_plan(*argv) -> int:
         try:

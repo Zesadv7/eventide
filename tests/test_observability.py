@@ -1,6 +1,7 @@
 """Tests for trace persistence and redaction."""
 
-from eventide.observability import TraceStore, redact
+from eventide.normalization import redact
+from eventide.store import RuntimeStore
 
 
 def test_redact_secrets_and_large_values():
@@ -19,7 +20,7 @@ def test_redact_secrets_and_large_values():
 
 
 def test_trace_store_roundtrip(isolated_workspace):
-    store = TraceStore(isolated_workspace / "trace.db")
+    store = RuntimeStore(isolated_workspace / "trace.db")
     store.create_session("s1")
     store.append_message("s1", {"role": "user", "content": "hello"})
     store.create_run("r1", "s1")

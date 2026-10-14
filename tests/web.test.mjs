@@ -14,7 +14,7 @@ const task = (id, status, extra = {}) => ({id, content: `${id} 内容`, status, 
 test("plan groups count statuses and keep only server-side facts", () => {
   const plan = planGroups(taskState([
     task("t1", "completed", {summary: "读取了数据文件"}),
-    task("t2", "in_progress"),
+    task("t2", "in_progress", {depends_on: ["t1"]}),
     task("t3", "pending"),
     task("t4", "blocked"),
   ], "t2"));
@@ -24,6 +24,8 @@ test("plan groups count statuses and keep only server-side facts", () => {
   assert.deepEqual(plan.open.map((t) => t.id), ["t2", "t3", "t4"]);
   assert.deepEqual(plan.settled.map((t) => t.id), ["t1"]);
   assert.equal(plan.open[0].active, true);
+  assert.deepEqual(plan.open[0].dependsOn, ["t1"]);
+  assert.deepEqual(plan.open[1].dependsOn, []);
 });
 
 test("plan evidence lists failed calls without claiming verified success", () => {

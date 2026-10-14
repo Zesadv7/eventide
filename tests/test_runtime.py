@@ -4,10 +4,10 @@ import asyncio
 from dataclasses import replace
 
 from eventide.config import Settings
+from eventide.host import RuntimeHost
 from eventide.models import RunRequest
-from eventide.observability import TraceStore
 from eventide.providers import ScriptedProvider
-from eventide.runtime import AgentRuntime
+from eventide.store import RuntimeStore
 
 
 def settings_for(path, **changes):
@@ -18,7 +18,6 @@ def settings_for(path, **changes):
         api_key=None,
         base_url=None,
         model="scripted",
-        fallback_model=None,
     )
     return replace(settings, **changes)
 
@@ -27,17 +26,17 @@ def settings_for(path, **changes):
 # absolute Workspace path, plus the assembled tool catalog. Compaction and folding only
 # shrink messages, so a budget under this floor can never be satisfied -- the run fails with
 # "fixed system/tool characters" instead of exercising the path the test is about.
-# Measured at 2987 characters from this checkout's nested worktree path.
+# Raised for dependency metadata and headroom for different checkout path lengths.
 # "test_tool_catalog_stays_within_its_budget" guards the catalog side of the number; raise
 # this constant on purpose rather than widening the tests that depend on it.
-REQUEST_FLOOR_CHARS = 3_000
+REQUEST_FLOOR_CHARS = 3_200
 # Operating budget for the compaction tests: the floor plus room for the compacted tail and
 # for path-length drift, so catalog growth trips the sentinel instead of these tests.
 COMPACTION_BUDGET = REQUEST_FLOOR_CHARS + 400
 
 
 async def test_runtime_direct_answer_and_trace(isolated_workspace):
-    runtime = AgentRuntime(
+    runtime = RuntimeHost(
         settings_for(isolated_workspace),
         ScriptedProvider([{"text": "done", "usage": {"input_tokens": 3, "output_tokens": 1}}]),
     )
@@ -51,7 +50,7 @@ async def test_runtime_direct_answer_and_trace(isolated_workspace):
 
 async def test_runtime_uses_per_run_model_without_changing_host_default(isolated_workspace):
     provider = ScriptedProvider([{"text": "done"}])
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     result = await runtime.run(RunRequest("hello", model="message-model"))
     assert result.status == "completed"
     assert provider.requests[0].model == "message-model"
@@ -72,7 +71,7 @@ async def test_runtime_tool_and_permission_denial(isolated_workspace):
             {"text": "handled"},
         ]
     )
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     result = await runtime.run(RunRequest("read outside"))
     events = runtime.store.get_events(result.run_id)
     assert result.output == "handled"
@@ -93,7 +92,7 @@ async def test_runtime_approval_handler(isolated_workspace):
         called.append((approval_id, call.name, reason))
         return False
 
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     result = await runtime.run(RunRequest("delete"), approval_handler=approve)
     assert result.status == "completed"
     assert called[0][1] == "bash"
@@ -111,7 +110,7 @@ async def test_runtime_retries_and_compacts(isolated_workspace):
             {"text": "recovered"},
         ]
     )
-    runtime = AgentRuntime(settings, provider)
+    runtime = RuntimeHost(settings, provider)
     session = runtime.create_session("long")
     runtime.store.append_message(session, {"role": "user", "content": "x" * 2_000})
     runtime.store.create_run("earlier", session)
@@ -132,8 +131,8 @@ async def test_sessions_are_isolated_and_can_run_concurrently(isolated_workspace
 
             return ModelResponse(str(request.messages[-1]["content"]))
 
-    store = TraceStore(isolated_workspace / "shared.db")
-    runtime = AgentRuntime(settings_for(isolated_workspace), EchoProvider(), store=store)
+    store = RuntimeStore(isolated_workspace / "shared.db")
+    runtime = RuntimeHost(settings_for(isolated_workspace), EchoProvider(), store=store)
     first, second = await asyncio.gather(
         runtime.run(RunRequest("alpha", session_id="a")),
         runtime.run(RunRequest("beta", session_id="b")),
@@ -154,7 +153,7 @@ async def test_runtime_reconfigures_and_closes_previous_provider(isolated_worksp
             self.closed = True
 
     provider = ClosableProvider()
-    runtime = AgentRuntime(settings_for(isolated_workspace), provider)
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     await runtime.configure_provider(
         provider="openai-compatible",
         api_key="new-key",

@@ -12,6 +12,7 @@ from typing import Any
 
 from eventide.config import Settings
 from eventide.evaluation import run_evaluations
+from eventide.host import RuntimeHost
 from eventide.migration import import_v02_database
 from eventide.models import RunRequest, ToolCall
 from eventide.rag.embedding import provider_from_settings
@@ -22,7 +23,6 @@ from eventide.rag.evaluation import (
 )
 from eventide.rag.index import IndexStore
 from eventide.rag.search import format_results, hybrid_search
-from eventide.runtime import AgentRuntime
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,6 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
     actions.add_parser("add").add_argument("target")
     actions.add_parser("show").add_argument("target")
     actions.add_parser("remove").add_argument("target")
+    worktree = subparsers.add_parser("worktree", help="Manage isolated Git working directories")
+    worktree.add_argument("--workspace", help="Workspace ID or existing path")
+    worktree_actions = worktree.add_subparsers(dest="worktree_action", required=True)
+    worktree_actions.add_parser("list")
+    worktree_create = worktree_actions.add_parser("create")
+    worktree_create.add_argument("name")
+    worktree_create.add_argument("--ref", default="HEAD", help="Existing commit, branch or tag")
+    worktree_actions.add_parser("keep").add_argument("name")
+    worktree_actions.add_parser("remove").add_argument("name")
     rag = subparsers.add_parser("rag", help="Build and query a Workspace knowledge index")
     rag_actions = rag.add_subparsers(dest="rag_action", required=True)
     rag_build = rag_actions.add_parser("build", help="Build or update the knowledge index")
@@ -103,7 +112,7 @@ async def _terminal_approval(_approval_id: str, call: ToolCall, reason: str) -> 
 
 
 async def _run_once(args: argparse.Namespace) -> int:
-    runtime = AgentRuntime(Settings.from_env())
+    runtime = RuntimeHost(Settings.from_env())
     try:
         workspace = (
             runtime.resolve_or_register_workspace(args.workspace) if args.workspace else None
@@ -133,7 +142,7 @@ async def _chat(
     working_directory: str | None = None,
 ) -> int:
     settings = Settings.from_env()
-    runtime = AgentRuntime(settings)
+    runtime = RuntimeHost(settings)
     try:
         workspace = (
             runtime.resolve_or_register_workspace(workspace_target) if workspace_target else None
@@ -239,6 +248,8 @@ def _render_plan_text(status: dict[str, Any]) -> str:
         if task.get("id") and task.get("id") == active:
             marker = f"{marker} · active"
         lines.append(f"[{marker}] {task.get('id') or '-'} {task.get('content', '')}")
+        if task.get("depends_on"):
+            lines.append("  depends_on: " + ", ".join(task["depends_on"]))
         summary = task.get("summary")
         if summary:
             lines.append(f"  summary: {summary}")
@@ -259,9 +270,18 @@ def _render_plan_text(status: dict[str, Any]) -> str:
 
 
 async def _manage(args: argparse.Namespace) -> int:
-    runtime = AgentRuntime(Settings.from_env())
+    runtime = RuntimeHost(Settings.from_env())
     try:
         value: Any
+        if args.command == "worktree":
+            value = await runtime.manage_worktree(
+                args.workspace or runtime.default_workspace.workspace_id,
+                args.worktree_action,
+                name=getattr(args, "name", None),
+                ref=getattr(args, "ref", "HEAD"),
+            )
+            print(json.dumps(value, ensure_ascii=False, indent=2))
+            return 0
         if args.command in {"continue", "abandon"}:
             result = (
                 await runtime.continue_session(
@@ -385,6 +405,7 @@ def _main(argv: list[str] | None = None) -> int:
         return _rag(args)
     if args.command in {
         "workspace",
+        "worktree",
         "continue",
         "abandon",
         "migrate-v02",
@@ -400,7 +421,7 @@ def _main(argv: list[str] | None = None) -> int:
             raise AssertionError from exc
         from eventide.api import create_app
 
-        runtime = AgentRuntime(Settings.from_env())
+        runtime = RuntimeHost(Settings.from_env())
         try:
             if args.workspace:
                 runtime.default_workspace = runtime.resolve_or_register_workspace(args.workspace)

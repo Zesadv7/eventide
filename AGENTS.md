@@ -19,8 +19,9 @@
 
 ## 生产实现边界
 
-- 新 Runtime 功能优先进入 `runtime.py`、`providers/`、`executor.py`、`policy.py`、`observability.py`、`mcp/client.py`、`api.py` 或 `web/`。
-- `agent.py`、旧 context/hooks、cron 和旧协作路径属于 legacy compatibility layer，除兼容性任务外不继续扩展。
+- 新 Runtime 功能优先进入 `host.py`、`store.py`、`providers/`、`executor.py`、`policy.py`、`worktrees.py`、`mcp/client.py`、`api.py` 或 `web/`。
+- 生产入口统一为 `RuntimeHost` / `RuntimeStore`；旧教学 Agent、context/hooks、cron、协作和全局注册表已退役，不重新引入第二套执行或状态路径。
+- Worktree 是用户控制面的 Git 工作副本；写入协作先隔离 Workspace，再设计调度和合并，不能把它描述为操作系统沙箱。
 - import、`--help`、单元测试和离线评测不得依赖 API Key 或网络。
 - 所有生产工具调用必须经过 `ToolExecutor` 和 `PolicyEngine`，文件工具继续执行内部路径校验。
 - 没有审批处理器、用户拒绝或审批超时时，`ASK` 默认拒绝。

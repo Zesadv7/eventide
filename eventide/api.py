@@ -23,9 +23,9 @@ from pydantic import BaseModel, Field, SecretStr
 
 from eventide import attachments
 from eventide.config import Settings, normalize_provider
+from eventide.host import RuntimeHost
 from eventide.models import RunRequest, ToolCall
 from eventide.normalization import normalize, redact
-from eventide.runtime import AgentRuntime
 from eventide.secrets import SecretKeyError
 
 WEB_DIR = Path(__file__).with_name("web")
@@ -160,8 +160,8 @@ class ApprovalBroker:
         return True
 
 
-def create_app(runtime: AgentRuntime | None = None) -> FastAPI:
-    agent_runtime = runtime or AgentRuntime(Settings.from_env())
+def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
+    agent_runtime = runtime or RuntimeHost(Settings.from_env())
     broker = ApprovalBroker()
     tasks: set[asyncio.Task[Any]] = set()
     reserved: set[str] = set()

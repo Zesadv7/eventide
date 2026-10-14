@@ -24,7 +24,6 @@ def live_settings(isolated_workspace, provider):
         api_key="test-key",
         base_url="https://example.invalid/v1",
         model="test-model",
-        fallback_model=None,
     )
 
 

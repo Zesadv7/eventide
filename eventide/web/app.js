@@ -1,4 +1,4 @@
-import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=12";
+import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=13";
 import {EventFeed, request} from "./transport.js?v=12";
 import {el, button, icon, reconcile, markdown} from "./view.js?v=14";
 
@@ -478,6 +478,7 @@ function planRow(task, settled) {
   const head = el("div", "plan-task-head");
   head.append(el("span", "plan-status", task.label), el("span", "plan-content", task.content));
   item.append(head);
+  if (task.dependsOn.length) item.append(el("p", "plan-summary", `前置任务：${task.dependsOn.join("、")}`));
   if (task.summary) item.append(el("p", "plan-summary", task.summary));
   if (task.evidence.length || task.evidenceOmitted) {
     const details = el("details", "plan-evidence");

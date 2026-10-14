@@ -7,6 +7,7 @@ Eventide v0.4 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHo
 主要能力：
 
 - async-first Agent loop，同一 Workspace 串行、不同 Workspace 并发；
+- 事件驱动的有界任务计划、依赖校验与 Git worktree 管理；
 - Anthropic Messages、OpenAI-compatible Chat Completions 和 OpenAI Responses API；
 - `ALLOW / ASK / DENY` 权限决策与 CLI、Web 一次性审批；
 - MCP stdio 与 Streamable HTTP 工具发现和调用；
@@ -137,13 +138,30 @@ uv run eventide plan show session_example --json
 uv run eventide export run_example ./eventide-run.jsonl
 ```
 
-省略 `--workspace` 时使用当前目录；Git 仓库内的子目录归一化到仓库根，非 Git 目录也可运行。每个 Session 固定绑定一个 Workspace 和其中的 working directory；`run/chat --cwd` 可显式选择，若 `--workspace` 本身传入仓库子目录则默认把该子目录作为 cwd。Shell 与文件工具从 cwd 运行，并把它作为文件访问边界；Git checkpoint 仍覆盖整个 Workspace。根目录 `AGENTS.md` 加入模型上下文（最多 4,000 字符），`mcp.json` 和 `skills/` 按 Workspace 加载。生产基础工具为 `bash/read_file/write_file/edit_file/glob/compact/read_tool_result/todo_write`；发现有效 Skill 时再增加只读的 `load_skill`。旧 task graph、worktree、teammate 等接口仍可导入，但不进入新 Runtime 默认工具目录。`workspace remove <id>` 只移除没有 Session 的注册记录，不删除项目文件。
+省略 `--workspace` 时使用当前目录；Git 仓库内的子目录归一化到仓库根，非 Git 目录也可运行。每个 Session 固定绑定一个 Workspace 和其中的 working directory；`run/chat --cwd` 可显式选择，若 `--workspace` 本身传入仓库子目录则默认把该子目录作为 cwd。Shell 与文件工具从 cwd 运行，并把它作为文件访问边界；Git checkpoint 仍覆盖整个 Workspace。根目录 `AGENTS.md` 加入模型上下文（最多 4,000 字符），`mcp.json` 和 `skills/` 按 Workspace 加载。生产基础工具为 `bash/read_file/write_file/edit_file/glob/compact/read_tool_result/todo_write`；发现有效 Skill 时再增加只读的 `load_skill`。旧教学 Agent、文件式任务图、teammate/cron、模拟 MCP 和全局工具注册表已删除，Python 入口统一为 `eventide.host.RuntimeHost` 与 `eventide.store.RuntimeStore`。`migrate-v02` 的历史数据库导入与现有 HTTP/SSE 契约继续保留。`workspace remove <id>` 只移除没有 Session 的注册记录，不删除项目文件。
 
 Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `parked`；单次 run 用尽步数预算（默认 30 步，`EVENTIDE_MAX_STEPS` 可调）时同样停驻，可由用户 Continue 继续，不会整轮失败；运行中被用户停止时也会先记录 checkpoint 再停驻，因此同样可以继续。服务崩溃后重启时，Host 会按 Git 可见路径的修改时间与删除情况判断崩溃之后工作区有没有被动过：没被动过就补记 checkpoint，工作记录仍可 Continue；查到改动则记录改动过的文件（最多 20 条），此时只能放弃恢复或先自行核对工作区。存在任务计划时，同一条进行中的任务连续占用步数（默认 12 步，`EVENTIDE_TASK_MAX_STEPS` 可调，设为 `0` 关闭）也会停驻并点名该任务，避免一条卡住的任务烧光整个 run 的预算；这是 run 内的软上限，不改变 `max_steps` 这个硬上限，Continue 后重新计数。Continue 必须由用户发起；它检查 Git HEAD、暂存/未暂存改动及未跟踪文件是否匹配最后可信 checkpoint，并拒绝存在未知 Bash、MCP 或写工具结果的历史。通过检查后创建新 turn/run，旧用户消息不会重复写入，未完成的只读调用会标记为 abandoned。非 Git、未提交过的 Git 仓库、包含 submodule 的项目或缺少可信 checkpoint 时不支持 Continue。检查范围是 Git 可见源码，不覆盖 ignored 文件或外部系统状态。Continue 无法通过时，可以使用 Web 的“放弃恢复”或 `eventide abandon` 保留历史并解除停驻；结果未知的工具不会被视为成功或重新执行。
 
-上下文摘要只覆盖已结束的 turn，原始事件不变；达到模型输出上限的残缺摘要不会保存为 checkpoint。Prompt、模型正文和工具结果不会因日志展示限长而在执行前被静默截断；工具始终使用 Provider 返回的原始参数，审计事件中的敏感字段使用脱敏副本。预算按 system、messages 和完整工具目录的序列化请求计算。超过 12,000 字符的单条工具结果会先在模型请求中变成带 run/call 引用的头尾预览，模型可用只读 `read_tool_result(run_id, call_id, offset, limit)` 分页取回任意区间；TodoWrite 的历史整表参数也会在请求侧省略，只保留下方当前计划。canonical Event Log、审计导出和工作记录仍保留完整结果与计划。摘要之后仍超预算时，当前 turn 内较早的工具结果会继续折叠为占位串（保留最近三条预览或原文），并记录 `context.trimmed`。仍无法在预算内保留时返回 `context_overflow`，不会静默丢弃当前交互。预算单位保持为序列化请求的字符数。模型输出达到 `max_tokens` 被截断且没有工具调用时，run 以 `failed` 结束并提示提高 `EVENTIDE_MAX_TOKENS`，不会静默报成功。
+上下文摘要只覆盖已结束的 turn，原始事件不变；达到模型输出上限的残缺摘要不会保存为 checkpoint。Prompt、模型正文和工具参数不会因日志展示限长而在执行前被静默截断；工具始终使用 Provider 返回的原始参数，审计事件中的敏感字段使用脱敏副本。预算按 system、messages 和完整工具目录的序列化请求计算。超过 12,000 字符的单条工具结果会先在模型请求中变成带 run/call 引用的头尾预览，模型可用只读 `read_tool_result(run_id, call_id, offset, limit)` 分页取回任意区间；TodoWrite 的历史整表参数也会在请求侧省略，只保留下方当前计划。canonical Event Log、审计导出和工作记录保留执行器返回的结果与完整计划。Shell 采用有界流式采集：stdout/stderr 各保留最多 25,000 字节的头尾，明确报告省略字节数，丢弃的中段无法通过 `read_tool_result` 恢复；非 Shell 的结果分页保留完整 canonical 内容。摘要之后仍超预算时，当前 turn 内较早的工具结果会继续折叠为占位串（保留最近三条预览或原文），并记录 `context.trimmed`。仍无法在预算内保留时返回 `context_overflow`，不会静默丢弃当前交互。预算单位保持为序列化请求的字符数。模型输出达到 `max_tokens` 被截断且没有工具调用时，run 以 `failed` 结束并提示提高 `EVENTIDE_MAX_TOKENS`，不会静默报成功。
 
 HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id` 和 Workspace 内的 `working_directory`；空请求继续绑定启动项目根目录。`PATCH /api/sessions/{id}` 可设置显式标题或归档状态；默认列表隐藏已归档 Session，传 `include_archived=true` 可查看。`DELETE /api/sessions/{id}` 只删除没有 Run 或事件历史的空 Session，有历史的工作记录必须归档。Run History 默认返回最近 100 条，可用 `limit`（最多 200）和 `before=<run_id>` 向前翻页；Web 提供“加载更早记录”。`GET /api/runs/{id}/export` 流式下载 canonical JSONL；CLI `export` 默认拒绝覆盖已有文件，显式 `--force` 才替换。`POST /api/sessions/{id}/continue` 先完成恢复校验并持久化新 Run，再返回 `202`、`run_id` 和 `status=accepted`；验证失败返回 409，执行继续通过 Run 查询与 SSE 观察。同 Workspace 的并发 HTTP 请求返回 409。Web 长任务状态显示已观察到的模型步数、正在执行的任务和运行时长，并提供按 Run 停止；不虚构无法由事件证明的完成百分比。另有只读的能力自省（`GET /api/workspaces/{id}/capabilities`）、运行设置（`GET /api/runtime/settings`）以及 Session 附件上传、清单、下载和删除接口，见[接口契约](docs/api-contract.md)。
+
+## Git worktree 管理
+
+旧 worktree 能力已经迁入 Workspace 控制面，不再依赖 `.tasks`、`.worktrees` 或导入时的全局目录：
+
+```bash
+uv run eventide worktree --workspace /path/to/project create review-fix
+uv run eventide worktree --workspace /path/to/project list
+uv run eventide worktree --workspace /path/to/project keep review-fix
+uv run eventide worktree --workspace /path/to/project remove review-fix
+```
+
+`create` 默认从已提交的 `HEAD` 创建，也可传 `--ref <已有分支/tag/commit>`；不复制原工作区的未提交修改。分支使用 `codex/<workspace_id>/<name>`，checkout 和身份记录存放在状态根 `worktrees/<workspace_id>/`，状态根必须在源项目之外。返回的 checkout 路径可直接用于 `run --workspace <path>`。非 Git、无 HEAD、submodule、越界路径或身份不匹配时拒绝操作。Host 使用源 Workspace 锁串行管理操作，变更意图、结果与失败写入一个名为「Worktree 管理」的 Session；list 不写运行事件。
+
+`keep` 标记留待审阅；`remove` 只删除没有文件改动、未跟踪/ignored 内容和新增提交的受管 checkout，带 `assume-unchanged` / `skip-worktree` 索引标记或关联了 Session 的 checkout 也会保留用于检查与恢复。删除过程关闭新 Workspace/Session 进入，成功后移除空的 checkout 注册。没有强制删除选项，分支始终保留；删除后复用同名分支会明确报错，由用户检查后自行处理。旧 `.worktrees`、任务文件和 ignored 运行产物不自动迁移或清除。这是 Git 写入隔离的基础，尚不包含自动合并、多 Agent 调度或容器沙箱。
+
+Shell 返回明确的退出码、超时状态和分开的 stdout/stderr；运行事件另保存 `metadata` 中的耗时、截断与输出字节计数。非零退出码与超时标记为工具错误，成功输出包含 `Error:` 字样不会被误判。停止或超时会清理本地进程树。
 
 ## Web 工作记录页
 
@@ -268,7 +286,9 @@ uv run eventide rag eval evals/retrieval.yaml --json
 
 计划是只读展示的：CLI 提供 `eventide plan show <session_id>`，默认人类可读输出（各项状态、active 任务、完成 summary、证据列表），`--json` 直接返回与 Session 状态同构的 `task_plan`、`active_task_id` 和 `task_state`。Web 工作记录页通过顶栏「计划」胶囊打开的任务计划浮层展示计划：顶部是总进度式“N / M 已完成”计数与进度条，仅当存在时追加“进行中”和“受阻”数量，不单独显示“待开始”（待开始任务仍逐条可见）；active 任务高亮，`completed` 项默认折叠进“已完成的任务”分组，summary 和工具证据可按需展开，点击证据条目会定位到工具浮层中的对应调用；浮层同时保留计划修订历史，可以看到清单如何随工作推进改写。前端收到 `task.plan_updated` SSE 后重新读取 Session 状态刷新浮层，不在前端复制投影规则；计划没有任何人工编辑入口，唯一写入路径仍是 `todo_write`。
 
-这只是当前 Session 的执行计划，不会启动 Subagent、后台任务或依赖图；旧文件式 task graph 仍属于 compatibility layer。
+计划项可带 `depends_on`，引用同一清单的稳定任务 id（例如 `"depends_on": ["t1"]`）；初次提交可按清单顺序引用当次分配的 id。引用必须存在且不得重复、自引用或成环；某项进入 `in_progress` / `completed` 时，依赖项必须在该次快照中为 `completed`。重复更新省略该字段会保留原依赖，显式 `[]` 才清空。校验失败不写计划事件，历史无该字段时按无依赖投影。
+
+依赖约束只校验计划快照，不会自动启动任务或拦截无关的文件/Shell 调用；完成仍是模型声明。Subagent 与持久后台调度尚未实现。
 
 ## 使用 Skills
 

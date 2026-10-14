@@ -196,7 +196,7 @@ def test_cli_workspace_and_runs(isolated_workspace, monkeypatch, capsys):
     monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
     monkeypatch.setattr(
         cli,
-        "AgentRuntime",
+        "RuntimeHost",
         lambda settings: RuntimeHost(
             settings,
             ScriptedProvider([{"text": "cli done"}]),
@@ -228,7 +228,7 @@ def test_cli_continue(isolated_workspace, monkeypatch, capsys):
     import eventide.cli as cli
 
     host, session, _ = asyncio.run(interrupted_host(isolated_workspace))
-    monkeypatch.setattr(cli, "AgentRuntime", lambda _: host)
+    monkeypatch.setattr(cli, "RuntimeHost", lambda _: host)
     assert main(["continue", session, "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["continuation_of"] == "crashed"
 
@@ -237,7 +237,7 @@ def test_cli_abandon(isolated_workspace, monkeypatch, capsys):
     import eventide.cli as cli
 
     host, session, _ = asyncio.run(interrupted_host(isolated_workspace, "bash"))
-    monkeypatch.setattr(cli, "AgentRuntime", lambda _: host)
+    monkeypatch.setattr(cli, "RuntimeHost", lambda _: host)
     assert main(["abandon", session, "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["continuation_of"] == "crashed"
 
@@ -296,7 +296,7 @@ def test_cli_imports_v02_history_without_changing_source(
     monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
     monkeypatch.setattr(
         cli,
-        "AgentRuntime",
+        "RuntimeHost",
         lambda value: RuntimeHost(value, ScriptedProvider([{"text": "unused"}])),
     )
     assert main(["migrate-v02", str(source)]) == 0

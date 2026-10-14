@@ -85,7 +85,6 @@ async def run_demo() -> dict[str, Any]:
             api_key=None,
             base_url=None,
             model="scripted",
-            fallback_model=None,
             max_steps=2,
         )
         discovery = ScriptedProvider(

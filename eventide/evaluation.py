@@ -12,11 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from eventide.config import Settings
+from eventide.host import RuntimeHost
 from eventide.models import RunRequest
-from eventide.observability import TraceStore
 from eventide.providers import ScriptedProvider, build_provider
 from eventide.rag.index import IndexStore
-from eventide.runtime import AgentRuntime
+from eventide.store import RuntimeStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +170,7 @@ async def run_evaluations(
     cases = load_suite(path)
     mode = "live" if live else "offline"
     database = settings.state_dir / "evals" / f"{mode}.db"
-    suite_store = TraceStore(database)
+    suite_store = RuntimeStore(database)
     results: list[EvalCaseResult] = []
     suite_started = time.perf_counter()
     for index, case in enumerate(cases, 1):
@@ -184,7 +184,7 @@ async def run_evaluations(
         if isinstance(fixtures, dict):
             sandbox = _create_sandbox(fixtures)
             case_settings = replace(settings, workdir=sandbox, state_dir=sandbox / ".eventide")
-            case_store = TraceStore(case_settings.state_dir / "evals" / f"{mode}.db")
+            case_store = RuntimeStore(case_settings.state_dir / "evals" / f"{mode}.db")
             if rag_index:
                 # Fixture indexes are always deterministic, including live LLM runs.
                 case_settings = replace(
@@ -195,7 +195,7 @@ async def run_evaluations(
         provider = (
             build_provider(case_settings) if live else ScriptedProvider(case.get("script", []))
         )
-        runtime = AgentRuntime(
+        runtime = RuntimeHost(
             settings=case_settings, provider=provider, store=case_store, enable_mcp=live
         )
         session_id = f"eval_{mode}_{index}_{int(time.time() * 1000)}"

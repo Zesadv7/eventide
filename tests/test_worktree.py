@@ -98,6 +98,20 @@ def test_explicit_ref_and_unmanaged_checkouts(isolated_workspace):
     assert unmanaged.exists()
 
 
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_removal_preserves_changes_hidden_by_index_flags(isolated_workspace, flag):
+    manager = service(isolated_workspace)
+    record = manager.create("hidden")
+    checkout = Path(record.path)
+    git(checkout, "update-index", flag, "README.md")
+    (checkout / "README.md").write_text("uncommitted user data", encoding="utf-8")
+    assert git(checkout, "status", "--porcelain") == ""
+    with pytest.raises(ValueError, match="index hides tracked files"):
+        manager.remove("hidden")
+    assert (checkout / "README.md").read_text() == "uncommitted user data"
+    assert manager.list() == [record]
+
+
 @pytest.mark.parametrize(
     "field", ["path", "repository", "workspace_id", "git_common_dir", "branch"]
 )

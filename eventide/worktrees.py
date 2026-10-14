@@ -219,6 +219,10 @@ class WorktreeService:
     def remove(self, name: str) -> WorktreeRecord:
         record = self._load(name, self._repository())
         path = Path(record.path)
+        index_entries = self._git(path, "ls-files", "-v", "-z").split("\0")
+        if any(entry and (entry[0].islower() or entry[0] == "S") for entry in index_entries):
+            # Both status and unforced Git removal can overlook these tracked files.
+            raise ValueError("Worktree index hides tracked files; keep it for review")
         if self._git(path, "status", "--porcelain", "--untracked-files=all", "--ignored"):
             raise ValueError("Worktree has changed, untracked or ignored files; keep it for review")
         if int(self._git(path, "rev-list", "--count", f"{record.base_commit}..HEAD")):

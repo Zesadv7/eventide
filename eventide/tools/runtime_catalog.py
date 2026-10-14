@@ -2,11 +2,12 @@
 
 from typing import Any
 
-from eventide.tools.bash import run_bash
 from eventide.tools.filesystem import run_edit, run_glob, run_read, run_write
 
 
-def _tool(name: str, description: str, properties: dict[str, Any], required: list[str]) -> dict:
+def _tool(
+    name: str, description: str, properties: dict[str, Any], required: list[str]
+) -> dict[str, Any]:
     return {
         "name": name,
         "description": description,
@@ -41,8 +42,15 @@ TOOLS = [
     _tool("glob", "Find workspace paths.", {"pattern": TEXT}, ["pattern"]),
     _tool("compact", "Request context compaction of completed turns.", {"focus": TEXT}, []),
 ]
+
+
+def _command_boundary(**_arguments: object) -> str:
+    """Visibility marker; ToolExecutor dispatches commands to its injected executor."""
+    raise RuntimeError("Commands must be executed through ToolExecutor")
+
+
 HANDLERS = {
-    "bash": run_bash,
+    "bash": _command_boundary,
     "read_file": run_read,
     "write_file": run_write,
     "edit_file": run_edit,
