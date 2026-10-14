@@ -180,8 +180,18 @@ class ContainerCommandExecutor:
                 endpoint = json.loads(result.stdout)
             except (ValueError, TypeError) as exc:
                 raise RuntimeError("Docker context returned an invalid endpoint") from exc
-        if not isinstance(endpoint, str) or not endpoint.startswith(("unix:///", "npipe://")):
+        local_socket = isinstance(endpoint, str) and endpoint.startswith("unix:///")
+        local_pipe = (
+            isinstance(endpoint, str)
+            and re.fullmatch(
+                r"npipe:////\./pipe/[a-zA-Z0-9._-]+",
+                endpoint,
+            )
+            is not None
+        )
+        if not local_socket and not local_pipe:
             raise ValueError("Container commands require a local Docker unix:// or npipe:// daemon")
+        assert isinstance(endpoint, str)
         return endpoint
 
     def _create_args(self, base: list[str], cwd: Path, name: str, command: str) -> list[str]:

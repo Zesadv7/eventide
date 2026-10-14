@@ -290,12 +290,28 @@ async def test_bad_container_identity_still_attempts_cleanup(fake_docker, tmp_pa
     assert not list(fake_docker[0].glob("eventide-*"))
 
 
-@pytest.mark.parametrize("endpoint", ["ssh://remote", "tcp://localhost:2375", "http://host:2375"])
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "ssh://remote",
+        "tcp://localhost:2375",
+        "http://host:2375",
+        "npipe:////remote-server/pipe/docker_engine",
+        "npipe://arbitrary-host",
+    ],
+)
 async def test_remote_daemon_is_rejected_before_creating_anything(fake_docker, tmp_path, endpoint):
     configure(fake_docker, endpoint=endpoint)
     with pytest.raises(ValueError, match="local Docker"):
         await executor(fake_docker).execute("ignored", tmp_path)
     assert [action(call) for call in calls(fake_docker)] == ["context"]
+
+
+async def test_local_windows_named_pipe_is_supported(fake_docker, tmp_path):
+    endpoint = "npipe:////./pipe/docker_engine"
+    configure(fake_docker, endpoint=endpoint)
+    await executor(fake_docker).execute("ignored", tmp_path)
+    assert calls(fake_docker)[1]["args"][:2] == ["--host", endpoint]
 
 
 async def test_explicit_local_endpoint_is_frozen_across_all_operations(
