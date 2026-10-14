@@ -9,10 +9,15 @@ import sqlite3
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from eventide.rag.chunker import Chunk, chunk_text
+from eventide.rag.chunker import (
+    Chunk,
+    chunk_document,
+    chunking_fingerprint,
+    chunking_identity,
+)
 from eventide.rag.embedding import (
     HASH_ALGORITHM_VERSION,
     EmbeddingProfile,
@@ -75,6 +80,9 @@ class BuildStats:
     chunks: int
     skipped: int
     duration_ms: float
+    structured_files: int = 0
+    structure_fallbacks: dict[str, int] = field(default_factory=dict)
+    chunking_fingerprint: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +123,8 @@ class _Scan:
     sources: tuple[_SourceFile, ...]
     skipped: int
     signature: tuple[tuple[str, str], ...]
+    structured_files: int = 0
+    structure_fallbacks: tuple[tuple[str, int], ...] = ()
 
 
 class IndexStore:
@@ -199,10 +209,12 @@ class IndexStore:
         )
         return sorted(os.fsdecode(item) for item in raw.split(b"\0") if item)
 
-    def _scan(self, *, include_chunks: bool) -> _Scan:
+    def _scan(self, *, include_chunks: bool, code_structure: bool = False) -> _Scan:
         sources: list[_SourceFile] = []
         signature: list[tuple[str, str]] = []
         skipped = 0
+        structured_files = 0
+        structure_fallbacks: dict[str, int] = {}
         for raw_path in self._git_paths():
             relative = PurePosixPath(raw_path).as_posix()
             parts = PurePosixPath(relative).parts
@@ -236,7 +248,14 @@ class IndexStore:
                 signature.append((relative, f"non-utf8:{content_hash}"))
                 continue
             signature.append((relative, content_hash))
-            chunks = tuple(chunk_text(relative, text)) if include_chunks else ()
+            chunks: tuple[Chunk, ...] = ()
+            if include_chunks:
+                document = chunk_document(relative, text, code_structure=code_structure)
+                chunks = document.chunks
+                structured_files += int(document.structured)
+                if document.fallback_reason:
+                    reason = document.fallback_reason
+                    structure_fallbacks[reason] = structure_fallbacks.get(reason, 0) + 1
             sources.append(
                 _SourceFile(
                     path=relative,
@@ -246,7 +265,13 @@ class IndexStore:
                     chunks=chunks,
                 )
             )
-        return _Scan(tuple(sources), skipped, tuple(signature))
+        return _Scan(
+            tuple(sources),
+            skipped,
+            tuple(signature),
+            structured_files,
+            tuple(sorted(structure_fallbacks.items())),
+        )
 
     @staticmethod
     def _generation(connection: sqlite3.Connection) -> int:
@@ -295,9 +320,12 @@ class IndexStore:
         force: bool = False,
         embedder: EmbeddingProvider | None = None,
         profile: EmbeddingProfile | None = None,
+        code_structure: bool = False,
     ) -> BuildStats:
         """Incrementally rebuild changed files and commit the new snapshot atomically."""
         started = time.perf_counter()
+        chunking_profile = chunking_identity(code_structure=code_structure)
+        chunking_digest = chunking_fingerprint(chunking_profile)
         if embedder is None:
             default_embedder = HashEmbedder()
             embedder = default_embedder
@@ -320,6 +348,16 @@ class IndexStore:
                 str(row["path"]): str(row["content_hash"])
                 for row in connection.execute("SELECT path, content_hash FROM files")
             }
+            stored_chunking = meta.get("chunking_fingerprint")
+            if (
+                existing
+                and not force
+                and (
+                    (stored_chunking is not None and stored_chunking != chunking_digest)
+                    or (stored_chunking is None and code_structure)
+                )
+            ):
+                raise ValueError("Chunking configuration changed; rebuild with --force")
             chunk_total, null_total = connection.execute(
                 "SELECT COUNT(*), SUM(CASE WHEN vec IS NULL THEN 1 ELSE 0 END) FROM chunks"
             ).fetchone()
@@ -357,7 +395,11 @@ class IndexStore:
                     and not force
                 ):
                     raise ValueError("Embedding configuration changed; rebuild with --force")
-            scan = self._scan(include_chunks=True)
+            scan = (
+                self._scan(include_chunks=True, code_structure=True)
+                if code_structure
+                else self._scan(include_chunks=True)
+            )
             current = {source.path: source for source in scan.sources}
             changed = [
                 source
@@ -383,6 +425,8 @@ class IndexStore:
                 verified = self._scan(include_chunks=False)
                 if verified.signature != scan.signature:
                     raise RuntimeError("Workspace changed during index build; retry")
+                if chunking_identity(code_structure=code_structure) != chunking_profile:
+                    raise RuntimeError("Chunking configuration changed during build; retry")
                 if force:
                     connection.execute("DELETE FROM files")
                 else:
@@ -437,6 +481,8 @@ class IndexStore:
                     "embedding_algorithm": resolved_profile.algorithm_version,
                     "embedding_dimension": str(dimension),
                     "embedding_fingerprint": resolved_profile.fingerprint(),
+                    "chunking_profile": chunking_profile,
+                    "chunking_fingerprint": chunking_digest,
                 }
                 connection.executemany(
                     "INSERT INTO meta(key, value) VALUES (?, ?) "
@@ -463,6 +509,9 @@ class IndexStore:
             chunks=chunk_count,
             skipped=scan.skipped,
             duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            structured_files=scan.structured_files,
+            structure_fallbacks=dict(scan.structure_fallbacks),
+            chunking_fingerprint=chunking_digest,
         )
 
     def sparse_search(self, query: str, *, limit: int) -> list[SparseCandidate]:

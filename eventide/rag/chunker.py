@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import bisect
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+
+from eventide.rag.code_structure import STRUCTURE_VERSION, parser_identity, source_sections
 
 MIN_CHUNK_CHARS = 600
 MAX_CHUNK_CHARS = 800
@@ -24,6 +28,34 @@ class Chunk:
     end_line: int
     heading: str
     text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkedDocument:
+    chunks: tuple[Chunk, ...]
+    structured: bool = False
+    fallback_reason: str | None = None
+
+
+def chunking_identity(*, code_structure: bool = False) -> str:
+    """Stable identity for window policy and explicitly enabled source parsers."""
+    return json.dumps(
+        {
+            "version": "windows-v1",
+            "min_chars": MIN_CHUNK_CHARS,
+            "max_chars": MAX_CHUNK_CHARS,
+            "overlap_chars": OVERLAP_CHARS,
+            "code_structure": code_structure,
+            "structure_version": STRUCTURE_VERSION if code_structure else None,
+            "parsers": parser_identity() if code_structure else None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def chunking_fingerprint(identity: str) -> str:
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 def _line_starts(text: str) -> list[int]:
@@ -124,20 +156,34 @@ def _markdown_sections(text: str) -> list[tuple[int, int, str]]:
     return sections
 
 
-def chunk_text(file: str, text: str) -> list[Chunk]:
-    """Split text deterministically while retaining exact one-based line ranges."""
+def chunk_document(file: str, text: str, *, code_structure: bool = False) -> ChunkedDocument:
+    """Retain source symbols when requested, with explicit window fallbacks."""
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     if not normalized.strip():
-        return []
+        return ChunkedDocument(())
     relative = PurePosixPath(file).as_posix()
     starts = _line_starts(normalized)
-    sections = (
-        _markdown_sections(normalized)
-        if PurePosixPath(relative).suffix.lower() == ".md"
-        else [(0, len(normalized), "")]
-    )
+    structured = False
+    fallback_reason = None
+    if PurePosixPath(relative).suffix.lower() == ".md":
+        sections = _markdown_sections(normalized)
+    elif code_structure:
+        source = source_sections(relative, normalized)
+        fallback_reason = source.fallback_reason
+        structured = fallback_reason is None
+        sections = list(source.sections) if structured else [(0, len(normalized), "")]
+    else:
+        sections = [(0, len(normalized), "")]
     chunks: list[Chunk] = []
     for section_start, section_end, heading in sections:
+        if structured:
+            while section_start < section_end and normalized[section_start] == "\n":
+                section_start += 1
+            # Separating a class from its methods can leave only closing braces.
+            if not any(
+                char.isalnum() or char == "_" for char in normalized[section_start:section_end]
+            ):
+                continue
         chunks.extend(
             _window_chunks(
                 relative,
@@ -148,4 +194,9 @@ def chunk_text(file: str, text: str) -> list[Chunk]:
                 heading,
             )
         )
-    return chunks
+    return ChunkedDocument(tuple(chunks), structured, fallback_reason)
+
+
+def chunk_text(file: str, text: str, *, code_structure: bool = False) -> list[Chunk]:
+    """Split text deterministically while retaining exact one-based line ranges."""
+    return list(chunk_document(file, text, code_structure=code_structure).chunks)

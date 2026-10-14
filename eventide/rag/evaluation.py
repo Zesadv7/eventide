@@ -108,6 +108,7 @@ def _grade_hits(case: dict[str, Any], hits: list[SearchResult]) -> dict[str, Any
                 "file": hit.chunk.file,
                 "start_line": hit.chunk.start_line,
                 "end_line": hit.chunk.end_line,
+                "heading": hit.chunk.heading,
                 "score": round(hit.score, 8),
                 "sources": list(hit.sources),
                 "relevant": is_relevant,
@@ -136,7 +137,7 @@ def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def run_retrieval_evaluation(path: Path) -> dict[str, Any]:
+def run_retrieval_evaluation(path: Path, *, code_structure: bool = False) -> dict[str, Any]:
     """Compare three retrieval paths on the same temporary offline index."""
     suite_path = path.expanduser().resolve()
     corpus, cases, suite_name = _load_suite(suite_path)
@@ -164,7 +165,9 @@ def run_retrieval_evaluation(path: Path) -> dict[str, Any]:
                 corpus_digest.update(relative.encode("utf-8") + b"\0")
                 corpus_digest.update(hashlib.sha256(source.read_bytes()).digest())
         _init_git_workspace(workspace)
-        stats = IndexStore(workspace).build(embedder=embedder, profile=profile)
+        stats = IndexStore(workspace).build(
+            embedder=embedder, profile=profile, code_structure=code_structure
+        )
         available_files = {
             item.relative_to(workspace).as_posix()
             for item in workspace.rglob("*")
@@ -205,6 +208,10 @@ def run_retrieval_evaluation(path: Path) -> dict[str, Any]:
         "indexed_files": stats.files,
         "indexed_chunks": stats.chunks,
         "embedding_fingerprint": profile.fingerprint(),
+        "chunking_fingerprint": stats.chunking_fingerprint,
+        "code_structure": code_structure,
+        "structured_files": stats.structured_files,
+        "structure_fallbacks": stats.structure_fallbacks,
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
     }
 
