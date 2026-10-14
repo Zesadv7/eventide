@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import mimetypes
+import os
 import re
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -34,11 +37,89 @@ def new_attachment_id() -> str:
     return f"att_{uuid.uuid4().hex[:12]}"
 
 
-def _safe_session_dir(session_id: str | None) -> str:
-    safe = _SAFE_COMPONENT.sub("_", str(session_id or "unknown"))
-    if safe in {".", ".."} or _WINDOWS_RESERVED.match(safe):
-        return f"_{safe}"
-    return safe
+def _safe_session_dir(session_id: str) -> str:
+    if not isinstance(session_id, str) or not session_id:
+        raise ValueError("会话 id 无效")
+    return "~" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def _legacy_session_dir(session_id: str) -> str | None:
+    """Only unchanged portable names can identify a legacy session directory."""
+    if (
+        _SAFE_COMPONENT.search(session_id)
+        or session_id in {".", ".."}
+        or session_id.endswith(".")
+        or _WINDOWS_RESERVED.fullmatch(session_id.split(".", 1)[0])
+        or len(session_id) > 128
+    ):
+        return None
+    return session_id
+
+
+def _check_path(path: Path, state_dir: Path, *, directory: bool = False) -> None:
+    if path.is_symlink():
+        raise ValueError("附件路径不能使用符号链接")
+    if not path.resolve().is_relative_to(state_dir.resolve()):
+        raise ValueError("附件路径越出状态目录")
+    if not path.exists():
+        return
+    # On case-insensitive filesystems, an old ownerless A/ directory must not
+    # also be accepted as a/. New hashed names do not have this ambiguity.
+    if not any(entry.name == path.name for entry in path.parent.iterdir()):
+        raise ValueError("附件路径大小写不一致，无法确认会话归属")
+    if directory and not path.is_dir():
+        raise ValueError("附件目录无效")
+    if not directory and not path.is_file():
+        raise ValueError("附件文件无效")
+
+
+def _primary_root(state_dir: str | Path, session_id: str) -> Path:
+    state = Path(state_dir)
+    root = state / "attachments"
+    _check_path(root, state, directory=True)
+    primary = root / _safe_session_dir(session_id)
+    _check_path(primary, state, directory=True)
+    return primary
+
+
+def _session_roots(state_dir: str | Path, session_id: str) -> list[Path]:
+    state = Path(state_dir)
+    primary = _primary_root(state_dir, session_id)
+    roots = [primary]
+    legacy = _legacy_session_dir(session_id)
+    if legacy is not None:
+        legacy_root = primary.parent / legacy
+        if legacy_root.exists() and not any(
+            entry.name == legacy for entry in primary.parent.iterdir()
+        ):
+            # A casing alias is another legacy directory, never a fallback.
+            return roots
+        _check_path(legacy_root, state, directory=True)
+        roots.append(legacy_root)
+    return roots
+
+
+def _atomic_write(path: Path, meta: dict[str, Any], *, replace: bool) -> None:
+    """Publish complete JSON; initial saves never overwrite an existing id."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, prefix=".attachment-", delete=False
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(meta, handle, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if replace:
+            os.replace(temporary, path)
+        else:
+            try:
+                os.link(temporary, path)
+            except FileExistsError as exc:
+                raise ValueError(f"附件 id 已存在：{path.name}") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _decode_base64(content_base64: str | None) -> bytes:
@@ -97,7 +178,9 @@ def decode_attachment(name: str, content_base64: str) -> str:
 def attachment_path(state_dir: str | Path, session_id: str, attachment_id: str) -> Path:
     if not isinstance(attachment_id, str) or not _ATTACHMENT_ID.fullmatch(attachment_id):
         raise ValueError(f"非法附件 id：{attachment_id!r}")
-    return Path(state_dir) / "attachments" / _safe_session_dir(session_id) / attachment_id
+    path = _primary_root(state_dir, session_id) / attachment_id
+    _check_path(path, Path(state_dir))
+    return path
 
 
 def save_attachment(
@@ -116,9 +199,16 @@ def save_attachment(
     if kind == "text" and normalized_type == "application/octet-stream":
         normalized_type = "text/plain"
     path = attachment_path(state_dir, session_id, attachment_id)
+    for root in _session_roots(state_dir, session_id):
+        existing = root / attachment_id
+        _check_path(existing, Path(state_dir))
+        if existing.exists():
+            raise ValueError(f"附件 id 已存在：{attachment_id}")
     path.parent.mkdir(parents=True, exist_ok=True)
+    path = attachment_path(state_dir, session_id, attachment_id)
     meta: dict[str, Any] = {
-        "version": 2,
+        "version": 3,
+        "session_id": session_id,
         "name": name,
         "size": len(raw),
         "media_type": normalized_type,
@@ -130,11 +220,13 @@ def save_attachment(
         meta["text"] = text
     else:
         meta["content_base64"] = base64.b64encode(raw).decode("ascii")
-    path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    _atomic_write(path, meta, replace=False)
     return _public_metadata(attachment_id, meta)
 
 
-def _read_meta(path: Path, attachment_id: str) -> dict[str, Any]:
+def _read_meta(
+    path: Path, attachment_id: str, session_id: str, *, legacy: bool = False
+) -> dict[str, Any]:
     if not path.is_file():
         raise ValueError(f"附件不存在：{attachment_id}")
     try:
@@ -143,6 +235,15 @@ def _read_meta(path: Path, attachment_id: str) -> dict[str, Any]:
         raise ValueError(f"附件数据损坏：{attachment_id}") from exc
     if not isinstance(meta, dict) or not isinstance(meta.get("name"), str):
         raise ValueError(f"附件数据损坏：{attachment_id}")
+    if "session_id" in meta:
+        if meta["session_id"] != session_id:
+            raise ValueError(f"附件不属于当前会话：{attachment_id}")
+    elif (
+        not legacy
+        or session_id != session_id.lower()
+        or meta.get("version") not in (None, 1, 2)
+    ):
+        raise ValueError(f"附件缺少可确认的会话归属：{attachment_id}")
     if "version" not in meta and isinstance(meta.get("text"), str):
         meta = {
             **meta,
@@ -151,7 +252,7 @@ def _read_meta(path: Path, attachment_id: str) -> dict[str, Any]:
             "media_type": mimetypes.guess_type(meta["name"])[0] or "text/plain",
             "kind": "text",
             "created_at": path.stat().st_mtime,
-            "used": False,
+            "used": bool(meta.get("used", False)),
         }
     required = ("size", "media_type", "kind", "created_at", "used")
     if any(key not in meta for key in required):
@@ -161,6 +262,26 @@ def _read_meta(path: Path, attachment_id: str) -> dict[str, Any]:
     if meta["kind"] != "text" and not isinstance(meta.get("content_base64"), str):
         raise ValueError(f"附件数据损坏：{attachment_id}")
     return meta
+
+
+def _load_meta(
+    state_dir: str | Path, session_id: str, attachment_id: str
+) -> tuple[Path, dict[str, Any]]:
+    # Validate the public id even if neither directory exists.
+    attachment_path(state_dir, session_id, attachment_id)
+    found: tuple[Path, dict[str, Any]] | None = None
+    for index, root in enumerate(_session_roots(state_dir, session_id)):
+        path = root / attachment_id
+        _check_path(path, Path(state_dir))
+        if not path.exists():
+            continue
+        meta = _read_meta(path, attachment_id, session_id, legacy=index != 0)
+        if found is not None:
+            raise ValueError(f"附件 id 重复：{attachment_id}")
+        found = path, meta
+    if found is None:
+        raise ValueError(f"附件不存在：{attachment_id}")
+    return found
 
 
 def _public_metadata(attachment_id: str, meta: dict[str, Any]) -> dict[str, Any]:
@@ -176,8 +297,7 @@ def _public_metadata(attachment_id: str, meta: dict[str, Any]) -> dict[str, Any]
 
 
 def load_attachment(state_dir: str | Path, session_id: str, attachment_id: str) -> dict[str, Any]:
-    path = attachment_path(state_dir, session_id, attachment_id)
-    meta = _read_meta(path, attachment_id)
+    _, meta = _load_meta(state_dir, session_id, attachment_id)
     record = _public_metadata(attachment_id, meta)
     if meta["kind"] == "text":
         record["content"] = meta["text"]
@@ -195,34 +315,42 @@ def load_attachments(
 def list_attachments(
     state_dir: str | Path, session_id: str, *, include_used: bool = False
 ) -> list[dict[str, Any]]:
-    root = Path(state_dir) / "attachments" / _safe_session_dir(session_id)
-    if not root.is_dir():
-        return []
     records: list[dict[str, Any]] = []
-    for path in root.iterdir():
-        if not path.is_file() or not _ATTACHMENT_ID.fullmatch(path.name):
+    seen: set[str] = set()
+    for index, root in enumerate(_session_roots(state_dir, session_id)):
+        if not root.is_dir():
             continue
-        meta = _read_meta(path, path.name)
-        if include_used or not meta["used"]:
-            records.append(_public_metadata(path.name, meta))
+        for path in root.iterdir():
+            if not _ATTACHMENT_ID.fullmatch(path.name):
+                continue
+            _check_path(path, Path(state_dir))
+            meta = _read_meta(path, path.name, session_id, legacy=index != 0)
+            if path.name in seen:
+                raise ValueError(f"附件 id 重复：{path.name}")
+            seen.add(path.name)
+            if include_used or not meta["used"]:
+                records.append(_public_metadata(path.name, meta))
     return sorted(records, key=lambda item: (item["created_at"], item["attachment_id"]))
 
 
 def mark_attachments_used(
     state_dir: str | Path, session_id: str, attachment_ids: list[str]
 ) -> None:
-    for attachment_id in attachment_ids:
-        path = attachment_path(state_dir, session_id, attachment_id)
-        meta = _read_meta(path, attachment_id)
+    # A bad/foreign id anywhere in the request must leave every valid chip
+    # untouched. Filesystem failure during publication is not a DB transaction.
+    validated = dict(_load_meta(state_dir, session_id, item) for item in attachment_ids)
+    for path, meta in validated.items():
         if meta["used"]:
             continue
         meta["used"] = True
-        path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        meta["version"] = 3
+        meta["session_id"] = session_id
+        _check_path(path, Path(state_dir))
+        _atomic_write(path, meta, replace=True)
 
 
 def delete_attachment(state_dir: str | Path, session_id: str, attachment_id: str) -> dict[str, Any]:
-    path = attachment_path(state_dir, session_id, attachment_id)
-    meta = _read_meta(path, attachment_id)
+    path, meta = _load_meta(state_dir, session_id, attachment_id)
     if meta["used"]:
         raise ValueError("附件已用于工作记录，不能删除")
     path.unlink()

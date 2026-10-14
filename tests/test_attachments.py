@@ -1,6 +1,7 @@
 """Attachment storage boundaries: validation, safe paths, and prompt inlining."""
 
 import base64
+import hashlib
 
 import pytest
 
@@ -148,18 +149,17 @@ def test_attachment_path_rejects_illegal_ids(state_dir):
 
 
 def test_attachment_path_never_traverses_through_the_session_id(state_dir):
-    # A ".." session id must not escape the attachments directory.
-    path = attachment_path(state_dir, "..", VALID_ID)
-    assert ".." not in path.parts
-    assert path == state_dir / "attachments" / "_.." / VALID_ID
-    # Separators and reserved characters are flattened into one component.
-    assert attachment_path(state_dir, "a/b\\c:d e", VALID_ID) == (
-        state_dir / "attachments" / "a_b_c_d_e" / VALID_ID
-    )
-    # Windows device names cannot be directory names.
-    assert attachment_path(state_dir, "CON", VALID_ID).parts[-2] == "_CON"
-    assert attachment_path(state_dir, "nul", VALID_ID).parts[-2] == "_nul"
-    assert attachment_path(state_dir, "", VALID_ID).parts[-2] == "unknown"
+    # Exact Session identity, including separators/case/device names, is hashed
+    # into one portable component without flattening distinct identities.
+    for session_id in ["..", "a/b\\c:d e", "CON", "nul", "CON.txt"]:
+        path = attachment_path(state_dir, session_id, VALID_ID)
+        assert path == (
+            state_dir / "attachments" / ("~" + hashlib.sha256(session_id.encode()).hexdigest())
+            / VALID_ID
+        )
+    for invalid in ["", None, 123]:
+        with pytest.raises(ValueError, match="会话 id 无效"):
+            attachment_path(state_dir, invalid, VALID_ID)
 
 
 def test_load_attachment_missing_foreign_and_corrupt(state_dir):
