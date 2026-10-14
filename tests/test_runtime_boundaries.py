@@ -147,6 +147,42 @@ async def test_summary_failure_uses_valid_checkpoint_or_overflows(isolated_works
         await host.close()
 
 
+async def test_rejected_summary_is_not_saved_after_tool_folding(isolated_workspace):
+    host = RuntimeHost(settings_for(isolated_workspace))
+    try:
+        session = host.create_session()
+        host.store.create_run("prior", session)
+        host.store.append_message(session, {"role": "user", "content": "prior goal"})
+        host.store.finish_run("prior", status="completed", output="prior answer")
+        host.store.create_run("active", session)
+        host.store.append_message(session, {"role": "user", "content": "next goal"})
+        for index in range(4):
+            call_id = f"call-{index}"
+            host.store.append_event(
+                "active", "model.response",
+                {"message": {"role": "assistant", "content": [{
+                    "type": "tool_use", "id": call_id, "name": "read_file",
+                    "input": {"path": "data.txt"},
+                }]}},
+            )
+            host.store.append_event(
+                "active", "tool.completed",
+                {"call_id": call_id, "name": "read_file",
+                 "content": "x" * 8000 if index == 0 else "short", "is_error": False},
+            )
+        provider = ScriptedProvider([{"text": "z" * 10000}, {"text": "z" * 10000}])
+        for _ in range(2):
+            messages, compacted, trimmed = await host.context_builder.build(
+                session, provider=provider, provider_name="scripted", model="scripted", budget=2200,
+            )
+            assert messages[0]["content"] == "prior goal"
+            assert compacted is None
+            assert trimmed is not None
+            assert host.store.checkpoints(session) == []
+    finally:
+        await host.close()
+
+
 async def test_overflow_reports_the_active_turn_not_a_missing_checkpoint(isolated_workspace):
     host = RuntimeHost(settings_for(isolated_workspace))
     try:

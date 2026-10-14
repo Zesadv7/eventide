@@ -250,6 +250,7 @@ class ContextBuilder:
         }
         current = messages
         pending: dict[str, Any] | None = None
+        summary_adopted = False
         failure: str | None = None
         # Only close whole turns. The latest active turn is always retained verbatim,
         # so a turn that exceeds the budget on its own is folded rather than summarized.
@@ -293,6 +294,7 @@ class ContextBuilder:
                 if size(candidate_messages) < size(current):
                     current = candidate_messages
                     preview_trimmed = candidate_preview
+                    summary_adopted = True
             except Exception as exc:
                 failure = f"summarizing completed turns failed ({type(exc).__name__}: {exc})"
 
@@ -322,7 +324,7 @@ class ContextBuilder:
             )
 
         compacted = None
-        if pending and current is not messages:
+        if pending and summary_adopted:
             self.store.save_checkpoint(
                 session_id,
                 pending["covered_seq"],
