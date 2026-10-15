@@ -9,7 +9,7 @@ import time
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager, suppress
+from contextlib import aclosing, asynccontextmanager, contextmanager, suppress
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -43,6 +43,7 @@ from eventide.models import (
 )
 from eventide.normalization import normalize, redact
 from eventide.policy import PolicyEngine
+from eventide.previews import PreviewStore, SafeTextBuffer
 from eventide.projections import TaskPlanProjection
 from eventide.providers import Provider, ProviderError, build_provider
 from eventide.rag.embedding import provider_from_settings
@@ -190,6 +191,7 @@ class RuntimeHost:
         self._configuring = False
         self._config_path: Path | None = None
         self._enable_mcp = enable_mcp
+        self.previews = PreviewStore()
 
     @property
     def state_dir(self) -> Path:
@@ -716,7 +718,8 @@ class RuntimeHost:
             await self._emit(run_id, "model.attempt_started", identity, sink)
             try:
                 response = await asyncio.wait_for(
-                    self._provider().complete(request), timeout=self.settings.model_timeout,
+                    self._complete_request(request, run_id, request_id, kind),
+                    timeout=self.settings.model_timeout,
                 )
             except BaseException as exc:
                 await self._emit(run_id, "model.attempt_finished", {
@@ -726,7 +729,10 @@ class RuntimeHost:
                 }, None)
                 if not isinstance(exc, (asyncio.TimeoutError, ProviderError)):
                     raise
-                retryable = isinstance(exc, asyncio.TimeoutError) or exc.retryable
+                streaming = kind == "agent" and callable(getattr(self._provider(), "stream", None))
+                retryable = (
+                    isinstance(exc, asyncio.TimeoutError) or exc.retryable
+                ) and not streaming
                 message = (
                     f"Model request timed out ({self.settings.model_timeout:g}s)"
                     if isinstance(exc, asyncio.TimeoutError) else self._clean(str(exc))
@@ -748,6 +754,41 @@ class RuntimeHost:
                 }, sink)
                 return response
         raise RuntimeError("Model attempts exhausted")
+
+    async def _complete_request(
+        self, request: ModelRequest, run_id: str, request_id: str, kind: str,
+    ) -> ModelResponse:
+        stream = getattr(self._provider(), "stream", None)
+        if not callable(stream) or kind != "agent":
+            return await self._provider().complete(request)
+        buffer = SafeTextBuffer((self.settings.api_key or "",), self._clean)
+        completed: ModelResponse | None = None
+        observed = False
+        try:
+            async with aclosing(stream(request)) as iterator:
+                async for event in iterator:
+                    observed = True
+                    if completed is not None:
+                        raise ProviderError("Model stream emitted data after its terminal response")
+                    if event.kind == "text_delta":
+                        self.previews.append(run_id, request_id, buffer.feed(event.text))
+                    elif event.kind == "response_completed":
+                        if completed is not None or event.response is None:
+                            raise ProviderError("Invalid duplicate or missing stream terminal")
+                        completed = event.response
+                    else:
+                        raise ProviderError("Unknown model stream event")
+            if completed is None:
+                raise ProviderError("Model stream ended without a complete response")
+            return completed
+        except ProviderError as exc:
+            if observed:
+                raise ProviderError(str(exc), retryable=False) from exc
+            raise
+        finally:
+            # No raw suffix is flushed to a client on failure; the canonical
+            # completed response is the only durable output.
+            self.previews.clear(run_id)
 
     async def cancel_run(self, run_id: str) -> dict[str, Any]:
         """Cancel one active run and wait until its interrupted fact is durable."""

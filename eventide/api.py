@@ -694,19 +694,35 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
         )
 
     @app.get("/api/runs/{run_id}/events")
-    async def run_events(run_id: str, request: Request, after: int = 0) -> StreamingResponse:
+    async def run_events(
+        run_id: str, request: Request, after: int = 0, include_preview: bool = False,
+    ) -> StreamingResponse:
         if not agent_runtime.store.get_run_identity(run_id):
             raise HTTPException(status_code=404, detail="Run not found")
 
         async def stream() -> AsyncIterator[str]:
             cursor = max(after, 0)
             idle_ticks = 0
+            preview_revision = 0
+            preview_active = False
             while not await request.is_disconnected():
                 events = agent_runtime.store.get_events(run_id, cursor)
                 for event in events:
                     cursor = event["seq"]
                     encoded = json.dumps(event, ensure_ascii=False)
                     yield f"id: {cursor}\nevent: {event['type']}\ndata: {encoded}\n\n"
+                if include_preview:
+                    preview = agent_runtime.previews.get(run_id)
+                    if preview and preview["revision"] != preview_revision:
+                        preview_revision = preview["revision"]
+                        preview_active = True
+                        encoded = json.dumps(preview, ensure_ascii=False)
+                        yield f"event: model.preview\ndata: {encoded}\n\n"
+                    elif preview_active and preview is None:
+                        preview_active = False
+                        cleared = {"type": "model.preview", "run_id": run_id,
+                                   "active": False, "ephemeral": True, "text": ""}
+                        yield f"event: model.preview\ndata: {json.dumps(cleared)}\n\n"
                 if agent_runtime.store.run_is_terminal(run_id) and not events:
                     break
                 if not events:

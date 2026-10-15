@@ -102,7 +102,7 @@ uv run eventide eval evals/smoke.yaml
 | A3 | 待开始 | 内置类型生成 schema，MCP 校验禁网络引用；校验后仍过权限；无效参数一次修正，副作用不自动重放。 |
 | A4 | 已完成 | generation严格配置/能力声明/模型与会话API和三adapter映射；17项生成参数测试及59项相关回归通过，Ruff/mypy50模块通过。README/architecture/api-contract/ADR-050同步；页面在F迁移。 |
 | A5 | 已完成 | admission冻结、零/null/最大输出/继承、Continue及并发工作区隔离验证通过；最大输出日志字段保留数值；辅助调用不继承采样覆盖。见test_generation及ADR-050。 |
-| A6 | 待开始 | 保留 complete 增加 stream，覆盖三类 adapter；参数完整才执行；部分返回失败不重发；预览不逐 Token 落库、不推进持久游标。 |
+| A6 | 进行中 | Host流消费/完整响应后执行、无持久id预览SSE、有界内存和跨片已知凭据脱敏已接线；流超时/断流不重试，测试覆盖。三SDK适配器在独立worktree实现，集成后验收；Vue在F。 |
 | A7 | 待开始 | 跨片密钥脱敏、未知能力显式提示，不静默删参数；取消/断流/重连无重复工具。 |
 | P1 | 待开始 | 项目聚合/执行副本关联，保留 Session 稳定身份，不运行中重新绑定。 |
 | P2 | 待开始 | 同 Session 串行，只读固定快照并发、写入各 worktree、直接源/采纳独占；快照检测漂移。 |
