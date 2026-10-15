@@ -40,6 +40,12 @@ describe("request identity and UI isolation", () => {
     store.sessions[session.workspace_id] = [
       { ...session, status: "running", execution: { kind: "snapshot" } },
     ];
+    store.sessions[session.workspace_id]!.push({
+      ...session,
+      session_id: "writer",
+      status: "running",
+      execution: { kind: "worktree" },
+    });
     expect(store.workspaceBusy).toBe(false);
     store.sessions[session.workspace_id]!.push({
       ...session,

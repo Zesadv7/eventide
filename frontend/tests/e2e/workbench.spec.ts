@@ -1,4 +1,12 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+import { access, readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+async function newConversation(page: Page) {
+  const previous = page.url();
+  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await expect(page).not.toHaveURL(previous);
+  await expect(page.getByRole("textbox", { name: "任务输入" })).toBeEnabled();
+}
 test("real Skills API: reviewed import, explicit activation, resources and durable loaded record", async ({
   page,
 }) => {
@@ -21,7 +29,7 @@ test("real Skills API: reviewed import, explicit activation, resources and durab
   await expect(page.locator("pre")).toContainText("name: code-review");
   await page.reload();
   await expect(page.getByLabel("选择 user:code-review")).toBeChecked();
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await newConversation(page);
   await page.getByRole("textbox", { name: "任务输入" }).fill("技能场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
   await expect(page.getByText("已加载审查技能", { exact: true })).toBeVisible();
@@ -42,7 +50,7 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("./#/chat");
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await newConversation(page);
   const input = page.getByRole("textbox", { name: "任务输入" });
   await input.fill("流式场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
@@ -53,7 +61,7 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
   await expect(page.getByText("生成中 · 尚未保存")).toHaveCount(0);
   await input.fill("第一个会话的草稿");
   const first = page.url();
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await newConversation(page);
   await expect(page).not.toHaveURL(first);
   await input.fill("第二个会话的草稿");
   const second = page.url();
@@ -94,7 +102,7 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "放弃恢复", exact: true }).click();
   await expect(page.getByText("本轮已停驻", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await newConversation(page);
   await expect(page).not.toHaveURL(second);
   await input.fill("停驻场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
@@ -157,7 +165,7 @@ test("real budgets API: price versions, zero admission limit, reload and shared 
     .getByRole("button", { name: "当前项目全部对话", exact: true })
     .click();
   await expect(page.getByLabel("Token 上限", { exact: true })).toHaveValue("0");
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await newConversation(page);
   await page.getByRole("textbox", { name: "任务输入" }).fill("预算阻止场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
   await expect(page.getByText("本轮已停驻", { exact: true })).toBeVisible();
@@ -207,24 +215,23 @@ test("real snapshot API: concurrent project conversations and independent stop",
   context,
 }) => {
   await page.goto("./#/chat");
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await newConversation(page);
   await page.getByLabel("运行模式", { exact: true }).selectOption("plan");
-  await page
-    .getByLabel("只读执行位置", { exact: true })
-    .selectOption("snapshot");
+  await page.getByLabel("执行位置", { exact: true }).selectOption("snapshot");
   await page.getByRole("textbox", { name: "任务输入" }).fill("并发快照场景 A");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
   await expect(
     page.getByText("本轮使用固定只读快照 · 源码变化不影响在途读取"),
   ).toBeVisible();
   const first = page.url();
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await newConversation(page);
   await page.getByLabel("运行模式", { exact: true }).selectOption("plan");
-  await page
-    .getByLabel("只读执行位置", { exact: true })
-    .selectOption("snapshot");
+  await page.getByLabel("执行位置", { exact: true }).selectOption("snapshot");
   await page.getByRole("textbox", { name: "任务输入" }).fill("并发快照场景 B");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
+  await expect(
+    page.getByText("本轮使用固定只读快照 · 源码变化不影响在途读取"),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "■ 停止", exact: true }),
   ).toBeVisible();
@@ -242,5 +249,93 @@ test("real snapshot API: concurrent project conversations and independent stop",
   await expect(
     page.getByText("本轮使用固定只读快照 · 源码变化不影响在途读取"),
   ).toBeVisible();
+  await monitor.close();
+});
+
+test("real worktree API: concurrent edits, source preservation and stable session copy", async ({
+  page,
+  context,
+}) => {
+  await page.goto("./#/chat");
+  await expect(page.locator(".workspace-path")).toContainText("main");
+  const source = join(
+    dirname((await page.locator(".workspace-path").innerText()).trim()),
+    "plain",
+  );
+  const original = await readFile(`${source}/README.md`, "utf8");
+  await page.getByRole("button", { name: "添加项目", exact: true }).click();
+  await page.getByLabel("本机项目绝对路径", { exact: true }).fill(source);
+  await page
+    .locator("form.add-workspace")
+    .getByRole("button", { name: "添加项目", exact: true })
+    .click();
+  await expect(page.locator(".workspace-path")).toHaveText(source);
+  await newConversation(page);
+  await page.getByLabel("执行位置", { exact: true }).selectOption("worktree");
+  await page.getByRole("textbox", { name: "任务输入" }).fill("副本写入场景 A");
+  await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
+  await expect(page.getByText("生成中 · 尚未保存")).toBeVisible();
+  const first = page.url();
+  await newConversation(page);
+  await page.getByLabel("执行位置", { exact: true }).selectOption("worktree");
+  await page.getByRole("textbox", { name: "任务输入" }).fill("副本写入场景 B");
+  await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
+  await expect(page.getByText("生成中 · 尚未保存")).toBeVisible();
+  const monitor = await context.newPage();
+  await monitor.goto(first);
+  await expect(
+    monitor.getByRole("button", { name: "■ 停止", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("副本已完成：副本写入场景 B", { exact: true }),
+  ).toBeVisible({ timeout: 15000 });
+  await expect(
+    monitor.getByText("副本已完成：副本写入场景 A", { exact: true }),
+  ).toBeVisible();
+  const readSession = async (url: string) => {
+    const id = decodeURIComponent(new URL(url).hash.split("/").at(-1)!);
+    return (
+      await page.request.get(
+        new URL(`/api/sessions/${encodeURIComponent(id)}`, page.url()).href,
+      )
+    ).json();
+  };
+  const one = await readSession(first),
+    two = await readSession(page.url());
+  expect(one.execution.execution_workspace_id).not.toBe(
+    two.execution.execution_workspace_id,
+  );
+  const copies = await (
+    await page.request.get(new URL("/api/workspaces", page.url()).href)
+  ).json();
+  for (const [record, text] of [
+    [one, "副本写入场景 A"],
+    [two, "副本写入场景 B"],
+  ] as const) {
+    const copy = copies.find(
+      (item: { workspace_id: string }) =>
+        item.workspace_id === record.execution.execution_workspace_id,
+    );
+    expect(await readFile(`${copy.path}/result.txt`, "utf8")).toBe(text);
+  }
+  expect(await readFile(`${source}/README.md`, "utf8")).toBe(original);
+  await expect(access(join(source, "result.txt"))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+  await page.reload();
+  await expect(page.getByLabel("执行位置", { exact: true })).toHaveValue(
+    "worktree",
+  );
+  await expect(page.getByLabel("执行位置", { exact: true })).toBeDisabled();
+  await page
+    .getByRole("textbox", { name: "任务输入" })
+    .fill("副本写入场景 B 续写");
+  await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
+  await expect(
+    page.getByText("副本已完成：副本写入场景 B 续写", { exact: true }),
+  ).toBeVisible({ timeout: 15000 });
+  expect((await readSession(page.url())).execution.execution_workspace_id).toBe(
+    two.execution.execution_workspace_id,
+  );
   await monitor.close();
 });

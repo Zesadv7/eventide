@@ -941,7 +941,7 @@ export interface components {
        * @default source
        * @enum {string}
        */
-      execution_target: "source" | "snapshot";
+      execution_target: "source" | "snapshot" | "worktree";
       /** Attachment Ids */
       attachment_ids?: string[];
       /** Model */

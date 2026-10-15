@@ -53,7 +53,7 @@ try {
   }
   const runner = launch(
     process.execPath,
-    ["node_modules/@playwright/test/cli.js", "test"],
+    ["node_modules/@playwright/test/cli.js", "test", ...process.argv.slice(2)],
     { EVENTIDE_WEB_URL: url },
   );
   runner.stdout.on("data", (data) => process.stdout.write(data));

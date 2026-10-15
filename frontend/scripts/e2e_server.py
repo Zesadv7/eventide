@@ -32,6 +32,17 @@ def main() -> None:
                 yield ModelStreamEvent("text_delta", text="正在等待工具准备。" * 50)
                 await asyncio.sleep(30)
                 response = ModelResponse(text="不应完成", usage=usage)
+            elif "副本写入场景" in prompt:
+                if step == 1:
+                    response = ModelResponse(
+                        tool_calls=[self._call("write_file", {
+                            "path": "result.txt", "content": prompt,
+                        })], stop_reason="tool_use", usage=usage,
+                    )
+                else:
+                    yield ModelStreamEvent("text_delta", text="正在核对独立工作副本。" * 50)
+                    await asyncio.sleep(8)
+                    response = ModelResponse(text="副本已完成：" + prompt, usage=usage)
             elif "并发快照场景" in prompt:
                 yield ModelStreamEvent("text_delta", text="正在分析独立只读快照。" * 50)
                 await asyncio.sleep(8)

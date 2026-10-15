@@ -9,7 +9,7 @@ import SafeContent from "../components/SafeContent.vue";
 const store = useWorkbench(),
   route = useRoute(),
   mode = ref("auto"),
-  executionTarget = ref<"source" | "snapshot">("source"),
+  executionTarget = ref<"source" | "snapshot" | "worktree">("source"),
   model = ref(""),
   generation = ref<Generation>({}),
   modelList = ref<string[]>([]),
@@ -21,7 +21,12 @@ const draft = computed({
 const session = computed(() => store.currentSession),
   run = computed(() => store.currentRun),
   isActive = computed(() => store.active(run.value?.status));
-const busyOther = computed(() => store.workspaceBusy && !isActive.value),
+const boundWorktree = computed(
+  () => session.value?.execution?.kind === "worktree",
+);
+const busyOther = computed(
+    () => store.workspaceBusy && !isActive.value && !boundWorktree.value,
+  ),
   unknown = computed(() => run.value?.reason === "unknown_tool_outcome");
 const preview = computed(() =>
   run.value ? store.previews[run.value.run_id] : null,
@@ -51,6 +56,25 @@ watch(
   },
   { immediate: true },
 );
+watch(
+  () => store.selectedSession,
+  () => {
+    mode.value = "auto";
+  },
+  { flush: "sync" },
+);
+watch(
+  [() => store.selectedSession, () => session.value?.execution?.kind],
+  () => {
+    executionTarget.value = session.value?.execution?.kind || "source";
+    if (executionTarget.value === "snapshot") mode.value = "plan";
+  },
+  { immediate: true },
+);
+watch(mode, () => {
+  if (mode.value !== "plan" && executionTarget.value === "snapshot")
+    executionTarget.value = "source";
+});
 async function refreshModels() {
   try {
     const result = await api.models();
@@ -80,8 +104,9 @@ async function submit() {
     await store.submit({
       prompt: draft.value,
       mode: mode.value,
-      execution_target:
-        mode.value === "plan" ? executionTarget.value : "source",
+      execution_target: boundWorktree.value
+        ? "worktree"
+        : executionTarget.value,
       model: model.value || null,
       generation: generation.value,
       attachment_ids: (store.attachments[store.selectedSession] || []).map(
@@ -153,6 +178,13 @@ async function abandon() {
         </h1>
         <p class="muted">
           {{ session?.working_directory || "从左侧添加项目并创建对话。" }}
+        </p>
+        <p v-if="boundWorktree" class="muted">
+          本对话使用独立工作副本 · 后续消息与恢复沿用同一份修改
+          <small
+            >{{ session?.execution?.name }} ·
+            {{ session?.execution?.base_commit?.slice(0, 12) }}</small
+          >
         </p>
         <p v-if="run?.execution?.kind === 'snapshot'" class="muted">
           本轮使用固定只读快照 · 源码变化不影响在途读取
@@ -287,7 +319,7 @@ async function abandon() {
           尚未配置模型连接。<RouterLink to="/settings">前往设置</RouterLink>
         </div>
         <div v-if="busyOther" class="composer-notice">
-          源工作副本正在使用中，暂不能开始源任务或制作新快照。已接收的快照对话可独立运行。
+          源工作副本正在使用中，暂不能开始源任务或准备新副本。已绑定的工作副本和已接收的快照可独立运行。
         </div>
         <div v-if="pending" class="composer-notice">
           上次请求的接收结果待确认。<button
@@ -318,20 +350,31 @@ async function abandon() {
         ></textarea>
         <div class="composer-toolbar">
           <div class="button-row">
-            <select v-model="mode" aria-label="运行模式">
+            <select
+              v-model="mode"
+              :disabled="store.creating"
+              aria-label="运行模式"
+            >
               <option value="auto">Auto · 风险操作询问</option>
               <option value="plan">Plan · 只读分析</option>
               <option value="agent">Agent · 自动批准风险操作</option>
             </select>
             <select
-              v-if="mode === 'plan'"
               v-model="executionTarget"
-              aria-label="只读执行位置"
+              :disabled="boundWorktree || store.creating"
+              aria-label="执行位置"
             >
-              <option value="source">当前源码 · 独占读取</option>
-              <option value="snapshot">固定快照 · 可并发</option>
+              <option value="source">当前源码 · 独占执行</option>
+              <option v-if="mode === 'plan'" value="snapshot">
+                固定快照 · 可并发
+              </option>
+              <option value="worktree">独立工作副本 · 可并发</option>
             </select>
-            <select v-model="model" aria-label="本次模型">
+            <select
+              v-model="model"
+              :disabled="store.creating"
+              aria-label="本次模型"
+            >
               <option v-for="item in models" :key="item" :value="item">
                 {{ item }}
               </option></select
@@ -396,6 +439,11 @@ async function abandon() {
           需要 Git 项目和可用
           HEAD。快照排除密钥、链接、二进制及过大文件；本轮使用固定
           Skills，不连接 MCP 或读取源目录索引。Continue 继续使用原快照。
+        </p>
+        <p v-if="executionTarget === 'worktree'" class="muted">
+          首次创建需要干净的 Git 源项目和可用
+          HEAD；修改保留在本对话副本中，不自动提交或采纳。
+          绑定后不会切回源目录，若要操作其他副本请新建对话。工作副本不是操作系统沙箱。
         </p>
         <small class="muted"
           >⌘ / Ctrl + Enter 发送 · 切换页面不会停止运行 · 本地 Shell

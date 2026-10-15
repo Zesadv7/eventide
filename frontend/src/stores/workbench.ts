@@ -66,7 +66,9 @@ export const useWorkbench = defineStore("workbench", () => {
     currentSessions.value.some(
       (s) =>
         active(s.status) &&
-        (s.execution || s.latest_run?.execution)?.kind !== "snapshot",
+        !["snapshot", "worktree"].includes(
+          (s.execution || s.latest_run?.execution)?.kind || "source",
+        ),
     ),
   );
   let selectionVersion = 0;

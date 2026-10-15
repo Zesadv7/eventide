@@ -8851,7 +8851,7 @@
           },
           "execution_target": {
             "type": "string",
-            "enum": ["source", "snapshot"],
+            "enum": ["source", "snapshot", "worktree"],
             "title": "Execution Target",
             "default": "source"
           },
