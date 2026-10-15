@@ -116,10 +116,10 @@ async def test_snapshot_thread_cancel_retains_owner_until_cleanup(
     entered, release = threading.Event(), threading.Event()
     original = SourceSnapshot.create
 
-    def delayed(*args):
+    def delayed(*args, **kwargs):
         entered.set()
         assert release.wait(3)
-        return original(*args)
+        return original(*args, **kwargs)
 
     monkeypatch.setattr(SourceSnapshot, "create", delayed)
     provider = ControlledProvider()
@@ -143,6 +143,7 @@ async def test_snapshot_thread_cancel_retains_owner_until_cleanup(
         if stopper is not None:
             await asyncio.wait_for(stopper, 3)
         assert not host._active_tasks and not host._run_tasks
+        assert not host.workspace_busy(host.default_workspace.workspace_id)
         assert not list((host.state_dir / "workers").iterdir())
     finally:
         release.set()
