@@ -173,3 +173,45 @@ def test_trace_uses_attempts_not_duplicate_legacy_events_and_does_not_export_ids
     run = next(span for span in no_usage["spans"] if span["name"] == "eventide.run")
     assert "eventide.usage.input_tokens" not in run["attributes"]
     assert run["attributes"]["eventide.usage.complete"] is False
+
+
+def test_request_metadata_replays_without_deriving_latency_from_wall_clock():
+    start = event("model.attempt_started", 10, {
+        "attempt_id": "try1", "request_id": "request", "attempt": 1,
+        "provider": "openai_compatible", "model": "model-a",
+    })
+    finish = attempt(5, duration_ms=0, stop_reason="length")
+    ledger = build_usage_ledger([start, finish, deepcopy(finish)])
+    row = ledger["calls"][0]
+    assert ledger["attempt_count"] == 1
+    assert row["provider"] == "openai_compatible"
+    assert row["model"] == "model-a"
+    assert row["stop_reason"] == "length"
+    assert row["duration_ms"] == 0  # A reported zero is not missing; wall clock moved backwards.
+    in_flight = build_usage_ledger([start])["calls"][0]
+    assert in_flight["duration_ms"] is None
+    assert in_flight["stop_reason"] is None
+    assert in_flight["provider"] == "openai_compatible"
+    assert in_flight["usage_source"] == "unknown"
+
+
+@pytest.mark.parametrize("duration", [None, True, -1, "12", float("nan"), float("inf")])
+def test_invalid_or_missing_latency_remains_unknown(duration):
+    row = build_usage_ledger([attempt(duration_ms=duration)])["calls"][0]
+    assert row["duration_ms"] is None
+
+
+def test_failed_and_legacy_request_metadata_preserve_only_observed_values():
+    failed = build_usage_ledger([attempt(
+        status="failed", usage={}, duration_ms=12.5, provider="scripted",
+    )])["calls"][0]
+    assert failed["duration_ms"] == 12.5
+    assert failed["usage_source"] == "unknown"
+    assert failed["stop_reason"] is None
+    legacy = build_usage_ledger([event("model.response", 99, {
+        "provider": "anthropic", "stop_reason": "end_turn",
+    })])["calls"][0]
+    assert legacy["duration_ms"] is None  # No invented zero or timestamp subtraction.
+    assert legacy["provider"] == "anthropic"
+    assert legacy["stop_reason"] == "end_turn"
+    assert legacy["usage_complete"] is False

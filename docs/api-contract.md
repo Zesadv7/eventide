@@ -259,3 +259,5 @@ Run和Continue仍在输入、参数、Skills、执行位置、checkpoint及身�
 GET Run/Session/list-runs中的queued不是终态；SSE持续观察到真实终态，run.admitted是已接收证据。停止沿用`POST /api/runs/{id}/cancel`；queued取消写interrupted、保留目标、没有模型attempt/Token预留。停止活跃任务必须等副作用收尾才释放根名额。重启将queued/started停驻，不自动执行；恢复Continue使用新身份并复核旧checkpoint，不能用恢复时的源码替换接收基线。队列等待和模型槽等待均阻止Provider配置变更，原来源与幂等保护继续生效。
 
 Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入口。6个真实API对话验证4根/2模型/2等待，取消等待后的usage.attempt_count=0且预算预留为空；停止根任务后自动认领下一项。
+
+用量账本calls新增兼容字段`provider: string|null`、`duration_ms: number|null`、`stop_reason: string|null`，Run/Session usage及costs内嵌usage共用同一投影。耗时仅透传非负有限的已记录数值（含真实0），started-only尝试不生成终态耗时/结束原因；历史事件缺失返回null，不以finished_at-started_at推算。原Token去重、来源和完整性口径不变。

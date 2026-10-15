@@ -72,6 +72,11 @@ onUnmounted(() => {
 function tokens(value: unknown) {
   return typeof value === "number" ? value.toLocaleString("zh-CN") : "未报告";
 }
+function duration(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? `${value.toLocaleString("zh-CN", { maximumFractionDigits: 1 })} ms`
+    : "未记录";
+}
 function when(value: number) {
   return new Date(value * 1000).toLocaleString("zh-CN");
 }
@@ -221,13 +226,17 @@ const grouped = computed(() => {
       </section>
       <section class="panel">
         <h2>请求明细</h2>
+        <p class="muted">
+          耗时来自每次实际请求的记录，不含排队等待；历史缺失值不补算。
+        </p>
         <div class="table-scroll">
-          <table>
+          <table class="call-details">
             <thead>
               <tr>
                 <th>开始时间／身份</th>
-                <th>用途／模型</th>
-                <th>结果</th>
+                <th>用途／供应商／模型</th>
+                <th>结果／结束原因</th>
+                <th>请求耗时</th>
                 <th>输入</th>
                 <th>输出</th>
                 <th>依据</th>
@@ -243,9 +252,15 @@ const grouped = computed(() => {
                   }}<small class="mono">{{ call.attempt_id }}</small>
                 </td>
                 <td>
-                  {{ call.kind }}<small>{{ call.model || "未记录模型" }}</small>
+                  {{ call.kind
+                  }}<small>{{ call.provider || "未记录供应商" }}</small
+                  ><small>{{ call.model || "未记录模型" }}</small>
                 </td>
-                <td>{{ call.status }}</td>
+                <td>
+                  {{ call.status
+                  }}<small>{{ call.stop_reason || "未记录结束原因" }}</small>
+                </td>
+                <td>{{ duration(call.duration_ms) }}</td>
                 <td>{{ tokens(call.usage.input_tokens) }}</td>
                 <td>{{ tokens(call.usage.output_tokens) }}</td>
                 <td>

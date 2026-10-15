@@ -982,3 +982,7 @@ td small {
   flex-shrink: 0;
   white-space: nowrap;
 }
+
+.usage-page .call-details {
+  min-width: 850px;
+}

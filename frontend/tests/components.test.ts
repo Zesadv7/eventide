@@ -87,6 +87,31 @@ describe("content and generation controls", () => {
     ).not.toContain("secret-key-fixture");
     expect(wrapper.text()).not.toContain("secret-key-fixture");
   });
+  it("shows observed request metadata including zero latency without fabricating token usage", async () => {
+    vi.spyOn(budgetsApi, "costs").mockResolvedValue({
+      ...costs,
+      usage: {
+        ...costs.usage,
+        calls: [
+          {
+            ...costs.usage.calls[0]!,
+            provider: "openai_responses",
+            duration_ms: 0,
+            stop_reason: "length",
+          },
+        ],
+      },
+    });
+    vi.spyOn(budgetsApi, "prices").mockResolvedValue({ prices: [] });
+    useWorkbench().selectedSession = "session-1";
+    const wrapper = mount(UsageView);
+    await flushPromises();
+    expect(wrapper.get(".call-details").text()).toContain("openai_responses");
+    expect(wrapper.get(".call-details").text()).toContain("length");
+    expect(wrapper.get(".call-details").text()).toContain("0 ms");
+    expect(wrapper.get(".call-details").text()).toContain("未报告");
+    wrapper.unmount();
+  });
   it("shows unknown usage rather than inventing zero tokens or a price", async () => {
     vi.spyOn(budgetsApi, "costs").mockResolvedValue(costs);
     vi.spyOn(budgetsApi, "prices").mockResolvedValue({ prices: [] });
@@ -98,6 +123,9 @@ describe("content and generation controls", () => {
     expect(wrapper.text()).toContain("统计不完整");
     expect(wrapper.text()).toContain("未知");
     expect(wrapper.text()).not.toContain("0 元");
+    expect(wrapper.text()).toContain("未记录供应商");
+    expect(wrapper.text()).toContain("未记录结束原因");
+    expect(wrapper.text()).not.toContain("0 ms");
     wrapper.unmount();
   });
 });

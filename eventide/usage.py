@@ -7,6 +7,7 @@ reported zero, and aggregate/terminal events are never billing evidence.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from math import isfinite
 from typing import Any
 
 TOKEN_FIELDS = (
@@ -27,6 +28,20 @@ def _count(value: Any) -> int | None:
 
 def _field(value: Any, name: str) -> Any:
     return value.get(name) if isinstance(value, Mapping) else getattr(value, name, None)
+
+
+def _request_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
+    duration = payload.get("duration_ms")
+    if not (isinstance(duration, (int, float)) and not isinstance(duration, bool)
+            and (isinstance(duration, int) or isfinite(duration)) and duration >= 0):
+        duration = None
+    return {
+        "provider": payload.get("provider") if isinstance(payload.get("provider"), str) else None,
+        "stop_reason": (
+            payload.get("stop_reason") if isinstance(payload.get("stop_reason"), str) else None
+        ),
+        "duration_ms": duration,
+    }
 
 
 def normalize_usage(usage: Any) -> dict[str, int]:
@@ -200,6 +215,9 @@ def _attempt_row(
             "request_observed": start is not None,
             "started_at": start["ts"] if start else event.get("ts", 0),
             "finished_at": finish.get("ts") if finish else None,
+            **_request_metadata(payload if finish else {
+                "provider": payload.get("provider"),
+            }),
             "usage": snapshot["usage"],
             "usage_source": snapshot["source"],
             "usage_complete": snapshot["complete"],
@@ -222,6 +240,7 @@ def _legacy_row(event: Mapping[str, Any]) -> dict[str, Any]:
         "request_observed": False,
         "started_at": event.get("ts", 0),
         "finished_at": event.get("ts"),
+        **_request_metadata(payload),
         "usage": snapshot["usage"],
         "usage_source": snapshot["source"],
         # Historical calls lack evidence for hidden retries and missing requests.

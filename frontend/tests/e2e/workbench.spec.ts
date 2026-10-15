@@ -94,6 +94,11 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
   await expect(
     page.locator("tbody").getByText("供应商报告").first(),
   ).toBeVisible();
+  await expect(page.locator(".call-details")).toContainText("openai_responses");
+  await expect(page.locator(".call-details")).toContainText(
+    /\d(?:[.,]\d+)? ms/,
+  );
+  await expect(page.locator(".call-details")).toContainText("end_turn");
   await page.goto(second);
   await input.fill("停止场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();

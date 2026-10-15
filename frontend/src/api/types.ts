@@ -102,7 +102,10 @@ export interface UsageCall {
   request_id: string | null;
   attempt_id: string;
   kind: string;
-  model?: string;
+  model?: string | null;
+  provider?: string | null;
+  duration_ms?: number | null;
+  stop_reason?: string | null;
   status: string;
   started_at: number;
   finished_at: number | null;
