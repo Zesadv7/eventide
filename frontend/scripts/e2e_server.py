@@ -1,0 +1,76 @@
+"""Disposable real Runtime API for the Vue journey; no external model/network."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+import uvicorn
+
+
+def main() -> None:
+    repository = Path(
+        os.environ.get("EVENTIDE_E2E_REPOSITORY", Path(__file__).resolve().parents[2])
+    ).resolve()
+    sys.path.insert(0, str(repository))
+    from eventide.streaming import ModelStreamEvent
+
+    from eventide.api import create_app
+    from eventide.config import Settings
+    from eventide.host import RuntimeHost
+    from eventide.models import ModelResponse
+    from tests.e2e_server import E2EUvicornServer, FakeProvider, build_fixtures
+
+    class JourneyProvider(FakeProvider):
+        async def stream(self, request):
+            prompt = self._prompt(request)
+            step = self.counts[prompt] = self.counts.get(prompt, 0) + 1
+            usage = {"input_tokens": 100 + step, "output_tokens": 20}
+            if "停止场景" in prompt:
+                yield ModelStreamEvent("text_delta", text="正在等待工具准备。" * 50)
+                await asyncio.sleep(30)
+                response = ModelResponse(text="不应完成", usage=usage)
+            elif "审批场景" in prompt:
+                response = self._approval(step, usage)
+            elif "停驻场景" in prompt:
+                response = self._park(step, usage)
+            elif "流式场景" in prompt:
+                for part in ("正在阅读源码与项目约定。" * 30, "已经形成初步结论。" * 30):
+                    yield ModelStreamEvent("text_delta", text=part)
+                    await asyncio.sleep(1)
+                response = ModelResponse(
+                    text="流式场景已完成，最终内容以这条回复为准。", usage=usage
+                )
+            else:
+                response = ModelResponse(text="已读取项目：" + prompt, usage=usage)
+            yield ModelStreamEvent("response_completed", response=response)
+
+    with tempfile.TemporaryDirectory(prefix="eventide-vue-e2e-") as temporary:
+        root = Path(temporary)
+        fixtures = build_fixtures(root / "workspaces", sys.executable)
+        os.chdir(root)
+        settings = Settings(
+            workdir=fixtures["main"],
+            state_dir=root / "state",
+            provider="openai_responses",
+            api_key="fixture-only",
+            base_url=None,
+            model="vue-fixture-model",
+            max_steps=6,
+        )
+        provider = JourneyProvider(max_steps=6)
+        runtime = RuntimeHost(settings, provider)
+        provider.attach(runtime)
+        app = create_app(runtime)
+        server = E2EUvicornServer(
+            uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
+        )
+        print(f"E2E_WORKSPACE={fixtures['main']}", flush=True)
+        server.run()
+
+
+if __name__ == "__main__":
+    main()

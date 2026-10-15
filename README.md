@@ -426,3 +426,36 @@ description: Review code for correctness, security and maintainability.
 2026-10-16使用DeepSeek Responses（deepseek-flash，非思考模式）完成普通响应、只读工具及三个工程修复fixture各两次。10次中7次完整完成，3次触发20,000已观测Token软限而停驻；六次修复均通过冻结测试的独立验收，测试未改动。总输入131,359、输出7,630 Token，48次请求都有供应商usage。软限在下一次请求前检查，单响应可越界。全部尝试均计入报告，不能将这个小样本外推为普遍成功率；后续冻结任务集与原子预算仍按B/P/U阶段验收。
 
 Skill 运行现在固定正文和资源版本，用户包需在指定项目启用；版本可查看差异并切回旧版。项目包由 Git 维护，导入不覆盖现有目录。正文按需加载，引用按页读取；有脚本时才提供脚本工具，须先加载正文、通过权限审批，再由当前命令后端执行。Plan 模式不提供脚本。Python 控制接口已实现，页面导入与配置按 S/F 阶段继续。
+
+
+## Vue 工作台（迁移中）
+
+`frontend/` 提供 Vue 3、TypeScript、Vite、Vue Router 和 Pinia 工作台。已接入真实项目/会话、对话记录、流式临时预览、审批、停止、Continue、附件、模型连接、生成参数，以及按请求尝试去重的 Run/Session 用量。切页或关闭观察连接不会停止后台运行；草稿按 Session 保存在当前浏览器标签页，模型密钥只保留在设置表单内存并在保存后清空。
+
+当前后端默认仍提供旧页面，生产静态资源挂载与安装包承接由 F5 完成。开发时先启动同机 API，再运行：
+
+```bash
+cd frontend
+npm ci --ignore-scripts
+npm run dev
+```
+
+需要 Node.js 22.12 及以上。默认代理到 `http://127.0.0.1:8000`，可通过 `EVENTIDE_API_URL` 指定本机 API 地址；代理保留浏览器 Host，与后端同源写请求检查配合，不开放任意 CORS。模型列表仅在用户点击“联网刷新模型列表”后探测，进入页面不会自动发起模型网络请求。
+
+Skills 当前展示后端可发现目录；安装/版本管理、知识索引、评测与交付管理页面明确标示待接入，不提供模拟数据。费用、共享预算、每日/项目用量和输入组成分析仍由后续步骤实现；用量缺失显示“未报告”，不伪装成零消费。
+
+前端验证与接口类型生成：
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run format:check
+# 使用项目 Python 环境，导出过程只创建临时 RuntimeHost
+uv run --project .. npm run api:generate
+# 显式安装浏览器后，启动一次性真实 API 与 Git fixture
+npx playwright install chromium --only-shell
+uv run --project .. npm run test:e2e
+```
+
+浏览器旅程使用确定性流式 Provider，不需要模型密钥或供应商网络。`EVENTIDE_CHROMIUM` 可显式指定已有浏览器，缺少浏览器时测试失败；不自动下载。旧前端和用户 CLI 在全部功能承接前继续保留。
