@@ -173,7 +173,9 @@ Workspace capabilities 增加 readonly_workers（enabled/roles/max_concurrency/m
 
 ## Vue 客户端兼容规则
 
-Vue HTTP 客户端规范化列表/详情返回的 Run `id` 为内部 `run_id`；202 接收凭据仍直接使用 `run_id`。Run 列表是最近一页按时间正序排列，最新项位于末尾。工具待审批期间，`/messages` 可能因工具历史尚未配对返回 409；客户端暂留上次可见消息，继续查询 Run/Session，不能因此隐藏审批或停止按钮。
+Vue HTTP 客户端规范化列表/详情返回的 Run `id` 为内部 `run_id`；202 接收凭据仍直接使用 `run_id`。Run 列表是最近一页按追加顺序排列，最新项位于末尾。工具待审批期间，`/messages` 可能因工具历史尚未配对返回 409；客户端暂留上次可见消息，继续查询 Run/Session，不能因此隐藏审批或停止按钮。
+
+历史页 `#/history?session=<session_id>&run=<run_id>` 使用 `GET /api/projects/{id}/sessions?include_archived=true` 确认当前项目归属，再调用既有 Session Run 列表、精确 Run 详情及 export。列表请求固定 `limit=100`；下一页 `before` 使用当前已加载最旧 Run 的身份，服务端按追加 rowid 排序且排除游标本身，不使用时间戳翻页。每页仍按旧到新返回，Vue 反向展示；`hasOlder` 仅由满页推断，没有伪造总数。精确详情验证 `run_id` 和 `session_id` 后才显示导出入口；URL 恢复不要求先拉取全部中间页。JSONL 返回 canonical 事件，工具详情投影不是独立 trace 导出。本页没有写请求，不更改当前执行会话；会话管理、历史导入及独立 trace 控制面仍待后续迁移。
 
 Vue 使用 `include_preview=true` 订阅流式临时预览。`model.preview` 无 seq/id，不推进持久游标、不写入消息历史；`model.response` 与终态触发真实消息刷新并清除预览。客户端保留原提交键处理网络/超时/5xx 下的不确定接收，明确参数拒绝后允许编辑。开发代理保留原 Host，使浏览器 Origin 与 API 的请求源相符。
 

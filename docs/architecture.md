@@ -290,9 +290,11 @@ SkillRuntime 从 skill.installed 和 skills.configured 唯一事实派生用户�
 
 ## Vue 工作台基础与核心迁移
 
-`frontend/` 是独立开发构建工程，组件由 Router 管理，Pinia 只保存 UI 选择、草稿、临时预览、可重建 HTTP 结果和有限事件缓存，不保存第二份执行事实。API 客户端区分后端 Run 的 `id` 与接收凭据的 `run_id`，统一规范化供组件使用；历史页按时间正序返回，最新 Run 取末项并加载完整详情。Session 全历史用量来自专用账本接口，不把历史分页汇总当总账。
+`frontend/` 是独立开发构建工程，组件由 Router 管理，Pinia 只保存 UI 选择、草稿、临时预览、可重建 HTTP 结果和有限事件缓存，不保存第二份执行事实。API 客户端区分后端 Run 的 `id` 与接收凭据的 `run_id`，统一规范化供组件使用；Run 列表每页按追加顺序返回，最新 Run 取末项并加载完整详情。Session 全历史用量来自专用账本接口，不把历史分页汇总当总账。
 
 `api:generate` 用显式临时 Settings/RuntimeHost 导出 OpenAPI，再生成 TypeScript 请求类型；不会调用默认 Host 或读取用户真实状态。当前后端字典型响应仍由小型领域接口描述，SSE 是独立契约。持久事件按 Run/seq 去重；`model.preview` 没有持久游标，只更新临时区域，最终响应/终态清除预览。UI 观察断开不取消后台任务。
+
+HistoryView 是独立只读观察页。先从当前 Project 的含归档 Session 目录验证归属，再使用每页100条、最旧 Run 身份作为 `before` 的列表接口读取历史；响应页保持追加顺序，展示时最新在前。选择详情单独读取精确 Run 并复核 Session，不依赖它是否位于已加载页，因此 URL 可直接恢复100条之外的旧记录。项目/会话/Run 各有请求代次，切换或卸载后的响应不能覆盖新选择；同一在途详情读取不被轮询重复取代。仅活动详情每3秒刷新，手动刷新列表回到最新一页；不把分页缓存当总量，不将历史选择写入 Pinia 的当前 Session/Run。输出及工具证据只以转义文本显示，JSONL 下载沿用服务端 canonical 导出，evaluation 执行记录链接专属报告页面。
 
 发送前生成 Idempotency-Key；网络、超时及 5xx 等接收结果不明时，按 Session 保存原请求与键，显式重试原内容，不改成第二个任务。已知参数拒绝允许编辑。草稿与待确认提交存当前标签页 sessionStorage，API Key 不进入 Pinia/浏览器持久存储；设置保存完成后清空密码输入。HTTP 请求有 30 秒等待上限，超时不代表后台任务已取消。会话切换与刷新使用代次检查，旧响应不覆盖新选择。待审批时 MessagesProjection 的不完整工具历史 409 只延用上次可见消息，运行详情和审批仍正常更新。
 
