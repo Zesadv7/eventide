@@ -58,9 +58,11 @@ jobs:
       - run: uv sync --locked --extra dev
       - run: docker info
       - run: docker pull python:3.12-slim
-      - run: uv run pytest -q tests/test_container_executor.py
+      - run: uv run pytest -q tests/test_container_executor.py tests/test_container_live.py
         env:
           EVENTIDE_TEST_CONTAINER_IMAGE: python:3.12-slim
+      - run: docker build -t eventide:validation .
+      - run: uv run python tests/container_smoke.py --image eventide:validation
 
   vue:
     runs-on: ubuntu-latest

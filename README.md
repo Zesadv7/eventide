@@ -106,7 +106,7 @@ uv run eventide migrate-v02 /path/to/project/.nexus/nexus.db --workspace /path/t
 
 ```bash
 docker build -t eventide .
-docker run --rm -p 127.0.0.1:8000:8000 -v eventide-state:/data/eventide eventide
+docker run --rm -p 127.0.0.1:8000:8000 -v eventide-state:/data/eventide -v eventide-workspace:/workspaces/demo eventide
 ```
 
 或使用 compose 演示（状态根与演示工作区均为命名卷）：
@@ -120,6 +120,10 @@ docker compose up --build
 - 如果重建容器时既没有持久化状态根卷，也没有固定 `EVENTIDE_SECRET_KEY`，之前通过 Web 保存的 API Key 将无法解密，需要在设置中重新填写。
 - Docker 转发可能使服务看到非回环的连接来源。可在启动时通过 `EVENTIDE_LOCAL_PROXY_PEERS` 配置实际测得的精确转发 IP（多个地址用逗号分隔）；默认空，不接受网段、主机名或通配符。配置后，来自这些地址的管理请求还必须使用 `localhost`／回环 IP 的 Host 与完全匹配的 Origin。宿主端口必须继续只发布到 `127.0.0.1`，不能将此配置用于公网服务。
 - 满足上述本机访问条件后，在 Web 的“添加项目”中填写容器内路径，例如 `/workspaces/demo`，模型和 Skills 也由页面管理。不要在服务运行期间另启 CLI Host 操作同一状态根；状态根锁会拒绝第二个 Host。服务入口禁用 Uvicorn 转发头处理，不从 `X-Forwarded-For` 等请求头授予本机权限。
+
+首次启动可从宿主访问 `http://127.0.0.1:8000/healthz`，再用 `docker compose logs eventide` 查看该请求的实际来源 IP；将这一精确地址设为 `EVENTIDE_LOCAL_PROXY_PEERS` 后重新执行 `docker compose up -d`。不同 Docker 网络的地址可能不同，不能照抄别人的网关。镜像默认工作目录为可写的 `/workspaces/demo`，不会将程序自身 `/app` 登记成用户项目。
+
+2026-10-16 已在 Apple Silicon Mac 的 Docker Desktop 上完成镜像构建、实际 Compose 启动、同源管理、Vue 全部资源哈希和容器重建后的会话／配置／项目文件恢复验证。测试使用一次性命名卷和假配置，未发送模型请求。可复现的分发检查为 `python tests/container_smoke.py --image eventide:validation`；先自行构建对应镜像，脚本只清理自己的临时容器和卷。
 
 容器只是部署形态：Eventide 的权限策略与本地 Shell 执行器仍以容器用户身份运行，不构成操作系统沙箱（与 ADR-005、ADR-012 一致）。
 
@@ -430,7 +434,7 @@ Vue 的「Skills」页支持以下流程：
 2. 用户级安装不自动启用；在当前项目选择一个已安装版本，再勾选主动选择并保存。切回旧版本就是回退，只影响后续运行。项目级导入写入项目 `skills/`，默认可发现；页面可禁用，更新由 Git 管理，不覆盖同名目录。
 3. 查看已安装版本的资源、与当前启用版本比较差异；页面区分安装、启用、选择和实际加载。当前运行显示固定选择、实际加载版本和正文字符数，刷新后从日志恢复。
 
-导入和保存配置带持久幂等身份，网络结果不明时重试沿用原身份；服务器重启不会自动重放未知写入。多标签页修改配置发生冲突时，刷新查看最新状态后再保存。损坏的固定版本会显示诊断，管理页仍可将其禁用。脚本的真实 Docker 路径仍需独立环境验证；Skills 对任务质量和成本的影响留待 B/U 阶段实测。
+导入和保存配置带持久幂等身份，网络结果不明时重试沿用原身份；服务器重启不会自动重放未知写入。多标签页修改配置发生冲突时，刷新查看最新状态后再保存。损坏的固定版本会显示诊断，管理页仍可将其禁用。Python／Shell Skill 脚本已通过真实 Docker 的 Host／权限主链验证，包括资源读取、参数按字面传递、非 root 执行和清理。冻结资源仅在容器暂存目录设置跨 UID 可读权限，原始 Skill 和项目权限不变；脚本镜像需预先具有解释器及依赖。Skills 对任务质量和成本的影响留待 B/U 阶段实测。
 
 ### 当前真实模型接入基线
 
@@ -471,7 +475,7 @@ uv run --project .. npm run test:e2e
 
 `npm run build` 同时将构建结果写入 `eventide/workbench/`，附源码指纹和资源SHA-256清单；修改前端后须重建并一起提交，Python测试会发现陈旧或缺失的产物。`EVENTIDE_E2E_BUILT=1 npm run test:e2e` 直接测试FastAPI托管页面，不启动Vite。安装包验证可运行 `uv build --wheel --out-dir .task_outputs/dist` 和 `uv run python frontend/scripts/check_wheel.py .task_outputs/dist/eventide-0.4.0-py3-none-any.whl`，后者在临时目录隔离导入wheel并检查资源及接口。
 
-Dockerfile 使用Node构建阶段和Python运行阶段，运行镜像不需要Node。当前主机没有Docker，尚未实测容器构建；CI定义和本地wheel测试不作为容器成功证据。
+Dockerfile 使用Node构建阶段和Python运行阶段，运行镜像不需要Node。Apple Silicon Docker Desktop 已完成镜像构建、全部静态资源校验、非 root 启动与持久卷恢复实测，Compose 启动和管理请求也通过。CI 的 container job 显式执行同一分发检查及真实容器脚本／只读边界／停止／超时回归；尚未运行的远程 CI 不计入本机证据。
 
 
 ## 共享预算与费用估算底座（U2 进行中）

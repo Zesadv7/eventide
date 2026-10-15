@@ -63,6 +63,13 @@ elif action == "start":
     sys.exit(config.get("exit_code", 0))
 elif action == "rm":
     time.sleep(config.get("cleanup_delay", 0))
+    attempts = directory / "cleanup-attempts"
+    attempt = int(attempts.read_text()) + 1 if attempts.exists() else 1
+    attempts.write_text(str(attempt))
+    if attempt <= config.get("cleanup_pending", 0):
+        print("Error response from daemon: removal of container " + args[-1]
+              + " is already in progress", file=sys.stderr)
+        sys.exit(1)
     if config.get("cleanup_exit"):
         print(config.get("cleanup_error", "Daemon unavailable"), file=sys.stderr)
         sys.exit(config["cleanup_exit"])
@@ -267,7 +274,7 @@ async def test_creation_timeout_is_not_reported_as_known_clean_execution(
     monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
     configure(fake_docker, create_delay=30)
     with pytest.raises(ContainerCleanupError, match="creation was not confirmed"):
-        await executor(fake_docker, cleanup_timeout=0.5).execute("ignored", tmp_path)
+        await executor(fake_docker, cleanup_timeout=2).execute("ignored", tmp_path)
     assert [action(call) for call in calls(fake_docker)] == ["create", "rm"]
 
 
@@ -285,6 +292,18 @@ async def test_auto_removal_is_distinguished_from_cleanup_failure(fake_docker, t
     configure(fake_docker, cleanup_exit=7)
     with pytest.raises(ContainerCleanupError, match="cleanup was not confirmed"):
         await executor(fake_docker).execute("ignored", tmp_path)
+
+
+async def test_auto_removal_race_waits_for_confirmation(fake_docker, tmp_path):
+    configure(fake_docker, auto_remove=True, cleanup_pending=2)
+    assert not (await executor(fake_docker).execute("ignored", tmp_path)).is_error
+    assert [action(call) for call in calls(fake_docker)].count("rm") == 3
+
+
+async def test_pending_removal_has_a_total_deadline(fake_docker, tmp_path):
+    configure(fake_docker, cleanup_pending=1000)
+    with pytest.raises(ContainerCleanupError, match="cleanup was not confirmed"):
+        await executor(fake_docker, cleanup_timeout=2).execute("ignored", tmp_path)
 
 
 async def test_bad_container_identity_still_attempts_cleanup(fake_docker, tmp_path):

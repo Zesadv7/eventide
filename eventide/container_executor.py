@@ -234,19 +234,40 @@ class ContainerCommandExecutor:
         ]
 
     async def _remove(self, base: list[str], cwd: Path, env: dict[str, str], name: str) -> bool:
-        result, cancelled = await _owned(
-            asyncio.create_task(
-                self._control.run([*base, "rm", "--force", "--volumes", name], cwd, env)
-            )
-        )
-        already_removed = (
-            not result.timed_out and "No such container" in result.stderr and name in result.stderr
-        )
-        if result.is_error and not already_removed:
-            raise ContainerCleanupError(
-                f"Container cleanup was not confirmed for {name}; inspect Docker: "
-                f"{result.stderr or result.render()}"
-            )
+        async def remove() -> None:
+            deadline = time.monotonic() + self._control.timeout
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ContainerCleanupError(
+                        f"Container cleanup was not confirmed for {name}; removal still pending"
+                    )
+                try:
+                    result = await asyncio.wait_for(
+                        self._control.run([*base, "rm", "--force", "--volumes", name], cwd, env),
+                        remaining,
+                    )
+                except asyncio.TimeoutError as exc:
+                    raise ContainerCleanupError(
+                        f"Container cleanup was not confirmed for {name}; cleanup timed out"
+                    ) from exc
+                already_removed = (
+                    not result.timed_out and f"No such container: {name}" in result.stderr
+                )
+                if not result.is_error or already_removed:
+                    return
+                # --rm can race explicit cancellation cleanup. "In progress"
+                # is not proof of removal: retry within the original deadline.
+                pending = f"removal of container {name} is already in progress"
+                if not result.timed_out and pending in result.stderr:
+                    await asyncio.sleep(min(0.05, max(0, deadline - time.monotonic())))
+                    continue
+                raise ContainerCleanupError(
+                    f"Container cleanup was not confirmed for {name}; inspect Docker: "
+                    f"{result.stderr or result.render()}"
+                )
+
+        _, cancelled = await _owned(asyncio.create_task(remove()))
         return cancelled
 
     async def execute(self, command: str, cwd: Path) -> CommandResult:

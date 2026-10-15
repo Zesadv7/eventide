@@ -224,11 +224,11 @@ DeliveryController 是 Host 的控制面组件，无独立循环、Store 或状�
 
 Writer通过同一durable admission创建独立checkout Session/Run，execution_config记录backend/image/disable_mcp/writer_delivery_id。Workspace后续Run、Continue和重启从事件派生执行配置，显式Local可由下一次控制面run选择；空image拒绝，不降级。根任务仍串行；容器仅替换CommandExecutor，不改变文件工具边界或Provider执行位置。verify使用ToolExecutor/PolicyEngine显式命令，绑定检查前后相同checkout checkpoint与patch；模型不能改受保护测试/配置伪造验收。apply须最新verified=passed，重读实际patch并再次验证source+checkout；不自动暂存或提交。apply在线程内已生效后被Stop，仍先落delivery.applied，再记interrupted，不假装撤销已发生的Git写入。
 
-ContainerCommandExecutor通过Docker create/start/rm、argv执行和有界输出，使用本机endpoint、预拉镜像、非root、network none、只挂载cwd、资源上限与readonly验收。创建/清理阶段屏蔽重复取消并有独立期限，运行停止后必须确认rm。ContainerCleanupError携outcome_unknown，ToolExecutor保留此元数据；Host不把它变成tool.completed，而将Run停驻并按canonical tool.outcome_unknown隔离可能仍在写的Workspace。Delivery在源及checkout入口都检查该状态；readonly验收未知不宣称通过，也不误隔离原项目。普通同步处理器在多次取消下继续shield等待真实结束，已知结果提交后才释放owner。
+ContainerCommandExecutor通过Docker create/start/rm、argv执行和有界输出，使用本机endpoint、预拉镜像、非root、network none、只挂载cwd、资源上限与readonly验收。创建/清理阶段屏蔽重复取消并有独立期限，运行停止后必须确认rm。Docker自动删除与显式rm竞争返回removal in progress时，在同一清理期限内重试；只有删除成功或已不存在才确认结束，不能把“正在删除”当作已完成。ContainerCleanupError携outcome_unknown，ToolExecutor保留此元数据；Host不把它变成tool.completed，而将Run停驻并按canonical tool.outcome_unknown隔离可能仍在写的Workspace。Delivery在源及checkout入口都检查该状态；readonly验收未知不宣称通过，也不误隔离原项目。普通同步处理器在多次取消下继续shield等待真实结束，已知结果提交后才释放owner。
 
 acceptance_tests工程评测使用一次性Git fixture，原测试复制到外部临时目录并保存SHA清单。基线必须退出1；结束后测试源/数据清单不变，清理fixture的派生bytecode，再以-I/-B独立Python、先导入stdlib unittest后加入候选源码，运行原版测试。check_project通过唯一ToolExecutor/Policy留下独立Run证据，不接受模型自判。report增加verification字段；baseline/verification run id、exit/timed_out、manifest与tests_unchanged可追溯。测试、数据与模型预算均有限，失败消费不推测；这些功能测试不构成恶意代码隔离证明。
 
-CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optional-extensions 安装全部 extras；container job 显式预拉测试镜像后开启真实 readonly boundary 测试；web job 固定 Playwright 版本并安装 headless Chromium，严格模式缺浏览器必须失败。默认离线门禁仍不依赖 Key；未执行的远程 CI 不能当成本机真实 Docker 验证证据。
+CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optional-extensions 安装全部 extras；container job 显式预拉测试镜像后开启真实 readonly boundary、Host Skill 脚本及取消/超时测试，再构建部署镜像、执行一次性卷上的服务分发检查；web job 固定 Playwright 版本并安装 headless Chromium，严格模式缺浏览器必须失败。默认离线门禁仍不依赖 Key 或 Docker；未执行的远程 CI 不能当成本机真实 Docker 验证证据。
 
 
 ## 请求用量账本基础（U1 进行中）
@@ -291,7 +291,9 @@ Vite采用相对资源地址与Hash Router，FastAPI通过StaticFiles挂载/work
 
 package_web.mjs在构建后替换专用eventide/workbench目录，写入每个产物的SHA-256与前端源码/锁文件/构建配置指纹。资源作为Python package-data提交和打包，源码安装与wheel使用者无需Node；维护者修改前端后必须重建。离线pytest校验源码指纹及全部资源，CI重建并比较版本库差异，再直接运行FastAPI静态页面浏览器旅程。
 
-wheel验证在临时目录解包并以隔离Python进程导入，断言Eventide来源为安装包，再通过TestClient获取页面、清单、所有资源及healthz。Docker多阶段构建只在web-build阶段使用Node，Python镜像复制新产物；本机无Docker，真实镜像构建和运行仍待外部验证。
+wheel验证在临时目录解包并以隔离Python进程导入，断言Eventide来源为安装包，再通过TestClient获取页面、清单、所有资源及healthz。Docker多阶段构建只在web-build阶段使用Node，Python镜像复制新产物；运行用户UID1000默认进入预建且归其所有的/workspaces/demo，命名卷首次初始化继承该权限，避免注册/app为用户源码。
+
+2026-10-16在Apple Silicon Docker Desktop完成镜像构建与实际Compose启动。tests/container_smoke.py使用唯一命名的临时容器/状态卷/源码卷，验证非root、无需Node、全部静态资源hash、默认来源拒绝/显式peer及同源放行、持久会话/假配置/项目文件在重建后恢复；仅测试环境读取访问日志获知peer，生产不会自动授予信任。另以真实容器覆盖Host调用Python/Shell Skill、权限审批、字面参数、资源读取、停止和超时。容器Skill暂存树仅对冻结副本设置目录0755/文件0644以适配Linux UID边界，本地暂存保留0700且不修改用户文件权限；umask077有离线专项验证。全部验证均无付费模型请求。
 
 
 ## 预算事务与价格版本底座（U2）

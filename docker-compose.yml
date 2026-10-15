@@ -6,6 +6,8 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       EVENTIDE_STATE_DIR: /data/eventide
+      # 仅填写实测的本机端口转发来源 IP；为空时管理接口仍只允许回环来源。
+      EVENTIDE_LOCAL_PROXY_PEERS: ${EVENTIDE_LOCAL_PROXY_PEERS:-}
     volumes:
       # 状态根：runtime.sqlite、secret.key、host.lock 必须持久化
       - eventide-state:/data/eventide

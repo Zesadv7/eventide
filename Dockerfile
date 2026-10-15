@@ -30,10 +30,11 @@ ENV EVENTIDE_STATE_DIR=/data/eventide \
     PATH="/app/.venv/bin:$PATH"
 
 RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin eventide \
-    && mkdir -p /data/eventide \
-    && chown -R eventide:eventide /data/eventide /app
+    && mkdir -p /data/eventide /workspaces/demo \
+    && chown -R eventide:eventide /data/eventide /app /workspaces/demo
 
 USER eventide
+WORKDIR /workspaces/demo
 
 VOLUME /data/eventide
 EXPOSE 8000

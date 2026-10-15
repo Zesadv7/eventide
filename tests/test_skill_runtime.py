@@ -1,13 +1,14 @@
 """Skills keep canonical activation, fixed run bytes, and production policy."""
 
+import os
 from dataclasses import replace
 
 import pytest
 
-from eventide.container_executor import ContainerCleanupError
+from eventide.container_executor import ContainerCleanupError, ContainerCommandExecutor
 from eventide.executor import LocalCommandExecutor
 from eventide.host import RuntimeHost
-from eventide.models import RunRequest
+from eventide.models import CommandResult, RunRequest
 from eventide.providers import ScriptedProvider
 from eventide.skill_packages import SkillPackageError
 from eventide.skill_runtime import execute_skill_script
@@ -245,3 +246,36 @@ def test_three_bundled_packages_are_distributable():
         "fault-localization",
         "test-repair",
     }
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mount permissions")
+async def test_container_staged_resources_are_readable_without_changing_project_permissions(
+    isolated_workspace,
+):
+    import stat
+
+    package(isolated_workspace / "skills/diagnose", scripts=True)
+    catalog = SkillCatalog.discover(isolated_workspace)
+    project_mode = stat.S_IMODE(isolated_workspace.stat().st_mode)
+
+    class InspectMount(ContainerCommandExecutor):
+        async def execute(self, command, cwd):
+            staging = next(cwd.glob(".eventide-skill-*"))
+            for path in (staging, *staging.rglob("*")):
+                assert stat.S_IMODE(path.stat().st_mode) == (0o755 if path.is_dir() else 0o644)
+            return CommandResult(exit_code=0, stdout="readable", stderr="")
+
+    old_umask = os.umask(0o077)
+    try:
+        await execute_skill_script(
+            catalog,
+            "project:diagnose",
+            "scripts/check.py",
+            [],
+            isolated_workspace,
+            InspectMount("python:3.12-slim"),
+        )
+    finally:
+        os.umask(old_umask)
+    assert stat.S_IMODE(isolated_workspace.stat().st_mode) == project_mode
+    assert not list(isolated_workspace.glob(".eventide-skill-*"))

@@ -99,12 +99,12 @@ uv run eventide eval evals/smoke.yaml
 | 0.4 | 已完成 | 2026-10-16：真实DeepSeek Responses非思考模式，普通/只读工具及3工程fixture各2次，共10次、7次完整完成；3次Token软限停驻且固定测试仍通过，6次修复独立验收均通过。累计131,359输入/7,630输出Token、48次请求、未知0；失败全保留，未改用户状态。README/architecture有摘要，不能外推成功率。 |
 | A1 | 进行中 | 2026-10-16：api.py 收敛为 composition root，现有38条路由拆入http_api领域模块，应用独立共享上下文；统一code/message/detail且不回显校验原始输入。94项API/HTTP/接收/流式/生成/usage/工作区回归、Ruff与Mypy67模块通过；README/architecture/api-contract/ADR-056同步。Skills管理已补齐，索引/评测/交付长任务接口仍待实现，未标整体完成。 |
 | A2 | 进行中 | Run/Continue持久幂等接收、重启重试、内容冲突及同源/DNS-rebinding防护已实现；43项HTTP/接收/API回归、Ruff/mypy52模块通过。api-contract/architecture同步；Skills导入/配置已接持久幂等与来源检查、配置竞争返回409；Delivery等继续按后续步骤接入。2026-10-16：容器本机转发精确peer启动配置已接管理守卫，额外peer仍强制回环Host/匹配Origin，禁用代理头信任；85项来源/API/Skills/CLI回归及Ruff/Mypy72模块通过，README/architecture/api-contract/ADR-061同步。真实镜像验证仍由F5记录。 |
-| A3 | 已完成 | 生产Host全部实际目录/动态MCP/Worker接入严格契约，首次参数错误允许一次修正轮次，再次错误停机且不重放副作用；截断调用不派发。97项core及81项主链回归、Ruff/mypy55模块通过。README/architecture/api-contract/ADR-052同步；真实Docker单列未验证。 |
+| A3 | 已完成 | 生产Host全部实际目录/动态MCP/Worker接入严格契约，首次参数错误允许一次修正轮次，再次错误停机且不重放副作用；截断调用不派发。97项core及81项主链回归、Ruff/mypy55模块通过。README/architecture/api-contract/ADR-052同步；真实Docker命令与Skill脚本路径已由S4/F5补验。 |
 | A4 | 已完成 | generation严格配置/能力声明/模型与会话API和三adapter映射；17项生成参数测试及59项相关回归通过，Ruff/mypy50模块通过。README/architecture/api-contract/ADR-050同步；页面在F迁移。 |
 | A5 | 已完成 | admission冻结、零/null/最大输出/继承、Continue及并发工作区隔离验证通过；最大输出日志字段保留数值；辅助调用不继承采样覆盖。见test_generation及ADR-050。 |
 | A6 | 已完成 | 2026-10-16：Host流式主链/有界脱敏预览SSE及3类官方SDK适配完成，完整终态前不派发工具；104项集成回归通过，真实DeepSeek普通/工具调用10次基线完成。预览不落库/不推进游标；页面在F。README/architecture/api-contract/ADR-053同步。 |
 | A7 | 已完成 | 2026-10-16：跨分片密钥lookahead脱敏、超长密钥禁预览，取消/断流/超时不重发或执行半成品；未知能力接收前明确拒绝采样参数。104项相关集成覆盖，详见test_stream_runtime/test_provider_streaming/test_generation；最终页面验收在F/R。 |
-| P1 | 已完成 | 2026-10-16：schema v4稳定Project/源Workspace/执行副本关联及只读聚合API，迁移保留旧身份与事件原文；接收/直接运行/Continue/Worker/交付固定项目归属。15项身份专项、82项主链相关回归、23项前端测试、build/typecheck、Ruff/Mypy73模块和smoke12/12通过；全量845通过/1跳过、覆盖93.63%，唯一既有Docker fixture启动期限失败由容器任务修复后集成复验。README/architecture/api-contract/ADR-060同步；同Workspace仍串行，P2/P3未实现。 |
+| P1 | 已完成 | 2026-10-16：schema v4稳定Project/源Workspace/执行副本关联及只读聚合API，迁移保留旧身份与事件原文；接收/直接运行/Continue/Worker/交付固定项目归属。15项身份专项、82项主链相关回归、23项前端测试、build/typecheck、Ruff/Mypy73模块和smoke12/12通过；容器fixture启动期限修复后集成全量880通过/5个显式Docker跳过、覆盖93.78%。README/architecture/api-contract/ADR-060同步；同Workspace仍串行，P2/P3未实现。 |
 | P2 | 待开始 | 同 Session 串行，只读固定快照并发、写入各 worktree、直接源/采纳独占；快照检测漂移。 |
 | P3 | 待开始 | 默认活跃根 Run 4/模型请求 2/等待 20；持久队列可查可取消，重启不自动重放写任务。 |
 | P4 | 待开始 | 精确审批/取消/用量身份；共享 Git 元数据协调；父子等待无额度死锁。 |
@@ -112,13 +112,13 @@ uv run eventide eval evals/smoke.yaml
 | S1 | 已完成 | 2026-10-16：严格元数据、资源布局和依赖诊断已接入Host/API及Vue；损坏固定版本可诊断并禁用，执行仍拒绝。70项Skills定向回归、完整782通过/1跳过且覆盖93.36%、Ruff/Mypy70模块、smoke12/12、23项前端回归及2条真实API浏览器旅程通过；README/architecture/api-contract/ADR-057同步。 |
 | S2 | 已完成 | 2026-10-16：本地目录/ZIP/内置包导入与项目/用户作用域已接API和页面，安装不自动授权用户包；同名精确身份、恶意路径/链接/规模限制、持久幂等及重启未知不重放有测试。70项Skills回归及真实API导入旅程通过；稳定文档同步。 |
 | S3 | 已完成 | 2026-10-16：admission/Continue/重启固定内容；页面支持用户版本固定、差异及回退，项目更新由Git管理。预览摘要复核防源漂移，配置摘要拒绝旧标签覆盖；资源篡改、恢复与加载记录持久化通过70项Skills回归和23项前端回归。README/architecture/api-contract同步。 |
-| S4 | 待外部验证 | 2026-10-16：ZIP/资源边界及本地脚本权限执行已通过回归，Plan不提供脚本、安装不执行、未知结果保留资源；HTTP上传接入。当前主机未安装Docker，真实容器脚本执行仍待外部验证；本地路径完成，不宣称容器实测。 |
+| S4 | 已完成 | 2026-10-16：ZIP/资源边界、本地权限与真实Docker Python/Shell脚本主链已验收；安装不执行、Plan不开放脚本、参数按字面传递，固定资源跨UID可读且不改用户权限。修复自动删除与显式清理竞态，停止/超时确认清理、未知仍保守保留。67项容器/Skills/交付生命周期回归及全量880通过/5个默认离线跳过、覆盖93.78%，Ruff/Mypy73模块、smoke12/12通过；README/architecture/ADR-047同步。 |
 | S5 | 进行中 | 2026-10-16：3内置包可显式导入；Vue区分安装/启用/选择/实际加载，资源分页、运行固定版本及刷新恢复已通过真实API旅程。完整冻结任务集效果与Token成本对照仍待B/U，未用页面验证替代效果评测。 |
 | F1 | 已完成 | 2026-10-16：Vue3/TS/Vite/Router/Pinia及隔离OpenAPI导出/类型生成落地；18项HTTP/组件/SSE/状态回归、typecheck/build及真实API浏览器旅程通过。README/architecture/api-contract/ADR-055同步；静态挂载由F5承接。 |
 | F2 | 进行中 | 2026-10-16：项目/会话、流式、审批/停止/Continue、附件、模型参数、export/usage及Skills管理已接真实API；Skills导入启用/资源/加载记录旅程通过。索引、评测、交付控制面仍待接入。 |
 | F3 | 进行中 | 已验证刷新恢复、会话草稿、切页后台继续及多标签审批同步；网络结果不明保留原幂等键。完整新控制面和并发队列旅程待后续API集成。 |
 | F4 | 进行中 | Run/Session账本、请求明细/调用分类/缓存推理细项/未知完整性已展示；价格/预算/项目日统计/输入组成待U2/U3后续接入。 |
-| F5 | 待外部验证 | 2026-10-16：/workbench/同源产物、源码/文件指纹、Python包资源与Docker多阶段构建已落地；39项API/分发回归、23项前端回归、build/typecheck、2条直接FastAPI静态页面旅程及wheel隔离导入/全部资源冒烟通过，Ruff/Mypy70模块通过。README/architecture/api-contract/ADR-058同步。主机无Docker，镜像实测待外部验证；旧页保留到X。 |
+| F5 | 已完成 | 2026-10-16：/workbench/同源产物、源码/文件指纹、wheel资源及Docker多阶段分发完成。已有39项分发/API、23项前端、2条真实API页面旅程及wheel验收；本轮Apple Silicon Docker Desktop真实构建和Compose启动、非root/无需Node/全部资源hash/来源拒绝与同源管理/重建后会话与配置及文件恢复通过，未调用付费模型。CI加入同一容器分发及脚本检查，README/architecture/ADR-058/061同步；旧页保留到X。 |
 | B1 | 待开始 | 20 任务：理解4/定位4/单文件6/跨文件4/恢复交付2；开发12/留出8，调参后移出留出并补样本。 |
 | B2 | 待开始 | commit/任务版本/模型参数/Skill/工具指纹/usage/价格版本，失败和未知不丢失。 |
 | B3 | 待开始 | 开发单次、候选每题3次，相同配置对照，保留失败/预算停止。 |

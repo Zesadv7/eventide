@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from eventide.container_executor import ContainerCommandExecutor
 from eventide.executor import CommandExecutor, LocalCommandExecutor
 from eventide.models import CommandResult
 from eventide.skill_packages import (
@@ -247,6 +248,13 @@ async def execute_skill_script(
             target = root / resource.path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(resource.content)
+        if isinstance(command_executor, ContainerCommandExecutor):
+            # Only these frozen, temporary inputs are shared with UID 1000.
+            # mkdtemp and a restrictive host umask otherwise prevent reading
+            # scripts on Linux bind mounts. Never chmod the user's project.
+            for target in root.rglob("*"):
+                target.chmod(0o755 if target.is_dir() else 0o644)
+            root.chmod(0o755)
         relative = root.relative_to(cwd)
         interpreter = "python3" if path.endswith(".py") else "sh"
         if isinstance(command_executor, LocalCommandExecutor):
@@ -254,7 +262,8 @@ async def execute_skill_script(
                 raise SkillPackageError("Shell Skill scripts require a POSIX or container backend")
             return await command_executor.execute_argv(
                 [sys.executable if path.endswith(".py") else "sh", str(relative / path), *args],
-                cwd, extra_env={"EVENTIDE_SKILL_ROOT": str(relative)},
+                cwd,
+                extra_env={"EVENTIDE_SKILL_ROOT": str(relative)},
             )
         command = f"EVENTIDE_SKILL_ROOT={shlex.quote(str(relative))} " + shlex.join(
             [interpreter, str(relative / path), *args]
