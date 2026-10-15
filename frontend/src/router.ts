@@ -3,6 +3,7 @@ import ChatView from "./views/ChatView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import UsageView from "./views/UsageView.vue";
 import CapabilitiesView from "./views/CapabilitiesView.vue";
+import SkillsView from "./views/SkillsView.vue";
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
@@ -10,7 +11,7 @@ export const router = createRouter({
     { path: "/chat/:sessionId?", name: "chat", component: ChatView },
     { path: "/settings", component: SettingsView },
     { path: "/usage", component: UsageView },
-    { path: "/skills", component: CapabilitiesView, props: { area: "skills" } },
+    { path: "/skills", component: SkillsView },
     {
       path: "/knowledge",
       component: CapabilitiesView,

@@ -15,6 +15,7 @@ class RunBody(BaseModel):
     attachment_ids: list[str] = Field(default_factory=list)
     model: str | None = Field(default=None, max_length=256)
     generation: GenerationPatch = Field(default_factory=GenerationPatch)
+    selected_skills: list[str] | None = Field(default=None, max_length=64)
 
 
 class GenerationBody(BaseModel):

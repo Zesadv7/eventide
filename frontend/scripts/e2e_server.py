@@ -21,7 +21,7 @@ def main() -> None:
     from eventide.api import create_app
     from eventide.config import Settings
     from eventide.host import RuntimeHost
-    from eventide.models import ModelResponse
+    from eventide.models import ModelResponse, ToolCall
     from tests.e2e_server import E2EUvicornServer, FakeProvider, build_fixtures
 
     class JourneyProvider(FakeProvider):
@@ -37,6 +37,11 @@ def main() -> None:
                 response = self._approval(step, usage)
             elif "停驻场景" in prompt:
                 response = self._park(step, usage)
+            elif "技能场景" in prompt:
+                response = ModelResponse(
+                    tool_calls=[ToolCall("load-review", "load_skill", {"name": "code-review"})],
+                    stop_reason="tool_use", usage=usage,
+                ) if step == 1 else ModelResponse(text="已加载审查技能", usage=usage)
             elif "流式场景" in prompt:
                 for part in ("正在阅读源码与项目约定。" * 30, "已经形成初步结论。" * 30):
                     yield ModelStreamEvent("text_delta", text=part)

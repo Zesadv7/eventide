@@ -191,7 +191,10 @@ async def test_custom_and_mcp_stay_disabled_without_inherited_agent_approval(
                 for e in host.store.run_events(child["id"])
                 if e["type"] == "approval.resolved"
             ]
-            assert approvals and all(not e["approved"] and not e.get("auto") for e in approvals)
+            # Unregistered worker tools are rejected before policy/approval.
+            assert approvals == []
+            assert "Unknown tool" in child["tools"]["custom"]["content"]
+            assert "Unknown tool" in child["tools"]["mcp"]["content"]
     finally:
         await host.close()
 

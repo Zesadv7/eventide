@@ -114,6 +114,7 @@ def create_router(context: ApiContext) -> APIRouter:
                     model=body.model,
                     generation=body.generation.patch(),
                     request_fingerprint=receipt.fingerprint,
+                    selected_skills=body.selected_skills,
                 )
             )
             task = agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)

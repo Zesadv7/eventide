@@ -1030,6 +1030,7 @@ class RuntimeHost:
 
     async def import_skill(
         self, workspace_id: str, source: Path | bytes, *, zipped: bool, scope: str = "user",
+        expected_version: str | None = None,
     ) -> dict[str, Any]:
         if self._closed:
             raise ValueError("RuntimeHost is closed")
@@ -1038,7 +1039,9 @@ class RuntimeHost:
         if scope == "user":
             # Keep ownership until bounded disk IO has really finished on cancellation.
             return dict(await self._admission_check(
-                lambda: self.skills.import_user(owner, source, zipped=zipped)
+                lambda: self.skills.import_user(
+                    owner, source, zipped=zipped, expected_version=expected_version,
+                )
             ))
         if scope != "project":
             raise ValueError("Skill scope must be project or user")
@@ -1054,6 +1057,8 @@ class RuntimeHost:
                     preview = self.skills.packages.preview_directory(source)
                 if not preview.valid or not preview.name:
                     raise SkillPackageError("; ".join(d.message for d in preview.diagnostics))
+                if expected_version is not None and preview.version != expected_version:
+                    raise SkillPackageError("Skill changed since preview; review it again")
                 root = Path(workspace.path) / "skills"
                 if root.is_symlink():
                     raise SkillPackageError("Project skills directory cannot be a symlink")

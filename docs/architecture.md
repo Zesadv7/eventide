@@ -89,7 +89,7 @@ Continue 从来源 `run.admitted` / `run.started` 继承 Plan 的只读限制与
 
 `api.py` 是 FastAPI 组装入口，保留 `create_app(runtime=None)`；现有 HTTP 路由按工作区、Session、Run、模型生成参数、Provider 配置、附件及 SSE/导出拆入 `http_api/`。请求模型集中声明；每个 router factory 接收同一应用的 `ApiContext`，其中只保存 Host 引用、审批 Future、暂存 reservation 与 Task 集合，不是新的运行状态库。每个应用独立创建上下文，禁止模块级共享可变状态。Host/Store 仍管理接收、执行和全部事实；应用 lifespan 在退出时取消并等待自己跟踪的 Task 后再关闭 Host。
 
-同源写入守卫仍在应用级，领域路由继续执行原本的回环、身份和权限检查。统一 HTTP 错误包含 code/message/detail，保留状态码、HTTP 异常响应头以及字符串或列表 detail；RequestValidationError 不返回原始 input/ctx，内部异常仅返回通用错误。OpenAPI 使用共同 ErrorResponse 描述该契约；模型连接探测的 HTTP 200 失败结果不改为协议错误。38 条现有路由全部保留，用量查询仍覆盖完整历史，SSE 持久游标及 opt-in 临时预览语义不变。Skills 管理、索引、评测及交付长任务的 HTTP 控制面尚待后续步骤，本次拆分不表示 A1 整体完成。
+同源写入守卫仍在应用级，领域路由继续执行原本的回环、身份和权限检查。统一 HTTP 错误包含 code/message/detail，保留状态码、HTTP 异常响应头以及字符串或列表 detail；RequestValidationError 不返回原始 input/ctx，内部异常仅返回通用错误。OpenAPI 使用共同 ErrorResponse 描述该契约；模型连接探测的 HTTP 200 失败结果不改为协议错误。38 条现有路由全部保留，用量查询仍覆盖完整历史，SSE 持久游标及 opt-in 临时预览语义不变。Skills 管理已由专用路由承接；索引、评测及交付长任务控制面仍待后续步骤，A1 尚未整体完成。
 
 HTTP写请求先校验浏览器同源与本机Origin；无Origin的可信非浏览器路径沿用现有权限边界。Run/Continue可用Idempotency-Key生成操作/Session隔离的确定性Run身份，在admission原子保存内容指纹；重复提交先查持久接收事实，再检查busy/parked，不重新启动已接收任务。未落库接收竞争仍拒绝为busy，不通过内存缓存伪造持久成功。
 
@@ -263,3 +263,12 @@ SkillRuntime 从 skill.installed 和 skills.configured 唯一事实派生用户�
 发送前生成 Idempotency-Key；网络、超时及 5xx 等接收结果不明时，按 Session 保存原请求与键，显式重试原内容，不改成第二个任务。已知参数拒绝允许编辑。草稿与待确认提交存当前标签页 sessionStorage，API Key 不进入 Pinia/浏览器持久存储；设置保存完成后清空密码输入。HTTP 请求有 30 秒等待上限，超时不代表后台任务已取消。会话切换与刷新使用代次检查，旧响应不覆盖新选择。待审批时 MessagesProjection 的不完整工具历史 409 只延用上次可见消息，运行详情和审批仍正常更新。
 
 开发服务器仅监听回环地址，HTTP 代理保留 Host 通过 API 同源校验；生产仍计划同源托管构建产物。Markdown 子集只用 Vue 文本插值与代码块，不执行 raw HTML，不创建任意协议链接。页面支持跟随系统的深浅主题和窄屏导航；生产资源打包、完整管理页面与旧入口删除仍待后续步骤。
+
+
+### Skills 管理 HTTP 与 Vue
+
+`http_api/skills.py` 将本机目录、ZIP和内置包预检/导入、配置替换、版本差异、资源分页及Run加载记录接入同一Host。预检只读；导入可要求expected_version，在重新读取源后先比对摘要，再物化该次预检的固定字节，避免检查后再次读源产生不同内容。配置可带expected_configuration_hash；单服务事件循环在同步比较和追加之间没有await，旧页面冲突返回409。管理查询将损坏配置变成可见诊断，但运行admission仍拒绝损坏目录，不能降级获得执行能力。
+
+`http_control` 先追加mutation_started，完成后追加completed/failed；状态源仍是Event Log。重复键完成时直接返回原结果；只有started时结果不明，保守拒绝重放。磁盘导入和数据库回执不是跨资源原子事务，崩溃可能留下未启用内容或待核查的项目目录；页面通过状态查询帮助核对，不能把未确认当失败后再次执行。
+
+SkillsView 区分用户安装、项目启用、主动选择和Run实际加载。网络不确定的写请求只把SHA-256指纹与幂等键放入标签页存储，不持久化本地路径或ZIP正文；成功后删除待确认键，后续同内容操作可产生新的用户意图。导入预览随来源/作用域变更失效；页面、项目及资源请求用代次隔离，迟到响应不能覆盖新选择。Run加载记录读取canonical session_seq后规范化为seq；SSE订阅skills.snapshot/skill.loaded仅触发事实刷新，不把选择等同加载。

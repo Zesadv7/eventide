@@ -97,8 +97,8 @@ uv run eventide eval evals/smoke.yaml
 | 0.2 | 已完成 | 2026-10-15：Host/live 共用配置优先级；live 只读解析已提交 WAL 配置、隔离前解密且不创建 Host/密钥，错误不回退。88 项定向回归、Ruff、Mypy 50 模块通过；README/architecture/ADR-051 已同步。真实调用另属 0.4。 |
 | 0.3 | 已完成 | 2026-10-15：全部用例独立临时 Git 项目/数据库，live/offline 均关闭 MCP；失败产物保留，报告可逐例定位，凭据不写产物、用户源码/状态不变。88 项回归及 smoke12/tasks14/engineering3/workers1 全通过；README/architecture/ADR-051 同步。 |
 | 0.4 | 已完成 | 2026-10-16：真实DeepSeek Responses非思考模式，普通/只读工具及3工程fixture各2次，共10次、7次完整完成；3次Token软限停驻且固定测试仍通过，6次修复独立验收均通过。累计131,359输入/7,630输出Token、48次请求、未知0；失败全保留，未改用户状态。README/architecture有摘要，不能外推成功率。 |
-| A1 | 进行中 | 2026-10-16：api.py 收敛为 composition root，现有38条路由拆入http_api领域模块，应用独立共享上下文；统一code/message/detail且不回显校验原始输入。94项API/HTTP/接收/流式/生成/usage/工作区回归、Ruff与Mypy67模块通过；README/architecture/api-contract/ADR-056同步。新Skills/索引/评测/交付长任务接口仍待实现，未标整体完成。 |
-| A2 | 进行中 | Run/Continue持久幂等接收、重启重试、内容冲突及同源/DNS-rebinding防护已实现；43项HTTP/接收/API回归、Ruff/mypy52模块通过。api-contract/architecture同步；Skills/Delivery等新写控制面按后续步骤接入。 |
+| A1 | 进行中 | 2026-10-16：api.py 收敛为 composition root，现有38条路由拆入http_api领域模块，应用独立共享上下文；统一code/message/detail且不回显校验原始输入。94项API/HTTP/接收/流式/生成/usage/工作区回归、Ruff与Mypy67模块通过；README/architecture/api-contract/ADR-056同步。Skills管理已补齐，索引/评测/交付长任务接口仍待实现，未标整体完成。 |
+| A2 | 进行中 | Run/Continue持久幂等接收、重启重试、内容冲突及同源/DNS-rebinding防护已实现；43项HTTP/接收/API回归、Ruff/mypy52模块通过。api-contract/architecture同步；Skills导入/配置已接持久幂等与来源检查、配置竞争返回409；Delivery等继续按后续步骤接入。 |
 | A3 | 已完成 | 生产Host全部实际目录/动态MCP/Worker接入严格契约，首次参数错误允许一次修正轮次，再次错误停机且不重放副作用；截断调用不派发。97项core及81项主链回归、Ruff/mypy55模块通过。README/architecture/api-contract/ADR-052同步；真实Docker单列未验证。 |
 | A4 | 已完成 | generation严格配置/能力声明/模型与会话API和三adapter映射；17项生成参数测试及59项相关回归通过，Ruff/mypy50模块通过。README/architecture/api-contract/ADR-050同步；页面在F迁移。 |
 | A5 | 已完成 | admission冻结、零/null/最大输出/继承、Continue及并发工作区隔离验证通过；最大输出日志字段保留数值；辅助调用不继承采样覆盖。见test_generation及ADR-050。 |
@@ -109,13 +109,13 @@ uv run eventide eval evals/smoke.yaml
 | P3 | 待开始 | 默认活跃根 Run 4/模型请求 2/等待 20；持久队列可查可取消，重启不自动重放写任务。 |
 | P4 | 待开始 | 精确审批/取消/用量身份；共享 Git 元数据协调；父子等待无额度死锁。 |
 | P5 | 待开始 | 接入 U2 原子预留结算，多窗口不超额派发。 |
-| S1 | 进行中 | 严格元数据/资源布局、可见诊断、缺依赖提示与旧畸形格式拒绝已实现；82项Skills/Runtime/API相关回归、新模块覆盖90.78%、mypy53模块通过；README/architecture/ADR-054同步。待Host将诊断接入能力页面。 |
-| S2 | 进行中 | 本地目录/ZIP先预检后原子内容导入，项目/用户精确作用域与同名诊断已实现；恶意路径/链接/文件数/大小/碰撞测试通过；不写第二启用状态。待Host/API唯一事件控制面接入。 |
-| S3 | 进行中 | 2026-10-16：admission固定正文/资源版本、不可变内容产物、Continue/重启恢复和篡改拒绝已接主链；86项相关测试通过。安装事实与项目启用分离，Python差异/回退已提供；API/页面待接。README/architecture同步。 |
-| S4 | 进行中 | 2026-10-16：严格脚本工具经过Policy ASK和当前CommandExecutor；Plan不提供脚本，参数安全引用、未知容器结果保留资源，安装不执行。86项相关及23项命令/脚本回归通过；API上传与真实Docker后续。 |
-| S5 | 进行中 | 用户选择/启用/实际加载及版本事件已区分，资源分页按需提供，3内置包加入安装资源。主链测试通过；页面与完整对照评测待接。 |
+| S1 | 已完成 | 2026-10-16：严格元数据、资源布局和依赖诊断已接入Host/API及Vue；损坏固定版本可诊断并禁用，执行仍拒绝。70项Skills定向回归、完整782通过/1跳过且覆盖93.36%、Ruff/Mypy70模块、smoke12/12、23项前端回归及2条真实API浏览器旅程通过；README/architecture/api-contract/ADR-057同步。 |
+| S2 | 已完成 | 2026-10-16：本地目录/ZIP/内置包导入与项目/用户作用域已接API和页面，安装不自动授权用户包；同名精确身份、恶意路径/链接/规模限制、持久幂等及重启未知不重放有测试。70项Skills回归及真实API导入旅程通过；稳定文档同步。 |
+| S3 | 已完成 | 2026-10-16：admission/Continue/重启固定内容；页面支持用户版本固定、差异及回退，项目更新由Git管理。预览摘要复核防源漂移，配置摘要拒绝旧标签覆盖；资源篡改、恢复与加载记录持久化通过70项Skills回归和23项前端回归。README/architecture/api-contract同步。 |
+| S4 | 待外部验证 | 2026-10-16：ZIP/资源边界及本地脚本权限执行已通过回归，Plan不提供脚本、安装不执行、未知结果保留资源；HTTP上传接入。当前主机未安装Docker，真实容器脚本执行仍待外部验证；本地路径完成，不宣称容器实测。 |
+| S5 | 进行中 | 2026-10-16：3内置包可显式导入；Vue区分安装/启用/选择/实际加载，资源分页、运行固定版本及刷新恢复已通过真实API旅程。完整冻结任务集效果与Token成本对照仍待B/U，未用页面验证替代效果评测。 |
 | F1 | 已完成 | 2026-10-16：Vue3/TS/Vite/Router/Pinia及隔离OpenAPI导出/类型生成落地；18项HTTP/组件/SSE/状态回归、typecheck/build及真实API浏览器旅程通过。README/architecture/api-contract/ADR-055同步；静态挂载由F5承接。 |
-| F2 | 进行中 | 真实项目/会话、对话、流式、审批/停止/Continue、附件、模型及生成参数、export与请求账本已迁移；Skills目录只读展示，安装/索引/评测/交付控制面尚待接入，未假数据宣称完成。 |
+| F2 | 进行中 | 2026-10-16：项目/会话、流式、审批/停止/Continue、附件、模型参数、export/usage及Skills管理已接真实API；Skills导入启用/资源/加载记录旅程通过。索引、评测、交付控制面仍待接入。 |
 | F3 | 进行中 | 已验证刷新恢复、会话草稿、切页后台继续及多标签审批同步；网络结果不明保留原幂等键。完整新控制面和并发队列旅程待后续API集成。 |
 | F4 | 进行中 | Run/Session账本、请求明细/调用分类/缓存推理细项/未知完整性已展示；价格/预算/项目日统计/输入组成待U2/U3后续接入。 |
 | F5 | 待开始 | 同源静态产物，安装包/Docker 资源验证，用户无需 Node；旧页面到 X 再删。 |
@@ -138,7 +138,7 @@ uv run eventide eval evals/smoke.yaml
 | X1 | 待开始 | CLI能力清单逐项承接，包括历史导入、worktree、export/trace/检索/评测/交付。 |
 | X2 | 待开始 | 删除用户命令行产品和旧前端/专属死代码，不留转发空壳。 |
 | X3 | 待开始 | 打包/Docker/示例/CI/文档同步；help/eval门禁改服务冒烟/Python接口，不降低范围。 |
-| U1 | 进行中 | Host尝试身份/SDK禁隐式重试、provider归一化、去重账本、Run/Session全历史及子Run查询已接线；70项相关集成通过，未知/取消/父子/重启回归通过。流式终态待A6，embedding接线待C；README/architecture/api-contract/ADR-049同步。 |
+| U1 | 进行中 | Host尝试身份/SDK禁隐式重试、provider归一化、去重账本、Run/Session全历史及子Run查询已接线；70项相关集成通过，未知/取消/父子/重启回归通过。流式终态已随A6接入，embedding接线待C；README/architecture/api-contract/ADR-049同步。 |
 | U2 | 待开始 | 随P：Run/交付/项目/当日预算，原子预留估计输入+输出、实际结算，未知不释放为0；重启保留；80%提示/阈值阻止新请求。 |
 | U3 | 进行中 | Vue已消费去重请求账本，未知不记零、父子按服务端口径汇总；18项前端回归及真实API用量页面旅程通过。成本/共享预算/项目与每日/内容组成尚未完成。 |
 | U4 | 待开始 | 随S/C/D：渐进加载/分页/去重/片段预算、摘要阈值间隔、减少重复委派、无进展停止、稳定缓存前缀，参数实验。 |

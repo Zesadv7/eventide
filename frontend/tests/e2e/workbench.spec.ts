@@ -1,4 +1,40 @@
 import { test, expect } from "@playwright/test";
+test("real Skills API: reviewed import, explicit activation, resources and durable loaded record", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/#/skills");
+  await page.getByRole("button", { name: "检查导入内容", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "导入已检查版本" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "导入已检查版本" }).click();
+  await expect(page.getByRole("status")).toContainText("已安装固定版本");
+  const pin = page.getByLabel("code-review 固定版本");
+  await expect(pin).toHaveValue("");
+  await pin.selectOption({ index: 1 });
+  await page.getByLabel("选择 user:code-review").check();
+  await page.getByRole("button", { name: "保存项目配置" }).click();
+  await expect(page.getByRole("status")).toContainText("配置已保存");
+  await page.getByRole("button", { name: "查看资源", exact: true }).click();
+  await expect(page.locator("pre")).toContainText("name: code-review");
+  await page.reload();
+  await expect(page.getByLabel("选择 user:code-review")).toBeChecked();
+  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await page.getByRole("textbox", { name: "任务输入" }).fill("技能场景");
+  await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
+  await expect(page.getByText("已加载审查技能", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "◇ Skills", exact: true }).click();
+  await expect(page.getByText(/已加载 user:code-review/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(/已加载 user:code-review/)).toBeVisible();
+  await page.screenshot({
+    path: "test-results/skills-desktop.png",
+    fullPage: true,
+  });
+  expect(errors).toEqual([]);
+});
 test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continue", async ({
   page,
   context,

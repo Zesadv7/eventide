@@ -86,3 +86,87 @@ def run_receipt(
     if identity["session_id"] != session_id or admitted.get("request_fingerprint") != fingerprint:
         raise HTTPException(409, "Idempotency-Key was already used with different content")
     return RunReceipt(run_id, fingerprint, True)
+
+
+@dataclass(frozen=True, slots=True)
+class MutationReceipt:
+    identity: str
+    owner: str
+    result: dict[str, Any] | None = None
+
+
+def begin_mutation(
+    runtime: RuntimeHost,
+    request: Request,
+    owner: str,
+    operation: str,
+    payload: dict[str, Any],
+) -> MutationReceipt:
+    """Persist an at-most-once local mutation; ambiguous writes are never replayed."""
+    key = request.headers.get("idempotency-key", "")
+    if not key or len(key) > 128 or any(ord(char) <= 32 or ord(char) >= 127 for char in key):
+        raise HTTPException(422, "Idempotency-Key must be 1–128 visible ASCII characters")
+    identity = "mutation_" + digest([owner, operation, key])
+    fingerprint = digest(payload)
+    events = [
+        e
+        for e in runtime.store.session_events(owner)
+        if e["type"].startswith("http.mutation_") and e["payload"].get("identity") == identity
+    ]
+    if events:
+        if events[0]["payload"].get("fingerprint") != fingerprint:
+            raise HTTPException(409, "Idempotency-Key was already used with different content")
+        terminal = events[-1]
+        if terminal["type"] == "http.mutation_completed":
+            return MutationReceipt(identity, owner, terminal["payload"]["result"])
+        if terminal["type"] == "http.mutation_failed":
+            raise HTTPException(terminal["payload"]["status_code"], terminal["payload"]["message"])
+        raise HTTPException(
+            409, "Mutation is running or its outcome is unknown; inspect current state"
+        )
+    runtime.store.append_fact(
+        owner,
+        "http.mutation_started",
+        {
+            "identity": identity,
+            "operation": operation,
+            "fingerprint": fingerprint,
+        },
+        author="user",
+    )
+    return MutationReceipt(identity, owner)
+
+
+def finish_mutation(
+    runtime: RuntimeHost,
+    receipt: MutationReceipt,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    runtime.store.append_fact(
+        receipt.owner,
+        "http.mutation_completed",
+        {
+            "identity": receipt.identity,
+            "result": result,
+        },
+        author="user",
+    )
+    return result
+
+
+def fail_mutation(
+    runtime: RuntimeHost,
+    receipt: MutationReceipt,
+    message: str,
+    status_code: int = 422,
+) -> None:
+    runtime.store.append_fact(
+        receipt.owner,
+        "http.mutation_failed",
+        {
+            "identity": receipt.identity,
+            "message": message,
+            "status_code": status_code,
+        },
+        author="user",
+    )

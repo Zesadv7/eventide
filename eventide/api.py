@@ -14,7 +14,16 @@ from fastapi.staticfiles import StaticFiles
 
 from eventide.config import Settings
 from eventide.host import RuntimeHost
-from eventide.http_api import attachments, config, models, runs, sessions, streams, workspaces
+from eventide.http_api import (
+    attachments,
+    config,
+    models,
+    runs,
+    sessions,
+    skills,
+    streams,
+    workspaces,
+)
 from eventide.http_api.context import ApiContext, ApprovalBroker
 from eventide.http_api.errors import ERROR_RESPONSES, error_response, register_error_handlers
 from eventide.http_api.schemas import (
@@ -99,6 +108,6 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok", "runtime": "eventide"}
 
-    for domain in (workspaces, sessions, runs, models, config, attachments, streams):
+    for domain in (workspaces, sessions, runs, models, config, attachments, streams, skills):
         app.include_router(domain.create_router(context))
     return app

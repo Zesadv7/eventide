@@ -13,9 +13,15 @@ from typing import Any
 
 from eventide.executor import CommandExecutor, LocalCommandExecutor
 from eventide.models import CommandResult
-from eventide.skill_packages import SkillPackageError, SkillPackageService, resource_path
+from eventide.skill_packages import (
+    SkillDiagnostic,
+    SkillPackageError,
+    SkillPackageService,
+    resource_path,
+)
 from eventide.skills import Skill, SkillCatalog
 from eventide.store import RuntimeStore
+from eventide.workspace import digest
 
 SKILL_FACTS = ("skill.installed", "skills.configured")
 
@@ -92,13 +98,21 @@ class SkillRuntime:
         self.store.append_fact(owner, "skills.configured", config, author="user")
         return config
 
-    def import_user(self, owner: str, source: Path | bytes, *, zipped: bool) -> dict[str, Any]:
+    def import_user(
+        self, owner: str, source: Path | bytes, *, zipped: bool,
+        expected_version: str | None = None,
+    ) -> dict[str, Any]:
         if zipped:
-            package = self.packages.import_zip(source)
+            preview = self.packages.preview_zip(source)
         else:
             if not isinstance(source, Path):
                 raise SkillPackageError("Directory imports require a local path")
-            package = self.packages.import_directory(source)
+            preview = self.packages.preview_directory(source)
+        if not preview.valid:
+            raise SkillPackageError("; ".join(d.message for d in preview.diagnostics))
+        if expected_version is not None and preview.version != expected_version:
+            raise SkillPackageError("Skill changed since preview; review it again")
+        package = self.packages.freeze_resources(preview.resources)
         payload = package.as_dict()
         if not any(
             item["name"] == package.name and item["version"] == package.version
@@ -142,10 +156,18 @@ class SkillRuntime:
 
     def status(self, workspace_id: str, workspace: Path) -> dict[str, Any]:
         config = self.configuration(workspace_id)
-        catalog = self.catalog(workspace_id, workspace)
+        try:
+            catalog = self.catalog(workspace_id, workspace)
+        except (ValueError, OSError) as exc:
+            # Management must remain accessible to disable a broken pin/selection.
+            # Admission still calls catalog() directly and rejects the broken state.
+            catalog = SkillCatalog(workspace, (), diagnostics=(
+                SkillDiagnostic("invalid_configuration", str(exc), workspace_id),
+            ))
         return {
             "installed": self.installed(),
             "configuration": config,
+            "configuration_hash": digest(config),
             "enabled": catalog.snapshot(),
             "project_packages": SkillCatalog.discover(workspace).snapshot(),
         }

@@ -254,7 +254,7 @@ cases:
       - tool_calls:
           - id: x1
             name: write_file
-            arguments: {path: ../outside.txt, content: no}
+            arguments: {path: ../outside.txt, content: "no"}
       - text: denied
     expected:
       final_contains: denied

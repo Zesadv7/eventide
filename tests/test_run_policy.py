@@ -32,6 +32,8 @@ def test_filter_tool_catalog_keeps_only_the_plan_whitelist_without_mutating():
         {"name": "read_tool_result", "description": "p"},
         {"name": "todo_write", "description": "t"},
         {"name": "load_skill", "description": "s"},
+        {"name": "read_skill_resource", "description": "sr"},
+        {"name": "run_skill_script", "description": "ss"},
         {"name": "search_knowledge", "description": "k"},
         {"name": "delegate_readonly", "description": "d"},
         {"name": "edit_file", "description": "e"},
@@ -46,6 +48,7 @@ def test_filter_tool_catalog_keeps_only_the_plan_whitelist_without_mutating():
         "read_tool_result",
         "todo_write",
         "load_skill",
+        "read_skill_resource",
         "search_knowledge",
         "delegate_readonly",
     ]

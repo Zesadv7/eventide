@@ -17,6 +17,8 @@ export interface RuntimeEvent {
 export type EventConnection = { close: () => void };
 export const eventNames = [
   "run.admitted",
+  "skills.snapshot",
+  "skill.loaded",
   "run.started",
   "message.user",
   "model.request",
