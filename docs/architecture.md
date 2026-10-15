@@ -411,3 +411,11 @@ P3/P4/P5集成验收已完成：完整1180项通过、覆盖93.90%，默认7项D
 usage投影只验证attempt_started中的固定字段、方法、单位、非负整数与精确合计；finish不能补写或覆盖统计。旧事件、缺失、未知版本或非法结构均为null，不从消息重算；重放按原attempt去重，结束前和取消后同样可查，不增加已报告Token或费用完整性。Run/Session usage及costs内嵌usage沿用该投影。
 
 Vue的InputComposition只展示服务端已校验的固定字符统计，旧值为null时不补造。UsageInsights由costs返回的全历史独占calls按精确run_id分组：排名只加reported输入/输出，缓存与推理细项不重复相加；仅estimated/unknown的运行不以零参与排名，部分报告保留不完整次数。父子Run各自列出，不再次求父终态和。context_summary按真实attempt数计数，重复失败仅取status=failed、取消不算失败。组件刷新替换投影，无本地累计状态。48项前端回归与6条真实API旅程验证刷新、零值、缺失和分类；桌面/移动端输入详情在跨列区域展示。
+
+### Vue 离线评测控制面（B4）
+
+`EvaluationsView`消费项目级评测目录、接收、历史、详情、取消和报告API；任务集仅固定为`engineering-v1`，允许development/holdout/all，mode始终offline。页面不生成prompt或模型配置，不把控制Run的完成状态当作每题通过。脚本机制验证、实际模型效果、真实费用口径始终分开。
+
+`api/evaluations.ts`复用durableMutation管理接收和取消身份；不确定接收在sessionStorage中保留原项目、suite指纹和split，只有明确拒绝或成功接收才解除。模块级在途状态和接收结果跨SPA页面继续持有，防止旧页面完成后新页面再次发起；浏览器刷新依靠持久请求身份及服务端事实恢复。当前页按项目epoch丢弃旧作用域响应，按详情epoch丢弃旧任务／取消前读取；相同读取在途时轮询跳过，不反复作废慢响应。
+
+地址查询参数evaluation只选中后端已有身份；详情必须与当前项目相符，不从URL改变归属。历史逐页读取，选中的旧记录可独立查询。报告按用户请求读取并显示为快照，后端报告缺失或指纹错误显式显示，不以浏览器缓存替代事件状态。UI没有真实模型评测开关；接入真实模型前仍需完成主服务共享模型额度和预算归属。

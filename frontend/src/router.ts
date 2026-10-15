@@ -5,6 +5,7 @@ import UsageView from "./views/UsageView.vue";
 import CapabilitiesView from "./views/CapabilitiesView.vue";
 import SkillsView from "./views/SkillsView.vue";
 import QueueView from "./views/QueueView.vue";
+import EvaluationsView from "./views/EvaluationsView.vue";
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
@@ -21,8 +22,7 @@ export const router = createRouter({
     },
     {
       path: "/evaluations",
-      component: CapabilitiesView,
-      props: { area: "evaluations" },
+      component: EvaluationsView,
     },
     {
       path: "/deliveries",

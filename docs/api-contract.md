@@ -286,3 +286,9 @@ Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入�
 所有计数为非负整数，七组件合计必须等于total_characters；图示数值仅说明结构。字段集合、method、unit、数值和合计严格验证，非法/旧版/缺失为null，不修正成零或重新估算。仅started携带才有效，finished不能替代或覆盖；取消、失败和尚未结束的尝试仍可具有有效字符统计，usage_source继续保持其真实状态。
 
 统计是最终Provider中立system/messages/tools对象经json.dumps(ensure_ascii=False)序列化后的Unicode字符，含转义/结构，不是供应商wire、Token或费用。instructions统计system序列化字符串，tool_catalog统计整个tools数组；message.content块按已确认配对的工具结果分别归skills/retrieval/tool_results，其他内容及message中role/content以外的扩展字段值归history，剩余角色/字段名和JSON结构归envelope。仅唯一且先出现的assistant tool_use可为user tool_result建立归属，加载Skill正文/资源和search_knowledge分别归对应项；错序/孤立/重复ID不猜来源。摘要、图片及provider_state按当前请求本身统计，不还原已压缩来源；不能把Skills字符项解释为其完整因果成本。
+
+### Vue 离线评测请求恢复
+
+Vue仅提交固定`engineering-v1`任务集目录返回的`suite_sha256`、development/holdout/all及`mode=offline`；接收和取消均使用随机Idempotency-Key。网络错误或未明确拒绝的409保留原身份，刷新重试也固定原指纹与划分。明确无副作用拒绝（X-Eventide-Mutation-Outcome: rejected）或403/404/422才允许新请求身份，成功202只代表持久接收，运行结果从详情和报告查询。
+
+详情的queued/running/completed/failed/interrupted与逐题passed分别展示；passed=null、duration_ms=null不显示为false或0。报告接口失败不会抹掉运行详情，下载内容保留schema v2原字段和scripted_mechanism_validation/billing_applicable=false标记。`#/evaluations?evaluation=<id>`可恢复选择，但客户端必须核对详情project_id与当前项目；切项目或选择其他评测时丢弃迟到响应。
