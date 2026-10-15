@@ -21,6 +21,7 @@ from eventide.budget_prices import PriceVersion
 from eventide.budgets import BudgetExceeded, BudgetScope
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
+from eventide.execution_snapshots import ExecutionSnapshots
 from eventide.executor import (
     ApprovalHandler,
     CommandExecutor,
@@ -171,6 +172,7 @@ class RuntimeHost:
         self._lease = HostLease(store.path.parent if store else self.settings.state_dir)
         try:
             self.store = store or RuntimeStore(self.settings.state_dir / "runtime.sqlite")
+            self.execution_snapshots = ExecutionSnapshots(self.state_dir)
             self._recover_interrupted_runs()
             self._secret_box = SecretBox(self.settings.state_dir)
             self._provider_secret_error: str | None = None
@@ -193,6 +195,8 @@ class RuntimeHost:
             tools=self.tools,
         )
         self._workspace_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._snapshot_preparing: set[str] = set()
         self._admissions: dict[str, str] = {}
         self._admission_done: dict[str, _Admission] = {}
         self._active_tasks: set[asyncio.Task[Any]] = set()
@@ -425,7 +429,7 @@ class RuntimeHost:
             "workspace_id": workspace.workspace_id,
             "project_id": workspace.project_id,
             "source_workspace_id": workspace.source_workspace_id,
-            "working_directory": str(self.sessions.working_directory(session_id)),
+            "working_directory": str(Path(workspace.path) / session["working_directory"]),
             "created_at": session["created_at"],
             "updated_at": activity["updated_at"],
             "title": title[:96],
@@ -436,6 +440,7 @@ class RuntimeHost:
             if run
             else "idle",
             "latest_run": run,
+            "execution": self.run_execution(run["id"]) if run else {"kind": "source"},
             "task_plan": self.store.task_plan(session_id) or [],
             "active_task_id": task_state["active_task_id"],
             "task_state": task_state,
@@ -878,7 +883,7 @@ class RuntimeHost:
         if (
             task is None
             and intent is not None
-            and self._admissions.get(intent["workspace_id"]) == run_id
+            and self._admissions.get(self._execution_key(run_id, intent)) == run_id
             and not self.store.run_is_terminal(run_id)
         ):
             self._finish_admitted(run_id, asyncio.CancelledError())
@@ -908,6 +913,11 @@ class RuntimeHost:
         approval_handler: ApprovalHandler | None = None,
     ) -> RunResult:
         session_id = self.create_session(request.session_id)
+        if request.execution_target != "source":
+            run_id = await self.admit_run(replace(request, session_id=session_id))
+            return await self.start_admitted_run(
+                run_id, approval_handler=approval_handler, sink=sink,
+            )
         return await self._admit(session_id, request, None, sink, approval_handler)
 
     async def continue_session(
@@ -919,6 +929,12 @@ class RuntimeHost:
         run_id: str | None = None,
     ) -> RunResult:
         session_id = request if isinstance(request, str) else request.session_id
+        if self.session_execution_target(session_id) == "snapshot":
+            identity = run_id or f"run_{uuid.uuid4().hex[:16]}"
+            await self.admit_continue(session_id, identity)
+            return await self.start_admitted_run(
+                identity, approval_handler=approval_handler, sink=sink,
+            )
         return await self._admit(
             session_id,
             None,
@@ -931,12 +947,59 @@ class RuntimeHost:
     def validate_continue(self, session_id: str) -> WorkspaceRecord:
         """Validate recovery admission before an asynchronous transport accepts it."""
         workspace = self.sessions.workspace(session_id)
+        if self.session_execution_target(session_id) == "snapshot":
+            self._validate_continue(workspace, self.store.latest_run(session_id))
+            return workspace
         root = Path(workspace.path)
         if not root.is_dir() or root.resolve() != root:
             raise ValueError("Workspace missing or path identity changed")
         self.sessions.working_directory(session_id)
         self._validate_continue(workspace, self.store.latest_run(session_id))
         return workspace
+
+    def _execution_binding(self, run_id: str | None) -> dict[str, Any] | None:
+        intent = self._admitted_intent(run_id) if run_id else None
+        return intent.get("execution_binding") if intent else None
+
+    @staticmethod
+    def _execution_key(run_id: str, intent: dict[str, Any]) -> str:
+        if intent.get("execution_binding", {}).get("kind") == "snapshot":
+            return f"snapshot_run:{run_id}"
+        return str(intent["workspace_id"])
+
+    def session_execution_target(self, session_id: str) -> str:
+        run = self.store.latest_run_summary(session_id)
+        binding = self._execution_binding(run["id"]) if run else None
+        return binding["kind"] if binding else "source"
+
+    def session_busy(self, session_id: str) -> bool:
+        return self._session_locks[session_id].locked() or any(
+            admission.session_id == session_id for admission in self._admission_done.values()
+        )
+
+    def run_execution(self, run_id: str) -> dict[str, Any]:
+        binding = self._execution_binding(run_id)
+        if not binding:
+            return {"kind": "source"}
+        return {key: binding[key] for key in (
+            "kind", "workspace_id", "snapshot_id", "working_directory", "skipped",
+        )}
+
+    @asynccontextmanager
+    async def _session_execution(self, session_id: str, run_id: str) -> AsyncIterator[None]:
+        lock = self._session_locks[session_id]
+        while True:
+            await lock.acquire()
+            pending = next((value for identity, value in self._admission_done.items()
+                            if value.session_id == session_id and identity != run_id), None)
+            if pending is None:
+                break
+            lock.release()
+            await pending.done.wait()
+        try:
+            yield
+        finally:
+            lock.release()
 
     def workspace_busy(self, workspace_id: str) -> bool:
         return workspace_id in self._admissions or self._workspace_locks[workspace_id].locked()
@@ -1336,6 +1399,16 @@ class RuntimeHost:
         workspace = self.sessions.workspace(session_id)
         if run_id in self._admission_done or self.store.get_run_identity(run_id):
             raise ValueError("Run identity already used")
+        if self.session_busy(session_id):
+            raise ValueError("Session is busy")
+        if request and request.execution_target not in {"source", "snapshot"}:
+            raise ValueError("Unknown execution target")
+        if (request and request.execution_target == "snapshot") or (
+            request is None and self.session_execution_target(session_id) == "snapshot"
+        ):
+            return await self._reserve_snapshot_run(
+                session_id, run_id, request, workspace, request_fingerprint,
+            )
         if self.workspace_busy(workspace.workspace_id):
             raise ValueError("Workspace is busy")
         root = Path(workspace.path)
@@ -1420,6 +1493,126 @@ class RuntimeHost:
             if not already_active:
                 self._active_tasks.discard(task)
 
+    async def _reserve_snapshot_run(
+        self, session_id: str, run_id: str, request: RunRequest | None,
+        workspace: WorkspaceRecord, request_fingerprint: str | None,
+    ) -> str:
+        if request and run_policy.normalize_mode(request.mode) != "plan":
+            raise ValueError("Snapshot execution requires Plan mode")
+        task = asyncio.current_task()
+        assert task is not None
+        already_active = task in self._active_tasks
+        self._active_tasks.add(task)
+        try:
+            async with self._session_locks[session_id]:
+                previous = self.store.latest_run(session_id)
+                if request and previous and previous["status"] == "interrupted":
+                    raise ValueError("Session is parked; use Continue")
+                source_id = previous["id"] if previous and request is None else None
+                self._admission_done[run_id] = _Admission(session_id, asyncio.Event())
+                self._admissions[f"snapshot_run:{run_id}"] = run_id
+                try:
+                    intent = self._run_intent(request, source_id, session_id)
+                    if source_id:
+                        await self._admission_check(self._validate_continue, workspace, previous)
+                        binding = self._execution_binding(source_id)
+                        assert binding is not None
+                    else:
+                        if (self.workspace_busy(workspace.workspace_id)
+                                and workspace.workspace_id not in self._snapshot_preparing):
+                            raise ValueError("Workspace is busy")
+                        async with self._workspace_execution(workspace.workspace_id):
+                            self._snapshot_preparing.add(workspace.workspace_id)
+                            try:
+                                if self.store.workspace_has_unknown_outcome(workspace.workspace_id):
+                                    raise ValueError("Workspace has an unresolved tool outcome")
+                                root = Path(workspace.path)
+                                self.sessions.working_directory(session_id)
+                                session = self.store.get_session(session_id)
+                                assert session is not None
+                                binding = await self._admission_check(
+                                    self.execution_snapshots.create, workspace.workspace_id, root,
+                                    session["working_directory"],
+                                )
+                                intent["skill_snapshot"] = await self._freeze_skills(
+                                    workspace, request,
+                                )
+                                current = await self._admission_check(workspace_checkpoint, root)
+                                if current != binding["source_checkpoint"]:
+                                    raise ValueError(
+                                        "Source Workspace changed during snapshot admission"
+                                    )
+                            finally:
+                                self._snapshot_preparing.discard(workspace.workspace_id)
+                    if "execution_config" not in intent:
+                        saved = self.store.workspace_execution_config(workspace.workspace_id)
+                        if saved:
+                            intent["execution_config"] = saved
+                    checkpoint = await self._admission_check(
+                        self.execution_snapshots.checkpoint, binding,
+                    )
+                    ids = list(request.attachment_ids) if request else []
+                    records = attachments.load_attachments(self.state_dir, session_id, ids)
+                    attachments.validate_for_provider(records, self.settings.provider)
+                    payload = {
+                        **intent, "session_id": session_id, "workspace_id": workspace.workspace_id,
+                        "project_id": workspace.project_id,
+                        "source_workspace_id": workspace.source_workspace_id,
+                        "attachment_ids": ids, "continuation_of": source_id,
+                        "execution_binding": binding,
+                        "request_fingerprint": request.request_fingerprint
+                        if request else request_fingerprint,
+                    }
+                    facts = [("run.admitted", self._semantic(payload), "system", "user")]
+                    if previous and request is None:
+                        facts.extend(self._recovery_facts(previous))
+                    if request:
+                        facts.append(("message.user", {
+                            "message": self._semantic(
+                                attachments.compose_message(request.prompt, records)
+                            ), "attachment_ids": ids,
+                        }, "user", "user"))
+                    facts.append(("workspace.checkpoint", {"checkpoint": checkpoint},
+                                  "system", "runtime"))
+                    turn_id = self.store.admit_run(
+                        run_id, session_id, facts, continuation_of=source_id,
+                    )
+                    attachments.mark_attachments_used(self.state_dir, session_id, ids)
+                    return turn_id
+                except BaseException as exc:
+                    self._finish_admitted(run_id, exc)
+                    self._release_admission(run_id)
+                    raise
+        finally:
+            if not already_active:
+                self._active_tasks.discard(task)
+
+    async def _execute_snapshot_run(
+        self, session_id: str, run_id: str, workspace: WorkspaceRecord,
+        request: RunRequest | None, sink: EventSink | None,
+        approval_handler: ApprovalHandler | None, binding: dict[str, Any],
+    ) -> RunResult:
+        admitted = self.store.get_run_identity(run_id)
+        intent = self._admitted_intent(run_id)
+        if not admitted or not intent or self.store.run_is_terminal(run_id):
+            raise ValueError("Snapshot Run is not awaiting execution")
+        if binding["workspace_id"] != workspace.workspace_id or intent["mode"] != "plan":
+            raise ValueError("Snapshot execution binding mismatch")
+        async with (
+            self._session_execution(session_id, run_id),
+            self._workspace_execution(self._execution_key(run_id, intent), run_id),
+        ):
+            await self._admission_check(self.execution_snapshots.restore, binding)
+            if self._closed:
+                raise RuntimeError("Host is closed")
+            task = asyncio.current_task()
+            assert task is not None
+            self._run_tasks[run_id] = task
+            return await self._execute(
+                session_id, run_id, workspace, request, admitted["continuation_of"], sink,
+                approval_handler, existing_turn_id=admitted["turn_id"], execution_binding=binding,
+            )
+
     def _finish_admitted(self, run_id: str, error: BaseException) -> None:
         """Close accepted work that stopped before its execution could write a terminal."""
         if (
@@ -1440,7 +1633,8 @@ class RuntimeHost:
             )
 
     def start_admitted_run(
-        self, run_id: str, *, approval_handler: ApprovalHandler | None = None
+        self, run_id: str, *, approval_handler: ApprovalHandler | None = None,
+        sink: EventSink | None = None,
     ) -> asyncio.Task[RunResult]:
         """Register cancellation ownership synchronously, before the worker can run."""
         run = self.store.get_run_identity(run_id)
@@ -1449,7 +1643,7 @@ class RuntimeHost:
             raise ValueError("Run is not awaiting execution")
         if run_id in self._run_tasks:
             raise ValueError("Run is already scheduled")
-        if self._admissions.get(intent["workspace_id"]) != run_id:
+        if self._admissions.get(self._execution_key(run_id, intent)) != run_id:
             raise ValueError("Run admission is not owned by this Host")
         if self._closed:
             raise ValueError("Host is closed")
@@ -1470,7 +1664,7 @@ class RuntimeHost:
                 run["session_id"],
                 request,
                 bool(run["continuation_of"]),
-                None,
+                sink,
                 approval_handler,
                 run_id=run_id,
             )
@@ -1609,11 +1803,20 @@ class RuntimeHost:
             if self._configuring:
                 raise ValueError("Provider configuration is changing")
             workspace = self.sessions.workspace(session_id)
+            binding = self._execution_binding(admitted_run_id)
+            if binding:
+                return await self._execute_snapshot_run(
+                    session_id, admitted_run_id, workspace, request, sink,
+                    approval_handler, binding,
+                )
             root = Path(workspace.path)
             if not root.is_dir() or root.resolve() != root:
                 raise ValueError("Workspace missing or path identity changed")
             self.sessions.working_directory(session_id)
-            async with self._workspace_execution(workspace.workspace_id, admitted_run_id):
+            async with (
+                self._session_execution(session_id, admitted_run_id),
+                self._workspace_execution(workspace.workspace_id, admitted_run_id),
+            ):
                 if self._closed:
                     raise RuntimeError("Host is closed")
                 if self.store.workspace_has_unknown_outcome(workspace.workspace_id):
@@ -1701,6 +1904,12 @@ class RuntimeHost:
         events = self.store.run_events(run_id)
         if not workspace or not events:
             return None
+        binding = self._execution_binding(run_id)
+        if binding:
+            try:
+                return [], self.execution_snapshots.checkpoint(binding)
+            except (ValueError, OSError):
+                return ["execution snapshot changed or missing"], None
         report = changed_since(Path(workspace.path), events[-1]["ts"])
         if report is None:
             return None
@@ -1716,12 +1925,19 @@ class RuntimeHost:
     ) -> None:
         if not previous or previous["status"] != "interrupted":
             raise ValueError("Only an interrupted, parked session can Continue")
-        if not workspace.git_root:
-            raise ValueError("Continue requires a Git workspace")
-        evidence = workspace_checkpoint(Path(workspace.path))
+        binding = self._execution_binding(previous["id"])
+        evidence: dict[str, Any] | None
+        if binding:
+            evidence = self.execution_snapshots.checkpoint(binding)
+        else:
+            if not workspace.git_root:
+                raise ValueError("Continue requires a Git workspace")
+            evidence = workspace_checkpoint(Path(workspace.path))
         if evidence is None or evidence != previous["checkpoint"]:
             raise ValueError("Workspace changed or checkpoint unavailable; session remains parked")
         events = self.store.run_events(previous["id"])
+        if any(event["type"] == "tool.outcome_unknown" for event in events):
+            raise ValueError("Unknown tool outcome; session remains parked")
         last_checkpoint = max(
             (e["session_seq"] for e in events if e["type"] == "workspace.checkpoint"), default=0
         )
@@ -1809,6 +2025,7 @@ class RuntimeHost:
         existing_turn_id: str | None = None,
         readonly_profile: ReadonlyProfile | None = None,
         snapshot_root: Path | None = None,
+        execution_binding: dict[str, Any] | None = None,
         execution_config: dict[str, Any] | None = None,
     ) -> RunResult:
         started = time.perf_counter()
@@ -1817,8 +2034,17 @@ class RuntimeHost:
             session_id,
             continuation_of=continuation_of,
         )
-        workspace_root = snapshot_root or Path(workspace.path)
-        working_root = snapshot_root or self.sessions.working_directory(session_id)
+        if execution_binding:
+            workspace_root, working_root = self.execution_snapshots.restore(execution_binding)
+        else:
+            workspace_root = snapshot_root or Path(workspace.path)
+            working_root = snapshot_root or self.sessions.working_directory(session_id)
+
+        def execution_checkpoint(_root: Path) -> dict[str, Any] | None:
+            if execution_binding:
+                return self.execution_snapshots.checkpoint(execution_binding)
+            return workspace_checkpoint(_root)
+
         manager = MCPManager()
         usage = {"input_tokens": 0, "output_tokens": 0}
         output, steps, tool_count = "", 0, 0
@@ -1884,6 +2110,7 @@ class RuntimeHost:
                     "continuation_of": continuation_of,
                     "resumed_task_id": resumed_task_id,
                     **({"execution_config": execution_config} if execution_config else {}),
+                    **({"execution_binding": execution_binding} if execution_binding else {}),
                     **(
                         {
                             "parent_run_id": readonly_profile.parent_run_id,
@@ -1928,7 +2155,7 @@ class RuntimeHost:
                 run_id,
                 "workspace.checkpoint",
                 {
-                    "checkpoint": await asyncio.to_thread(workspace_checkpoint, workspace_root),
+                    "checkpoint": await asyncio.to_thread(execution_checkpoint, workspace_root),
                 },
                 sink,
             )
@@ -1973,6 +2200,7 @@ class RuntimeHost:
             if (
                 self._enable_mcp
                 and not readonly_profile
+                and not execution_binding
                 and not execution_config.get("disable_mcp")
             ):
                 configs = manager.load_configs(
@@ -2217,7 +2445,8 @@ class RuntimeHost:
 
             worker_tools = (
                 [READONLY_WORKER_TOOL]
-                if self.settings.workers_enabled and workspace.git_root and not readonly_profile
+                if self.settings.workers_enabled and workspace.git_root
+                and not readonly_profile and not execution_binding
                 else []
             )
             tools = [
@@ -2400,8 +2629,10 @@ class RuntimeHost:
                     {
                         "call_id": call.id,
                         "name": call.name,
-                        "readonly": False,
+                        "readonly": bool(execution_binding),
                         "workspace_id": workspace.workspace_id,
+                        **({"snapshot_id": execution_binding["snapshot_id"]}
+                           if execution_binding else {}),
                         "error": self._semantic(content),
                     },
                     sink,
@@ -2615,7 +2846,7 @@ class RuntimeHost:
                             "workspace.checkpoint",
                             {
                                 "checkpoint": await asyncio.to_thread(
-                                    workspace_checkpoint, workspace_root
+                                    execution_checkpoint, workspace_root
                                 ),
                             },
                             sink,
@@ -2644,13 +2875,15 @@ class RuntimeHost:
                         "workspace.checkpoint",
                         {
                             "checkpoint": await asyncio.to_thread(
-                                workspace_checkpoint, workspace_root
+                                execution_checkpoint, workspace_root
                             ),
                         },
                         sink,
                     )
                 status, error = "interrupted", park_message
             else:
+                if execution_binding:
+                    await asyncio.to_thread(self.execution_snapshots.restore, execution_binding)
                 status, error = "completed", None
         except _UnknownToolOutcome as exc:
             status, error, park_kind = "interrupted", str(exc), "unknown_tool_outcome"
@@ -2658,7 +2891,7 @@ class RuntimeHost:
             await self._emit(
                 run_id,
                 "workspace.checkpoint",
-                {"checkpoint": await asyncio.to_thread(workspace_checkpoint, workspace_root)},
+                {"checkpoint": await asyncio.to_thread(execution_checkpoint, workspace_root)},
                 sink,
             )
             steps = max(
@@ -2685,20 +2918,26 @@ class RuntimeHost:
                         "workspace.checkpoint",
                         {
                             "checkpoint": await asyncio.to_thread(
-                                workspace_checkpoint, workspace_root
+                                execution_checkpoint, workspace_root
                             ),
                         },
                         sink,
                     )
+            unknown = (
+                any(event["type"] == "tool.outcome_unknown"
+                    for event in self.store.run_events(run_id))
+                if execution_binding else
+                self.store.workspace_has_unknown_outcome(workspace.workspace_id)
+            )
             await self._emit(
                 run_id,
                 "run.interrupted",
                 {
-                    "error": "Run cancelled; tool outcome unknown, Workspace execution blocked"
-                    if self.store.workspace_has_unknown_outcome(workspace.workspace_id)
+                    "error": "Run cancelled; tool outcome unknown, execution blocked"
+                    if unknown
                     else "Run cancelled; session parked",
                     "reason": "unknown_tool_outcome"
-                    if self.store.workspace_has_unknown_outcome(workspace.workspace_id)
+                    if unknown
                     else "cancelled",
                     "usage": usage,
                     "steps": steps,

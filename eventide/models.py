@@ -62,6 +62,7 @@ class RunRequest:
     generation: dict[str, Any] = field(default_factory=dict)
     request_fingerprint: str | None = None
     selected_skills: list[str] | None = None
+    execution_target: str = "source"
 
 
 @dataclass(frozen=True, slots=True)

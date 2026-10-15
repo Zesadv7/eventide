@@ -6,7 +6,7 @@ Eventide v0.4 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHo
 
 主要能力：
 
-- async-first Agent loop，同一 Workspace 串行、不同 Workspace 并发；
+- async-first Agent loop，同一 Session 串行；显式 Plan 固定快照可在同一项目并发，直接源目录执行仍独占；
 - 事件驱动的有界任务计划、依赖校验与 Git worktree 管理；
 - Anthropic Messages、OpenAI-compatible Chat Completions 和 OpenAI Responses API；
 - `ALLOW / ASK / DENY` 权限决策与 CLI、Web 一次性审批；
@@ -133,7 +133,15 @@ Project 将一个本地源码项目与它的 Git worktree 工作副本聚合起�
 
 `GET /api/projects`、`/api/projects/{id}`、`/api/projects/{id}/workspaces` 和 `/api/projects/{id}/sessions` 可查询项目及其全部执行副本、对话。现有添加工作区接口继续使用，响应增加 `project_id`、`source_workspace_id`、`kind`；不接受客户端重绑既有对话。创建受管 worktree 会自动注册副本，交付 Writer 与源项目共享 Project 身份，新 Run 的接收及开始事件固定记录该归属。
 
-首次升级自动补齐身份关系，既有 Workspace、Session、Run 和事件保持原身份及原文；旧路径已丢失或无法验证 Git 时保留为独立项目，后续不静默改绑。源项目还有执行副本时不能移除注册；任何有会话历史的 Workspace 仍不能移除。这里只完成项目关联，**同 Workspace 仍串行**，快照并发和调度队列继续按 P2/P3 实施。
+首次升级自动补齐身份关系，既有 Workspace、Session、Run 和事件保持原身份及原文；旧路径已丢失或无法验证 Git 时保留为独立项目，后续不静默改绑。源项目还有执行副本时不能移除注册；任何有会话历史的 Workspace 仍不能移除。直接源目录仍串行；显式 Plan 快照已可在同一项目并发，写任务独立副本和调度队列继续按 P2/P3 实施。
+
+## 同项目 Plan 快照并发
+
+HTTP 创建 Run 时传 `execution_target: "snapshot"` 和 `mode: "plan"`，或 Python 使用 `RunRequest(..., mode="plan", execution_target="snapshot")`，即可让不同 Session 在同一个项目上同时调查。省略 `execution_target` 仍使用原来的 `source` 执行方式；此切片不改变旧 CLI。一个 Session 同时只能执行一个 Run。Run 和 Session 查询返回 `execution`，说明实际使用源目录还是哪个固定快照。
+
+接收时短暂独占源 Workspace，从当前 Git 可见源码（包含未提交改动）创建持久副本，复制前后验证 checkpoint。快照要求有可信 Git HEAD；最多 2,000 个候选文件、10 MiB 文本，单文件最多 1 MiB；忽略、密钥、链接、二进制与过大文件排除，排除数在 `execution.skipped` 显示。模型运行期间不占源目录锁，其他 Session 的快照和直接源操作可以继续；新快照不能在正在直接写源目录时创建。
+
+快照使用固定 Skills 和快照内文件工具，暂不接外部 MCP、源目录知识索引或嵌套 worker，也没有 Shell/写文件/Skill 脚本权限。Continue 和重启后的人工恢复沿用原副本，源代码后来变化不改变该次调查；副本丢失或内容被改则拒绝运行。快照产物保存在状态根，不能手工清理后期待恢复；文件只读位与摘要校验不等于操作系统沙箱。写任务独立 worktree、共享 Git 协调及持久排队仍在后续 P2/P3 中。
 
 ## Workspace 与 Continue
 
