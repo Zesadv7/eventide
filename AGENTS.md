@@ -138,8 +138,8 @@ uv run eventide eval evals/smoke.yaml
 | X1 | 待开始 | CLI能力清单逐项承接，包括历史导入、worktree、export/trace/检索/评测/交付。 |
 | X2 | 待开始 | 删除用户命令行产品和旧前端/专属死代码，不留转发空壳。 |
 | X3 | 待开始 | 打包/Docker/示例/CI/文档同步；help/eval门禁改服务冒烟/Python接口，不降低范围。 |
-| U1 | 进行中 | Host尝试身份/SDK禁隐式重试、provider归一化、去重账本、Run/Session全历史及子Run查询已接线；70项相关集成通过，未知/取消/父子/重启回归通过。流式终态已随A6接入，embedding接线待C；README/architecture/api-contract/ADR-049同步。 |
-| U2 | 进行中 | 2026-10-16：原子预留/结算和价格快照已接Host主Agent、摘要、worker每次尝试；权威项目/交付归属、Continue共享桶与80%事件可用。新增预算/价格/未知处理HTTP控制面，严格本机同源、持久幂等与配置冲突保护；人工核对保留未知或补记总量，不修改Provider用量。41项HTTP专项、完整909通过/1跳过且覆盖93.70%、Ruff/Mypy76模块及smoke12/12通过；后续补充确定拒绝的持久响应标记，活跃请求结束后可用新键核对，未知409继续保留原键，74项预算/HTTP/Skills回归及Ruff/Mypy通过。README/architecture/api-contract/ADR-059/062/064同步。Vue预算/费用已接并通过浏览器旅程；P调度仍待完成；连接探测与API embedding尚未纳入，不标整体完成。 |
+| U1 | 进行中 | 2026-10-16：连接探测已接真实control Run、共享模型槽及Run/UTC日预算；21项新离线专项和既有160项回归通过，README/architecture/api-contract/ADR-067同步。HTTP幂等接收由下一A2切片补齐；API embedding仍随C实施。 Host尝试身份/SDK禁隐式重试、provider归一化、去重账本、Run/Session全历史及子Run查询已接线；70项相关集成通过，未知/取消/父子/重启回归通过。流式终态已随A6接入，embedding接线待C；README/architecture/api-contract/ADR-049同步。 |
+| U2 | 进行中 | 2026-10-16：原子预留/结算和价格快照已接Host主Agent、摘要、worker每次尝试；权威项目/交付归属、Continue共享桶与80%事件可用。新增预算/价格/未知处理HTTP控制面，严格本机同源、持久幂等与配置冲突保护；人工核对保留未知或补记总量，不修改Provider用量。41项HTTP专项、完整909通过/1跳过且覆盖93.70%、Ruff/Mypy76模块及smoke12/12通过；后续补充确定拒绝的持久响应标记，活跃请求结束后可用新键核对，未知409继续保留原键，74项预算/HTTP/Skills回归及Ruff/Mypy通过。README/architecture/api-contract/ADR-059/062/064同步。Vue预算/费用已接并通过浏览器旅程；P调度仍待完成；连接探测已接Run/UTC日预算，可信None项目不放松普通Run归属；API embedding仍待C，不标整体完成。 |
 | U3 | 进行中 | 2026-10-16：Vue费用/预算/价格控制面已接入，项目用P1真实身份、全历史不依赖分页，未知不当零、币种与来源分开，保持配置草稿和幂等请求。35项前端测试、4条真实API页面旅程（含价格固定、预算阻止、Continue和快照并发）、typecheck/build/format及独立只读复核通过；集成后端965通过/5个显式Docker跳过、覆盖93.79%，Ruff/Mypy77模块通过。README/architecture/api-contract/ADR-064同步；输入组成、高消耗统计及交付页面待完成。 请求明细现透传已观测供应商/耗时/结束原因，历史缺失为null、不从墙钟推算；90项usage/预算回归、43项前端回归、真实API用量旅程、Ruff/Mypy81及typecheck/build通过。 |
 | U4 | 待开始 | 随S/C/D：渐进加载/分页/去重/片段预算、摘要阈值间隔、减少重复委派、无进展停止、稳定缓存前缀，参数实验。 |
 | U5 | 待开始 | 随B/R：冻结集单项及组合消融，成功计数/总Token及费用/延迟p50/p95/分类额外开销/缓存覆盖/失败与未知；总费用÷成功数，无成功不可算。 |

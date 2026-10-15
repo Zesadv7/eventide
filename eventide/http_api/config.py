@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,64 +14,9 @@ from eventide.config import normalize_provider
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.schemas import ProviderConfigBody
 from eventide.normalization import normalize, redact
+from eventide.provider_probe import probe_error
 from eventide.secrets import SecretKeyError
-
-_ERROR_BY_CLASS = {
-    "AuthenticationError": ("authentication", "鉴权失败，请检查 API Key"),
-    "PermissionDeniedError": ("permission_denied", "账号无权限，请检查 API Key 的访问范围"),
-    "NotFoundError": ("model_not_found", "模型不存在或当前账号无权访问"),
-    "RateLimitError": ("rate_limit", "请求受到限流，请稍后重试"),
-    "BadRequestError": ("bad_request", "请求被模型服务拒绝，请检查模型名称与参数"),
-}
-
-
-def probe_error(exc: Exception) -> tuple[str, str]:
-    # 优先按异常类型分类：adapter 用 `raise ProviderError(...) from exc` 把原始
-    # SDK 异常挂在 __cause__ 链上；openai/anthropic 共用稳定类名，故按类名匹配。
-    node: BaseException | None = exc
-    seen: set[int] = set()
-    while node is not None and id(node) not in seen:
-        seen.add(id(node))
-        name = type(node).__name__
-        if name in _ERROR_BY_CLASS:
-            return _ERROR_BY_CLASS[name]
-        if name in ("APIConnectionError", "ConnectionError"):
-            return "network", "无法连接到模型服务，请检查 Base URL 和网络"
-        if name in ("APITimeoutError", "TimeoutError"):
-            return "timeout", "连接超时，请检查接口地址或网络"
-        node = node.__cause__ or node.__context__
-    # 回退到字符串匹配，覆盖非 SDK 或文本透传的错误。
-    text = str(exc).lower()
-    if "no model api key" in text or "api key configured" in text:
-        return "missing_api_key", "尚未配置 API Key"
-    if "无法解密" in text or "eventide_secret_key" in text:
-        return "decrypt_error", "已保存的 API Key 无法解密，请重新输入或恢复主密钥"
-    if any(token in text for token in ("401", "unauthorized", "authentication", "invalid api key")):
-        return "authentication", "鉴权失败，请检查 API Key"
-    if any(token in text for token in ("model_not_found", "model not found", "does not exist")):
-        return "model_not_found", "模型不存在或当前账号无权访问"
-    if "529" in text or "overloaded" in text:
-        return "overloaded", "模型服务过载，请稍后重试"
-    if "429" in text or "rate limit" in text:
-        return "rate_limit", "请求受到限流，请稍后重试"
-    if "timeout" in text or "timed out" in text:
-        return "timeout", "连接超时，请检查接口地址或网络"
-    if any(
-        token in text
-        for token in (
-            "connection",
-            "connect error",
-            "dns",
-            "name resolution",
-            "ssl",
-            "certificate",
-            "tls",
-        )
-    ):
-        return "network", "无法连接到模型服务，请检查 Base URL 和网络"
-    if "unsupported provider" in text:
-        return "provider_error", "不支持的 Provider，请检查选择"
-    return "provider_error", "模型服务返回错误，请检查 Provider、模型名称和接口地址"
+from eventide.usage import build_usage_ledger
 
 
 def create_router(context: ApiContext) -> APIRouter:
@@ -131,6 +77,17 @@ def create_router(context: ApiContext) -> APIRouter:
         key = body.api_key.get_secret_value() if body.api_key else None
         started = time.perf_counter()
         checked_at = datetime.now(timezone.utc).isoformat()
+        safe_model = normalize(body.model, (key or "", agent_runtime.settings.api_key or ""))
+        run_id = f"probe_{uuid.uuid4().hex}"
+
+        def accounting() -> dict[str, Any]:
+            exists = agent_runtime.store.get_run_identity(run_id) is not None
+            return {
+                "run_id": run_id if exists else None,
+                "usage": build_usage_ledger(
+                    agent_runtime.store.usage_events(run_id=run_id) if exists else []
+                ),
+            }
         try:
             await asyncio.wait_for(
                 agent_runtime.probe_provider(
@@ -138,15 +95,17 @@ def create_router(context: ApiContext) -> APIRouter:
                     api_key=key,
                     base_url=body.base_url,
                     model=body.model,
+                    run_id=run_id,
                 ),
                 timeout=30,
             )
         except Exception as exc:
             error_type, message = probe_error(exc)
             return {
+                **accounting(),
                 "success": False,
                 "provider": normalize_provider(body.provider),
-                "model": body.model,
+                "model": safe_model,
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
                 "checked_at": checked_at,
                 "message": message,
@@ -154,9 +113,10 @@ def create_router(context: ApiContext) -> APIRouter:
                 "detail": normalize(redact(str(exc)), (key or "",)),
             }
         return {
+            **accounting(),
             "success": True,
             "provider": normalize_provider(body.provider),
-            "model": body.model,
+            "model": safe_model,
             "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             "checked_at": checked_at,
             "message": "连接成功",

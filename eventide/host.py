@@ -18,7 +18,7 @@ from typing import Any, Protocol
 
 from eventide import attachments, model_catalog, run_policy
 from eventide.budget_prices import PriceVersion
-from eventide.budgets import BudgetExceeded, BudgetScope
+from eventide.budgets import BudgetExceeded, BudgetScope, is_service_probe_run
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
 from eventide.execution_snapshots import ExecutionSnapshots
@@ -54,6 +54,7 @@ from eventide.policy import PolicyEngine
 from eventide.previews import PreviewStore, SafeTextBuffer
 from eventide.projections import TaskPlanProjection
 from eventide.provider_config import apply_provider_configuration
+from eventide.provider_probe import run_probe
 from eventide.providers import Provider, ProviderError, build_provider
 from eventide.rag.embedding import provider_from_settings
 from eventide.rag.index import INDEX_RELATIVE_PATH
@@ -703,7 +704,9 @@ class RuntimeHost:
         api_key: str | None,
         base_url: str | None,
         model: str,
+        run_id: str | None = None,
     ) -> ModelResponse:
+        await self.initialize()
         normalized = normalize_provider(provider)
         if normalized not in SUPPORTED_PROVIDERS:
             raise ValueError(f"Unsupported provider '{provider}'")
@@ -717,24 +720,7 @@ class RuntimeHost:
             base_url=base_url.strip() if base_url else None,
             model=model.strip(),
         )
-        probe = build_provider(probe_settings)
-        try:
-            async with self.dispatch.scheduler.model_slot():
-                return await probe.complete(
-                    ModelRequest(
-                        system="你是连接检查助手。",
-                        messages=[{"role": "user", "content": "请只回复：连接成功"}],
-                        tools=[],
-                        model=probe_settings.model,
-                        max_tokens=32,
-                    )
-                )
-        finally:
-            closer = getattr(probe, "close", None) or getattr(probe, "aclose", None)
-            if closer:
-                result = closer()
-                if inspect.isawaitable(result):
-                    await result
+        return await run_probe(self, probe_settings, build_provider, run_id=run_id)
 
     def _clean(self, value: Any) -> Any:
         return normalize(redact(value), (self.settings.api_key or "",))
@@ -2067,7 +2053,8 @@ class RuntimeHost:
             # An unstarted admission already has its authoritative checkpoint.
             # Replacing it with the current filesystem would hide queue-time drift.
             queued = not started and self._admitted_intent(run_id) is not None
-            evidence = None if queued else self._crash_gap_evidence(run_id)
+            evidence = (None if queued or is_service_probe_run(self.store, run_id)
+                        else self._crash_gap_evidence(run_id))
             if queued:
                 payload["reason"] = "host_stopped_before_dispatch"
             if evidence is not None:

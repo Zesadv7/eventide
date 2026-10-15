@@ -58,12 +58,13 @@ class BudgetScope:
 
 @dataclass(frozen=True)
 class BudgetContext:
-    project_id: str
+    project_id: str | None
     root_run_id: str
     delivery_id: str | None = None
 
     def __post_init__(self) -> None:
-        _text(self.project_id, "project identity")
+        if self.project_id is not None:
+            _text(self.project_id, "project identity")
         _text(self.root_run_id, "root Run identity")
         if self.delivery_id is not None:
             _text(self.delivery_id, "delivery identity")
@@ -74,11 +75,34 @@ class BudgetContext:
             scopes.append(BudgetScope("run", run_id))
         if self.delivery_id is not None:
             scopes.append(BudgetScope("delivery", self.delivery_id))
-        scopes.extend((
-            BudgetScope("project", self.project_id),
-            BudgetScope("day", utc_time(at).strftime("%Y-%m-%d")),
-        ))
+        if self.project_id is not None:
+            scopes.append(BudgetScope("project", self.project_id))
+        scopes.append(BudgetScope("day", utc_time(at).strftime("%Y-%m-%d")))
         return tuple(scopes)
+
+
+def is_service_probe_run(
+    store: RuntimeStore, run_id: str, events: list[dict[str, Any]] | None = None,
+) -> bool:
+    """Only a trusted, standalone connection-check Run can omit a project bucket."""
+    identity = store.get_run_identity(run_id)
+    if identity is None or identity["continuation_of"]:
+        return False
+    facts = events if events is not None else store.session_events(identity["session_id"])
+    controls = [e["payload"] for e in facts
+                if e["session_id"] == identity["session_id"] and e["type"] == "control.session"]
+    runs = [e for e in facts if e["run_id"] == run_id]
+    starts = [e["payload"] for e in runs if e["type"] == "run.started"]
+    return (
+        len(controls) == 1 and controls[0].get("kind") == "connection_probe"
+        and len(starts) == 1 and starts[0].get("source") == "connection_probe"
+        and starts[0].get("billing_scope") == "service"
+        and starts[0].get("project_id") is None
+        and not any(e["type"] == "run.admitted" for e in runs)
+        and not any(e["payload"].get("parent_run_id") or e["payload"].get("delivery_id")
+                    or e["payload"].get("execution_config", {}).get("writer_delivery_id")
+                    for e in runs)
+    )
 
 
 class BudgetExceeded(ValueError):
@@ -294,7 +318,7 @@ class BudgetLedger:
             return _receipt(state, attempt_id), additions
 
         return self.store.transact_facts(
-            session_id, (*BUDGET_FACTS, "run.admitted", "run.started"), decide,
+            session_id, (*BUDGET_FACTS, "run.admitted", "run.started", "control.session"), decide,
             run_id=run_id if attempt_started is not None else None,
         )
 
@@ -305,6 +329,11 @@ class BudgetLedger:
         identity = self.store.get_run_identity(run_id)
         if identity is None or identity["session_id"] != session_id:
             raise ValueError("Run/session identity mismatch")
+        if context.project_id is None and (
+            context.root_run_id != run_id or context.delivery_id is not None
+            or not is_service_probe_run(self.store, run_id, events)
+        ):
+            raise ValueError("Only a standalone connection probe can omit project ownership")
         parents: dict[str, str] = {}
         for event in events:
             if event["type"] in {"run.admitted", "run.started"} and event["run_id"]:

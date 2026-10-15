@@ -12,6 +12,10 @@ HTTP 状态码保持原义，JSON 错误包含 `code`、可读 `message` 与兼�
 
 模型配置连接检查仍返回 HTTP 200 及 success/error_type/message/detail，不属于 HTTP 错误包裹。SSE 与导出成功响应保持原媒体类型；在流已经开始后的传输失败不能改写成新的 JSON HTTP 响应。
 
+连接检查另返回`run_id`及`usage`（统一attempt账本）。接收前配置验证失败时run_id为null且无调用；已建立控制Run则成功及业务失败均返回精确身份。预算拒绝error_type为budget_exceeded。控制Session标记connection_probe，不可接受普通Run/Continue；不进入根Agent队列，使用共享模型槽、该Run及UTC日预算。取消/超时无usage保留未知，重启不重发。
+
+预算reservation.context.project_id为string|null；只有事务内验证的独立连接检查可以为null，其费用不归属控制Session存储目录所在项目。已有Run、每日usage/cost及未知核对接口均适用。HTTP幂等接收由下一A2切片补齐。
+
 ### 浏览器写请求与运行幂等 —— 已实现
 
 工具调用错误的canonical metadata含稳定code（invalid_arguments、invalid_tool_contract、unknown_tool、permission_denied、timeout、execution_failed、outcome_unknown）。第一次参数错误交回模型修正，再次参数错误结束该Run；错误结果仍保存，不自动重放已执行工具。截断响应的调用不会派发，其未执行事实补齐历史消息。

@@ -11,7 +11,12 @@ import json
 from typing import Any
 
 from eventide.budget_prices import CostLedger
-from eventide.budgets import BudgetContext, BudgetLedger, ReservationReceipt
+from eventide.budgets import (
+    BudgetContext,
+    BudgetLedger,
+    ReservationReceipt,
+    is_service_probe_run,
+)
 from eventide.models import ModelRequest
 from eventide.store import RuntimeStore
 
@@ -38,6 +43,8 @@ class ModelBudgetController:
         if run is None:
             raise ValueError("Run not found")
         session_id = run["session_id"]
+        if is_service_probe_run(self.store, run_id):
+            return session_id, BudgetContext(None, run_id)
         ancestor = run_id
         visited: set[str] = set()
         project_id: str | None = None
