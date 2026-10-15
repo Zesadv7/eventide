@@ -683,12 +683,19 @@ Vue集成验证：35项前端回归、typecheck/build/format与4条真实FastAPI
 
 ## ADR-065：调度从Run事实派生，根所有权与模型额度分开
 
-**状态：Accepted（独立组件）；Host/HTTP集成仍为Proposed。** P3保持进行中，不宣称生产已经限制4根/20等待/2模型请求。
+**状态：Accepted（底座及Host/HTTP接线）。** 前端与分发完整集成仍按P3/F/R验收。
 
 **底座决策：** 从既有admitted/started/终态事实按Store提交顺序构建队列，不按时钟排序、不另写状态源。只统计根Agent，持久parent_run_id子任务与没有admission的控制Run排除。4个根lease覆盖准备和实际清理，20个等待额度包含短期接收ticket；ticket不是202凭据，必须先完成持久接收。明确取消或拒绝不会制造Run，持久接收后不能直接丢弃ticket逃避容量。所有句柄按对象所有权核对，不能用相同ID的伪造句柄释放他人资源。
 
 **模型并发：** 单独2个模型槽，限制每次尝试而非整轮Run。父等待worker或backoff期间不持模型槽；worker不另抢根槽。该组件不产生Provider调用或用量事实；接线必须在获得模型槽后才做U2预留，等待期间取消不算真实尝试。
 
-**待集成约束：** 同Session最多一个未终态工作，队列只承接可靠冻结输入；源正在被直接修改时仍拒绝准备新副本。认领执行资源保持单进程同步操作，失败先补终态再清理并释放lease。重启先停驻旧任务，不自动重发写入或释放未知Token。Python/API/Delivery入口、主投影queued及队列页面必须一起验收后才能接受P3整体完成。
+**生产接线约束：** 同Session最多一个未终态工作，队列只承接可靠冻结输入；源正在被直接修改时仍拒绝准备新副本。认领执行资源保持单进程同步操作，失败先补终态再清理并释放lease。重启先停驻旧任务，不自动重发写入或释放未知Token。Python/API/Delivery入口、主投影queued及队列页面必须一起验收后才能接受P3整体完成。
 
-**验证：** 19项新组件测试及预算相关回归共66项通过，scheduler模块100%覆盖；Ruff和Mypy77模块通过。覆盖4+20边界、无副作用容量拒绝、准确Session/句柄所有权、提交顺序/时钟回拨、重启纯重建、子任务排除、FIFO可运行性、终态后保留清理所有权、模型槽取消/异常释放、四父等待子任务以及重试backoff释放。Host/HTTP均未修改，主链调度仍待验收。
+**验证：** 19项新组件测试及预算相关回归共66项通过，scheduler模块100%覆盖；Ruff和Mypy77模块通过。覆盖4+20边界、无副作用容量拒绝、准确Session/句柄所有权、提交顺序/时钟回拨、重启纯重建、子任务排除、FIFO可运行性、终态后保留清理所有权、模型槽取消/异常释放、四父等待子任务以及重试backoff释放。这些为独立底座阶段证据；Host/HTTP接线及新增验证见下文。
+
+
+**P3主链接线补充：** Host委派RunDispatch管理临时ticket/root/通知，只从既有事实投影接收队列；不增加第二事实源。Python/HTTP/Delivery writer共用同一个admission和等待/执行Task，Python返回最终RunResult；删除HTTP的执行task/reservation所有者。queued释放实际执行claim但保留Session身份；调度在同步claim后启动，精确取消/异常/实际清理结束后才释放根额度，控制面锁释放也唤醒队列。
+
+为避免把半成品源当基线，忙源直接拒绝；等待的source没有可信Git checkpoint则接收前拒绝。source/worktree在执行锁内重验，未started重启不补写当前checkpoint。非Git即时源执行保留原限制。每次模型attempt在拿到全局2槽后才做U2预留，backoff/工具/子任务等待释放槽；Delivery控制Run和readonly子Run不重复占根。配置守卫同时覆盖未start队列和准备ticket，不只看活跃Task。模型连接探测共享槽但仍未纳入Run账本。
+
+**接线验证：** 200项接收/快照/写副本/交付/worker/预算/HTTP回归及最终38项调度专项通过；scheduler与run_dispatch均100%覆盖，Ruff/Mypy81模块、help和smoke12/12通过。专项包含真实进程退出保留接收checkpoint、24接收/25拒绝、精确取消/无消费、Continue漂移、控制锁唤醒、启动失败释放、同步写重复取消、4父+8worker及5交付writer容量。前端与整包全量由集成任务单列，未调用真实模型。

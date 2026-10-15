@@ -20,7 +20,7 @@ def wait_for_run(client: TestClient, run_id: str):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         response = client.get(f"/api/runs/{run_id}")
-        if response.status_code == 200 and response.json()["status"] != "running":
+        if response.status_code == 200 and response.json()["status"] not in {"queued", "running"}:
             return response.json()
         time.sleep(0.01)
     raise AssertionError("run did not finish")

@@ -59,8 +59,6 @@ def require_local_request(request: Request) -> None:
 class ApiContext:
     runtime: RuntimeHost
     approvals: ApprovalBroker = field(default_factory=ApprovalBroker)
-    tasks: set[asyncio.Task[Any]] = field(default_factory=set)
-    reserved: set[str] = field(default_factory=set)
     local_proxy_peers: tuple[str, ...] = field(init=False)
 
     def __post_init__(self) -> None:

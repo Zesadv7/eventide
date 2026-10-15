@@ -32,7 +32,7 @@ async def test_admission_can_cancel_before_scheduling_and_keeps_target(isolated_
     try:
         session = host.create_session()
         run_id = await host.admit_run(RunRequest("keep this goal", session, mode="plan"))
-        assert host.store.get_run(run_id)["status"] == "running"
+        assert host.store.get_run(run_id)["status"] == "queued"
         assert host.store.load_messages(session) == [{"role": "user", "content": "keep this goal"}]
         with pytest.raises(ValueError, match="active runs"):
             await host.configure_provider(
@@ -80,7 +80,7 @@ async def test_duplicate_identity_cannot_cancel_another_workspace_admission(isol
         await host.admit_run(RunRequest("first goal", first, "same-id"))
         with pytest.raises(ValueError, match="already used"):
             await host.admit_run(RunRequest("another goal", second, "same-id"))
-        assert host.store.get_run("same-id")["status"] == "running"
+        assert host.store.get_run("same-id")["status"] == "queued"
         assert host.workspace_busy(host.default_workspace.workspace_id)
         assert host.store.load_messages(second) == []
     finally:
@@ -112,7 +112,7 @@ async def test_direct_run_cannot_steal_pending_admission(
     admission = asyncio.create_task(host.admit_run(RunRequest("first", first, "reserved")))
     try:
         assert await asyncio.to_thread(entered.wait, 5)
-        with pytest.raises(ValueError, match="reserved by another admission"):
+        with pytest.raises(ValueError, match="already used"):
             await host.run(RunRequest("second", second, "reserved"))
         assert host._admission_done["reserved"].session_id == first
         release.set()

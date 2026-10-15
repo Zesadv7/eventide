@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import asdict
 from typing import Any
 
@@ -12,6 +11,7 @@ from eventide.http_api.context import ApiContext
 from eventide.http_api.schemas import ApprovalBody, RunBody
 from eventide.http_control import run_receipt
 from eventide.models import RunRequest
+from eventide.scheduler import QueueFull
 from eventide.usage import build_usage_ledger
 
 
@@ -20,16 +20,6 @@ def create_router(context: ApiContext) -> APIRouter:
     agent_runtime = context.runtime
     get_session = context.get_session
     broker = context.approvals
-    tasks = context.tasks
-    reserved = context.reserved
-
-    def reservation_key(session_id: str, workspace_id: str, target: str) -> str:
-        return f"session:{session_id}" if target != "source" else workspace_id
-
-    def is_busy(session_id: str, key: str, target: str) -> bool:
-        return (key in reserved or agent_runtime.session_busy(session_id)
-                or (target == "source" and agent_runtime.workspace_busy(key)))
-
     @router.get("/api/sessions/{session_id}/runs")
     async def list_runs(
         session_id: str,
@@ -48,16 +38,10 @@ def create_router(context: ApiContext) -> APIRouter:
     async def continue_session(session_id: str, request: Request) -> dict[str, str]:
         # Continue validation is part of admission; a rejected request returns 409,
         # without creating a run that could hide the parked source run.
-        record = await get_session(session_id)
+        await get_session(session_id)
         receipt = run_receipt(agent_runtime, request, session_id, "continue", {})
         if receipt.existing:
             return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
-        workspace_id = record["workspace_id"]
-        target = agent_runtime.session_execution_target(session_id)
-        key = reservation_key(session_id, workspace_id, target)
-        if is_busy(session_id, key, target):
-            raise HTTPException(status_code=409, detail="Workspace is busy")
-        reserved.add(key)
         run_id = receipt.run_id
         try:
             await agent_runtime.admit_continue(
@@ -65,38 +49,25 @@ def create_router(context: ApiContext) -> APIRouter:
                 run_id,
                 **({"request_fingerprint": receipt.fingerprint} if receipt.fingerprint else {}),
             )
+            agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
+        except QueueFull as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         except ValueError as exc:
-            reserved.discard(key)
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except BaseException:
-            reserved.discard(key)
-            raise
-
-        task = agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
-        tasks.add(task)
-
-        def done(finished: asyncio.Task[Any]) -> None:
-            tasks.discard(finished)
-            reserved.discard(key)
-
-        task.add_done_callback(done)
         return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
 
     @router.post("/api/sessions/{session_id}/abandon")
     async def abandon_interruption(session_id: str) -> dict[str, Any]:
         record = await get_session(session_id)
-        workspace_id = record["workspace_id"]
-        target = agent_runtime.session_execution_target(session_id)
-        key = reservation_key(session_id, workspace_id, target)
-        if is_busy(session_id, key, target):
-            raise HTTPException(status_code=409, detail="Workspace is busy")
-        reserved.add(key)
+        if agent_runtime.session_busy(session_id) or (
+            agent_runtime.session_execution_target(session_id) == "source"
+            and agent_runtime.workspace_busy(record["workspace_id"])
+        ):
+            raise HTTPException(status_code=409, detail="Session or Workspace is busy")
         try:
             return asdict(await agent_runtime.abandon_interruption(session_id))
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        finally:
-            reserved.discard(key)
 
     @router.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(session_id: str, body: RunBody, request: Request) -> dict[str, str]:
@@ -107,13 +78,8 @@ def create_router(context: ApiContext) -> APIRouter:
         receipt = run_receipt(agent_runtime, request, session_id, "run", payload)
         if receipt.existing:
             return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
-        workspace_id = record["workspace_id"]
-        key = reservation_key(session_id, workspace_id, body.execution_target)
-        if is_busy(session_id, key, body.execution_target):
-            raise HTTPException(status_code=409, detail="Workspace is busy")
         if record["status"] == "parked":
             raise HTTPException(status_code=409, detail="Session is parked")
-        reserved.add(key)
         run_id = receipt.run_id
         try:
             await agent_runtime.admit_run(
@@ -130,25 +96,16 @@ def create_router(context: ApiContext) -> APIRouter:
                     selected_skills=body.selected_skills,
                 )
             )
-            task = agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
+            agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
+        except QueueFull as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         except (ValueError, OSError) as exc:
-            reserved.discard(key)
             code = (
                 409
                 if any(word in str(exc) for word in ("busy", "parked", "configuration"))
                 else 422
             )
             raise HTTPException(status_code=code, detail=str(exc)) from exc
-        except BaseException:
-            reserved.discard(key)
-            raise
-        tasks.add(task)
-
-        def done(finished: asyncio.Task[Any]) -> None:
-            tasks.discard(finished)
-            reserved.discard(key)
-
-        task.add_done_callback(done)
         return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
 
     @router.get("/api/runs/{run_id}")

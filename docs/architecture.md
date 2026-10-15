@@ -31,7 +31,7 @@ Project 查询聚合所有副本 Session，不改变原 Workspace API 的过滤�
 
 准备阶段短暂获取源 Workspace 锁，复制、冻结 Skills 后再次验证源 checkpoint；取消准备时等待复制线程完成才释放锁。运行阶段获取 Session 锁与 snapshot_run:<RunID> 所有权，不持有源锁。工具 cwd、项目指令、Skill恢复和checkpoint全部从固定副本解析，模型/工具仍走唯一 `_execute`、ToolExecutor、PolicyEngine 和 U2 请求入口。Plan禁止Shell、写工具与Skill脚本，快照不连接MCP、源索引或嵌套worker，以免读取可变源数据。
 
-每次开始、Continue和成功终态重验资源摘要、大小、链接边界；副本损坏明确拒绝。Continue复用原admission绑定，源端漂移不影响副本，启动恢复只写停驻事实，不重放请求。快照中未知工具结果保留并阻止该次Continue，不将已知只读副本的异常扩散为源Workspace写入隔离。用户停止只影响精确Run；同Session的Python执行串行、HTTP并发接收拒绝。没有P3排队容量或请求信号量，不能把副本隔离等同完整调度。
+每次开始、Continue和成功终态重验资源摘要、大小、链接边界；副本损坏明确拒绝。Continue复用原admission绑定，源端漂移不影响副本，启动恢复只写停驻事实，不重放请求。快照中未知工具结果保留并阻止该次Continue，不将已知只读副本的异常扩散为源Workspace写入隔离。用户停止只影响精确Run；同Session只接受一个未完成请求，Python/HTTP共用接收与P3调度；父子任务和模型额度的分离见后文。
 
 ### 写入副本链与短期 Git 协调
 
@@ -94,7 +94,7 @@ ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读
 
 持久 checkpoint 保存 covered_seq、source_digest、summary、policy_version、provider、model。摘要只覆盖结束 turn 的完整前缀；模型调用使用 summary + 未覆盖 raw tail。checkpoint 来源 digest、策略和模型身份不符时忽略；空摘要、工具调用或达到 Provider 输出上限的残缺摘要都视为生成失败。摘要生成失败且旧投影仍在预算内时使用旧投影；摘要之后仍超预算时先折叠当前 turn 的旧工具结果，仍不够才返回 context_overflow。压缩与折叠都不改变原始事件。context_limit 计算 system、messages 和完整工具目录的 provider-neutral 序列化请求，仍以字符数近似，不宣称 token 精确计量。ContextBuilder 抽出模块级 `request_size()` 与 `tool_catalog_size()` 作为唯一序列化度量；Host 发出的 `model.request` payload 复用同一函数记录 `request_chars` 与 `tool_catalog_chars`，composer 的上下文指示器和用量分析因此与预算使用同一口径。
 
-Host 的两阶段接收由 `admit_run` / `admit_continue` 和 `start_admitted_run` 组成：先在 Workspace 锁内预留精确 Run/Session 身份，通过可取消但会等待线程结束的恢复和 checkpoint 检查，再由 `RuntimeStore.admit_run()` 在一个 SQLite 事务中写入 turn/run、`run.admitted`、用户消息或恢复事实和 checkpoint。附件验证、事务提交与 used 缓存写入之间没有 await；跨文件和 SQLite 仍不是共同事务，因此附件 API 同时查询 canonical 引用来保护生命周期。202 前同步登记执行 Task，使立即取消、关闭和配置切换都能找到所有者。Python 直接调用按 Workspace 排队，HTTP 重复请求拒绝；临时 reservation 只管理进程内所有权，重启事实仍以 Event Log 为准。
+Host 的两阶段接收由 `admit_run` / `admit_continue` 和 `start_admitted_run` 组成：先在 Workspace 锁内预留精确 Run/Session 身份，通过可取消但会等待线程结束的恢复和 checkpoint 检查，再由 `RuntimeStore.admit_run()` 在一个 SQLite 事务中写入 turn/run、`run.admitted`、用户消息或恢复事实和 checkpoint。附件验证、事务提交与 used 缓存写入之间没有 await；跨文件和 SQLite 仍不是共同事务，因此附件 API 同时查询 canonical 引用来保护生命周期。202 前同步登记执行 Task，使立即取消、关闭和配置切换都能找到所有者。Python直接调用与HTTP共用持久队列，忙源在接收前拒绝；临时ticket/lease只管理进程内所有权，重启事实仍以Event Log为准。
 
 ContextBuilder 的可选 completion callback 把生产摘要接入 Host 的模型 timeout/retry 和统一用量账本；不提供 callback 的离线调用者保持 Provider.complete 行为。`context.summary_requested/generated` 不进入 MessagesProjection，也不增加主 Agent 步数；成功生成的 usage 在是否采用判断前记账，新 `context.compacted` 不重复携带 usage。旧 compacted usage 仍可投影兼容。`run_token_limit`（默认 0）检查成功响应返回的 input+output tokens，包括摘要，在下一次主模型或摘要请求前停驻；它是按 Run 计数的软上限，不估计重试未返回的消费或视觉 token，不保证账单硬上限。
 
@@ -139,7 +139,7 @@ Responses 终态为 incomplete 时，即使带有格式正确的 function_call�
 
 `RuntimeHost.run(RunRequest)`、create_session、Provider 配置和 RunResult 原字段保持当前契约；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。
 
-CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/list/show/remove、continue、abandon、export 和 plan show。`plan show <session_id>` 读取 session_status 中已有的计划事实，默认人类可读输出，`--json` 返回与 HTTP 同构的 `task_plan`、`active_task_id` 和 `task_state`；CLI 不重算投影，也不提供任何计划写入口。无指定 Workspace 时使用启动 cwd；Git 子目录可作为 Session cwd，同时 Workspace 身份仍归一到仓库根。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon、按 run_id 取消和 canonical JSONL export。Session POST 可传 working_directory，PATCH 可设置标题或归档；列表默认隐藏归档记录；DELETE 只允许没有运行历史的空 Session。普通 Run 与 Continue 都返回 202；Continue 在响应前完成安全校验并持久化 continuation Run 身份，执行结果通过 Run 查询与 SSE 获取。Export 按 session_seq 分页读取 canonical Event 并以 NDJSON 流响应，不使用 SSE 兼容别名；CLI 写文件默认不覆盖。轻量事实接口包括：`GET /api/workspaces/{id}/capabilities` 用纯文件解析返回 Workspace 的 Skill 名称/简介、MCP 服务名/transport 与配置路径提示，不连接 MCP 服务，也不返回 command/env/密钥，坏配置写入 `notes` 而非 500；`GET /api/runtime/settings` 透出 `context_limit`、`approval_timeout`、`max_steps`、`task_max_steps`、`run_token_limit`；Run 摘要（`list_runs` 与 latest run summary）随状态字段透出 RuntimeStateProjection 已派生的 `usage`（input/output tokens）。这些只是字段透出，不新增事实源。模型列表辅助位于 `model_catalog.py`，`GET /api/models` 探测当前 Provider 的列表端点，失败返回空列表与说明而不抛错。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。
+CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/list/show/remove、continue、abandon、export 和 plan show。`plan show <session_id>` 读取 session_status 中已有的计划事实，默认人类可读输出，`--json` 返回与 HTTP 同构的 `task_plan`、`active_task_id` 和 `task_state`；CLI 不重算投影，也不提供任何计划写入口。无指定 Workspace 时使用启动 cwd；Git 子目录可作为 Session cwd，同时 Workspace 身份仍归一到仓库根。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon、按 run_id 取消和 canonical JSONL export。Session POST 可传 working_directory，PATCH 可设置标题或归档；列表默认隐藏归档记录；DELETE 只允许没有运行历史的空 Session。普通 Run 与 Continue 都返回 202；Continue 在响应前完成安全校验并持久化 continuation Run 身份，执行结果通过 Run 查询与 SSE 获取。Export 按 session_seq 分页读取 canonical Event 并以 NDJSON 流响应，不使用 SSE 兼容别名；CLI 写文件默认不覆盖。轻量事实接口包括：`GET /api/workspaces/{id}/capabilities` 用纯文件解析返回 Workspace 的 Skill 名称/简介、MCP 服务名/transport 与配置路径提示，不连接 MCP 服务，也不返回 command/env/密钥，坏配置写入 `notes` 而非 500；`GET /api/runtime/settings` 透出 `context_limit`、`approval_timeout`、`max_steps`、`task_max_steps`、`run_token_limit`；Run 摘要（`list_runs` 与 latest run summary）随状态字段透出 RuntimeStateProjection 已派生的 `usage`（input/output tokens）。这些只是字段透出，不新增事实源。模型列表辅助位于 `model_catalog.py`，`GET /api/models` 探测当前 Provider 的列表端点，失败返回空列表与说明而不抛错。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。同Session或直接源执行忙时Python/HTTP均拒绝；只有完成冻结的接收才能进入P3队列。
 
 `migrate-v02 [source] --workspace <target>` 显式导入旧 `.nexus/nexus.db`。旧 messages 变为 `message.imported`，工具事件名称映射到 canonical prepared/completed，Run 根据旧终态补成当前终态；无法确认结束的旧 running Run 作为 interrupted 导入。旧源文件不写入，身份冲突时整个导入回滚。Provider 名称、URL 和模型可在目标没有配置时导入，旧 `api_key_ciphertext` 不跨密钥根复制。
 
@@ -343,14 +343,16 @@ UsageView按精确Run/Session/Project/UTC日请求完整历史费用与用量，
 
 Vue页面显式选择source、Plan snapshot或worktree；Session与Run执行归属来自服务端。source活跃时阻止新源任务和副本准备，已存在worktree与已接收snapshot不占源UI锁。绑定worktree后表单不能切回source，Continue由服务端继承原副本。执行位置监听使用独立原始值源，普通轮询替换Session对象不重置用户选择；创建新Session期间禁选，完成切换后回到Auto。页面不能把准备期的短锁误报成持久队列，P3调度继续独立验收。
 
-## 调度底座（P3，尚未主链接入）
+## 持久接收与有界调度（P3）
 
-`scheduler.py`提供独立RuntimeScheduler与纯project_queue。队列只从RuntimeStore按提交顺序返回的run.admitted、run.started及run.completed/failed/interrupted派生，不新建运行表或调度事件。未开始的已接收根为queued，已开始未终态根为running；parent_run_id子任务及未经过admission的Delivery/verification控制Run不算额外根。Continue的新Run仍是根，交付实际Writer也应是根。这个新投影尚未替换现有Run/Session页面投影，因此当前生产行为没有改变。
+`scheduler.py`从RuntimeStore按提交顺序提供的run.admitted、run.started及终态事实重建队列，不按时钟排序、不增加运行状态表或另一套调度事件。RuntimeStateProjection将已接收未开始的Run投影为queued；started才进入running，终态不回退。parent_run_id子任务和没有admission的Delivery/verification控制Run不另占根额度；Continue是新根，实际Delivery Writer仍是根。
 
-默认4个根执行所有者、20个等待根、2个模型请求。容量ticket只表示Host准备接收时的短期进程内占位，不是已接受请求；Host持久提交准确Run/Session后才能commit ticket并返回202。可立即开始的ticket占根额度，否则占等待额度；可运行4根加等待20个时第25个必须在写Run/消息前拒绝。源执行资源不可用时，即使还有根额度也不能谎称可启动。队列主要承接已经可靠冻结、暂缺执行额度的工作；源正被直接修改时，快照/worktree准备仍应拒绝，不在无持久身份时后台等待或读取半成品。
+`RunDispatch`是RuntimeHost的进程内所有权helper。默认4根、20等待、2模型请求，短期容量ticket在冻结输入前竞争名额，不能替代持久接收；只有Store.admit_run同事务写入精确Run/Session、消息及checkpoint后才允许202。满额拒绝不写孤立Run或消息。准备中的ticket占相应容量，counts.preparing_admissions单列，未接收输入不进入active/queued列表。实际根lease覆盖准备、执行及真实清理，出现终态不自动提前释放。
 
-RootLease是进程内实际所有权，覆盖run.started之前的准备和终态之后的清理。同一Session有ticket、未终态根或未释放lease时，不接受另一个根。预留ticket不能在已写持久Run后直接释放；须转为持久排队/根lease，或先补终态。根lease必须在终态且Host确认副作用清理完成后释放。认领选择按提交顺序扫描最早可运行的任务，可跳过暂时忙的执行副本；同步claim callback仍须取得真实Session/Workspace执行key，lease不能替代这些锁或Git协调。一个Host只维护一个调度器，方法由其事件循环顺序调用，不支持多个scheduler同时拥有同一库。
+Python run/continue、HTTP和Delivery writer共用admission与start_admitted_run；Python仍await最终RunResult。start_admitted_run登记同一个等待/执行wrapper Task，它获得调度通知后直接await原_admit，不再创建第二个执行Task。HTTP不维护tasks/reserved执行所有者。queued保留_admission_done的Session所有权，但释放_admissions中源码/副本执行claim。同步claim选择最早可执行任务，检查真实execution key和Session锁；根完成及控制面释放锁均唤醒，不因前一项资源忙阻塞所有后续项。任务失败先补终态，最终Task done回调在实际副作用收尾后释放root并推进队列。
 
-独立model_slot只限单次真实模型尝试。接线时必须先获取模型槽，再写预算预留及尝试开始，成功/异常/取消都退出槽；等待worker、工具/审批、重试backoff都不持有模型槽。worker沿用父根所有权但单独竞争模型槽与U2预算，避免四个父根等待子任务再抢根槽的死锁。等待槽本身不写模型或预算事实。
+队列仅接收已经可靠冻结的请求：源正在直接执行时，Python/HTTP均拒绝新源运行或新副本准备，不在无身份时等待半成品源。等待的source必须有可信Git checkpoint，否则接收前拒绝；空闲非Git直接运行保留原限制。source/worktree实际开始时在执行锁内复核接收checkpoint，snapshot复核固定manifest；Continue不绕过复核。等待时源码变更导致明确失败，不静默换基线。所有未终态工作（包括queued、已接收但尚未start的Run和短期ticket）阻止Python/HTTP修改Provider配置。
 
-后续接线仍需统一Python run/continue、HTTP、Delivery writer入口，加入queued状态与GET /api/queue、取消待调度任务、source/checkpoint复核及关闭后的重启停驻。底座重建仅查询事实，不自动启动、补写终态或释放未知预算。Host应先按保守恢复规则停驻旧queued/started工作，再接收新任务；原始接收顺序和固定参数保留，人工Continue重新进入队列。以上集成尚未实施，不将组件测试当作主链并发验收。
+模型信号量在每次实际attempt及U2原子预留之前获得；等待名额被取消不产生尝试或消费记录。主调用、摘要、worker共用2槽，连接探测也遵守请求上限，但尚不纳入Run用量账本。Provider返回/异常结算后释放模型槽，重试backoff、工具/审批和worker等待均在槽外。worker继承父预算，不另抢根槽，四个根等待子任务时仍可推进。
+
+GET /api/queue只读查询上述事实与所有权；project_id只过滤列表，容量和counts始终是全局。dispatch_state区分queued/starting/running/finishing；Run status继续使用canonical投影，审批等待或终态清理不会伪装为新执行。排队取消复用精确Run取消并保留输入，关闭等待准备线程/执行清理后停驻全部已接收工作。重启不自动派发；尚未started的admission保留原checkpoint，不调用crash-gap补新基线，实际开始过的旧运行继续保守恢复。所有未知Token预留保持原状。前端生成类型、队列页面和整包门禁由集成阶段验证。

@@ -92,7 +92,7 @@ async def test_tool_catalog_stays_within_its_budget(isolated_workspace):
     )
 
 
-async def test_workspace_serialization_and_cross_workspace_parallelism(isolated_workspace):
+async def test_busy_source_is_rejected_while_other_workspace_runs(isolated_workspace):
     entered = asyncio.Queue()
     release = asyncio.Event()
 
@@ -118,7 +118,14 @@ async def test_workspace_serialization_and_cross_workspace_parallelism(isolated_
         assert observed == {"first", "third"}
         assert entered.empty()
         release.set()
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        assert results[0].status == results[2].status == "completed"
+        assert isinstance(results[1], ValueError) and "busy" in str(results[1])
+        assert host.store.list_runs(second) == []
+        assert host.store.load_messages(second) == []
+        # Explicit retry after the source owner finishes still awaits RunResult.
+        result = await host.run(RunRequest("second", second))
+        assert result.status == "completed"
         assert await entered.get() == "second"
     finally:
         release.set()

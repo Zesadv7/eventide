@@ -1253,7 +1253,7 @@ function renderSubtitle(session) {
 }
 function renderActions(session) {
   const owner = draftKey();
-  const workspaceBusy = (state.sessions.get(state.workspace) || []).some((s) => ["running", "waiting_for_user"].includes(s.status)) ||
+  const workspaceBusy = (state.sessions.get(state.workspace) || []).some((s) => ["queued", "running", "waiting_for_user"].includes(s.status)) ||
     [...state.busy].some((id) => id === `new:${state.workspace}` || (sessionRecord(id)?.workspace_id === state.workspace));
   const parked = session?.status === "parked";
   const outcomeUnknown = session?.latest_run?.reason === "unknown_tool_outcome";

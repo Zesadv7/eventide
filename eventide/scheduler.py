@@ -157,7 +157,7 @@ class RuntimeScheduler:
             entry.session_id == session_id and entry.status in {"queued", "running"}
             for entry in self.entries()
         ):
-            raise ValueError("Session already has pending work")
+            raise ValueError("Session is busy with pending work")
         counts = self.counts()
         lane: Literal["active", "waiting"] = "waiting"
         if startable and counts["active_roots"] < self.limits.active_roots:

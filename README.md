@@ -133,7 +133,7 @@ Project 将一个本地源码项目与它的 Git worktree 工作副本聚合起�
 
 `GET /api/projects`、`/api/projects/{id}`、`/api/projects/{id}/workspaces` 和 `/api/projects/{id}/sessions` 可查询项目及其全部执行副本、对话。现有添加工作区接口继续使用，响应增加 `project_id`、`source_workspace_id`、`kind`；不接受客户端重绑既有对话。创建受管 worktree 会自动注册副本，交付 Writer 与源项目共享 Project 身份，新 Run 的接收及开始事件固定记录该归属。
 
-首次升级自动补齐身份关系，既有 Workspace、Session、Run 和事件保持原身份及原文；旧路径已丢失或无法验证 Git 时保留为独立项目，后续不静默改绑。源项目还有执行副本时不能移除注册；任何有会话或 Run 执行引用的 Workspace 仍不能移除。直接源目录仍串行；显式 Plan 快照和写入 worktree 可在同一项目并发，持久调度队列继续按 P3 实施。
+首次升级自动补齐身份关系，既有 Workspace、Session、Run 和事件保持原身份及原文；旧路径已丢失或无法验证 Git 时保留为独立项目，后续不静默改绑。源项目还有执行副本时不能移除注册；任何有会话或 Run 执行引用的 Workspace 仍不能移除。直接源目录仍串行；显式 Plan 快照和写入 worktree 可在同一项目并发，持久接收与有界调度见下文。
 
 ## 同项目 Plan 快照并发
 
@@ -152,6 +152,15 @@ HTTP Run 使用 `execution_target: "worktree"`，Python 使用 `RunRequest(..., 
 项目 Skill 启用配置沿用逻辑源身份，正文与资源从实际副本冻结；文件、指令、检索索引及只读 worker 都使用实际副本，不静默回读源目录。副本暂不连接外部 MCP。共享 Git 元数据操作和 Shell/Skill 命令按项目协调，但模型请求与普通文件工具仍可并发。本机 Shell 仍具有本机权限，worktree 不提供操作系统沙箱。
 
 Delivery 的写入与独立验收期间不再整轮占住源目录；准备、副本比对和人工采纳短暂协调源目录与 Git。验收期间源变化会使结果失效，采纳前再次检查双方源码。含 Run 引用的副本禁止删除；创建失败或取消留下的受管副本保留可检查，不自动清除。此处还没有自动合并或有界多轮修复，旧 CLI/Python 的直接源操作继续兼容。
+
+### 运行队列与并发
+
+单个服务默认最多持有 4 个根 Run、同时发送 2 次模型请求、接收 20 个等待 Run。`GET /api/queue` 查询全局容量、已接收队列和正在执行的精确身份；Run/Session 的 `queued` 状态表示尚未执行，可使用原停止接口取消。排队取消保留任务目标供 Continue 使用，不产生模型尝试或 Token 预留。容量满时返回 429，拒绝的请求不会写入 Run 或用户消息；同 Session 已有工作、源正在直接执行时返回 409。
+
+Python `run()` / `continue_session()`、HTTP 和 Delivery Writer 共用同一接收及调度路径；Python 仍等待最终 `RunResult`。忙源请求直接拒绝，调用者稍后显式重试，不再在无持久身份时后台等待。队列只接收已经冻结参数、Skills、执行位置与 checkpoint 的工作：源忙时不能准备新副本；缺少可信 Git checkpoint 的直接源任务不能排队。原本空闲时的非 Git 直接运行保留，但不能验证外部源码漂移或 Continue。
+
+等待任务只保留 Session 身份，不持有源码/副本执行锁；实际派发前重验固定源码，漂移则失败且不调用模型。空出的名额按接收提交顺序分配给当前可以执行的任务。停止会等待正在运行的工具收尾后才释放名额；服务重启将未结束任务停驻，用户检查后 Continue，不自动重放。主 Agent、摘要、worker 和连接探测共用 2 个模型名额；重试等待、工具与子任务等待均不占模型名额。连接探测仍不计入 Run Token 账本，embedding 接线另在 C 阶段处理。
+
 
 ## Workspace 与 Continue
 
@@ -174,7 +183,7 @@ Host 重启会把未结束的 run 标记为 `interrupted`，Session 显示为 `p
 
 上下文摘要只覆盖已结束的 turn，原始事件不变；达到模型输出上限的残缺摘要不会保存为 checkpoint。Prompt、模型正文和工具参数不会因日志展示限长而在执行前被静默截断；工具始终使用 Provider 返回的原始参数，审计事件中的敏感字段使用脱敏副本。预算按 system、messages 和完整工具目录的序列化请求计算。超过 12,000 字符的单条工具结果会先在模型请求中变成带 run/call 引用的头尾预览，模型可用只读 `read_tool_result(run_id, call_id, offset, limit)` 分页取回任意区间；TodoWrite 的历史整表参数也会在请求侧省略，只保留下方当前计划。canonical Event Log、审计导出和工作记录保留执行器返回的结果与完整计划。Shell 采用有界流式采集：stdout/stderr 各保留最多 25,000 字节的头尾，明确报告省略字节数，丢弃的中段无法通过 `read_tool_result` 恢复；非 Shell 的结果分页保留完整 canonical 内容。摘要之后仍超预算时，当前 turn 内较早的工具结果会继续折叠为占位串（保留最近三条预览或原文），并记录 `context.trimmed`。仍无法在预算内保留时返回 `context_overflow`，不会静默丢弃当前交互。预算单位保持为序列化请求的字符数。模型输出达到 `max_tokens` 被截断且没有工具调用时，run 以 `failed` 结束并提示提高 `EVENTIDE_MAX_TOKENS`，不会静默报成功。
 
-HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id` 和 Workspace 内的 `working_directory`；空请求继续绑定启动项目根目录。`PATCH /api/sessions/{id}` 可设置显式标题或归档状态；默认列表隐藏已归档 Session，传 `include_archived=true` 可查看。`DELETE /api/sessions/{id}` 只删除没有 Run 或事件历史的空 Session，有历史的工作记录必须归档。Run History 默认返回最近 100 条，可用 `limit`（最多 200）和 `before=<run_id>` 向前翻页；Web 提供“加载更早记录”。`GET /api/runs/{id}/export` 流式下载 canonical JSONL；CLI `export` 默认拒绝覆盖已有文件，显式 `--force` 才替换。`POST /api/sessions/{id}/continue` 先完成恢复校验并持久化新 Run，再返回 `202`、`run_id` 和 `status=accepted`；验证失败返回 409，执行继续通过 Run 查询与 SSE 观察。同 Workspace 的并发 HTTP 请求返回 409。Web 长任务状态显示已观察到的模型步数、正在执行的任务和运行时长，并提供按 Run 停止；不虚构无法由事件证明的完成百分比。另有只读的能力自省（`GET /api/workspaces/{id}/capabilities`）、运行设置（`GET /api/runtime/settings`）以及 Session 附件上传、清单、下载和删除接口，见[接口契约](docs/api-contract.md)。
+HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、查询、无会话记录移除、项目会话列表、session/messages 和 Session Run History 查询。`POST /api/sessions` 可传 `workspace_id` 和 Workspace 内的 `working_directory`；空请求继续绑定启动项目根目录。`PATCH /api/sessions/{id}` 可设置显式标题或归档状态；默认列表隐藏已归档 Session，传 `include_archived=true` 可查看。`DELETE /api/sessions/{id}` 只删除没有 Run 或事件历史的空 Session，有历史的工作记录必须归档。Run History 默认返回最近 100 条，可用 `limit`（最多 200）和 `before=<run_id>` 向前翻页；Web 提供“加载更早记录”。`GET /api/runs/{id}/export` 流式下载 canonical JSONL；CLI `export` 默认拒绝覆盖已有文件，显式 `--force` 才替换。`POST /api/sessions/{id}/continue` 先完成恢复校验并持久化新 Run，再返回 `202`、`run_id` 和 `status=accepted`；验证失败返回 409，执行继续通过 Run 查询与 SSE 观察。同 Session 或正在直接运行的源 Workspace 冲突返回409；已完成冻结但缺根名额的请求进入持久队列，满额429。Web 长任务状态显示已观察到的模型步数、正在执行的任务和运行时长，并提供按 Run 停止；不虚构无法由事件证明的完成百分比。另有只读的能力自省（`GET /api/workspaces/{id}/capabilities`）、运行设置（`GET /api/runtime/settings`）以及 Session 附件上传、清单、下载和删除接口，见[接口契约](docs/api-contract.md)。
 
 普通 Run 与 Continue 都先把身份、运行模式、模型选择、用户消息或恢复事实及 checkpoint 作为一个事务提交，再返回 HTTP 202；因此收到 202 后可以立即查询和停止，即使后台执行尚未开始，目标也不会丢失。接收期间同样占用 Workspace，阻止其他入口与配置切换插入。Continue 继承 Plan 的只读限制；相同 Provider 和 Base URL 下继承原模型，切换 Provider 或 Base URL 后使用当前默认模型。Agent 模式的自动审批只授权原 Run，Continue 恢复为 Auto。
 
@@ -403,7 +412,7 @@ uv run eventide rag eval evals/retrieval.yaml --json
 
 计划项可带 `depends_on`，引用同一清单的稳定任务 id（例如 `"depends_on": ["t1"]`）；初次提交可按清单顺序引用当次分配的 id。引用必须存在且不得重复、自引用或成环；某项进入 `in_progress` / `completed` 时，依赖项必须在该次快照中为 `completed`。重复更新省略该字段会保留原依赖，显式 `[]` 才清空。校验失败不写计划事件，历史无该字段时按无依赖投影。
 
-依赖约束只校验计划快照，不会自动启动任务或拦截无关的文件/Shell 调用；完成仍是模型声明。已提供显式开启的有界只读 Researcher/Reviewer，见上文；依赖计划自动调度和持久后台队列尚未实现。
+依赖约束只校验计划快照，不会自动启动任务或拦截无关的文件/Shell 调用；完成仍是模型声明。已提供显式开启的有界只读 Researcher/Reviewer，见上文；依赖计划自动调度尚未实现；Run 接收队列独立限制并发，不从 todo 依赖图自动创建任务。
 
 ## 使用 Skills
 

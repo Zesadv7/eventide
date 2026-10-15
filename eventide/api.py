@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,6 +19,7 @@ from eventide.http_api import (
     config,
     models,
     projects,
+    queue,
     runs,
     sessions,
     skills,
@@ -71,10 +71,6 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
         try:
             yield
         finally:
-            for task in list(context.tasks):
-                task.cancel()
-            if context.tasks:
-                await asyncio.gather(*context.tasks, return_exceptions=True)
             await context.runtime.close()
 
     app = FastAPI(
@@ -121,6 +117,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
 
     for domain in (
         projects, workspaces, sessions, runs, models, config, attachments, streams, skills, budgets,
+        queue,
     ):
         app.include_router(domain.create_router(context))
     return app

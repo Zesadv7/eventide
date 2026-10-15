@@ -142,7 +142,7 @@ POST /api/sessions/{id}/attachments
 
 ### Run 接收、Continue 与 Token 软上限 —— 已实现
 
-普通 Run 与 Continue 返回 202 前，Host 在同一事务写入 Run/turn 身份、`run.admitted`、用户消息或恢复事实及 checkpoint；返回后 GET 可立即查询，取消可以早于后台执行。默认 source 接收和执行均占用 Workspace；显式 snapshot/worktree 在准备完成后释放源锁，按 Session 和执行副本执行。同 Session 冲突、直接源 Workspace 冲突或停驻冲突返回 409，模式/模型/附件校验失败返回 422（Continue 恢复校验失败为 409）。重启只将未结束 Run 停驻，不自动执行。
+普通 Run 与 Continue 返回 202 前，Host 在同一事务写入 Run/turn 身份、`run.admitted`、用户消息或恢复事实及 checkpoint；返回后 GET 可立即查询，取消可以早于后台执行。默认source准备和实际执行占用Workspace，queued仅持Session身份；显式snapshot/worktree在准备完成后释放源锁，按Session和执行副本执行，等待时不持执行锁。同 Session 冲突、直接源 Workspace 冲突或停驻冲突返回 409，模式/模型/附件校验失败返回 422（Continue 恢复校验失败为 409）。重启只将未结束 Run 停驻，不自动执行。
 
 Continue 保持原 Plan，只在相同 Provider 和 Base URL 下沿用选定模型；连接变化则使用当前默认模型。原 Agent 模式恢复为 Auto，自动审批不跨 Run。附件的归属以完整 Session ID 为准，DELETE 对 canonical 引用返回 409，不仅依赖文件 used 标记。
 
@@ -247,3 +247,13 @@ worktree 使用现有 auto/agent/plan 模式，首次接收要求源目录干净
 同 Session 后续 Run 必须继续传 worktree，服务复用首次副本和未提交修改；省略字段恢复默认 source 也会422，不能静默更换执行目录。Continue 自动继承绑定；新副本由新建 Session 获得。放弃中断保留绑定及副本未知结果隔离。接收后副本漂移阻止模型派发，Continue 的副本漂移/未知结果为409；源后来的变化不改变已创建副本。不同 Session 的写入 Run 可并发，同 Session 或实际副本冲突仍409。Worktree引用阻止DELETE，源忙状态不代表所有隔离对话都忙；共享Git命令仍由服务协调。
 
 Vue已生成source/snapshot/worktree类型；读取Session execution恢复绑定，既有worktree新Run显式携带worktree。普通状态轮询不能改变待提交target，创建新Session时禁止在旧会话控件上修改执行选项；Continue无需客户端重发副本身份。
+
+## 运行队列与接收容量（P3）
+
+`GET /api/queue?project_id=<id>`返回`limits`、`counts`、`queued`与`active`。可选项目不存在为404；过滤只影响两个列表，limits/counts始终描述整个服务。默认limits为`{active_roots:4, model_requests:2, waiting_roots:20}`。counts包含active_roots、waiting_roots、preparing_admissions、active_models、waiting_models；准备ticket尚未成为接收Run，因此不出现在列表中。
+
+每项包含run_id、session_id、project_id、workspace_id、execution、admitted_at、position、status及dispatch_state。execution沿用Run查询的source/snapshot/worktree身份；queued的position为按提交顺序的全局一基位置（过滤后可有间隔），active的position为null。dispatch_state取queued/starting/running/finishing；status取现有canonical Run状态，并新增queued。starting已拥有根名额但还没有run.started；finishing已写终态但工具清理尚未结束，仍占名额。
+
+Run和Continue仍在输入、参数、Skills、执行位置、checkpoint及身份持久接收后返回202，原accepted响应形状和幂等重放不变。4根加20等待满额时返回429，不创建Run/消息；同Session忙或源正在直接运行返回409。源忙时不能准备新快照/worktree。直接源等待任务若无可信Git checkpoint在接收前422拒绝；Python入口遵循同一约束，不后台无身份等待，调用成功仍await最终RunResult。
+
+GET Run/Session/list-runs中的queued不是终态；SSE持续观察到真实终态，run.admitted是已接收证据。停止沿用`POST /api/runs/{id}/cancel`；queued取消写interrupted、保留目标、没有模型attempt/Token预留。停止活跃任务必须等副作用收尾才释放根名额。重启将queued/started停驻，不自动执行；恢复Continue使用新身份并复核旧checkpoint，不能用恢复时的源码替换接收基线。队列等待和模型槽等待均阻止Provider配置变更，原来源与幂等保护继续生效。

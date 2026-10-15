@@ -183,7 +183,7 @@ def test_queue_rebuild_uses_commit_order_and_excludes_workers_controls(scheduler
     restored = RuntimeScheduler(scheduler.store)
     assert restored.entries() == before
     assert restored.counts()["waiting_roots"] == 2
-    assert scheduler.store.get_run("first")["status"] == "running"  # Main projection unchanged.
+    assert scheduler.store.get_run("first")["status"] == "queued"
     # Rebuild never starts/replays work or rewrites canonical facts.
     assert scheduler.store.facts_by_type(("run.started",))[0]["run_id"] == "control"
     assert len(scheduler.store.facts_by_type(("run.started",))) == 1

@@ -76,7 +76,6 @@ def probe_error(exc: Exception) -> tuple[str, str]:
 def create_router(context: ApiContext) -> APIRouter:
     router = APIRouter(tags=["config"])
     agent_runtime = context.runtime
-    tasks = context.tasks
 
     @router.get("/api/runtime/settings")
     async def get_runtime_settings() -> dict[str, Any]:
@@ -96,7 +95,7 @@ def create_router(context: ApiContext) -> APIRouter:
     @router.put("/api/config/provider")
     async def set_provider_config(body: ProviderConfigBody, request: Request) -> dict[str, Any]:
         require_local_request(request)
-        if any(not task.done() for task in tasks):
+        if agent_runtime.runtime_busy():
             raise HTTPException(
                 status_code=409,
                 detail="Wait for active runs to finish before changing provider configuration",
@@ -118,7 +117,7 @@ def create_router(context: ApiContext) -> APIRouter:
     @router.delete("/api/config/provider")
     async def reset_provider_config(request: Request) -> dict[str, Any]:
         require_local_request(request)
-        if any(not task.done() for task in tasks):
+        if agent_runtime.runtime_busy():
             raise HTTPException(
                 status_code=409,
                 detail="请等待当前任务结束后再恢复启动配置",

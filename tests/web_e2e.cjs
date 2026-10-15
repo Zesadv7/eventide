@@ -113,7 +113,7 @@ async function pollRun(runId) {
     const resp = await api("GET", `/api/runs/${runId}`);
     if (resp.status !== 200) fail(`GET /api/runs/${runId} -> ${resp.status} ${resp.text.slice(0, 200)}`);
     last = resp.json;
-    if (last.status && last.status !== "running") return last;
+    if (last.status && !["queued", "running"].includes(last.status)) return last;
     await sleep(300);
   }
   fail(`轮询 run ${runId} 超时（${RUN_TIMEOUT_MS}ms），最后状态：${JSON.stringify(last)}`);
@@ -495,7 +495,7 @@ async function phase1() {
         approvalId = ids[0];
         break;
       }
-      if (resp.json?.status && resp.json.status !== "running") break;
+      if (resp.json?.status && !["queued", "running"].includes(resp.json.status)) break;
       await sleep(300);
     }
     if (!approvalId) fail("审批未出现（pending_approvals 为空）");

@@ -84,6 +84,10 @@ class RuntimeStateProjection:
                         if key in payload
                     }
                 )
+            if kind == "run.admitted" and not terminal:
+                state["status"] = "queued"
+            if kind == "run.started" and not terminal:
+                state["status"] = "running"
             if kind == "model.response":
                 state["steps"] = payload.get("step", state["steps"])
             if kind in {

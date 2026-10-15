@@ -60,6 +60,7 @@ from eventide.rag.index import INDEX_RELATIVE_PATH
 from eventide.rag.tool import SEARCH_KNOWLEDGE_TOOL
 from eventide.rag.tool import handler as knowledge_search_handler
 from eventide.rag.tool import index_available as knowledge_index_available
+from eventide.run_dispatch import RunDispatch
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skill_packages import SkillPackageError
 from eventide.skill_runtime import SkillRuntime, execute_skill_script, script_tool
@@ -212,6 +213,7 @@ class RuntimeHost:
         self.previews = PreviewStore()
         self.skills = SkillRuntime(self.store, self.state_dir)
         self.model_budget = ModelBudgetController(self.store)
+        self.dispatch = RunDispatch(self)
 
     def _budget_control_session(self) -> str:
         session_id = self.create_session(f"budgets_{self.default_workspace.workspace_id}")
@@ -559,6 +561,7 @@ class RuntimeHost:
         for run_id in list(self._admission_done):
             self._finish_admitted(run_id, asyncio.CancelledError())
             self._release_admission(run_id)
+            self.dispatch.finished(run_id)
         try:
             await self._close_provider()
         finally:
@@ -612,7 +615,7 @@ class RuntimeHost:
 
     @contextmanager
     def _configuration_change(self) -> Iterator[None]:
-        if self._configuring or self._active_tasks or self._admissions:
+        if self._configuring or self.runtime_busy():
             raise ValueError("Wait for active runs or configuration changes")
         self._configuring = True
         try:
@@ -703,15 +706,16 @@ class RuntimeHost:
         )
         probe = build_provider(probe_settings)
         try:
-            return await probe.complete(
-                ModelRequest(
-                    system="你是连接检查助手。",
-                    messages=[{"role": "user", "content": "请只回复：连接成功"}],
-                    tools=[],
-                    model=probe_settings.model,
-                    max_tokens=32,
+            async with self.dispatch.scheduler.model_slot():
+                return await probe.complete(
+                    ModelRequest(
+                        system="你是连接检查助手。",
+                        messages=[{"role": "user", "content": "请只回复：连接成功"}],
+                        tools=[],
+                        model=probe_settings.model,
+                        max_tokens=32,
+                    )
                 )
-            )
         finally:
             closer = getattr(probe, "close", None) or getattr(probe, "aclose", None)
             if closer:
@@ -779,69 +783,72 @@ class RuntimeHost:
         admitted = self._admitted_intent(run_id) or {}
         call_kind = "worker" if kind == "agent" and admitted.get("parent_run_id") else kind
         for attempt in range(1, 4):
-            attempt_id = f"attempt_{uuid.uuid4().hex}"
-            started = time.perf_counter()
-            identity = {
-                "request_id": request_id, "attempt_id": attempt_id, "attempt": attempt,
-                "kind": call_kind, "model": request.model, "generation": request.generation,
-                "max_output_tokens": request.max_tokens,
-                "provider": self.settings.provider,
-            }
-            try:
-                receipt = self.model_budget.begin(run_id, request, identity)
-            except BudgetExceeded as exc:
-                await self._emit(run_id, "budget.blocked", {
-                    "request_id": request_id, "violations": exc.violations,
-                }, sink)
-                raise
-            try:
-                await self._notify_model_attempt(run_id, sink)
-                if receipt.warnings:
-                    await self._emit(run_id, "budget.warning", {
-                        "attempt_id": attempt_id, "budgets": receipt.warnings,
+            async with self.dispatch.scheduler.model_slot():
+                attempt_id = f"attempt_{uuid.uuid4().hex}"
+                started = time.perf_counter()
+                identity = {
+                    "request_id": request_id, "attempt_id": attempt_id, "attempt": attempt,
+                    "kind": call_kind, "model": request.model, "generation": request.generation,
+                    "max_output_tokens": request.max_tokens,
+                    "provider": self.settings.provider,
+                }
+                try:
+                    receipt = self.model_budget.begin(run_id, request, identity)
+                except BudgetExceeded as exc:
+                    await self._emit(run_id, "budget.blocked", {
+                        "request_id": request_id, "violations": exc.violations,
                     }, sink)
-                response = await asyncio.wait_for(
-                    self._complete_request(request, run_id, request_id, kind),
-                    timeout=self.settings.model_timeout,
-                )
-            except BaseException as exc:
-                self.model_budget.finish(run_id, {
-                    **identity, "status": "cancelled" if isinstance(exc, asyncio.CancelledError)
-                    else "failed", "usage_source": "unknown",
-                    "duration_ms": (time.perf_counter() - started) * 1000,
-                })
-                if not isinstance(exc, (asyncio.TimeoutError, ProviderError)):
                     raise
-                streaming = kind == "agent" and callable(getattr(self._provider(), "stream", None))
-                retryable = (
-                    isinstance(exc, asyncio.TimeoutError) or exc.retryable
-                ) and not streaming
-                message = (
-                    f"Model request timed out ({self.settings.model_timeout:g}s)"
-                    if isinstance(exc, asyncio.TimeoutError) else self._clean(str(exc))
-                )
-                await self._emit(run_id, "model.retry", {
-                    **identity, "retryable": retryable and attempt < 3,
-                    "error": message,
-                }, sink)
-                if not retryable or attempt == 3:
-                    if isinstance(exc, asyncio.TimeoutError):
-                        raise RuntimeError(message) from exc
-                    raise
-                await asyncio.sleep(0.25 * (2 ** (attempt - 1)))
-            else:
-                settled = self.model_budget.finish(run_id, {
-                    **identity, "status": "completed", "usage": response.usage,
-                    "usage_source": "reported" if response.usage else "unknown",
-                    "stop_reason": response.stop_reason,
-                    "duration_ms": (time.perf_counter() - started) * 1000,
-                })
-                await self._notify_model_attempt(run_id, sink)
-                if settled.warnings:
-                    await self._emit(run_id, "budget.warning", {
-                        "attempt_id": attempt_id, "budgets": settled.warnings,
+                try:
+                    await self._notify_model_attempt(run_id, sink)
+                    if receipt.warnings:
+                        await self._emit(run_id, "budget.warning", {
+                            "attempt_id": attempt_id, "budgets": receipt.warnings,
+                        }, sink)
+                    response = await asyncio.wait_for(
+                        self._complete_request(request, run_id, request_id, kind),
+                        timeout=self.settings.model_timeout,
+                    )
+                except BaseException as exc:
+                    self.model_budget.finish(run_id, {
+                        **identity, "status": "cancelled" if isinstance(exc, asyncio.CancelledError)
+                        else "failed", "usage_source": "unknown",
+                        "duration_ms": (time.perf_counter() - started) * 1000,
+                    })
+                    if not isinstance(exc, (asyncio.TimeoutError, ProviderError)):
+                        raise
+                    streaming = kind == "agent" and callable(
+                        getattr(self._provider(), "stream", None)
+                    )
+                    retryable = (
+                        isinstance(exc, asyncio.TimeoutError) or exc.retryable
+                    ) and not streaming
+                    message = (
+                        f"Model request timed out ({self.settings.model_timeout:g}s)"
+                        if isinstance(exc, asyncio.TimeoutError) else self._clean(str(exc))
+                    )
+                    await self._emit(run_id, "model.retry", {
+                        **identity, "retryable": retryable and attempt < 3,
+                        "error": message,
                     }, sink)
-                return response
+                    if not retryable or attempt == 3:
+                        if isinstance(exc, asyncio.TimeoutError):
+                            raise RuntimeError(message) from exc
+                        raise
+                else:
+                    settled = self.model_budget.finish(run_id, {
+                        **identity, "status": "completed", "usage": response.usage,
+                        "usage_source": "reported" if response.usage else "unknown",
+                        "stop_reason": response.stop_reason,
+                        "duration_ms": (time.perf_counter() - started) * 1000,
+                    })
+                    await self._notify_model_attempt(run_id, sink)
+                    if settled.warnings:
+                        await self._emit(run_id, "budget.warning", {
+                            "attempt_id": attempt_id, "budgets": settled.warnings,
+                        }, sink)
+                    return response
+            await asyncio.sleep(0.25 * (2 ** (attempt - 1)))
         raise RuntimeError("Model attempts exhausted")
 
     async def _notify_model_attempt(self, run_id: str, sink: EventSink | None) -> None:
@@ -893,11 +900,12 @@ class RuntimeHost:
         if (
             task is None
             and intent is not None
-            and self._admissions.get(self._execution_key(run_id, intent)) == run_id
+            and run_id in self._admission_done
             and not self.store.run_is_terminal(run_id)
         ):
             self._finish_admitted(run_id, asyncio.CancelledError())
             self._release_admission(run_id)
+            self.dispatch.finished(run_id)
             record = self.store.get_run(run_id)
             assert record is not None
             return record
@@ -923,12 +931,10 @@ class RuntimeHost:
         approval_handler: ApprovalHandler | None = None,
     ) -> RunResult:
         session_id = self.create_session(request.session_id)
-        if request.execution_target != "source":
-            run_id = await self.admit_run(replace(request, session_id=session_id))
-            return await self.start_admitted_run(
-                run_id, approval_handler=approval_handler, sink=sink,
-            )
-        return await self._admit(session_id, request, None, sink, approval_handler)
+        run_id = await self.admit_run(replace(request, session_id=session_id))
+        return await self.start_admitted_run(
+            run_id, approval_handler=approval_handler, sink=sink,
+        )
 
     async def continue_session(
         self,
@@ -939,19 +945,10 @@ class RuntimeHost:
         run_id: str | None = None,
     ) -> RunResult:
         session_id = request if isinstance(request, str) else request.session_id
-        if self.session_execution_target(session_id) != "source":
-            identity = run_id or f"run_{uuid.uuid4().hex[:16]}"
-            await self.admit_continue(session_id, identity)
-            return await self.start_admitted_run(
-                identity, approval_handler=approval_handler, sink=sink,
-            )
-        return await self._admit(
-            session_id,
-            None,
-            True,
-            sink,
-            approval_handler,
-            run_id=run_id,
+        identity = run_id or f"run_{uuid.uuid4().hex[:16]}"
+        await self.admit_continue(session_id, identity)
+        return await self.start_admitted_run(
+            identity, approval_handler=approval_handler, sink=sink,
         )
 
     def validate_continue(self, session_id: str) -> WorkspaceRecord:
@@ -988,6 +985,10 @@ class RuntimeHost:
         run = self.store.latest_run_summary(session_id)
         binding = self._execution_binding(run["id"]) if run else None
         return binding["kind"] if binding else "source"
+
+    def runtime_busy(self) -> bool:
+        return bool(self._active_tasks or self._admission_done
+                    or self.dispatch.scheduler.counts()["preparing_admissions"])
 
     def session_busy(self, session_id: str) -> bool:
         return self._session_locks[session_id].locked() or any(
@@ -1044,6 +1045,7 @@ class RuntimeHost:
             yield
         finally:
             lock.release()
+            self.dispatch.dispatch()
 
     def workspace_busy(self, workspace_id: str) -> bool:
         return workspace_id in self._admissions or self._workspace_locks[workspace_id].locked()
@@ -1183,11 +1185,15 @@ class RuntimeHost:
             yield
         finally:
             lock.release()
+            self.dispatch.dispatch()
 
-    def _release_admission(self, run_id: str) -> None:
+    def _release_execution_claims(self, run_id: str) -> None:
         for workspace_id, reserved in list(self._admissions.items()):
             if reserved == run_id:
                 self._admissions.pop(workspace_id)
+
+    def _release_admission(self, run_id: str) -> None:
+        self._release_execution_claims(run_id)
         done = self._admission_done.pop(run_id, None)
         if done is not None:
             done.done.set()
@@ -1437,6 +1443,33 @@ class RuntimeHost:
                 self._active_tasks.discard(task)
 
     async def _reserve_run(
+        self, session_id: str, run_id: str, request: RunRequest | None, *,
+        execution_config: dict[str, Any] | None = None,
+        request_fingerprint: str | None = None,
+    ) -> str:
+        """Reserve capacity before preparation; acknowledge only a durable intent."""
+        if self.session_busy(session_id):
+            raise ValueError("Session is busy")
+        ticket = self.dispatch.scheduler.reserve_admission(run_id, session_id, startable=True)
+        try:
+            result = await self._prepare_run(
+                session_id, run_id, request, execution_config=execution_config,
+                request_fingerprint=request_fingerprint,
+                require_checkpoint=ticket.lane == "waiting",
+            )
+            self.dispatch.admitted(ticket)
+            return result
+        except BaseException as exc:
+            self._finish_admitted(run_id, exc)
+            self._release_admission(run_id)
+            self.dispatch.scheduler.release_ticket(ticket)
+            raise
+        finally:
+            # A failed preparation/control lock may have been blocking an older
+            # already accepted Run even when no root task has just completed.
+            self.dispatch.dispatch()
+
+    async def _prepare_run(
         self,
         session_id: str,
         run_id: str,
@@ -1444,6 +1477,7 @@ class RuntimeHost:
         *,
         execution_config: dict[str, Any] | None = None,
         request_fingerprint: str | None = None,
+        require_checkpoint: bool = False,
     ) -> str:
         """Own a Workspace and atomically persist the request before transport acceptance."""
         await self.initialize()
@@ -1502,6 +1536,8 @@ class RuntimeHost:
                         if saved:
                             intent["execution_config"] = saved
                     checkpoint = await self._admission_check(workspace_checkpoint, root)
+                    if require_checkpoint and checkpoint is None:
+                        raise ValueError("Queued source execution requires a Git checkpoint")
                     ids = list(request.attachment_ids) if request else []
                     # Validation, commit and used-cache write have no intervening await.
                     records = attachments.load_attachments(self.state_dir, session_id, ids)
@@ -1754,7 +1790,7 @@ class RuntimeHost:
             raise ValueError("Run is not awaiting execution")
         if run_id in self._run_tasks:
             raise ValueError("Run is already scheduled")
-        if self._admissions.get(self._execution_key(run_id, intent)) != run_id:
+        if run_id not in self._admission_done:
             raise ValueError("Run admission is not owned by this Host")
         if self._closed:
             raise ValueError("Host is closed")
@@ -1770,16 +1806,22 @@ class RuntimeHost:
                 model=intent["model"],
             )
         )
-        task = asyncio.create_task(
-            self._admit(
-                run["session_id"],
-                request,
-                bool(run["continuation_of"]),
-                sink,
-                approval_handler,
-                run_id=run_id,
+        try:
+            task = self.dispatch.start(
+                run_id, lambda: self._admit(
+                    run["session_id"],
+                    request,
+                    bool(run["continuation_of"]),
+                    sink,
+                    approval_handler,
+                    run_id=run_id,
+                )
             )
-        )
+        except BaseException as exc:
+            self._finish_admitted(run_id, exc)
+            self._release_admission(run_id)
+            self.dispatch.finished(run_id)
+            raise
         self._track_run_task(run_id, task)
         return task
 
@@ -1797,6 +1839,7 @@ class RuntimeHost:
             self._release_admission(run_id)
             self._run_tasks.pop(run_id, None)
             self._active_tasks.discard(finished)
+            self.dispatch.finished(run_id)
 
         task.add_done_callback(done)
 
@@ -1950,6 +1993,10 @@ class RuntimeHost:
                 ):
                     raise ValueError("Run identity already used")
                 if admitted:
+                    observed = await self._admission_check(workspace_checkpoint, root)
+                    accepted = self.store.get_run(admitted_run_id)
+                    if not accepted or observed != accepted["checkpoint"]:
+                        raise ValueError("Source Workspace changed after admission")
                     continuation = bool(admitted["continuation_of"])
                 previous = (
                     self.store.get_run(admitted["continuation_of"])
@@ -1998,7 +2045,14 @@ class RuntimeHost:
         """
         for run_id in self.store.unfinished_runs():
             payload: dict[str, Any] = {"error": "Host stopped before terminal fact"}
-            evidence = self._crash_gap_evidence(run_id)
+            started = any(event["type"] == "run.started"
+                          for event in self.store.run_events(run_id))
+            # An unstarted admission already has its authoritative checkpoint.
+            # Replacing it with the current filesystem would hide queue-time drift.
+            queued = not started and self._admitted_intent(run_id) is not None
+            evidence = None if queued else self._crash_gap_evidence(run_id)
+            if queued:
+                payload["reason"] = "host_stopped_before_dispatch"
             if evidence is not None:
                 files, checkpoint = evidence
                 if files:
