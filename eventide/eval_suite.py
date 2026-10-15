@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -21,7 +22,7 @@ class StrictModel(BaseModel):
 
 def relative_file(value: str) -> str:
     path = PurePosixPath(value)
-    if (not value or path.is_absolute() or ".." in path.parts or "\\" in value
+    if (not path.parts or path.is_absolute() or ".." in path.parts or "\\" in value
             or str(path) != value or ".git" in path.parts or ".eventide" in path.parts):
         raise ValueError("Benchmark paths must be canonical relative files")
     return value
@@ -131,12 +132,22 @@ def _read_file(root: Path, name: str) -> bytes:
 
 
 def load_benchmark(path: Path, data: dict[str, Any]) -> list[dict[str, Any]]:
+    if path.absolute().resolve() != path.absolute():
+        raise ValueError("Benchmark manifest must not be linked")
+    root = path.absolute().parent
+    return load_benchmark_data(data, lambda name: _read_file(root, name))
+
+
+def load_benchmark_data(
+    data: dict[str, Any], read_file: Callable[[str], bytes],
+) -> list[dict[str, Any]]:
+    """Validate the same frozen contract for filesystem and package resources."""
     manifest = BenchmarkManifest.model_validate(data)
-    root = path.resolve().parent
     tasks: list[BenchmarkTask] = []
     fingerprints: list[str] = []
     for reference in manifest.tasks:
-        body = _read_file(root, reference.path)
+        relative_file(reference.path)
+        body = read_file(reference.path)
         fingerprint = hashlib.sha256(body).hexdigest()
         if fingerprint != reference.sha256:
             raise ValueError(

@@ -67,7 +67,13 @@ class EvalCaseResult:
 def load_suite(path: Path) -> list[dict[str, Any]]:
     import yaml
 
+    from eventide.bundled_evaluations import load_builtin_alias
+
+    if path.absolute().resolve() != path.absolute():
+        raise ValueError("Evaluation suite must not be linked")
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if isinstance(data, dict) and "builtin_suite" in data:
+        return load_builtin_alias(data)["cases"]
     if isinstance(data, dict) and "schema_version" in data:
         return load_benchmark(path, data)
     cases = data.get("cases", data) if isinstance(data, dict) else data

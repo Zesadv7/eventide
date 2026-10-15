@@ -382,7 +382,9 @@ P3/P4/P5集成验收已完成：完整1180项通过、覆盖93.90%，默认7项D
 
 ### 冻结任务与独立判分（B1）
 
-`eval_suite.py` 解析 `evals/benchmark.yaml` 的严格版本化清单及 20 个 JSON 任务包，校验任务内容哈希、相对路径、无链接引用、类别／开发留出配额和家族隔离。清单固定理解4、定位4、单文件6、跨文件4、恢复交付2；其中开发12、留出8。历史 engineering 三题保留并全部进入开发集。任务或策略实验发生变化时须提升任务／清单版本；参考留出结果调参后须移动并补充题目，不继续复用旧留出标签。
+`eval_suite.py` 用同一纯解析接口校验文件及包资源的严格版本化清单：任务内容哈希、相对路径、无链接引用、类别／开发留出配额和家族隔离。唯一正式manifest和20个JSON任务包已移入`eventide/bundled_evals/engineering-v1`，原`evals/benchmark.yaml`只保留严格内置别名，不复制任务正文；移动保留原字节和清单指纹。清单固定理解4、定位4、单文件6、跨文件4、恢复交付2；其中开发12、留出8。历史 engineering 三题保留并全部进入开发集。任务或策略实验发生变化时须提升任务／清单版本；参考留出结果调参后须移动并补充题目，不继续复用旧留出标签。
+
+`bundled_evaluations`通过`importlib.resources`读取白名单ID，支持常规安装与ZIP/wheel，不把用户ID当路径解析，也不依赖工作目录。逐资源有3MiB读取上限；文件系统路径及祖先、ZIP的UNIX链接项与祖先均拒绝。整个题集验证后才选split，某个留出题损坏时不能悄悄只运行开发集。返回独立纯JSON任务快照和三个指纹：`manifest_sha256`绑定原manifest字节，`suite_sha256`保留原规范manifest口径，`inputs_sha256`绑定所选cases的UTF-8 JSON（ensure_ascii=False、sort_keys=True，逗号和冒号分隔均无额外空白）。后续Web接收须将该快照持久固定，不在队列派发时重新读取当前包或别名；本模块没有第二状态源，也不读取凭据或启动模型。
 
 `evaluation.run_evaluations` 仍是唯一 Python 入口，旧 YAML suites 继续可用。冻结集先在读取环境或已保存凭据前禁止 live；离线数据注明 `scripted_mechanism_validation`，逐例带清单和任务版本哈希。每例源 Git 项目、状态根、冻结验收目录彼此独立，状态与验收目录作为源目录的兄弟目录，避免 worktree checkpoint 被评测自身数据库污染。模型步骤最多12、已观测 Token 软限最多20,000；整例5分钟上限及部分失败记录由下文B2实现，真实批次成本预算仍由B3前置评估。
 

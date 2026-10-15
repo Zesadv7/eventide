@@ -555,6 +555,10 @@ Vue“任务队列”页显示整个服务的执行、等待和模型请求额�
 
 `uv run eventide eval evals/benchmark.yaml` 通过同一 Python `run_evaluations` 接口运行 20 道冻结任务。清单固定每道题的版本、文件 SHA-256、任务家族和开发／留出划分：
 
+正式题集只有一份，位于 Python 包内的 `bundled_evals/engineering-v1`：一个 manifest 与20个任务JSON。旧 `evals/benchmark.yaml` 只是 `builtin_suite: engineering-v1` 的严格别名，不接受路径、任务或划分覆盖；旧 YAML suites 和 Python 评测调用继续可用。安装 wheel 后无需源码 checkout 也能读取同一内容；目录、ZIP 和 wheel 中的链接、越界引用、缺失或损坏任务会明确报错。
+
+开发接口 `eventide.bundled_evaluations.builtin_suite_catalog()` 查询已校验的内置目录，`load_builtin_suite("engineering-v1", split="development")` 返回可冻结的任务正文、版本、清单和所选输入指纹；`holdout` 返回8题，不指定划分返回全部20题。选择划分前仍校验完整20题。该接口只加载输入、不发起执行；Web接收、排队和取消由B4控制器继续接入。
+
 | 类别 | 开发 | 留出 | 验收依据 |
 |---|---:|---:|---|
 | 理解定位 | 2 | 2 | 标注事实与精确文件行号 |

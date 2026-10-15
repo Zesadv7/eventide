@@ -16,6 +16,7 @@ from eventide.evaluation import load_suite, run_evaluations
 from tests.test_runtime import settings_for
 
 SUITE = Path(__file__).resolve().parents[1] / "evals" / "benchmark.yaml"
+PACKAGED_SUITE = SUITE.parents[1] / "eventide/bundled_evals/engineering-v1/manifest.yaml"
 
 
 def test_frozen_benchmark_categories_and_development_provenance():
@@ -38,9 +39,9 @@ def test_frozen_benchmark_categories_and_development_provenance():
 
 def _copy_suite(tmp_path):
     root = tmp_path / "evals"
-    shutil.copytree(SUITE.parent / "fixtures", root / "fixtures")
+    shutil.copytree(PACKAGED_SUITE.parent / "fixtures", root / "fixtures")
     destination = root / "benchmark.yaml"
-    destination.write_bytes(SUITE.read_bytes())
+    destination.write_bytes(PACKAGED_SUITE.read_bytes())
     return destination, yaml.safe_load(destination.read_text())
 
 
@@ -84,7 +85,7 @@ def test_manifest_rejects_changed_or_ambiguous_inputs(tmp_path, mutation, match)
 
 
 @pytest.mark.parametrize("path", [
-    "../outside", "/absolute", "a/../b", "a\\b", "./a", ".git/config", ".eventide/config",
+    "../outside", "/absolute", "a/../b", "a\\b", "./a", ".", ".git/config", ".eventide/config",
 ])
 def test_fixture_paths_are_canonical_and_do_not_replace_state(path):
     with pytest.raises(ValueError, match="canonical"):
@@ -92,12 +93,12 @@ def test_fixture_paths_are_canonical_and_do_not_replace_state(path):
 
 
 def test_task_rejects_incorrect_citations_and_protected_allowed_changes():
-    manifest = yaml.safe_load(SUITE.read_text())
-    first = json.loads((SUITE.parent / manifest["tasks"][0]["path"]).read_bytes())
+    manifest = yaml.safe_load(PACKAGED_SUITE.read_text())
+    first = json.loads((PACKAGED_SUITE.parent / manifest["tasks"][0]["path"]).read_bytes())
     first["grade"]["facts"][0]["end_line"] = 1000
     with pytest.raises(ValueError, match="existing fixture lines"):
         BenchmarkTask.model_validate(first)
-    repair = json.loads((SUITE.parent / manifest["tasks"][8]["path"]).read_bytes())
+    repair = json.loads((PACKAGED_SUITE.parent / manifest["tasks"][8]["path"]).read_bytes())
     repair["grade"]["allowed_changes"] = ["README.md"]
     with pytest.raises(ValueError, match="business source"):
         BenchmarkTask.model_validate(repair)
