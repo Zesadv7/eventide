@@ -17,7 +17,13 @@ from typing import Any, Protocol
 from eventide import attachments, model_catalog, run_policy
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
-from eventide.executor import ApprovalHandler, LocalCommandExecutor, ToolContext, ToolExecutor
+from eventide.executor import (
+    ApprovalHandler,
+    CommandExecutor,
+    LocalCommandExecutor,
+    ToolContext,
+    ToolExecutor,
+)
 from eventide.mcp.client import MCPManager
 from eventide.models import (
     ContinuationRequest,
@@ -82,6 +88,10 @@ class _Admission:
 
 
 class _RunTokenBudgetExceeded(RuntimeError):
+    pass
+
+
+class _UnknownToolOutcome(RuntimeError):
     pass
 
 
@@ -251,6 +261,10 @@ class RuntimeHost:
         removal_path: Path | None = None
         try:
             async with self._workspace_execution(workspace.workspace_id):
+                if action != "list" and self.store.workspace_has_unknown_outcome(
+                    workspace.workspace_id
+                ):
+                    raise ValueError("Workspace has an unresolved tool outcome")
                 records = await asyncio.to_thread(service.list)
                 if action == "list":
                     return [record.to_dict() for record in records]
@@ -797,9 +811,108 @@ class RuntimeHost:
     def workspace_busy(self, workspace_id: str) -> bool:
         return workspace_id in self._admissions or self._workspace_locks[workspace_id].locked()
 
+    async def manage_delivery(self, action: str, **arguments: Any) -> dict[str, Any]:
+        from eventide.delivery_runtime import DeliveryController
+
+        return await DeliveryController(self).execute(action, **arguments)
+
+    async def check_project(self, session_id: str, command: str) -> dict[str, Any]:
+        """Run one independent bounded check, without asking the model to judge itself."""
+        await self.initialize()
+        workspace = self.sessions.workspace(session_id)
+        task = asyncio.current_task()
+        assert task is not None
+        self._active_tasks.add(task)
+        run_id: str | None = None
+        try:
+            async with self._workspace_execution(workspace.workspace_id):
+                if self.store.workspace_has_unknown_outcome(workspace.workspace_id):
+                    raise ValueError("Workspace has an unresolved tool outcome")
+                control = self.create_session(workspace_id=workspace.workspace_id)
+                self.store.update_session(control, title="Independent verification", archived=True)
+                run_id = f"run_{uuid.uuid4().hex[:16]}"
+                self.store.create_run(run_id, control)
+                self._run_tasks[run_id] = task
+                await self._emit(run_id, "run.started", {"source": "verification"}, None)
+                call = ToolCall("verification", "bash", {"command": command})
+                await self._emit(
+                    run_id,
+                    "tool.prepared",
+                    {
+                        "call_id": call.id,
+                        "name": call.name,
+                        "arguments": self._semantic(call.arguments),
+                        "readonly": False,
+                    },
+                    None,
+                )
+                executor = ToolExecutor(
+                    {"bash": lambda **_args: ""},
+                    command_executor=LocalCommandExecutor(min(self.settings.command_timeout, 30)),
+                )
+                execution = asyncio.create_task(
+                    executor.execute(
+                        call,
+                        ToolContext(
+                            self.sessions.working_directory(session_id), run_id, self.policy
+                        ),
+                    )
+                )
+                try:
+                    checked = await asyncio.shield(execution)
+                except asyncio.CancelledError:
+                    execution.cancel()
+                    while not execution.done():
+                        with suppress(asyncio.CancelledError):
+                            await asyncio.shield(execution)
+                    raise
+                payload = self._semantic(
+                    {
+                        "call_id": call.id,
+                        "name": call.name,
+                        "content": checked.content,
+                        "is_error": checked.is_error,
+                        "metadata": checked.metadata,
+                    }
+                )
+                await self._emit(run_id, "tool.completed", payload, None)
+                passed = not checked.is_error and checked.metadata.get("exit_code") == 0
+                await self._emit(
+                    run_id,
+                    "run.completed" if passed else "run.failed",
+                    {
+                        "output": self._semantic(checked.content),
+                        "steps": 0,
+                        "tool_calls": 1,
+                        "usage": {},
+                    },
+                    None,
+                )
+                return {"run_id": run_id, "passed": passed, **payload}
+        except BaseException as exc:
+            if run_id and not self.store.run_is_terminal(run_id):
+                await self._emit(
+                    run_id,
+                    "run.interrupted" if isinstance(exc, asyncio.CancelledError) else "run.failed",
+                    {"error": self._clean(str(exc))},
+                    None,
+                )
+            raise
+        finally:
+            if run_id:
+                self._run_tasks.pop(run_id, None)
+            self._active_tasks.discard(task)
+
     def is_worker_session(self, session_id: str) -> bool:
         return any(
             e["type"] == "run.admitted" and e["payload"].get("parent_run_id")
+            for e in self.store.session_events(session_id)
+        )
+
+    def is_control_session(self, session_id: str) -> bool:
+        return any(
+            e["type"] == "run.started"
+            and e["payload"].get("source") in {"delivery", "verification"}
             for e in self.store.session_events(session_id)
         )
 
@@ -841,6 +954,7 @@ class RuntimeHost:
         mode = run_policy.normalize_mode(request.mode) if request else "auto"
         model = request.model.strip() if request and request.model else self.settings.model
         model = model or self.settings.model
+        execution_config: dict[str, Any] = {}
         if source_id:
             prior: dict[str, Any] = next(
                 (
@@ -856,6 +970,7 @@ class RuntimeHost:
             )
             if prior.get("provider") == self.settings.provider and same_endpoint:
                 model = prior.get("model") or model
+            execution_config = prior.get("execution_config") or {}
         if not isinstance(model, str) or len(model) > 256:
             raise ValueError("Model name cannot exceed 256 characters")
         return {
@@ -863,6 +978,7 @@ class RuntimeHost:
             "model": model,
             "provider": self.settings.provider,
             "endpoint_hash": digest(self.settings.base_url),
+            **({"execution_config": execution_config} if execution_config else {}),
         }
 
     async def admit_run(self, request: RunRequest) -> str:
@@ -888,10 +1004,17 @@ class RuntimeHost:
             raise asyncio.CancelledError
         return result
 
-    async def _reserve_run(self, session_id: str, run_id: str, request: RunRequest | None) -> str:
+    async def _reserve_run(
+        self,
+        session_id: str,
+        run_id: str,
+        request: RunRequest | None,
+        *,
+        execution_config: dict[str, Any] | None = None,
+    ) -> str:
         """Own a Workspace and atomically persist the request before transport acceptance."""
         await self.initialize()
-        if self.is_worker_session(session_id):
+        if self.is_worker_session(session_id) or self.is_control_session(session_id):
             raise ValueError("Worker sessions cannot accept ordinary runs or Continue")
         if self._configuring:
             raise ValueError("Provider configuration is changing")
@@ -910,6 +1033,10 @@ class RuntimeHost:
         self._active_tasks.add(task)
         try:
             async with self._workspace_locks[workspace.workspace_id]:
+                if self.store.workspace_has_unknown_outcome(workspace.workspace_id):
+                    raise ValueError(
+                        "Workspace has an unresolved tool outcome; execution is blocked"
+                    )
                 self._admissions[workspace.workspace_id] = run_id
                 self._admission_done[run_id] = _Admission(session_id, asyncio.Event())
                 try:
@@ -920,6 +1047,12 @@ class RuntimeHost:
                         raise ValueError("Session is parked; use Continue")
                     source_id = previous["id"] if request is None and previous else None
                     intent = self._run_intent(request, source_id)
+                    if execution_config:
+                        intent["execution_config"] = execution_config
+                    elif "execution_config" not in intent:
+                        saved = self.store.workspace_execution_config(workspace.workspace_id)
+                        if saved:
+                            intent["execution_config"] = saved
                     checkpoint = await self._admission_check(workspace_checkpoint, root)
                     ids = list(request.attachment_ids) if request else []
                     # Validation, commit and used-cache write have no intervening await.
@@ -1130,8 +1263,9 @@ class RuntimeHost:
         approval_handler: ApprovalHandler | None,
         *,
         run_id: str | None = None,
+        execution_config: dict[str, Any] | None = None,
     ) -> RunResult:
-        if self.is_worker_session(session_id):
+        if self.is_worker_session(session_id) or self.is_control_session(session_id):
             raise ValueError("Worker sessions cannot accept ordinary runs or Continue")
         admitted_run_id = (
             (request.run_id if request else None) or run_id or f"run_{uuid.uuid4().hex[:16]}"
@@ -1160,6 +1294,10 @@ class RuntimeHost:
             async with self._workspace_execution(workspace.workspace_id, admitted_run_id):
                 if self._closed:
                     raise RuntimeError("Host is closed")
+                if self.store.workspace_has_unknown_outcome(workspace.workspace_id):
+                    raise ValueError(
+                        "Workspace has an unresolved tool outcome; execution is blocked"
+                    )
                 admitted = self.store.get_run_identity(admitted_run_id)
                 if admitted and (
                     self._admitted_intent(admitted_run_id) is None
@@ -1193,6 +1331,7 @@ class RuntimeHost:
                     sink,
                     approval_handler,
                     existing_turn_id=admitted["turn_id"] if admitted else None,
+                    execution_config=execution_config,
                 )
         except BaseException as exc:
             self._finish_admitted(admitted_run_id, exc)
@@ -1348,6 +1487,7 @@ class RuntimeHost:
         existing_turn_id: str | None = None,
         readonly_profile: ReadonlyProfile | None = None,
         snapshot_root: Path | None = None,
+        execution_config: dict[str, Any] | None = None,
     ) -> RunResult:
         started = time.perf_counter()
         turn_id = existing_turn_id or self.store.create_run(
@@ -1376,6 +1516,25 @@ class RuntimeHost:
         park_message: str | None = None
         try:
             intent = admitted_intent or self._run_intent(request, continuation_of)
+            execution_config = (
+                {}
+                if readonly_profile
+                else (
+                    execution_config
+                    or intent.get("execution_config")
+                    or self.store.workspace_execution_config(workspace.workspace_id)
+                    or {}
+                )
+            )
+            command_executor: CommandExecutor = self.executor.command_executor
+            if execution_config.get("kind") == "container":
+                from eventide.container_executor import ContainerCommandExecutor
+
+                command_executor = ContainerCommandExecutor(
+                    execution_config["image"],
+                    timeout=self.settings.command_timeout,
+                    read_only=False,
+                )
             mode, selected_model = intent["mode"], intent["model"]
             if readonly_profile:
                 mode = "plan"
@@ -1397,6 +1556,7 @@ class RuntimeHost:
                     "endpoint_hash": intent["endpoint_hash"],
                     "continuation_of": continuation_of,
                     "resumed_task_id": resumed_task_id,
+                    **({"execution_config": execution_config} if execution_config else {}),
                     **(
                         {
                             "parent_run_id": readonly_profile.parent_run_id,
@@ -1446,7 +1606,11 @@ class RuntimeHost:
                 sink,
             )
             skills = SkillCatalog.discover(workspace_root)
-            if self._enable_mcp and not readonly_profile:
+            if (
+                self._enable_mcp
+                and not readonly_profile
+                and not execution_config.get("disable_mcp")
+            ):
                 configs = manager.load_configs(
                     self._config_path
                     if workspace == self.default_workspace and self._config_path
@@ -1558,6 +1722,7 @@ class RuntimeHost:
                             "worker_role": profile.role,
                             "snapshot_id": snapshot.identity,
                         }
+                        child_intent.pop("execution_config", None)
                         child_turn = self.store.admit_run(
                             child_id,
                             child_session,
@@ -1615,7 +1780,9 @@ class RuntimeHost:
                     timed_out = False
                     try:
                         await asyncio.wait_for(
-                            asyncio.gather(*(child for _, child, _ in children)),
+                            asyncio.gather(
+                                *(child for _, child, _ in children), return_exceptions=True
+                            ),
                             READONLY_WORKER_TIMEOUT,
                         )
                     except asyncio.TimeoutError:
@@ -1673,7 +1840,7 @@ class RuntimeHost:
                                     1
                                 ],
                             },
-                            sink,
+                            None,
                         )
 
             worker_tools = (
@@ -1727,7 +1894,7 @@ class RuntimeHost:
                     *manager.readonly_tools,
                     *({"load_skill"} if skills else set()),
                 },
-                self.executor.command_executor,
+                command_executor,
             )
             runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)
             if worker_tools:
@@ -1849,6 +2016,21 @@ class RuntimeHost:
             task_park: str | None = None
             active_task_id: str | None = None
             active_since_step = 1
+
+            async def record_unknown(call: ToolCall, content: str) -> None:
+                await self._emit(
+                    run_id,
+                    "tool.outcome_unknown",
+                    {
+                        "call_id": call.id,
+                        "name": call.name,
+                        "readonly": False,
+                        "workspace_id": workspace.workspace_id,
+                        "error": self._semantic(content),
+                    },
+                    sink,
+                )
+
             resume_note = (
                 f"Resuming task {resumed_task_id} after a park. Continue it; do not repeat "
                 "completed work."
@@ -2003,11 +2185,30 @@ class RuntimeHost:
                             handlers.get(call.name)
                         ):
                             execution.cancel()
+                        while not execution.done():
                             with suppress(asyncio.CancelledError):
-                                await execution
-                        else:
-                            await execution
+                                await asyncio.shield(execution)
+                        if not execution.cancelled():
+                            settled = execution.result()
+                            if settled.metadata.get("outcome_unknown"):
+                                await record_unknown(call, settled.content)
+                            else:
+                                await self._emit(
+                                    run_id,
+                                    "tool.completed",
+                                    {
+                                        "call_id": call.id,
+                                        "name": call.name,
+                                        "content": self._semantic(settled.content),
+                                        "is_error": settled.is_error,
+                                        "metadata": self._semantic(settled.metadata),
+                                    },
+                                    sink,
+                                )
                         raise
+                    if result.metadata.get("outcome_unknown"):
+                        await record_unknown(call, result.content)
+                        raise _UnknownToolOutcome(result.content)
                     await self._emit(
                         run_id,
                         "tool.completed",
@@ -2059,6 +2260,8 @@ class RuntimeHost:
                 status, error = "interrupted", park_message
             else:
                 status, error = "completed", None
+        except _UnknownToolOutcome as exc:
+            status, error, park_kind = "interrupted", str(exc), "unknown_tool_outcome"
         except _RunTokenBudgetExceeded as exc:
             await self._emit(
                 run_id,
@@ -2099,8 +2302,12 @@ class RuntimeHost:
                 run_id,
                 "run.interrupted",
                 {
-                    "error": "Run cancelled; session parked",
-                    "reason": "cancelled",
+                    "error": "Run cancelled; tool outcome unknown, Workspace execution blocked"
+                    if self.store.workspace_has_unknown_outcome(workspace.workspace_id)
+                    else "Run cancelled; session parked",
+                    "reason": "unknown_tool_outcome"
+                    if self.store.workspace_has_unknown_outcome(workspace.workspace_id)
+                    else "cancelled",
                     "usage": usage,
                     "steps": steps,
                     "tool_calls": tool_count,

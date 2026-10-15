@@ -23,6 +23,7 @@ from eventide.rag.evaluation import (
 )
 from eventide.rag.index import IndexStore
 from eventide.rag.search import format_results, hybrid_search
+from eventide.telemetry import build_run_trace, export_run_trace
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -61,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("run_id")
     export.add_argument("destination", type=Path)
     export.add_argument("--force", action="store_true", help="Replace an existing file")
+    trace = subparsers.add_parser("trace", help="Derive a redacted trace from canonical events")
+    trace.add_argument("run_id")
+    trace.add_argument("destination", nargs="?", type=Path)
+    trace.add_argument("--force", action="store_true")
+    trace.add_argument("--otel-endpoint", help="Explicit opt-in OTLP HTTP traces endpoint")
     plan = subparsers.add_parser("plan", help="Show the read-only task plan of a session")
     plan_actions = plan.add_subparsers(dest="plan_action", required=True)
     plan_show = plan_actions.add_parser(
@@ -83,11 +89,32 @@ def build_parser() -> argparse.ArgumentParser:
     worktree_create.add_argument("--ref", default="HEAD", help="Existing commit, branch or tag")
     worktree_actions.add_parser("keep").add_argument("name")
     worktree_actions.add_parser("remove").add_argument("name")
+    deliver = subparsers.add_parser("deliver", help="Prepare, verify and adopt isolated changes")
+    deliver.add_argument("--workspace", help="Source Workspace ID or path")
+    delivery_actions = deliver.add_subparsers(dest="delivery_action", required=True)
+    prepare = delivery_actions.add_parser("prepare")
+    prepare.add_argument("name")
+    prepare.add_argument("--protect", action="append", default=[])
+    writer = delivery_actions.add_parser("run")
+    writer.add_argument("delivery_id")
+    writer.add_argument("goal")
+    writer_executor = writer.add_mutually_exclusive_group(required=True)
+    writer_executor.add_argument("--container-image")
+    writer_executor.add_argument("--local", action="store_true", help="Use local host commands")
+    verify = delivery_actions.add_parser("verify")
+    verify.add_argument("delivery_id")
+    verify.add_argument("--check", action="append", required=True)
+    check_executor = verify.add_mutually_exclusive_group(required=True)
+    check_executor.add_argument("--container-image")
+    check_executor.add_argument("--local", action="store_true")
+    delivery_actions.add_parser("show").add_argument("delivery_id")
+    delivery_actions.add_parser("apply").add_argument("delivery_id")
     rag = subparsers.add_parser("rag", help="Build and query a Workspace knowledge index")
     rag_actions = rag.add_subparsers(dest="rag_action", required=True)
     rag_build = rag_actions.add_parser("build", help="Build or update the knowledge index")
     rag_build.add_argument("--workspace", type=Path, default=Path.cwd())
     rag_build.add_argument("--force", action="store_true", help="Rebuild every indexed file")
+    rag_build.add_argument("--code-structure", action="store_true", help="Use optional tree-sitter")
     rag_search = rag_actions.add_parser("search", help="Search the knowledge index")
     rag_search.add_argument("query")
     rag_search.add_argument("--workspace", type=Path, default=Path.cwd())
@@ -95,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     rag_eval = rag_actions.add_parser("eval", help="Run an offline retrieval suite")
     rag_eval.add_argument("suite", type=Path)
     rag_eval.add_argument("--json", action="store_true")
+    rag_eval.add_argument("--code-structure", action="store_true")
     for name in ("run", "chat", "serve"):
         subparsers.choices[name].add_argument("--workspace", help="Workspace ID or existing path")
     for name in ("run", "chat"):
@@ -118,9 +146,7 @@ async def _run_once(args: argparse.Namespace) -> int:
             runtime.resolve_or_register_workspace(args.workspace) if args.workspace else None
         )
         inferred_cwd = (
-            args.workspace
-            if args.workspace and not args.workspace.startswith("ws_")
-            else None
+            args.workspace if args.workspace and not args.workspace.startswith("ws_") else None
         )
         session = runtime.create_session(
             workspace_id=workspace.workspace_id if workspace else None,
@@ -269,10 +295,47 @@ def _render_plan_text(status: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _trace_events(runtime: RuntimeHost, run_id: str) -> list[dict[str, Any]]:
+    identity = runtime.store.get_run_identity(run_id)
+    if identity is None:
+        raise ValueError(f"Run not found: {run_id}")
+    pending = [identity["session_id"]]
+    seen: set[str] = set()
+    events: list[dict[str, Any]] = []
+    while pending:
+        session = pending.pop()
+        if session in seen:
+            continue
+        if len(seen) >= 64:
+            raise ValueError("Trace exceeds the bounded child-session limit")
+        seen.add(session)
+        facts = runtime.store.session_events(session)
+        events.extend(facts)
+        pending.extend(
+            e["payload"]["child_session_id"]
+            for e in facts
+            if e["type"] == "worker.started" and e["payload"].get("child_session_id")
+        )
+    return events
+
+
 async def _manage(args: argparse.Namespace) -> int:
     runtime = RuntimeHost(Settings.from_env())
     try:
         value: Any
+        if args.command == "deliver":
+            value = await runtime.manage_delivery(
+                args.delivery_action,
+                target=args.workspace,
+                delivery_id=getattr(args, "delivery_id", None),
+                name=getattr(args, "name", None),
+                goal=getattr(args, "goal", None),
+                checks=getattr(args, "check", None),
+                image=getattr(args, "container_image", None),
+                protected_patterns=tuple(getattr(args, "protect", [])),
+            )
+            print(json.dumps(value, ensure_ascii=False, indent=2))
+            return 1 if value.get("status") in {"failed", "interrupted"} else 0
         if args.command == "worktree":
             value = await runtime.manage_worktree(
                 args.workspace or runtime.default_workspace.workspace_id,
@@ -284,9 +347,7 @@ async def _manage(args: argparse.Namespace) -> int:
             return 0
         if args.command in {"continue", "abandon"}:
             result = (
-                await runtime.continue_session(
-                    args.session_id, approval_handler=_terminal_approval
-                )
+                await runtime.continue_session(args.session_id, approval_handler=_terminal_approval)
                 if args.command == "continue"
                 else await runtime.abandon_interruption(args.session_id)
             )
@@ -329,6 +390,32 @@ async def _manage(args: argparse.Namespace) -> int:
             runtime.store.export_jsonl(args.run_id, destination)
             print(json.dumps({"run_id": args.run_id, "destination": str(destination)}))
             return 0
+        if args.command == "trace":
+            events = _trace_events(runtime, args.run_id)
+            if args.otel_endpoint:
+                try:
+                    from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                        OTLPSpanExporter,
+                    )
+                except ImportError as exc:
+                    raise ValueError("Install eventide[telemetry] for OTLP export") from exc
+                exporter = OTLPSpanExporter(endpoint=args.otel_endpoint, timeout=10)
+                try:
+                    count = export_run_trace(events, exporter=exporter, run_id=args.run_id)
+                finally:
+                    exporter.shutdown()
+                print(json.dumps({"exported_spans": count}))
+            else:
+                report = json.dumps(build_run_trace(events, run_id=args.run_id), indent=2)
+                if args.destination:
+                    destination = args.destination.expanduser().resolve()
+                    if destination.exists() and not args.force:
+                        raise ValueError("Trace destination exists; use --force")
+                    destination.write_text(report + "\n", encoding="utf-8")
+                    print(json.dumps({"destination": str(destination)}))
+                else:
+                    print(report)
+            return 0
         if args.workspace_action == "list":
             value = [asdict(w) for w in runtime.store.list_workspaces()]
         elif args.workspace_action == "remove":
@@ -352,14 +439,14 @@ async def _manage(args: argparse.Namespace) -> int:
 
 def _rag(args: argparse.Namespace) -> int:
     if args.rag_action == "eval":
-        report = run_retrieval_evaluation(args.suite)
+        report = run_retrieval_evaluation(args.suite, code_structure=args.code_structure)
         print(report_json(report) if args.json else format_retrieval_report(report))
         return 0 if report["passed"] == report["total"] else 1
     workspace = args.workspace.expanduser().resolve()
     embedder, profile = provider_from_settings(Settings.from_env(workdir=workspace))
     if args.rag_action == "build":
         stats = IndexStore(workspace).build(
-            force=args.force, embedder=embedder, profile=profile
+            force=args.force, embedder=embedder, profile=profile, code_structure=args.code_structure
         )
         print(
             "Indexed "
@@ -367,6 +454,11 @@ def _rag(args: argparse.Namespace) -> int:
             f"(rebuilt {stats.rebuilt_files}, deleted {stats.deleted_files}, "
             f"skipped {stats.skipped}) in {stats.duration_ms:.2f} ms"
         )
+        if args.code_structure:
+            print(
+                f"Structured files: {stats.structured_files}; "
+                f"fallbacks: {json.dumps(stats.structure_fallbacks, sort_keys=True)}"
+            )
         return 0
     results = hybrid_search(
         workspace,
@@ -406,10 +498,12 @@ def _main(argv: list[str] | None = None) -> int:
     if args.command in {
         "workspace",
         "worktree",
+        "deliver",
         "continue",
         "abandon",
         "migrate-v02",
         "export",
+        "trace",
         "plan",
     }:
         return asyncio.run(_manage(args))

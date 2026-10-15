@@ -24,6 +24,8 @@ _T = TypeVar("_T")
 class ContainerCleanupError(RuntimeError):
     """Docker did not confirm cleanup; the caller must retain this uncertainty."""
 
+    outcome_unknown = True
+
 
 class _DockerClient(LocalCommandExecutor):
     async def run(self, args: list[str], cwd: Path, env: dict[str, str]) -> CommandResult:

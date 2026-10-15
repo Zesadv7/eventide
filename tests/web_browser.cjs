@@ -510,6 +510,15 @@ const server = http.createServer(async (req, res) => {
     await page.locator(".toast-message").filter({hasText: "Workspace changed"}).waitFor();
     assert.equal(await page.locator("#continue-button").isVisible(), true);
 
+    // Unknown cleanup keeps the scene intact instead of suggesting a safe resume.
+    addRun("unknown-cleanup", "s1", "interrupted");
+    emit("unknown-cleanup", "run.interrupted", {reason: "unknown_tool_outcome"});
+    await page.reload(); await page.waitForLoadState("networkidle");
+    assert.match(await page.locator("#recovery-reason").innerText(), /阻止继续执行/);
+    assert.equal(await page.locator("#continue-button").isDisabled(), true);
+    assert.equal(await page.locator("#abandon-button").isDisabled(), true);
+    assert.equal(await page.locator("#continue-button").innerText(), "结果待确认");
+
     // Mobile: drawer navigation, empty workspace scope, creation and submission.
     await page.setViewportSize({width: 390, height: 844});
     await page.locator("#open-sidebar").click();

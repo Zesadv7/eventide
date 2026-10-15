@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field, replace
@@ -13,7 +17,7 @@ from typing import Any
 
 from eventide.config import Settings
 from eventide.host import RuntimeHost
-from eventide.models import RunRequest
+from eventide.models import RunRequest, RunResult
 from eventide.providers import ScriptedProvider, build_provider
 from eventide.rag.index import IndexStore
 from eventide.store import RuntimeStore
@@ -32,6 +36,7 @@ class EvalCaseResult:
     steps: int = 0
     usage: dict[str, int] = field(default_factory=dict)
     status: str = "unknown"
+    verification: dict[str, Any] = field(default_factory=dict)
 
 
 def load_suite(path: Path) -> list[dict[str, Any]]:
@@ -63,6 +68,9 @@ def _create_sandbox(fixtures: dict[str, Any]) -> Path:
     """
     sandbox = Path(tempfile.mkdtemp(prefix="eventide-eval-"))
     for relative, content in fixtures.items():
+        path = Path(str(relative))
+        if path.is_absolute() or ".." in path.parts or "\\" in str(relative):
+            raise ValueError("Evaluation fixture must stay inside its sandbox")
         target = sandbox / str(relative)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(content), encoding="utf-8")
@@ -76,6 +84,100 @@ def _create_sandbox(fixtures: dict[str, Any]) -> Path:
     _run_git(sandbox, "add", "-A")
     _run_git(sandbox, "commit", "--allow-empty", "-m", "eval fixture seed")
     return sandbox
+
+
+def _test_manifest(root: Path) -> dict[str, str]:
+    tests = root / "tests"
+    if tests.is_symlink() or not tests.is_dir():
+        raise ValueError("acceptance_tests requires a real tests directory")
+    manifest: dict[str, str] = {}
+    for path in sorted(tests.rglob("*")):
+        if path.is_symlink():
+            raise ValueError("Acceptance tests cannot contain symbolic links")
+        if "__pycache__" in path.parts or path.suffix == ".pyc" or not path.is_file():
+            continue
+        body = path.read_bytes()
+        if len(body) > 1024 * 1024 or len(manifest) >= 2000:
+            raise ValueError("Acceptance tests exceed their bound")
+        manifest[path.relative_to(tests).as_posix()] = hashlib.sha256(body).hexdigest()
+    if not manifest:
+        raise ValueError("Acceptance tests cannot be empty")
+    return manifest
+
+
+def _acceptance_command(workspace: Path, frozen_tests: Path) -> str:
+    # Import the stdlib runner before adding candidate code to the import path.
+    code = (
+        "import sys,unittest,json;"
+        f"sys.path.insert(0,{str(workspace)!r});"
+        f"suite=unittest.defaultTestLoader.discover({str(frozen_tests)!r});"
+        "result=unittest.TextTestRunner().run(suite);"
+        "print('EVENTIDE_ACCEPTANCE='+json.dumps({'tests_run':result.testsRun}));"
+        "sys.exit(0 if result.wasSuccessful() and result.testsRun else 1)"
+    )
+    return shlex.join([sys.executable, "-I", "-B", "-c", code])
+
+
+def _clear_candidate_bytecode(workspace: Path) -> None:
+    # These are disposable eval fixtures, never a user's project.
+    for path in workspace.rglob("__pycache__"):
+        if path.is_symlink():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+
+
+async def _run_case(
+    runtime: RuntimeHost,
+    case: dict[str, Any],
+    sandbox: Path | None,
+    session_id: str,
+) -> tuple[RunResult, dict[str, Any], tuple[str, ...]]:
+    request = RunRequest(prompt=str(case["prompt"]), session_id=session_id)
+    if case.get("acceptance_tests") is not True:
+        return await runtime.run(request), {}, ()
+    if sandbox is None:
+        raise ValueError("acceptance_tests requires an inline workspace fixture")
+    original = _test_manifest(sandbox)
+    runtime.create_session(session_id)
+    with tempfile.TemporaryDirectory(prefix="eventide-fixed-tests-") as temporary:
+        frozen = Path(temporary) / "tests"
+        shutil.copytree(
+            sandbox / "tests", frozen, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+        )
+        command = _acceptance_command(sandbox, frozen)
+        baseline = await runtime.check_project(session_id, command)
+        if baseline["passed"] or baseline["metadata"].get("exit_code") != 1:
+            raise ValueError("Acceptance fixture must have a failing baseline (exit code 1)")
+        if "EVENTIDE_ACCEPTANCE=" not in baseline["content"]:
+            raise ValueError("Acceptance baseline did not run the fixed test runner")
+        result = await runtime.run(request)
+        try:
+            unchanged = _test_manifest(sandbox) == original
+        except (OSError, ValueError):
+            unchanged = False
+        evidence = {
+            "baseline_run_id": baseline["run_id"],
+            "baseline_exit_code": baseline["metadata"]["exit_code"],
+            "tests_unchanged": unchanged,
+            "test_manifest": original,
+        }
+        if not unchanged:
+            return result, {**evidence, "passed": False}, ("acceptance tests changed",)
+        _clear_candidate_bytecode(sandbox)
+        checked = await runtime.check_project(session_id, command)
+        unchanged = _test_manifest(sandbox) == original
+        accepted = checked["passed"] and unchanged and "EVENTIDE_ACCEPTANCE=" in checked["content"]
+        evidence.update(
+            {
+                "verification_run_id": checked["run_id"],
+                "exit_code": checked["metadata"].get("exit_code"),
+                "timed_out": checked["metadata"].get("timed_out", False),
+                "tests_unchanged": unchanged,
+                "passed": accepted,
+            }
+        )
+        return result, evidence, () if accepted else ("independent acceptance failed",)
 
 
 def _git_reasons(workdir: Path) -> list[str]:
@@ -207,14 +309,20 @@ async def run_evaluations(
             settings=case_settings, provider=provider, store=case_store, enable_mcp=live
         )
         session_id = f"eval_{mode}_{index}_{int(time.time() * 1000)}"
-        result = await runtime.run(
-            RunRequest(
-                prompt=str(case["prompt"]),
-                session_id=session_id,
+        try:
+            result, verification, acceptance_reasons = await _run_case(
+                runtime, case, sandbox, session_id
             )
-        )
+        except BaseException:
+            await runtime.close()
+            if case_store is not suite_store:
+                case_store.close()
+            suite_store.close()
+            raise
         events = case_store.get_events(result.run_id)
         passed, reasons = _judge(case, result.output, events, result.status, sandbox)
+        reasons += acceptance_reasons
+        passed = passed and not acceptance_reasons
         error_events = [
             event
             for event in events
@@ -238,6 +346,7 @@ async def run_evaluations(
                 steps=result.steps,
                 usage=dict(result.usage),
                 status=result.status,
+                verification=verification,
             )
         )
         await runtime.close()

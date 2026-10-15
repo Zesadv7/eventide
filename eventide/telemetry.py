@@ -22,6 +22,7 @@ _REASONS = {
     "task_step_budget",
     "token_budget",
     "admission_failed",
+    "unknown_tool_outcome",
 }
 _TOOLS = {
     "bash",
@@ -35,6 +36,7 @@ _TOOLS = {
     "load_skill",
     "search_knowledge",
     "delegate",
+    "delegate_readonly",
     "review",
 }
 _PROVIDERS = {"anthropic", "openai_compatible", "openai_responses", "scripted"}
@@ -185,7 +187,7 @@ def build_run_trace(
         mode = metadata.get("mode")
         attributes["eventide.mode"] = mode if mode in {"auto", "plan", "agent"} else "unknown"
         role = metadata.get("worker_role")
-        if role in {"researcher", "reviewer"}:
+        if role in {"researcher", "reviewer", "writer"}:
             attributes["eventide.worker.role"] = role
         if reason in _REASONS:
             attributes["eventide.reason"] = reason

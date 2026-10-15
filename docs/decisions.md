@@ -463,3 +463,25 @@
 固定读取工具、禁止 MCP/custom/delegate、深度 1、并发 2、每父 Run 4 个任务，子步骤、Token 与时间均有界。成功结果先验证严格 JSON 和真实快照路径/行号才回传；合法引用不是独立验收。源码快照包含当前未提交源码，排除秘密、links和非文本，前后 Git checkpoint 检测漂移，不宣称文件系统原子性。父 usage 包含子消费，取消必须等子结束，未知消费不补造。
 
 **影响：** 可在没有 Key/网络时用 scripted 回归验证隔离、预算、取消和报告拒绝；真实模型质量需另跑 live。写入 Worker 使用 worktree 与独立验收，不扩大此只读 profile。
+
+## ADR-046：结构解析与外部观测采用显式可选扩展
+
+**状态：Accepted**，扩展 ADR-041/042。
+
+**决策：** tree-sitter作为code extra并由rag build/eval的code-structure参数开启，默认窗口与零parser依赖不变。结构块保留准确范围、符号路径与有界大小，解析失败明确fallback。切块配置和parser版本单独进入索引fingerprint，避免复用不同算法产生的旧块；写事务内复查环境，变化要求force。质量用相同语料与指标比较，现有套件成绩相同，不宣称召回改进。
+
+观测只从唯一Event Log派生，默认离线JSON；显式OTLP HTTP参数才懒加载telemetry extra并发送。只导出固定枚举、哈希身份与数字事实，不导出模型/工具原文。局部provider避免改变应用全局观测；稳定历史身份支持重复导出，Continue和worker关联可追踪。跨Run用exclusive模型事件计算已观测消费，未知用量标明不完整。
+
+**影响：** 不强制引入LangGraph、向量服务或外部Tracing平台；import/help/offline仍无Key和网络。增加parser版本维护和可选SDK回归成本，由lockfile、无extra路径与真实parser/内存exporter测试守住。
+
+## ADR-047：交付以不可变验收证据和显式采纳为边界
+
+**状态：Accepted**，扩展 ADR-037、ADR-043/045/046。
+
+**决策：** Writer运行于受管worktree，由Host的durable admission、同一Agent loop和Event Log执行，MCP关闭，backend选择随Workspace事实保留。交付控制面没有第二执行或存储系统：干净源基线先预检，固定测试/配置保护，临时Git index生成有界binary patch，独立检查绑定patch hash与源码checkpoint，显式apply前重读最新验收并重验双方源码。不自动commit、merge或覆盖用户已有修改；停止发生于apply生效后，也保存已发生事实。
+
+容器是可选CommandExecutor，默认无新运行依赖、不拉镜像；Shell在本机daemon的有界非root容器内，验收挂载只读。无法确认cleanup不是普通失败，而是未知结果；不写tool.completed，不允许继续写入或采纳该Workspace。Readonly检查失败不会被当作通过。反复Stop不得取消仍在写的同步线程future并释放owner，真实完成结果先落事件。
+
+工程评测采用三个带原版unittest的真实失败fixture；基线非零、测试清单完整和独立进程验收共同决定通过，模型正文不判分。原版测试另存并用隔离stdlib runner执行，消除候选测试修改与派生bytecode对验收的影响。离线脚本证明机制，真实效果必须显式live并报告样本与用量，三题不代表可靠成功率。
+
+**影响：** 首版保护依赖/锁/CI等配置，涉及这些变更需人工处理；容器需要本机Docker、兼容Linux镜像和挂载权限，Git common dir不暴露进容器。未知写入状态保守保留，人工检查后从未受影响源建立新交付，不提供force放行。真实Docker和真实模型验证需要外部环境，不能用mock或scripted冒充。

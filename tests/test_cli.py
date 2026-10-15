@@ -25,6 +25,12 @@ def test_cli_subcommands_parse():
     plan = parser.parse_args(["plan", "show", "session_x", "--json"])
     assert plan.command == "plan" and plan.plan_action == "show"
     assert plan.session_id == "session_x" and plan.json
+    assert parser.parse_args(["rag", "build", "--code-structure"]).code_structure
+    assert parser.parse_args(["trace", "run_x", "trace.json"]).destination.name == "trace.json"
+    delivery = parser.parse_args(["deliver", "run", "delivery_x", "fix", "--local"])
+    assert delivery.local and delivery.goal == "fix"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["deliver", "run", "delivery_x", "fix"])
 
 
 def test_help_needs_no_api_key(capsys):
@@ -32,6 +38,32 @@ def test_help_needs_no_api_key(capsys):
         main(["--help"])
     assert caught.value.code == 0
     assert "eventide" in capsys.readouterr().out
+
+
+def test_trace_cli_derives_private_metadata_without_network(
+    isolated_workspace, monkeypatch, capsys
+):
+    import eventide.cli as cli
+
+    settings = settings_for(isolated_workspace)
+
+    async def seed():
+        host = RuntimeHost(settings, ScriptedProvider([{"text": "private output body"}]))
+        try:
+            return await host.run(RunRequest("private user goal"))
+        finally:
+            await host.close()
+
+    result = asyncio.run(seed())
+    monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
+    destination = isolated_workspace / "trace.json"
+    assert main(["trace", result.run_id, str(destination)]) == 0
+    report = destination.read_text()
+    assert "private user goal" not in report and "private output body" not in report
+    assert "spans" in json.loads(report)
+    assert main(["trace", result.run_id, str(destination)]) == 1
+    assert destination.read_text() == report
+    assert "exists" in capsys.readouterr().out
 
 
 def test_eval_summary_output(monkeypatch, capsys):

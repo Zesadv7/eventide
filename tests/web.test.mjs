@@ -71,6 +71,8 @@ test("park reasons are explained in user language, not developer text", () => {
   assert.equal(parkSummary({status: "interrupted", reason: "cancelled", error: "Run cancelled; session parked"}), "这次执行被停止；已完成的工作已保存，可以继续。");
   assert.equal(parkLabel({status: "interrupted", reason: "token_budget"}), "Token 预算用尽");
   assert.match(parkSummary({status: "interrupted", reason: "token_budget"}), /软上限.*新的预算/);
+  assert.equal(parkLabel({status: "interrupted", reason: "unknown_tool_outcome"}), "工具结果未确认");
+  assert.match(parkSummary({status: "interrupted", reason: "unknown_tool_outcome"}), /阻止继续执行/);
   assert.equal(parkSummary({status: "interrupted", reason: null, error: "Host stopped before terminal fact"}), "服务在执行结束前停止；确认工作区状态后可以继续。");
   assert.equal(parkSummary({status: "interrupted", reason: null, error: "自定义原因"}), "自定义原因");
   // "cancelled" also covers Host-shutdown cancels, so the label never claims a hand.

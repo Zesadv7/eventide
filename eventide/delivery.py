@@ -244,6 +244,15 @@ def _protected_manifest(
     return {path: metadata for path, metadata in manifest.items() if _protected(path, patterns)}
 
 
+def validate_delivery_source(source: Path) -> dict[str, Any]:
+    root = _root(source)
+    _reject_hidden_index(root)
+    if _git(root, "status", "--porcelain", "-z", "--untracked-files=all"):
+        raise ValueError("Source Workspace must be clean before delivery")
+    _files(root)
+    return _checkpoint(root)
+
+
 def capture_delivery(
     source: Path, checkout: Path, *, protected_patterns: Sequence[str] = ()
 ) -> dict[str, Any]:

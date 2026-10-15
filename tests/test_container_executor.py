@@ -260,11 +260,15 @@ async def test_parallel_commands_have_distinct_cleanup_identities(fake_docker, t
     assert not list(fake_docker[0].glob("eventide-*"))
 
 
-async def test_creation_timeout_is_not_reported_as_known_clean_execution(fake_docker, tmp_path):
+async def test_creation_timeout_is_not_reported_as_known_clean_execution(
+    fake_docker, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DOCKER_HOST", "unix:///fixture/docker.sock")
+    monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
     configure(fake_docker, create_delay=30)
     with pytest.raises(ContainerCleanupError, match="creation was not confirmed"):
         await executor(fake_docker, cleanup_timeout=0.5).execute("ignored", tmp_path)
-    assert [action(call) for call in calls(fake_docker)] == ["context", "create", "rm"]
+    assert [action(call) for call in calls(fake_docker)] == ["create", "rm"]
 
 
 async def test_missing_image_is_an_error_without_pull_or_start(fake_docker, tmp_path):
@@ -411,6 +415,9 @@ async def test_policy_still_gates_command_before_docker(fake_docker, tmp_path):
 async def test_real_local_container_readonly_boundary(tmp_path):
     if shutil.which("docker") is None:
         pytest.skip("Docker executable is unavailable")
+    # Writable POSIX permissions make the readonly mount, rather than UID mismatch,
+    # responsible for rejecting writes. This is a disposable test directory.
+    tmp_path.chmod(0o777)
     runner = ContainerCommandExecutor(os.environ["EVENTIDE_TEST_CONTAINER_IMAGE"])
     result = await runner.execute(
         "id -u; if touch /workspace/should-not-write; then exit 23; fi; "

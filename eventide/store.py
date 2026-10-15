@@ -319,6 +319,17 @@ class RuntimeStore:
                 )
         return references
 
+    def delivery_facts(self, delivery_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                self._decode(row)
+                for row in self._connection.execute(
+                    "SELECT * FROM runtime_events WHERE partial=0 AND type LIKE 'delivery.%' "
+                    "AND json_extract(payload_json, '$.delivery_id')=? ORDER BY session_seq",
+                    (delivery_id,),
+                )
+            ]
+
     def append_fact(
         self,
         session_id: str,
@@ -341,6 +352,32 @@ class RuntimeStore:
                 author=author,
                 partial=partial,
             )
+
+    def workspace_has_unknown_outcome(self, workspace_id: str) -> bool:
+        with self._lock:
+            return bool(
+                self._connection.execute(
+                    "SELECT EXISTS(SELECT 1 FROM runtime_events e "
+                    "JOIN sessions s ON s.id=e.session_id "
+                    "WHERE e.type='tool.outcome_unknown' AND e.partial=0 "
+                    "AND COALESCE(json_extract(e.payload_json, '$.workspace_id'),s.workspace_id)=? "
+                    "AND COALESCE(json_extract(e.payload_json, '$.readonly'),0)=0)",
+                    (workspace_id,),
+                ).fetchone()[0]
+            )
+
+    def workspace_execution_config(self, workspace_id: str) -> dict[str, Any]:
+        """A delivery's explicit execution choice survives later runs and restarts."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json FROM runtime_events e JOIN sessions s ON s.id=e.session_id "
+                "WHERE s.workspace_id=? AND e.type IN ('run.admitted','run.started') "
+                "AND json_extract(e.payload_json,'$.execution_config.writer_delivery_id') "
+                "IS NOT NULL "
+                "ORDER BY e.rowid DESC LIMIT 1",
+                (workspace_id,),
+            ).fetchone()
+        return json.loads(row[0])["execution_config"] if row else {}
 
     def _append_fact_locked(
         self,

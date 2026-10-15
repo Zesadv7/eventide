@@ -264,4 +264,7 @@ class ToolExecutor:
             text = str(output)
             return ToolResult(call.id, call.name, text, text.startswith("Error:"))
         except Exception as exc:
-            return ToolResult(call.id, call.name, f"Error: {type(exc).__name__}: {exc}", True)
+            metadata = {"outcome_unknown": True} if getattr(exc, "outcome_unknown", False) else {}
+            return ToolResult(
+                call.id, call.name, f"Error: {type(exc).__name__}: {exc}", True, metadata
+            )

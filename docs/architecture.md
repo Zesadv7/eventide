@@ -44,7 +44,7 @@ RuntimeEvent 包含 event_id、session_id、严格递增 session_seq、turn_id�
 - approval.required、approval.resolved；
 - workspace.checkpoint、context.configured、context.compacted、context.trimmed、context.summary_requested、context.summary_generated；
 - task.plan_updated（payload 为 `{todos, next_task_seq, step}`，每个 todo 含 `id`、`content`、`status`）；
-- run.completed、run.failed、run.interrupted（终态 payload 另带 `reason`：`step_budget`、`task_step_budget`、`token_budget`、`cancelled` 或 `null`）。
+- run.completed、run.failed、run.interrupted（终态 payload 另带 `reason`：`step_budget`、`task_step_budget`、`token_budget`、`unknown_tool_outcome`、`cancelled` 或 `null`）。
 
 模型响应保存结构化 content blocks，包括 provider_state 与带稳定 ID 的 tool_use。工具执行前提交 prepared，结束后提交 completed；工具组收齐结果后才形成 provider-neutral tool_result 消息。副作用结果之后另存 workspace checkpoint；若两者之间崩溃，Continue 拒绝缺失 checkpoint 的历史。
 
@@ -143,7 +143,7 @@ Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订�
 
 ## 工程边界
 
-系统仍面向可信单机使用：没有账号、多租户、公网鉴权、容器沙箱、分布式锁或 Agent Graph。状态根锁不等于工具安全隔离。AGENTS.md 是模型指令，不会扩张 PolicyEngine 权限。生产代码的 import、--help、测试与离线评测不需要 API Key 或网络。
+系统仍面向可信单机使用：没有账号、多租户、公网鉴权、分布式锁或 Agent Graph。可选 Docker 只隔离 Shell 命令，不是覆盖文件工具与 Provider 的完整 Agent 沙箱；默认 Local 使用本机权限。状态根锁不等于工具安全隔离。AGENTS.md 是模型指令，不会扩张 PolicyEngine 权限。生产代码的 import、--help、测试与离线评测不需要 API Key 或网络。
 
 完整验证门禁见 AGENTS.md。测试创建隔离目录和独立状态根，Git 测试使用测试仓库；不使用或删除用户级真实状态。
 
@@ -155,7 +155,7 @@ Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订�
 
 `CommandExecutor` 返回 `CommandResult`，携带退出码、stdout、stderr、超时、耗时和精确省略字节计数；`ToolResult.metadata` 向 canonical `tool.completed` 透出这些字段。默认每流保留 25,000 字节头尾，实时消费 pipe，不先完整缓冲再截断。模型能看到退出状态，工具错误来自退出码/超时；注入返回字符串的自定义执行器继续可用。Shell 丢弃的中段不进入日志或分页存储；这与非 Shell 全量结果的请求侧预览不同。取消会等待进程树清理，不伪造完成结果。
 
-后续能力围绕可验收的软件工程闭环推进：先补命令/请求可靠性和独立验收，再增加隔离上下文的只读调研 worker；写入 worker 基于受管 worktree，父级负责取消、预算、结果采纳与合并。容器执行通过 `CommandExecutor` 替换边界进入；代码结构检索与真实 embedding 通过现有只读检索工具进入；OTel 作为 Event Log 的可选观察出口，不形成第二套事实源。LangGraph 若有跨阶段编排需求，只作为外层 adapter；Redis、Temporal、外置向量库按已有性能或调度证据决定，不作为基础依赖。以上是演进约束，尚未实现的能力不进入当前功能清单。
+能力扩展围绕可验收的软件工程闭环：只读 worker 复用主 Runtime，写入 worker 使用受管 worktree，经独立验收后由用户显式采纳；取消与预算仍归 Host 管理。容器执行通过 `CommandExecutor` 替换边界进入；代码结构检索与真实 embedding 通过现有只读检索工具进入；OTel 作为 Event Log 的可选观察出口，不形成第二套事实源。下文记录这些能力的当前实现。后续若确有跨阶段编排需求，LangGraph 只作为外层 adapter；Redis、Temporal、外置向量库按已有性能或调度证据决定，不作为基础依赖。
 
 覆盖率覆盖全部现存生产源码，mypy 不再通过 legacy 或 tools 通配排除；删除的教学测试由生产依赖校验、真实 worktree 生命周期和结构化命令测试替代，数据库迁移及 HTTP/SSE 兼容测试继续保留。
 
@@ -164,3 +164,21 @@ Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订�
 `workers.py` 提供不可变 ReadonlyProfile、Git 当前源码快照、角色协议与严格报告校验，没有第二个 Agent loop。Host 的 delegate_readonly 是经过 ToolExecutor/PolicyEngine 的动态工具，默认关闭。父 Run 持有源 Workspace 所有权，创建绑定该 Workspace 的独立归档 Session，在自己的执行作用域内直接复用同一个 `_execute`，将全部文件根覆盖为独立快照；子 Run 不重新争用父锁，避免同 Workspace 等待死锁。常规根任务继续串行，最多两个内部只读快照子任务可并发。子身份记录在 run.admitted/start 的 parent_run_id、worker_role、snapshot_id；普通接收和 Continue 按持久身份拒绝对子 Session 执行，API 拒绝附件。
 
 子 Run 不读取父消息、不连接 MCP、不使用 custom handlers/Skills/RAG/delegate，目录和执行器仅含四个安全读取工具。深度为 1，每父 Run 最多 4 个子任务，8 步/4,000 Token 软上限/60 秒批次期限；在开启父 Token 上限时按剩余量分配。worker.started 保留源 checkpoint、manifest 和排除数；worker.completed 保留子用量和报告校验状态，父 usage 为 inclusive，子 usage 为 exclusive。未知失败请求消费不估算。父取消或超时先取消并等待子终态，再删除自己创建的快照；重启不自动重派或采纳结果。
+
+## 可选结构切块与观测出口
+
+显式 code_structure 模式通过懒加载 tree-sitter Python/JS/TS grammar 提取类、函数和嵌套符号，heading携带符号路径；装饰器/UTF-8/CRLF行号按真实源码保留。大符号继续窗口化，class骨架与方法分开避免复制整类。build统计报告解析文件数与fallback原因；窗口/结构模式、parser版本组成chunking_profile/fingerprint，在写事务内复核，变化必须force。缺依赖/不支持语言/解析损坏时回退窗口；默认不导入parser。检索eval可对相同复制语料分别运行两种切法，记录实际提交的chunking指纹和hit heading，不以机制测试声称质量提升。
+
+telemetry.py 的 build_run_trace 是纯日志派生；export_run_trace 只在显式调用时懒加载SDK，使用局部TracerProvider和官方IdGenerator/SpanProcessor，保留历史时刻与确定性哈希identity，不修改全局provider。CLI收集所选Run的Session及worker.started引用的子Session，Continue提供link，缺失来源标记unobserved。默认JSON无网络，OTLP endpoint必须显式。固定元数据allowlist阻止正文/参数/结果/密钥进入出口，exclusive模型用量避免父子doublecount；没有响应的重试消费和账单不推测。导出失败不改变执行事实。
+
+## 写入交付与独立验收
+
+DeliveryController 是 Host 的控制面组件，无独立循环、Store 或状态库。prepare/run/verify/apply 使用源 Workspace owner；需要时再获取 checkout owner。每次操作建一个归档 control Run，delivery.prepared/verified/applied 为唯一事实，查询在源锁内重读最新状态，避免排队请求复用旧通过结论。worktree 继续由 WorktreeService 管理，receipt绑定干净源基线、路径/common dir、分支、base、保护清单；build_patch使用临时index与no-filters对象写入，不修改真实index。补丁文件是状态根的不可变派生产物，canonical receipt记录hash/checkpoint；不是第二份运行状态。
+
+Writer通过同一durable admission创建独立checkout Session/Run，execution_config记录backend/image/disable_mcp/writer_delivery_id。Workspace后续Run、Continue和重启从事件派生执行配置，显式Local可由下一次控制面run选择；空image拒绝，不降级。根任务仍串行；容器仅替换CommandExecutor，不改变文件工具边界或Provider执行位置。verify使用ToolExecutor/PolicyEngine显式命令，绑定检查前后相同checkout checkpoint与patch；模型不能改受保护测试/配置伪造验收。apply须最新verified=passed，重读实际patch并再次验证source+checkout；不自动暂存或提交。apply在线程内已生效后被Stop，仍先落delivery.applied，再记interrupted，不假装撤销已发生的Git写入。
+
+ContainerCommandExecutor通过Docker create/start/rm、argv执行和有界输出，使用本机endpoint、预拉镜像、非root、network none、只挂载cwd、资源上限与readonly验收。创建/清理阶段屏蔽重复取消并有独立期限，运行停止后必须确认rm。ContainerCleanupError携outcome_unknown，ToolExecutor保留此元数据；Host不把它变成tool.completed，而将Run停驻并按canonical tool.outcome_unknown隔离可能仍在写的Workspace。Delivery在源及checkout入口都检查该状态；readonly验收未知不宣称通过，也不误隔离原项目。普通同步处理器在多次取消下继续shield等待真实结束，已知结果提交后才释放owner。
+
+acceptance_tests工程评测使用一次性Git fixture，原测试复制到外部临时目录并保存SHA清单。基线必须退出1；结束后测试源/数据清单不变，清理fixture的派生bytecode，再以-I/-B独立Python、先导入stdlib unittest后加入候选源码，运行原版测试。check_project通过唯一ToolExecutor/Policy留下独立Run证据，不接受模型自判。report增加verification字段；baseline/verification run id、exit/timed_out、manifest与tests_unchanged可追溯。测试、数据与模型预算均有限，失败消费不推测；这些功能测试不构成恶意代码隔离证明。
+
+CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optional-extensions 安装全部 extras；container job 显式预拉测试镜像后开启真实 readonly boundary 测试；web job 固定 Playwright 版本并安装 headless Chromium，严格模式缺浏览器必须失败。默认离线门禁仍不依赖 Key；未执行的远程 CI 不能当成本机真实 Docker 验证证据。

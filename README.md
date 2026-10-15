@@ -13,7 +13,10 @@ Eventide v0.4 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHo
 - MCP stdio 与 Streamable HTTP 工具发现和调用；
 - Workspace 级 Skill 发现与按需加载；
 - Workspace 级混合知识检索（Hash/API embedding + FTS5 trigram + RRF）；
+- 有界 Researcher / Reviewer 只读协作，可选 tree-sitter 代码结构切块；
+- worktree 写入交付、独立命令验收与显式补丁采纳，可选 Docker Shell 执行；
 - SQLite 追加式 Event Log、持久上下文 checkpoint 与 JSONL 导出；
+- 从运行日志派生的隐私受限 trace，可选 OpenTelemetry 导出；
 - 中断检测、停驻与用户主动 Continue，不自动重放工具副作用；
 - scripted provider 离线评测与真实模型 live eval；
 - FastAPI、SSE 事件流和原生中文 Web 控制台。
@@ -22,7 +25,7 @@ Eventide v0.4 是面向软件工程项目的 Workspace Agent Runtime。RuntimeHo
 
 ## 环境要求
 
-- Python 3.10–3.14；
+- Python 3.10 及以上；
 - 推荐使用 [uv](https://docs.astral.sh/uv/) 管理环境；
 - 只有连接真实模型时才需要 API Key，帮助命令、单元测试和离线评测不需要网络或密钥。
 
@@ -152,6 +155,26 @@ HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、�
 
 附件按完整 Session ID 的 SHA-256 存入状态根 `attachments/~<hash>/`，内部记录再次验证精确归属。事件引用是已使用的依据，即使文件中的 used 缓存未写成功，也不能通过 API 删除。旧目录仅在能够确认安全身份时只读兼容；不自动搬移、覆盖或删除历史附件。
 
+## 可选代码结构检索与观测
+
+默认检索继续使用轻量窗口。安装 `uv sync --extra dev --extra code` 后，可显式开启 tree-sitter：
+
+```bash
+uv run --extra code eventide rag build --workspace /path/to/project --code-structure --force
+uv run --extra code eventide rag eval evals/retrieval.yaml --code-structure --json
+```
+
+Python、JavaScript、TypeScript/TSX 按函数、类和嵌套符号切块，保留准确行号；大符号仍受 800 字符窗口限制。缺依赖、语法损坏或不支持语言时回退原窗口并报告原因。切块模式和 parser 版本纳入索引指纹，变化需要 `--force`。当前内置 16 题语料在窗口与结构模式下均全部命中，尚没有质量提升证据；结构模式用于增加定位精度，后续用同语料对照评价。
+
+`trace` 从 canonical 事件派生脱敏的 Run、模型、摘要、工具与父子关系，不新建事实库：
+
+```bash
+uv run eventide trace run_example ./trace.json
+uv run --extra telemetry eventide trace run_example --otel-endpoint http://127.0.0.1:4318/v1/traces
+```
+
+默认离线 JSON；只有显式 endpoint 才发送 OTLP HTTP，依赖 `telemetry` extra。出口只含固定类别、哈希身份、状态、耗时和已观测用量，不发送正文、参数、工具结果或密钥。跨父子费用汇总使用各 Run 自身模型事件，避免把父 inclusive 用量再叠加子用量；失败/重试未返回用量会标为不完整，不推测费用。
+
 ## 受控只读 Agent 协作
 
 设置 `EVENTIDE_WORKERS=1` 后，有可信 Git HEAD 的 Workspace 增加 `delegate_readonly(tasks)`。模型可委派 Researcher 或 Reviewer；每批最多 2 个并发子任务，每个 Run 最多 4 个，子任务不能再委派。默认每个子 Run 最多 8 步、4,000 已观测 Tokens、60 秒，并从父 Run 剩余 Token 软预算中分配；父级用量包含子任务，子 Run 自身用量另可查询，汇总时不能重复相加。
@@ -164,6 +187,35 @@ HTTP 保留原有 session/run/approval/SSE 路由，新增 Workspace 注册、�
 EVENTIDE_WORKERS=1 uv run eventide run "委派 Researcher 定位调用链，并让 Reviewer 复查潜在问题"
 uv run eventide eval evals/workers.yaml
 ```
+
+## 隔离修复、独立验收与显式采纳
+
+`deliver` 将写入 Worker 放入受管 worktree，原项目必须从干净的 Git HEAD 开始；用户已有修改会在创建 checkout 前拒绝。流程分开执行和验收，模型的“完成”回复不构成测试通过。
+
+```bash
+uv run eventide deliver --workspace /path/to/project prepare repair
+# prepare 返回 delivery_id 和 checkout 路径
+uv run eventide deliver run delivery_example "修复问题，保持固定测试和配置不变" --local
+uv run eventide deliver verify delivery_example --check "python -B -m unittest discover -s tests" --local
+uv run eventide deliver show delivery_example
+# 审阅 show 返回的 patch 文件和检查结果后，显式采纳
+uv run eventide deliver apply delivery_example
+```
+
+每次 Run / Verify 都必须显式选择 `--local` 或 `--container-image <已存在的 Linux 镜像>`。Local 使用本机权限；容器只接管 Shell，文件工具仍在隔离 worktree 中执行，模型请求在 Host，Writer 不连接 MCP。容器不自动拉镜像，仅支持本机 Docker endpoint；默认限制网络、权限、进程、CPU/内存，验收挂载只读、Writer 挂载可写，UID 1000 需要对应权限。Docker bind 不挂载 worktree 外的 Git common dir，因此容器中的 Git 命令可能不可用。容器配置会随 Workspace 后续 Run/Continue 保存，不因重启或新 Session 静默退回 Local。`--container-image ""` 明确拒绝。
+
+验收通过现有 ToolExecutor/PolicyEngine 运行显式检查，保存真实退出码、超时、输出与检查时源码 checkpoint。默认保护测试、CI、项目/依赖配置、锁文件和秘密文件，`prepare --protect <glob>` 可增加保护；这些文件需要变更时应人工处理。检查期间变更源码、修改测试、来源被用户改动、补丁被篡改或 checkout 已变化都会拒绝采纳。补丁以 SHA-256 绑定状态根文件和 canonical 事件；`apply` 再核对最新通过的检查及来源、checkout，精确应用，不自动暂存、提交或合并分支。失败产物与历史保留。
+
+容器超时/停止会等待实际清理；无法确认时保留 `tool.outcome_unknown`，不写伪完成。可能仍在写的 Workspace 被阻止继续执行和采纳，重启也保留该边界。需要检查 Docker 状态并保留原产物；可从未受影响的原项目建立新的交付 worktree，不能用“放弃恢复”绕过未知状态。同步文件工具被多次停止时同样保持所有权直到线程结束；已得到真实结果会落库，再停驻。
+
+无需 Key 可复现整个交付闭环：
+
+```bash
+uv run python -m examples.delivery_repair
+uv run eventide eval evals/engineering.yaml
+```
+
+示例包含失败 → worktree 修复 → Host 重启 → 独立验收 → 审阅用补丁 → 显式采纳 → 原项目复验。三组工程评测覆盖折扣、TTL 缓存、配置合并，共 20 条固定 unittest：先确认基线失败，保存原测试及哈希，模型结束后检查测试未改，再用独立 Python 进程运行原版测试；模型正文不参与验收。离线 scripted 的 3/3 只证明执行机制，真实质量需同一套件显式 `--live`，报告包含基线/验收退出码、测试完整性与已观测用量。固定测试和 Local 检查不是抵御恶意代码的安全沙箱。
 
 ## Git worktree 管理
 

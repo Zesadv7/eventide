@@ -1,4 +1,4 @@
-import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=14";
+import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=15";
 import {EventFeed, request} from "./transport.js?v=12";
 import {el, button, icon, reconcile, markdown} from "./view.js?v=14";
 
@@ -1256,12 +1256,13 @@ function renderActions(session) {
   const workspaceBusy = (state.sessions.get(state.workspace) || []).some((s) => ["running", "waiting_for_user"].includes(s.status)) ||
     [...state.busy].some((id) => id === `new:${state.workspace}` || (sessionRecord(id)?.workspace_id === state.workspace));
   const parked = session?.status === "parked";
+  const outcomeUnknown = session?.latest_run?.reason === "unknown_tool_outcome";
   $("#recovery").hidden = !parked;
   $("#recovery-reason").textContent = parked ? parkSummary(session?.latest_run) || "执行被中断；可以尝试继续。" : "";
   $("#prompt-form").hidden = parked;
-  $("#continue-button").disabled = workspaceBusy;
-  $("#abandon-button").disabled = workspaceBusy;
-  $("#continue-button").textContent = state.busy.has(owner) ? "正在接续…" : "尝试 Continue";
+  $("#continue-button").disabled = workspaceBusy || outcomeUnknown;
+  $("#abandon-button").disabled = workspaceBusy || outcomeUnknown;
+  $("#continue-button").textContent = outcomeUnknown ? "结果待确认" : state.busy.has(owner) ? "正在接续…" : "尝试 Continue";
   $("#run-button").disabled = !state.workspace || workspaceBusy;
   const activeRun = session?.latest_run && !terminal(session.latest_run) ? session.latest_run : null;
   $("#cancel-run").hidden = !activeRun;
