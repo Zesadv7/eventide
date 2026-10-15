@@ -17,6 +17,7 @@ from eventide.budgets import (
     ReservationReceipt,
     is_service_probe_run,
 )
+from eventide.input_composition import measure_input_composition
 from eventide.models import ModelRequest
 from eventide.store import RuntimeStore
 
@@ -102,7 +103,9 @@ class ModelBudgetController:
         return self.ledger.reserve(
             session_id, run_id, identity["attempt_id"], context=context,
             input_estimate=inputs, output_estimate=outputs, estimate_method=method,
-            attempt_started=identity,
+            attempt_started={
+                **identity, "input_composition": measure_input_composition(request),
+            },
         )
 
     def finish(self, run_id: str, identity: dict[str, Any]) -> ReservationReceipt:

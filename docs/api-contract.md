@@ -272,3 +272,15 @@ Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入�
 
 
 源码checkpoint现可包含`checkpoint_policy:{version:2,excluded_untracked:[相对文件],excluded_untracked_directories:[相对产物目录]}`；它随原canonical checkpoint事实保存，不是客户端可配置的排除项。仅实际Runtime产物为例外，项目Skill或普通源码变化仍拒绝派发。状态目录等于Workspace根的Run接收返回422；历史停驻Run的指纹策略与当前不同，Continue返回409且原checkpoint不变，不能由重试或重启覆盖。
+
+### 输入组成字符统计
+
+上述usage账本的每个calls项新增`input_composition: object|null`，Run/Session usage和costs内嵌usage完全一致。新调用从`model.attempt_started`读取，结构为：
+
+```json
+{"method":"serialized_unicode_characters_v1","unit":"characters","total_characters":100,"components":{"instructions":10,"history":20,"tool_catalog":10,"skills":10,"retrieval":10,"tool_results":10,"envelope":30}}
+```
+
+所有计数为非负整数，七组件合计必须等于total_characters；图示数值仅说明结构。字段集合、method、unit、数值和合计严格验证，非法/旧版/缺失为null，不修正成零或重新估算。仅started携带才有效，finished不能替代或覆盖；取消、失败和尚未结束的尝试仍可具有有效字符统计，usage_source继续保持其真实状态。
+
+统计是最终Provider中立system/messages/tools对象经json.dumps(ensure_ascii=False)序列化后的Unicode字符，含转义/结构，不是供应商wire、Token或费用。instructions统计system序列化字符串，tool_catalog统计整个tools数组；message.content块按已确认配对的工具结果分别归skills/retrieval/tool_results，其他内容及message中role/content以外的扩展字段值归history，剩余角色/字段名和JSON结构归envelope。仅唯一且先出现的assistant tool_use可为user tool_result建立归属，加载Skill正文/资源和search_knowledge分别归对应项；错序/孤立/重复ID不猜来源。摘要、图片及provider_state按当前请求本身统计，不还原已压缩来源；不能把Skills字符项解释为其完整因果成本。

@@ -135,7 +135,7 @@ SDK stream 在终态返回前关闭；异常、取消和消费者 aclose 同样�
 
 Responses 终态为 incomplete 时，即使带有格式正确的 function_call，也保留 max_output_tokens 等原始截断原因，不能改写成 tool_use。外层 completed 但工具项仍为 in_progress/incomplete、缺少调用身份或 JSON 无效时，同样标记 incomplete；缺身份的项不制造伪调用，带身份的 JSON 错误保留审计占位。完整 ModelResponse 继续携带最终 usage，使 Host 可先记账，再终止并标记未派发的调用，不能因工具不完整而丢失已知消费。
 
-`RuntimeStore.usage_events`在一个递归查询中选取指定Run/Session及可选持久子Run的调用事实；`usage.build_usage_ledger`纯派生去重、已报告/估算/未知及完整性，HTTP用量接口不依赖列表分页。终态/worker汇总不再次收费，历史只做不完整响应回退。价格、共享预算、输入组成估算与Vue视图仍按U2/U3实施。
+`RuntimeStore.usage_events`在一个递归查询中选取指定Run/Session及可选持久子Run的调用事实；`usage.build_usage_ledger`纯派生去重、已报告/估算/未知及完整性，HTTP用量接口不依赖列表分页。终态/worker汇总不再次收费，历史只做不完整响应回退。价格、共享预算及Vue控制面见U2/U3章节；最终请求字符组成按下文固定方法记录，完整页面仍由U3集成验收。
 
 `RuntimeHost.run(RunRequest)`、create_session、Provider 配置和 RunResult 原字段保持当前契约；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。
 
@@ -385,3 +385,11 @@ P3源码证据补充：Host为接收、派发、只读工具基线、worker与�
 `eval_grading.py` 仅编排已有 RuntimeHost/ToolExecutor/PolicyEngine、check_project 和 manage_delivery；没有替代执行器或结果数据库。事实题在持久 Plan 快照中运行，要求结构化事实和精确行号与人工标注一致；修复题在 Session 固定 worktree 中运行。验收先确认原版测试失败，再在独立 Python 进程运行事先冻结的 unittest；源码允许范围、固定测试、额外文件和原项目未被修改均参与判断，正文自报成功没有分数。
 
 恢复交付题明确区分 scripted Provider 经工具修改业务文件与评测程序控制动作：一题关闭重开 Host 后 verify/apply 并复验源，另一题在 verify 后注入独立源变化并要求拒绝 apply。测试及候选产物持久保留并引用 Run 身份，不注入“已通过”事实。该机制验证不证明真实模型自主修复、不包含未来 C 检索或 D 三候选流程；本地执行仍不是恶意代码安全沙箱。Web 评测未来必须纳入主服务模型额度和项目／日预算，不能复制账本制造第二事实源。
+
+## 最终请求输入组成（U3）
+
+`input_composition.measure_input_composition`统计实际交给统一模型入口的ModelRequest.system/messages/tools。ModelBudgetController.begin在同一原子预算预留和model.attempt_started事实中保存统计；主Agent、context_summary、worker与其他复用begin的调用共用该路径。只保存方法、单位和数字，不复制提示、资源、图片或工具原文。既有serialized_utf8_bytes_v1预算预留和Provider Token总量不变。
+
+口径serialized_unicode_characters_v1使用Python json.dumps(ensure_ascii=False)的Unicode字符长度。instructions是system序列化字符串；tool_catalog是tools整个序列化数组；每个message.content的字符串或独立块分别归类。唯一且先出现的assistant tool_use与user tool_result按tool_use_id配对：load_skill/read_skill_resource结果整块归skills，search_knowledge归retrieval，其余或孤立结果归tool_results。重复ID、缺失、错序或非assistant调用不建立来源。普通文本、工具调用参数、图片/provider_state/未知块和压缩摘要归history；message中role/content以外的扩展字段值也归history，不能把顶层加密reasoning等长值当结构。其余角色、字段名及数组/根对象结构归envelope。七项和严格等于整个请求JSON长度，统计含转义与块包装，不能称纯正文Token或Skill总成本；system内Skill目录仍计instructions。
+
+usage投影只验证attempt_started中的固定字段、方法、单位、非负整数与精确合计；finish不能补写或覆盖统计。旧事件、缺失、未知版本或非法结构均为null，不从消息重算；重放按原attempt去重，结束前和取消后同样可查，不增加已报告Token或费用完整性。Run/Session usage及costs内嵌usage沿用该投影。

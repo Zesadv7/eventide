@@ -681,6 +681,8 @@ Vue补充验收：39项前端回归、5条真实FastAPI静态页面旅程、type
 Vue集成验证：35项前端回归、typecheck/build/format与4条真实FastAPI静态页面旅程通过；预算零值阻止、刷新恢复、关闭限制后Continue、固定价格计价和快照并发均实际运行。集成后端965通过/5个默认Docker跳过、覆盖93.79%，Ruff/Mypy77模块通过。全部使用临时项目和确定性Provider，无付费调用。
 
 
+**U3字符组成补充（ADR-064）：** 最终ModelRequest在统一预算begin入口按固定JSON序列化口径分项，只保存数字；Token账本和预留方法不变。Skills/检索依据当前请求唯一且先出现的tool_use与结果配对，摘要和缺失关联不补造来源。统计由attempt_started冻结，投影严格验证新结构、旧数据保持null，不能用费用除字符数冒充精确归因。178项组成/usage/预算/HTTP回归通过，统计模块100%覆盖、Ruff/Mypy82模块通过；Vue和完整集成门禁由后续步骤验收。
+
 ## ADR-067：连接探测使用真实控制 Run 与服务级预算归属
 
 **状态：Accepted。**

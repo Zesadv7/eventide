@@ -10,6 +10,8 @@ from collections.abc import Callable, Iterable, Mapping
 from math import isfinite
 from typing import Any
 
+from eventide.input_composition import validate_input_composition
+
 TOKEN_FIELDS = (
     "input_tokens",
     "output_tokens",
@@ -213,6 +215,9 @@ def _attempt_row(
             "model": payload.get("model"),
             "status": payload.get("status", "unknown") if finish else "unknown",
             "request_observed": start is not None,
+            "input_composition": validate_input_composition(
+                start["payload"].get("input_composition") if start else None,
+            ),
             "started_at": start["ts"] if start else event.get("ts", 0),
             "finished_at": finish.get("ts") if finish else None,
             **_request_metadata(payload if finish else {
@@ -238,6 +243,7 @@ def _legacy_row(event: Mapping[str, Any]) -> dict[str, Any]:
         "model": payload.get("model"),
         "status": "completed",
         "request_observed": False,
+        "input_composition": None,
         "started_at": event.get("ts", 0),
         "finished_at": event.get("ts"),
         **_request_metadata(payload),
