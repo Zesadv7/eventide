@@ -20,6 +20,8 @@ HTTP 状态码保持原义，JSON 错误包含 `code`、可读 `message` 与兼�
 
 重启或响应记录中断后，重试只读取原Run终态并补齐HTTP回执，不重新派发。恢复结果`recovered=true`，无法复原的`latency_ms`和`checked_at`为null；已接收但未建立Run的中断记录返回`error_type=not_dispatched`和null run_id。普通结果`recovered=false`。成功/业务失败继续HTTP200；请求身份、来源或格式错误仍用HTTP错误包裹。30秒触发取消后等待客户端收尾，不保证严格30秒总墙钟上限。
 
+Vue设置页通过`durableMutation('probe', ...)`调用此接口，结果独立于已保存Provider状态；仅显式点击发起。等待时锁定候选字段及保存/恢复操作。网络/5xx/未标记409保留原键及表单摘要，刷新后由用户重新输入原密钥核对，不保存凭据。新候选不得替换尚未确认的请求；HTTP200业务失败仍是确定回执，用量未知由账本及预留保守保留，不视为零消费。页面区分null耗时、unknown用量和无Run的未派发结果。
+
 ### 浏览器写请求与运行幂等 —— 已实现
 
 工具调用错误的canonical metadata含稳定code（invalid_arguments、invalid_tool_contract、unknown_tool、permission_denied、timeout、execution_failed、outcome_unknown）。第一次参数错误交回模型修正，再次参数错误结束该Run；错误结果仍保存，不自动重放已执行工具。截断响应的调用不会派发，其未执行事实补齐历史消息。

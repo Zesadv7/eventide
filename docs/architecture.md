@@ -365,6 +365,8 @@ BudgetContext.project_id仅对此严格控制身份允许None：ModelBudgetContr
 
 HTTP接收复用control Session上的http.mutation事实，Idempotency-Key必填；候选请求只存摘要（包含显式密钥的指纹，不存原值），实际已保存密钥在首次调用前冻结。Run身份由控制Session/操作/键派生；相同请求回放持久结果，内容冲突及在途/未知返回409。崩溃发生在Run完成与HTTP回执之间时，只从原终态恢复回执，耗时/检查时间无法还原则null；已接收但无Run的中断证明未派发，补写明确失败回执。进程内active集合仅阻止在途接收被误判为崩溃，不是新的运行事实源。旧页sessionStorage仅存随机键和表单摘要，不存密钥；结果不明不换键，刷新后可重试原内容。
 
+Vue SettingsView将候选草稿与store.provider分离，后者仍只由配置读取/保存/恢复结果更新；连接测试仅保留独立的ProbeResult。加载、保存及探测期间字段和冲突操作禁用，按钮没有自动触发路径。api/probe.ts复用durableMutation管理请求键，并保存单个候选摘要阻止未知结果被新表单替换；凭据留在组件内存，刷新后重新输入。同标签页的轻量内存观察器只共享在途请求状态及已返回结果，切页后仍锁定表单并接收原结果，避免旧请求清键后新页面把“重试”误变成新调用；它不保存凭据，也不替代持久Run事实。页面展示真实Run/usage、服务UTC日预算范围，未知Token与null耗时不转换为零。Playwright跨文件使用单worker，因为测试共用真实Host及全局队列；单场景内部继续验证并发窗口。
+
 GET /api/queue只读查询上述事实与所有权；project_id只过滤列表，容量和counts始终是全局。dispatch_state区分queued/starting/running/finishing；Run status继续使用canonical投影，审批等待或终态清理不会伪装为新执行。排队取消复用精确Run取消并保留输入，关闭等待准备线程/执行清理后停驻全部已接收工作。重启不自动派发；尚未started的admission保留原checkpoint，不调用crash-gap补新基线，实际开始过的旧运行继续保守恢复。所有未知Token预留保持原状。前端生成类型、队列页面和整包门禁由集成阶段验证。
 
 Vue队列控制面只读取Host队列快照，不维护浏览器调度器；全局counts/limits与带精确Run/Session/副本身份的列表分开。queued被视为同Session活跃工作，但不作为源Workspace执行锁；UI取消只发送该Run身份。每次单一在途轮询、卸载后停止回填，后台任务继续由Host拥有；狭窄屏幕横向滚动任务表。

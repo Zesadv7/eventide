@@ -20,8 +20,25 @@ def main() -> None:
     from eventide.config import Settings
     from eventide.host import RuntimeHost
     from eventide.models import ModelResponse, ToolCall
+    from eventide.providers import ProviderError
     from eventide.streaming import ModelStreamEvent
     from tests.e2e_server import E2EUvicornServer, FakeProvider, build_fixtures
+
+    class ConnectionProbeProvider:
+        """Exercise the real probe owner/ledger with no SDK or external network."""
+
+        async def complete(self, request):
+            await asyncio.sleep(0.3)
+            if request.model == "vue-probe-failure":
+                raise ProviderError("401 fixture connection refused", retryable=False)
+            return ModelResponse("连接成功", usage={"input_tokens": 8, "output_tokens": 2})
+
+        async def close(self):
+            pass
+
+    import eventide.host as host_module
+
+    host_module.build_provider = lambda _settings: ConnectionProbeProvider()
 
     class JourneyProvider(FakeProvider):
         async def stream(self, request):
