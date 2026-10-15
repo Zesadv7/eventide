@@ -515,6 +515,8 @@ Dockerfile 使用Node构建阶段和Python运行阶段，运行镜像不需要No
 
 `CostLedger` 使用版本化价格、Decimal和币种分别估价；缓存和推理细项只在相应价格配置存在时从总量中划分，不重复相加。无价格或用量不完整明确显示未知，估算Token对应的费用单独汇总；重估生成新事实，不改旧报告。
 
+embedding 的底层账本另支持固定 `input_only` 口径：仅记录供应商返回的输入 Token，不制造输出零值，也不要求输出价格。用量未知或估算时仍保留预留，普通生成调用仍必须有完整输入和输出才能结算。此口径已完成离线机制验证，API embedding 派发仍待 C 阶段接线；本地 Hash/语义推理不伪装供应商 Token 消费。
+
 RuntimeHost 的主Agent、摘要和只读worker请求现已共用预留/结算，重试每次独立计费；流式断流、取消和缺usage都保持未结算。项目身份来自P1持久绑定，交付及Continue沿用所属交付，子任务计入真实根Run，不重复累计。预算拒绝会在发出新请求前停驻，80%提示记录在事件中；实际响应可以超出估算，因此仍不是供应商账单硬上限。
 
 预算控制已提供HTTP接口：`GET/PUT /api/budgets/{kind}/{identity}`支持run、project、delivery和day，day明确使用UTC的YYYY-MM-DD；`GET /api/budgets`返回全部已配置额度及预留明细。PUT需要持久`Idempotency-Key`，正文`token_limit:null`关闭额度、`0`阻止派发；页面可带`expected_configuration_hash`拒绝旧标签覆盖。未配置额度仍记录消费但不阻止请求，原`EVENTIDE_RUN_TOKEN_LIMIT`软限的0关闭约定继续独立保留。Python的`host.configure_budget`、`budget_status`、`register_price`和`cost_status`仍供开发与CI共用。
@@ -529,7 +531,7 @@ RuntimeHost 的主Agent、摘要和只读worker请求现已共用预留/结算�
 
 ### 连接检查的用量与预算
 
-现有连接检查HTTP接口与旧页面仍可测试候选配置；Vue暂不新增测试按钮。每次检查是明确标记`connection_probe`的后台控制Run，不产生用户消息、不进入Agent循环，也不能Continue。它使用候选Provider/模型及固定32个最大输出Token，不改变当前连接。
+现有连接检查HTTP接口、Vue模型设置与旧页面均可测试候选配置。每次检查是明确标记`connection_probe`的后台控制Run，不产生用户消息、不进入Agent循环，也不能Continue。它使用候选Provider/模型及固定32个最大输出Token，不改变当前连接。
 
 检查共用服务的模型请求名额；取得名额后才预留及记录attempt，等待期间取消不产生消费记录。检查受Run及UTC当日预算限制，存储用的控制Session不表示费用属于启动项目。单次实际请求有模型超时，不自动重试；取消、失败、断流或缺少usage保留未知及预留。HTTP在30秒时触发取消，并等待客户端关闭后返回，因此不是严格的总墙钟上限；返回可追溯的`run_id`与用量账本；未知可在每日用量/预算中核对。客户端收尾完成后才结束控制Run，重启仅标停驻，不自动重发或补造源码checkpoint。
 

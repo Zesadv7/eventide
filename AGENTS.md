@@ -152,6 +152,7 @@ uv run eventide eval evals/smoke.yaml
 
 ## 用量、预算与实验细则
 
+- 2026-10-16 U1/U2 补充底座已验收：embedding预留固定input_only，Provider输入/缺失输出、预算结算及价格口径一致，未知/估算不释放；198项相关离线回归、Ruff/Mypy90通过。README/architecture/api-contract同步；远程embedding派发仍待C，不标整体完成。
 - 每次真实请求尝试独立记账；主Agent/摘要/worker/查询改写/embedding分类。成功响应使用供应商usage；请求失败、取消或断流无usage保持未知。
 - cache/read/write/reasoning细项按供应商协议归一化，不默认是互斥计费桶；非Token计费不强行并入。历史数据不补造精度。
 - 账本从模型调用事实派生，终态与worker汇总不重复计。重复usage/SSE/重启重建须幂等。

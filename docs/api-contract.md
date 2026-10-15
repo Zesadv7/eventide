@@ -46,6 +46,8 @@ Run与Continue接受可选`Idempotency-Key`（1–128个可见ASCII字符）。�
 
 无usage是unknown，不是零；缓存与推理Token为细项，不能再加到总量。账本暂不报价，原`usage`字段保留兼容；需要完整性判断时使用新账本。历史响应只能回退统计已观察响应，complete保持false。取消和失败请求无返回usage时保留未知。
 
+calls另带`usage_basis: input_output|input_only`；旧调用默认input_output。仅输入型embedding事实采用input_only，reported输入完整即可usage_complete=true，output_tokens保持缺省，不能渲染为已报告0。费用和预算从首次预留的相同口径派生，普通生成缺输出仍为不完整。底座已验收，远程embedding生产调用按C阶段接入。
+
 ### 流式预览传输 —— 主链、SDK 与 Vue 已实现
 
 Run事件流可显式传`include_preview=true`接收`event: model.preview`。此类帧无SSE id及session_seq，含ephemeral、active、request_id、revision、有界text与省略字符数，不可用于推进持久事件游标或Token计数。默认不发送，兼容原客户端。完整响应仍由持久model.response提供，结束/失败清理内存预览；重启不会恢复预览。Vue 已订阅临时预览并独立维护持久游标。

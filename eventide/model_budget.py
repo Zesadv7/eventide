@@ -126,3 +126,24 @@ class ModelBudgetController:
             model=identity["model"], estimate_id=f"cost_{identity['attempt_id']}",
         )
         return receipt
+
+    def begin_embedding(
+        self, run_id: str, texts: list[str], identity: dict[str, Any],
+    ) -> ReservationReceipt:
+        """Reserve an input-only attempt without fabricating a generation request.
+
+        This entry is for remote Token-billed embeddings. Local hash/semantic
+        inference is not a provider Token bill and does not enter this ledger.
+        """
+        if identity.get("kind") != "embedding" or identity.get("usage_basis") != "input_only":
+            raise ValueError("Embedding attempts must declare their input-only usage basis")
+        if not texts or any(not isinstance(text, str) for text in texts):
+            raise ValueError("Embedding input must be a non-empty list of strings")
+        session_id, context = self.context(run_id)
+        serialized = json.dumps({"input": texts}, ensure_ascii=False)
+        return self.ledger.reserve(
+            session_id, run_id, identity["attempt_id"], context=context,
+            input_estimate=len(serialized.encode("utf-8")), output_estimate=0,
+            estimate_method="embedding_serialized_utf8_bytes_v1", usage_basis="input_only",
+            attempt_started={**identity, "input_composition": None},
+        )

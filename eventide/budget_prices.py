@@ -9,6 +9,7 @@ from typing import Any
 
 from eventide.budgets import BUDGET_FACTS, _text, utc_time
 from eventide.store import RuntimeStore
+from eventide.usage import usage_total_fields
 
 PRICE_FACTS = ("price.registered", "cost.estimated")
 PRICE_CATEGORIES = frozenset({
@@ -56,15 +57,18 @@ class PriceVersion:
 
 
 def _price_lines(
-    usage: dict[str, int], rates: dict[str, dict[str, Any]],
+    usage: dict[str, int], rates: dict[str, dict[str, Any]], *, basis: str = "input_output",
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Partition subsets before pricing; never add cache/reasoning twice."""
     quantities: dict[str, int] = {}
     unknown = []
+    totals = usage_total_fields(basis)
     for total, details in (
         ("input_tokens", ("cache_read_input_tokens", "cache_creation_input_tokens")),
         ("output_tokens", ("reasoning_tokens",)),
     ):
+        if total not in totals:
+            continue
         if total not in usage:
             unknown.append(total)
             continue
@@ -182,7 +186,9 @@ class CostLedger:
                     rates[price["category"]] = price
             estimates = {}
             for currency, rates in currencies.items():
-                lines, unknown = _price_lines(usage, rates)
+                lines, unknown = _price_lines(
+                    usage, rates, basis=reservation.get("usage_basis", "input_output"),
+                )
                 with localcontext() as context:
                     context.prec = 50
                     amount = sum((Decimal(line["amount"]) for line in lines), Decimal(0))

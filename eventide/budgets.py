@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from eventide.store import RuntimeStore
+from eventide.usage import UsageBasis, usage_snapshot, usage_total_fields
 
 ScopeKind = Literal["run", "delivery", "project", "day"]
 BUDGET_FACTS = (
@@ -268,11 +269,22 @@ class BudgetLedger:
         input_estimate: int, output_estimate: int, estimate_method: str,
         at: datetime | None = None,
         attempt_started: dict[str, Any] | None = None,
+        usage_basis: UsageBasis = "input_output",
     ) -> ReservationReceipt:
         timestamp = utc_time(at)
         _text(attempt_id, "attempt identity")
         if attempt_started is not None and attempt_started.get("attempt_id") != attempt_id:
             raise ValueError("Model attempt identity mismatch")
+        usage_total_fields(usage_basis)
+        if usage_basis == "input_only" and (
+            output_estimate != 0 or attempt_started is None
+            or attempt_started.get("kind") != "embedding"
+        ):
+            raise ValueError("Input-only reservations require an embedding attempt without output")
+        if attempt_started is not None and (
+            attempt_started.get("usage_basis", "input_output") != usage_basis
+        ):
+            raise ValueError("Model attempt usage basis mismatch")
         payload: dict[str, Any] = {
             "attempt_id": attempt_id, "run_id": _text(run_id, "Run identity"),
             "session_id": session_id, "context": asdict(context),
@@ -282,6 +294,7 @@ class BudgetLedger:
             "reserved_tokens": input_estimate + output_estimate,
             "reserved_at": timestamp.isoformat(),
             "scopes": [asdict(scope) for scope in context.scopes(run_id, timestamp)],
+            **({"usage_basis": usage_basis} if usage_basis != "input_output" else {}),
         }
 
         def decide(events: list[dict[str, Any]]) -> tuple[ReservationReceipt, list[Any]]:
@@ -289,6 +302,8 @@ class BudgetLedger:
             prior = state["reservations"].get(attempt_id)
             if prior:
                 original = prior["reservation"]
+                if original.get("usage_basis", "input_output") != usage_basis:
+                    raise ValueError("Attempt identity was reused with different usage basis")
                 # Time is assigned at first reservation, not by an HTTP replay.
                 if any(original[key] != payload[key] for key in payload if key not in {
                     "reserved_at", "scopes",
@@ -378,21 +393,26 @@ class BudgetLedger:
         for key, value in observed.items():
             _text(key, "usage category")
             _count(value, key)
-        complete = source == "reported" and all(
-            key in observed for key in ("input_tokens", "output_tokens")
-        )
-        payload = {
-            "attempt_id": _text(attempt_id, "attempt identity"),
-            "usage": observed, "usage_source": source if observed else "unknown",
-            "actual_tokens": observed["input_tokens"] + observed["output_tokens"]
-            if complete else None,
-        }
+        _text(attempt_id, "attempt identity")
 
         def decide(events: list[dict[str, Any]]) -> tuple[ReservationReceipt, list[Any]]:
             state = _projection(events)
             item = self._owned(state, session_id, attempt_id)
             if run_id is not None and item["reservation"]["run_id"] != run_id:
                 raise ValueError("Attempt/Run identity mismatch")
+            basis = item["reservation"].get("usage_basis", "input_output")
+            if attempt_finished is not None and (
+                attempt_finished.get("usage_basis", "input_output") != basis
+                or (basis == "input_only" and attempt_finished.get("kind") != "embedding")
+            ):
+                raise ValueError("Model attempt usage basis mismatch")
+            snapshot = usage_snapshot(observed, source, basis=basis)
+            payload = {
+                "attempt_id": attempt_id,
+                "usage": observed, "usage_source": source if observed else "unknown",
+                "actual_tokens": sum(observed[key] for key in usage_total_fields(basis))
+                if snapshot["complete"] else None,
+            }
             prior = item["settlement"]
             if _change_key("budget.settled", payload) in state["seen_changes"]:
                 return _receipt(state, attempt_id), []

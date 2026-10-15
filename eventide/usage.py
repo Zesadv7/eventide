@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from math import isfinite
-from typing import Any
+from typing import Any, Literal
 
 from eventide.input_composition import validate_input_composition
 
@@ -22,6 +22,15 @@ TOKEN_FIELDS = (
     "reasoning_tokens",
 )
 _TOTAL_FIELDS = ("input_tokens", "output_tokens")
+UsageBasis = Literal["input_output", "input_only"]
+
+
+def usage_total_fields(basis: str = "input_output") -> tuple[str, ...]:
+    if basis == "input_only":
+        return ("input_tokens",)
+    if basis != "input_output":
+        raise ValueError("Unknown Token usage basis")
+    return _TOTAL_FIELDS
 
 
 def _count(value: Any) -> int | None:
@@ -102,9 +111,16 @@ def normalize_provider_usage(provider: str, usage: Any) -> dict[str, int]:
     return result
 
 
-def usage_snapshot(usage: Any, source: Any = None) -> dict[str, Any]:
+def usage_snapshot(
+    usage: Any, source: Any = None, *, basis: str = "input_output",
+) -> dict[str, Any]:
     """Describe known counters while preserving reported, estimated and unknown provenance."""
     counters = normalize_usage(usage)
+    totals = usage_total_fields(basis)
+    if basis == "input_only" and any(key in counters for key in (
+        "output_tokens", "reasoning_tokens",
+    )):
+        raise ValueError("Input-only usage cannot contain output counters")
     provenance = (
         source if isinstance(source, str) and source in {"reported", "estimated", "unknown"}
         else None
@@ -116,7 +132,7 @@ def usage_snapshot(usage: Any, source: Any = None) -> dict[str, Any]:
     return {
         "usage": counters,
         "source": provenance,
-        "complete": provenance == "reported" and all(key in counters for key in _TOTAL_FIELDS),
+        "complete": provenance == "reported" and all(key in counters for key in totals),
     }
 
 
@@ -204,7 +220,16 @@ def _attempt_row(
         for field in ("request_id", "attempt"):
             if start["payload"].get(field) != finish["payload"].get(field):
                 raise ValueError("Conflicting model attempt identity")
-    snapshot = usage_snapshot(payload.get("usage") if finish else None, payload.get("usage_source"))
+        if start["payload"].get("usage_basis", "input_output") != finish["payload"].get(
+            "usage_basis", "input_output"
+        ):
+            raise ValueError("Conflicting model attempt usage basis")
+    basis = payload.get("usage_basis", "input_output")
+    if basis == "input_only" and payload.get("kind") != "embedding":
+        raise ValueError("Input-only usage requires an embedding attempt")
+    snapshot = usage_snapshot(
+        payload.get("usage") if finish else None, payload.get("usage_source"), basis=basis,
+    )
     row = _identity(event)
     row.update(
         {
@@ -226,6 +251,7 @@ def _attempt_row(
             "usage": snapshot["usage"],
             "usage_source": snapshot["source"],
             "usage_complete": snapshot["complete"],
+            "usage_basis": basis,
         }
     )
     return row
@@ -251,6 +277,7 @@ def _legacy_row(event: Mapping[str, Any]) -> dict[str, Any]:
         "usage_source": snapshot["source"],
         # Historical calls lack evidence for hidden retries and missing requests.
         "usage_complete": False,
+        "usage_basis": "input_output",
     }
 
 
