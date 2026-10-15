@@ -496,6 +496,7 @@ class RuntimeStore:
         ],
         *,
         author: str = "runtime",
+        run_id: str | None = None,
     ) -> _FactResult:
         """Read, decide and append in one SQLite transaction across writers.
 
@@ -508,7 +509,9 @@ class RuntimeStore:
                 raise ValueError(f"Session not found: {session_id}")
             result, additions = decide(self.facts_by_type(types))
             for event_type, payload in additions:
-                self._append_fact_locked(session_id, event_type, payload, author=author)
+                self._append_fact_locked(
+                    session_id, event_type, payload, author=author, run_id=run_id,
+                )
             return result
 
     def append_fact(

@@ -243,9 +243,12 @@ class BudgetLedger:
         self, session_id: str, run_id: str, attempt_id: str, *, context: BudgetContext,
         input_estimate: int, output_estimate: int, estimate_method: str,
         at: datetime | None = None,
+        attempt_started: dict[str, Any] | None = None,
     ) -> ReservationReceipt:
         timestamp = utc_time(at)
         _text(attempt_id, "attempt identity")
+        if attempt_started is not None and attempt_started.get("attempt_id") != attempt_id:
+            raise ValueError("Model attempt identity mismatch")
         payload: dict[str, Any] = {
             "attempt_id": attempt_id, "run_id": _text(run_id, "Run identity"),
             "session_id": session_id, "context": asdict(context),
@@ -285,10 +288,14 @@ class BudgetLedger:
             state["reservations"][attempt_id] = {
                 "reservation": payload, "settlement": None, "resolution": None,
             }
-            return _receipt(state, attempt_id), [("budget.reserved", payload)]
+            additions = [("budget.reserved", payload)]
+            if attempt_started is not None:
+                additions.append(("model.attempt_started", attempt_started))
+            return _receipt(state, attempt_id), additions
 
         return self.store.transact_facts(
             session_id, (*BUDGET_FACTS, "run.admitted", "run.started"), decide,
+            run_id=run_id if attempt_started is not None else None,
         )
 
     def _validate_context(
@@ -327,7 +334,13 @@ class BudgetLedger:
     def settle(
         self, session_id: str, attempt_id: str, usage: dict[str, Any] | None, *,
         source: Literal["reported", "estimated", "unknown"] = "reported",
+        run_id: str | None = None,
+        attempt_finished: dict[str, Any] | None = None,
     ) -> ReservationReceipt:
+        if attempt_finished is not None and (
+            run_id is None or attempt_finished.get("attempt_id") != attempt_id
+        ):
+            raise ValueError("Model attempt identity mismatch")
         if source not in {"reported", "estimated", "unknown"}:
             raise ValueError("Unknown usage source")
         observed = dict(usage or {})
@@ -349,6 +362,8 @@ class BudgetLedger:
         def decide(events: list[dict[str, Any]]) -> tuple[ReservationReceipt, list[Any]]:
             state = _projection(events)
             item = self._owned(state, session_id, attempt_id)
+            if run_id is not None and item["reservation"]["run_id"] != run_id:
+                raise ValueError("Attempt/Run identity mismatch")
             prior = item["settlement"]
             if _change_key("budget.settled", payload) in state["seen_changes"]:
                 return _receipt(state, attempt_id), []
@@ -357,9 +372,12 @@ class BudgetLedger:
             )):
                 raise ValueError("Conflicting attempt settlement")
             item["settlement"] = payload
-            return _receipt(state, attempt_id), [("budget.settled", payload)]
+            additions = [("budget.settled", payload)]
+            if attempt_finished is not None:
+                additions.append(("model.attempt_finished", attempt_finished))
+            return _receipt(state, attempt_id), additions
 
-        return self.store.transact_facts(session_id, BUDGET_FACTS, decide)
+        return self.store.transact_facts(session_id, BUDGET_FACTS, decide, run_id=run_id)
 
     @staticmethod
     def _owned(state: dict[str, Any], session_id: str, attempt_id: str) -> dict[str, Any]:

@@ -484,4 +484,8 @@ Dockerfile 使用Node构建阶段和Python运行阶段，运行镜像不需要No
 
 `CostLedger` 使用版本化价格、Decimal和币种分别估价；缓存和推理细项只在相应价格配置存在时从总量中划分，不重复相加。无价格或用量不完整明确显示未知，估算Token对应的费用单独汇总；重估生成新事实，不改旧报告。
 
-这些组件已通过并发事务、恢复、父子归属、未知结算和价格回归。Host请求派发、项目身份绑定及Web预算页面仍待P/U2接入，当前用户运行仍沿用已有已观测Token软限；组件测试不能视为已启用预算控制，也不构成供应商账单硬上限。
+RuntimeHost 的主Agent、摘要和只读worker请求现已共用预留/结算，重试每次独立计费；流式断流、取消和缺usage都保持未结算。项目身份来自P1持久绑定，交付及Continue沿用所属交付，子任务计入真实根Run，不重复累计。预算拒绝会在发出新请求前停驻，80%提示记录在事件中；实际响应可以超出估算，因此仍不是供应商账单硬上限。
+
+首版通过Python开发接口显式配置：`host.configure_budget(BudgetScope("project", project_id), token_limit=100000, request_id="change-1")`，`BudgetScope` 从 `eventide.budgets` 导入；Run、delivery、day也使用各自精确身份。`host.budget_status()`、`host.register_price(PriceVersion(...))` 和 `host.cost_status()`提供查询及价格配置。`None`关闭额度、`0`阻止派发，不沿用旧环境软限中0代表关闭的约定。未配置额度仍记录消费但不阻止请求，原`EVENTIDE_RUN_TOKEN_LIMIT`软限仍独立保留。
+
+当前没有精确tokenizer，输入采用`serialized_utf8_bytes_v1`序列化UTF-8字节数估算、输出预留完整请求上限；图片等内联数据可能明显高估，不能视为实际Token或计费保证。估算只写数值和方法，不写提示正文或附件。预算HTTP/UI及P调度仍待接入；模型连接探测与API embedding尚未纳入此Run派发控制，embedding按C阶段补齐。旧调用不补造预留/费用。

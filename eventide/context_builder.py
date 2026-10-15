@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from eventide.budgets import BudgetExceeded
 from eventide.models import ModelRequest, ModelResponse
 from eventide.normalization import normalize, redact
 from eventide.projections import TERMINALS, MessagesProjection
@@ -305,6 +306,10 @@ class ContextBuilder:
                     current = candidate_messages
                     preview_trimmed = candidate_preview
                     summary_adopted = True
+            except BudgetExceeded:
+                # A refused paid request is a control decision, not a failed
+                # optional summary. The owner must park and preserve its reason.
+                raise
             except Exception as exc:
                 failure = f"summarizing completed turns failed ({type(exc).__name__}: {exc})"
 

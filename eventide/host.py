@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from eventide import attachments, model_catalog, run_policy
+from eventide.budget_prices import PriceVersion
+from eventide.budgets import BudgetExceeded, BudgetScope
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
 from eventide.executor import (
@@ -33,6 +35,7 @@ from eventide.generation import (
     resolve_generation,
 )
 from eventide.mcp.client import MCPManager
+from eventide.model_budget import ModelBudgetController
 from eventide.models import (
     ContinuationRequest,
     ModelRequest,
@@ -200,6 +203,40 @@ class RuntimeHost:
         self._enable_mcp = enable_mcp
         self.previews = PreviewStore()
         self.skills = SkillRuntime(self.store, self.state_dir)
+        self.model_budget = ModelBudgetController(self.store)
+
+    def _budget_control_session(self) -> str:
+        session_id = self.create_session(f"budgets_{self.default_workspace.workspace_id}")
+        if not self.is_control_session(session_id):
+            self.store.append_fact(session_id, "control.session", {"kind": "budgets"})
+            self.store.update_session(session_id, title="Budget 管理", archived=True)
+        return session_id
+
+    def configure_budget(
+        self, scope: BudgetScope, *, token_limit: int | None, request_id: str,
+    ) -> dict[str, Any]:
+        """Explicit Python control interface; zero blocks, None disables a limit."""
+        if scope.kind == "run" and self.store.get_run_identity(scope.identity) is None:
+            raise ValueError("Run not found")
+        if scope.kind == "project":
+            self.store.get_project(scope.identity)
+        if scope.kind == "delivery":
+            from eventide.delivery_runtime import DeliveryController
+
+            DeliveryController(self).load(scope.identity)
+        return self.model_budget.ledger.configure(
+            self._budget_control_session(), scope=scope, token_limit=token_limit,
+            request_id=request_id,
+        )
+
+    def budget_status(self, *, scopes: tuple[BudgetScope, ...] = ()) -> dict[str, Any]:
+        return self.model_budget.ledger.snapshot(scopes=scopes)
+
+    def register_price(self, price: PriceVersion) -> dict[str, Any]:
+        return self.model_budget.costs.register_price(self._budget_control_session(), price)
+
+    def cost_status(self) -> dict[str, Any]:
+        return self.model_budget.costs.snapshot()
 
     @property
     def state_dir(self) -> Path:
@@ -724,26 +761,40 @@ class RuntimeHost:
         kind: str = "agent",
     ) -> ModelResponse:
         request_id = f"request_{uuid.uuid4().hex}"
+        admitted = self._admitted_intent(run_id) or {}
+        call_kind = "worker" if kind == "agent" and admitted.get("parent_run_id") else kind
         for attempt in range(1, 4):
             attempt_id = f"attempt_{uuid.uuid4().hex}"
             started = time.perf_counter()
             identity = {
                 "request_id": request_id, "attempt_id": attempt_id, "attempt": attempt,
-                "kind": kind, "model": request.model, "generation": request.generation,
+                "kind": call_kind, "model": request.model, "generation": request.generation,
                 "max_output_tokens": request.max_tokens,
+                "provider": self.settings.provider,
             }
-            await self._emit(run_id, "model.attempt_started", identity, sink)
             try:
+                receipt = self.model_budget.begin(run_id, request, identity)
+            except BudgetExceeded as exc:
+                await self._emit(run_id, "budget.blocked", {
+                    "request_id": request_id, "violations": exc.violations,
+                }, sink)
+                raise
+            try:
+                await self._notify_model_attempt(run_id, sink)
+                if receipt.warnings:
+                    await self._emit(run_id, "budget.warning", {
+                        "attempt_id": attempt_id, "budgets": receipt.warnings,
+                    }, sink)
                 response = await asyncio.wait_for(
                     self._complete_request(request, run_id, request_id, kind),
                     timeout=self.settings.model_timeout,
                 )
             except BaseException as exc:
-                await self._emit(run_id, "model.attempt_finished", {
+                self.model_budget.finish(run_id, {
                     **identity, "status": "cancelled" if isinstance(exc, asyncio.CancelledError)
                     else "failed", "usage_source": "unknown",
                     "duration_ms": (time.perf_counter() - started) * 1000,
-                }, None)
+                })
                 if not isinstance(exc, (asyncio.TimeoutError, ProviderError)):
                     raise
                 streaming = kind == "agent" and callable(getattr(self._provider(), "stream", None))
@@ -755,7 +806,7 @@ class RuntimeHost:
                     if isinstance(exc, asyncio.TimeoutError) else self._clean(str(exc))
                 )
                 await self._emit(run_id, "model.retry", {
-                    **identity, "kind": kind, "retryable": retryable and attempt < 3,
+                    **identity, "retryable": retryable and attempt < 3,
                     "error": message,
                 }, sink)
                 if not retryable or attempt == 3:
@@ -764,13 +815,26 @@ class RuntimeHost:
                     raise
                 await asyncio.sleep(0.25 * (2 ** (attempt - 1)))
             else:
-                await self._emit(run_id, "model.attempt_finished", {
+                settled = self.model_budget.finish(run_id, {
                     **identity, "status": "completed", "usage": response.usage,
                     "usage_source": "reported" if response.usage else "unknown",
+                    "stop_reason": response.stop_reason,
                     "duration_ms": (time.perf_counter() - started) * 1000,
-                }, sink)
+                })
+                await self._notify_model_attempt(run_id, sink)
+                if settled.warnings:
+                    await self._emit(run_id, "budget.warning", {
+                        "attempt_id": attempt_id, "budgets": settled.warnings,
+                    }, sink)
                 return response
         raise RuntimeError("Model attempts exhausted")
+
+    async def _notify_model_attempt(self, run_id: str, sink: EventSink | None) -> None:
+        """Publish a committed attempt; accounting never depends on delivery to a sink."""
+        if sink:
+            event = self.store.run_events(run_id)[-1]
+            with suppress(Exception):
+                await sink.emit({**event, "seq": event["session_seq"]})
 
     async def _complete_request(
         self, request: ModelRequest, run_id: str, request_id: str, kind: str,
@@ -2590,7 +2654,7 @@ class RuntimeHost:
                 status, error = "completed", None
         except _UnknownToolOutcome as exc:
             status, error, park_kind = "interrupted", str(exc), "unknown_tool_outcome"
-        except _RunTokenBudgetExceeded as exc:
+        except (_RunTokenBudgetExceeded, BudgetExceeded) as exc:
             await self._emit(
                 run_id,
                 "workspace.checkpoint",
