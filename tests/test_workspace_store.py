@@ -33,6 +33,24 @@ def test_store_replay_order_and_terminal(isolated_workspace):
     reopened.close()
 
 
+def test_global_fact_query_keeps_all_history_and_ignores_partial(isolated_workspace):
+    store = RuntimeStore(isolated_workspace / "runtime.sqlite")
+    store.create_session("first")
+    store.create_session("second")
+    expected = []
+    for index in range(105):
+        expected.append(store.append_fact(
+            "first" if index % 2 else "second", "skill.enabled", {"index": index},
+        ))
+    store.append_fact("first", "other", {})
+    store.append_fact("second", "skill.enabled", {}, partial=True)
+    assert store.facts_by_type(()) == []
+    assert store.facts_by_type(("skill.enabled",)) == expected
+    assert len(store.facts_by_type(("skill.enabled", "other"))) == 106
+    assert store.facts_by_type(("unknown",)) == []
+    store.close()
+
+
 def test_host_lease_exclusive_and_releasable(isolated_workspace):
     lease = HostLease(isolated_workspace)
     with pytest.raises(RuntimeError, match="already owned"):

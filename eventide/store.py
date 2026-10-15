@@ -330,6 +330,21 @@ class RuntimeStore:
                 )
             ]
 
+    def facts_by_type(self, types: tuple[str, ...]) -> list[dict[str, Any]]:
+        """Read all committed facts of selected types, without navigation pagination."""
+        if not types:
+            return []
+        placeholders = ",".join("?" for _ in types)
+        with self._lock:
+            return [
+                self._decode(row)
+                for row in self._connection.execute(
+                    "SELECT * FROM runtime_events WHERE partial=0 AND type IN ("
+                    + placeholders + ") ORDER BY ts,rowid",
+                    types,
+                )
+            ]
+
     def append_fact(
         self,
         session_id: str,

@@ -37,6 +37,8 @@ RuntimeEvent 包含 event_id、session_id、严格递增 session_seq、turn_id�
 
 身份表不保存独立运行状态。消息与状态查询每次折叠事件，不依赖不可重建的缓存或 messages 表。`RuntimeStore` 是唯一存储入口；`append_message()` 仅作为导入/测试辅助追加 `message.imported`，生产 Agent loop 不调用它。
 
+全局控制面使用 `facts_by_type(types)` 在 Store 锁内读取指定类型的全部非 partial 事实，按时间及 rowid 排序，不受列表导航的 100 条分页影响；控制面不直接访问私有 SQLite 连接。
+
 主要事件：
 
 - run.admitted、run.started、message.user、model.request、model.response、model.retry；
