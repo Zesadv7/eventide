@@ -1,0 +1,47 @@
+{
+  "id": "discount-boundaries",
+  "version": 1,
+  "family": "discount-boundaries",
+  "category": "single_file",
+  "split": "development",
+  "prompt": "Repair pricing.py so discounted_price follows README.md, including discount boundaries and monetary rounding. Read and preserve the fixed tests. Modify only pricing.py; do not change tests, README, or configuration, add dependencies, or commit. The independent acceptance runner decides success.",
+  "workspace": {
+    "README.md": "# Discount contract\ndiscounted_price(amount, percent) returns a Decimal with two decimal places.\nConvert numbers using Decimal(str(value)); amounts must be nonnegative and\ndiscounts must be between 0 and 100 inclusive. Invalid, NaN, or infinite\ninputs raise ValueError. A zero discount preserves the amount, a 100-percent\ndiscount yields 0.00, and fractional discounts work. Round the final monetary\namount once using ROUND_HALF_UP. Fixed tests and configuration are immutable.\n",
+    "pricing.py": "from decimal import Decimal, InvalidOperation\n\n\ndef discounted_price(amount, percent):\n    try:\n        total = Decimal(str(amount))\n        rate = Decimal(str(percent))\n    except (InvalidOperation, ValueError):\n        raise ValueError(\"amount and percent must be numbers\") from None\n    if not total.is_finite() or not rate.is_finite():\n        raise ValueError(\"amount and percent must be finite\")\n    if total < 0 or not Decimal(\"0\") <= rate <= Decimal(\"100\"):\n        raise ValueError(\"amount or percent is out of range\")\n    discounted = total * (Decimal(\"1\") - rate / Decimal(\"1000\"))\n    return discounted.quantize(Decimal(\"0.01\"))\n",
+    "tests/__init__.py": "",
+    "tests/test_pricing.py": "import unittest\nfrom decimal import Decimal\n\nfrom pricing import discounted_price\n\n\nclass DiscountTests(unittest.TestCase):\n    def test_zero_discount(self):\n        self.assertEqual(discounted_price(\"19.99\", 0), Decimal(\"19.99\"))\n\n    def test_full_discount(self):\n        self.assertEqual(discounted_price(\"19.99\", 100), Decimal(\"0.00\"))\n\n    def test_fractional_discount(self):\n        self.assertEqual(discounted_price(\"80\", \"12.5\"), Decimal(\"70.00\"))\n\n    def test_round_half_up(self):\n        self.assertEqual(discounted_price(\"1.005\", 0), Decimal(\"1.01\"))\n        self.assertEqual(discounted_price(\"2.675\", 0), Decimal(\"2.68\"))\n\n    def test_float_conversion_and_decimal_result(self):\n        actual = discounted_price(0.3, 10)\n        self.assertIsInstance(actual, Decimal)\n        self.assertEqual(actual, Decimal(\"0.27\"))\n        self.assertEqual(actual.as_tuple().exponent, -2)\n\n    def test_zero_amount(self):\n        self.assertEqual(discounted_price(0, 75), Decimal(\"0.00\"))\n\n    def test_rejects_invalid_amounts(self):\n        for amount in (-1, \"NaN\", \"Infinity\", \"invalid\", None):\n            with self.subTest(amount=amount), self.assertRaises(ValueError):\n                discounted_price(amount, 10)\n\n    def test_rejects_invalid_discounts(self):\n        for rate in (-1, 101, \"NaN\", \"Infinity\", \"invalid\", None):\n            with self.subTest(rate=rate), self.assertRaises(ValueError):\n                discounted_price(10, rate)\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "discount_divisor",
+          "name": "edit_file",
+          "arguments": {
+            "path": "pricing.py",
+            "old_text": "rate / Decimal(\"1000\")",
+            "new_text": "rate / Decimal(\"100\")"
+          }
+        },
+        {
+          "id": "discount_rounding",
+          "name": "edit_file",
+          "arguments": {
+            "path": "pricing.py",
+            "old_text": "return discounted.quantize(Decimal(\"0.01\"))",
+            "new_text": "return discounted.quantize(Decimal(\"0.01\"), rounding=\"ROUND_HALF_UP\")"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Business source updated; independent acceptance decides the outcome."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "pricing.py"
+    ]
+  }
+}

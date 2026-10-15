@@ -1,0 +1,54 @@
+{
+  "id": "request-policy-order",
+  "version": 1,
+  "family": "request-policy-order",
+  "category": "understanding",
+  "split": "development",
+  "prompt": "Find the method called before execute to authorize a request (id authorization, answer its method name), and the exact allowed command literal (id command). Do not change files. Return only JSON with a facts array; each item has exactly id, answer (a string), path, start_line and end_line. Cite the smallest source line range supporting each answer.",
+  "workspace": {
+    "request.py": "def handle(raw, policy, executor):\n    command = raw.strip()\n    if not policy.allow(command):\n        return \"denied\"\n    return executor.execute(command)\n",
+    "policy.py": "class Policy:\n    def allow(self, command):\n        return command == \"status\"\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "read_0",
+          "name": "read_file",
+          "arguments": {
+            "path": "request.py"
+          }
+        },
+        {
+          "id": "read_1",
+          "name": "read_file",
+          "arguments": {
+            "path": "policy.py"
+          }
+        }
+      ]
+    },
+    {
+      "text": "{\"facts\": [{\"id\": \"authorization\", \"answer\": \"allow\", \"path\": \"request.py\", \"start_line\": 3, \"end_line\": 3}, {\"id\": \"command\", \"answer\": \"status\", \"path\": \"policy.py\", \"start_line\": 3, \"end_line\": 3}]}"
+    }
+  ],
+  "grade": {
+    "kind": "facts",
+    "facts": [
+      {
+        "id": "authorization",
+        "answer": "allow",
+        "path": "request.py",
+        "start_line": 3,
+        "end_line": 3
+      },
+      {
+        "id": "command",
+        "answer": "status",
+        "path": "policy.py",
+        "start_line": 3,
+        "end_line": 3
+      }
+    ]
+  }
+}

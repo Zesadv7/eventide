@@ -1,0 +1,54 @@
+{
+  "id": "pagination-boundary-diagnosis",
+  "version": 1,
+  "family": "pagination-boundary-diagnosis",
+  "category": "diagnosis",
+  "split": "development",
+  "prompt": "Diagnose the short page. Report the incorrect expression verbatim (id expression) and the observed returned item as its literal without quotes (id observed). Do not change files. Return only JSON with a facts array; each item has exactly id, answer (a string), path, start_line and end_line. Cite the smallest source line range supporting each answer.",
+  "workspace": {
+    "pages.py": "def page(items, offset, limit):\n    end = offset + limit - 1\n    return items[offset:end]\n",
+    "incident.txt": "Repro: page([\"a\", \"b\", \"c\"], 0, 2) returns [\"a\"].\nExpected exactly two items while enough items remain.\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "read_0",
+          "name": "read_file",
+          "arguments": {
+            "path": "pages.py"
+          }
+        },
+        {
+          "id": "read_1",
+          "name": "read_file",
+          "arguments": {
+            "path": "incident.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "{\"facts\": [{\"id\": \"expression\", \"answer\": \"offset + limit - 1\", \"path\": \"pages.py\", \"start_line\": 2, \"end_line\": 2}, {\"id\": \"observed\", \"answer\": \"a\", \"path\": \"incident.txt\", \"start_line\": 1, \"end_line\": 1}]}"
+    }
+  ],
+  "grade": {
+    "kind": "facts",
+    "facts": [
+      {
+        "id": "expression",
+        "answer": "offset + limit - 1",
+        "path": "pages.py",
+        "start_line": 2,
+        "end_line": 2
+      },
+      {
+        "id": "observed",
+        "answer": "a",
+        "path": "incident.txt",
+        "start_line": 1,
+        "end_line": 1
+      }
+    ]
+  }
+}

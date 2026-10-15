@@ -1,0 +1,47 @@
+{
+  "id": "timeout-config-units",
+  "version": 1,
+  "family": "timeout-config-units",
+  "category": "cross_file",
+  "split": "development",
+  "prompt": "Repair the business source according to README.md. Preserve every fixed test and all other files. Do not add dependencies, commit, merge, or approve your own patch. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "config.read_timeout(config) returns timeout_ms if explicitly present (including zero), otherwise 1000. It accepts nonnegative integers only. client.request_timeout(config) returns seconds by dividing milliseconds by 1000 exactly once.\n",
+    "config.py": "def read_timeout(config):\n    return config.get(\"timeout_ms\") or 1000\n",
+    "client.py": "from config import read_timeout\ndef request_timeout(config):\n    return read_timeout(config) / 1000000\n",
+    "tests/__init__.py": "",
+    "tests/test_contract.py": "import unittest\nfrom config import read_timeout\nfrom client import request_timeout\nclass Contract(unittest.TestCase):\n    def test_zero(self): self.assertEqual(read_timeout({\"timeout_ms\":0}), 0)\n    def test_default(self): self.assertEqual(read_timeout({}), 1000)\n    def test_units(self): self.assertEqual(request_timeout({\"timeout_ms\":250}), .25)\n    def test_default_units(self): self.assertEqual(request_timeout({}), 1)\n    def test_invalid(self):\n        for value in [-1, True, \"1\", None]:\n            with self.assertRaises(ValueError): read_timeout({\"timeout_ms\":value})\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "fix_0",
+          "name": "write_file",
+          "arguments": {
+            "path": "config.py",
+            "content": "def read_timeout(config):\n    value = config.get(\"timeout_ms\", 1000)\n    if type(value) is not int or value < 0:\n        raise ValueError(\"invalid timeout\")\n    return value\n"
+          }
+        },
+        {
+          "id": "fix_1",
+          "name": "write_file",
+          "arguments": {
+            "path": "client.py",
+            "content": "from config import read_timeout\ndef request_timeout(config):\n    return read_timeout(config) / 1000\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Candidate source updated; independent checks decide acceptance."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "config.py",
+      "client.py"
+    ]
+  }
+}

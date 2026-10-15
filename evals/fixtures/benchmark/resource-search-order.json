@@ -1,0 +1,54 @@
+{
+  "id": "resource-search-order",
+  "version": 1,
+  "family": "resource-search-order",
+  "category": "understanding",
+  "split": "holdout",
+  "prompt": "Find the winning path literal in startup.py (id path), and the exception class used for a missing resource (id missing). Do not change files. Return only JSON with a facts array; each item has exactly id, answer (a string), path, start_line and end_line. Cite the smallest source line range supporting each answer.",
+  "workspace": {
+    "resources.py": "def locate(name, bundled, user):\n    if name in user:\n        return user[name]\n    if name in bundled:\n        return bundled[name]\n    raise KeyError(name)\n",
+    "startup.py": "from resources import locate\nPATH = locate(\"theme\", {\"theme\": \"bundled.css\"}, {\"theme\": \"local.css\"})\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "read_0",
+          "name": "read_file",
+          "arguments": {
+            "path": "resources.py"
+          }
+        },
+        {
+          "id": "read_1",
+          "name": "read_file",
+          "arguments": {
+            "path": "startup.py"
+          }
+        }
+      ]
+    },
+    {
+      "text": "{\"facts\": [{\"id\": \"path\", \"answer\": \"local.css\", \"path\": \"startup.py\", \"start_line\": 2, \"end_line\": 2}, {\"id\": \"missing\", \"answer\": \"KeyError\", \"path\": \"resources.py\", \"start_line\": 6, \"end_line\": 6}]}"
+    }
+  ],
+  "grade": {
+    "kind": "facts",
+    "facts": [
+      {
+        "id": "path",
+        "answer": "local.css",
+        "path": "startup.py",
+        "start_line": 2,
+        "end_line": 2
+      },
+      {
+        "id": "missing",
+        "answer": "KeyError",
+        "path": "resources.py",
+        "start_line": 6,
+        "end_line": 6
+      }
+    ]
+  }
+}

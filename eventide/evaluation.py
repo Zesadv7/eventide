@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from eventide.config import Settings
+from eventide.eval_grading import run_benchmark_case
+from eventide.eval_suite import load_benchmark
 from eventide.generation import GenerationPatch
 from eventide.host import RuntimeHost
 from eventide.models import RunRequest, RunResult
@@ -40,12 +42,15 @@ class EvalCaseResult:
     status: str = "unknown"
     verification: dict[str, Any] = field(default_factory=dict)
     artifact_dir: str | None = None
+    benchmark: dict[str, Any] = field(default_factory=dict)
 
 
 def load_suite(path: Path) -> list[dict[str, Any]]:
     import yaml
 
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if isinstance(data, dict) and "schema_version" in data:
+        return load_benchmark(path, data)
     cases = data.get("cases", data) if isinstance(data, dict) else data
     if not isinstance(cases, list):
         raise ValueError("Evaluation suite must contain a 'cases' list")
@@ -66,10 +71,10 @@ def _create_sandbox(fixtures: dict[str, Any], *, parent: Path | None = None) -> 
 
     The sandbox is deliberately not auto-deleted: failed cases keep their
     workspace, database, and git history around for debugging. The eval state
-    root and the repo-local git identity live inside the sandbox, so later
+    root is private to the case; the repo-local git identity means later
     commits (seeded or model-driven) need no global git configuration.
     """
-    sandbox = Path(tempfile.mkdtemp(prefix="eventide-eval-", dir=parent))
+    sandbox = Path(tempfile.mkdtemp(prefix="eventide-eval-", dir=parent)).resolve()
     for relative, content in fixtures.items():
         path = Path(str(relative))
         if path.is_absolute() or ".." in path.parts or "\\" in str(relative):
@@ -136,6 +141,9 @@ async def _run_case(
     sandbox: Path | None,
     session_id: str,
 ) -> tuple[RunResult, dict[str, Any], tuple[str, ...]]:
+    if "benchmark" in case:
+        assert sandbox is not None
+        return await run_benchmark_case(runtime, case, sandbox, session_id)
     request = RunRequest(
         prompt=str(case["prompt"]), session_id=session_id,
         generation=GenerationPatch.model_validate(case.get("generation", {})).patch(),
@@ -280,6 +288,11 @@ async def run_evaluations(
     failed cases. output_dir explicitly exports the report only; it is not a
     state root and receives no credentials or runtime databases.
     """
+    cases = load_suite(path)
+    if live and any("benchmark" in case for case in cases):
+        raise ValueError(
+            "Frozen benchmark live experiments are not enabled; use offline validation"
+        )
     settings = settings or Settings.from_env()
     if live:
         settings = resolve_provider_configuration(settings)
@@ -293,22 +306,30 @@ async def run_evaluations(
             embedding_api_key=None,
             embedding_dim=256,
         )
-    cases = load_suite(path)
     mode = "live" if live else "offline"
-    artifact_dir = Path(tempfile.mkdtemp(prefix=f"eventide-evaluation-{mode}-"))
+    artifact_dir = Path(tempfile.mkdtemp(prefix=f"eventide-evaluation-{mode}-")).resolve()
     results: list[EvalCaseResult] = []
     suite_started = time.perf_counter()
     for index, case in enumerate(cases, 1):
         fixtures = case.get("workspace", {})
         if not isinstance(fixtures, dict):
             raise ValueError("Evaluation workspace must be an inline fixture mapping")
-        sandbox = _create_sandbox(fixtures, parent=artifact_dir)
+        case_artifacts = artifact_dir / f"case-{index:03d}"
+        case_artifacts.mkdir()
+        sandbox = _create_sandbox(fixtures, parent=case_artifacts)
         case_settings = replace(
             settings,
             workdir=sandbox,
-            state_dir=sandbox / ".eventide",
+            state_dir=(case_artifacts / "state" if "benchmark" in case
+                       else sandbox / ".eventide"),
             workers_enabled=case.get("readonly_workers") is True,
         )
+        if "benchmark" in case:
+            case_settings = replace(
+                case_settings, max_steps=min(settings.max_steps, 12),
+                run_token_limit=min(settings.run_token_limit or 20_000, 20_000),
+                model_timeout=min(settings.model_timeout, 300),
+            )
         rag_index = case.get("rag_index") is True
         if rag_index:
             # Fixture indexes are always deterministic, including live LLM runs.
@@ -362,6 +383,7 @@ async def run_evaluations(
                     status=result.status,
                     verification=verification,
                     artifact_dir=str(sandbox),
+                    benchmark=dict(case.get("benchmark", {})),
                 )
             )
         finally:
@@ -381,6 +403,7 @@ async def run_evaluations(
             failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
     report: dict[str, Any] = {
         "mode": mode,
+        "measurement_kind": "provider_experiment" if live else "scripted_mechanism_validation",
         "suite": str(path),
         "artifact_dir": str(artifact_dir),
         "report_path": str(artifact_dir / f"{mode}-report.json"),

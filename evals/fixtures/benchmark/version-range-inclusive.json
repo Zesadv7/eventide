@@ -1,0 +1,37 @@
+{
+  "id": "version-range-inclusive",
+  "version": 1,
+  "family": "version-range-inclusive",
+  "category": "single_file",
+  "split": "holdout",
+  "prompt": "Repair the business source according to README.md. Preserve every fixed test and all other files. Do not add dependencies, commit, merge, or approve your own patch. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "supports(version, lower, upper) compares dot-separated nonnegative integer version components, padding missing components with zeros. Both endpoints are inclusive. Invalid text raises ValueError.\n",
+    "versions.py": "def supports(version, lower, upper):\n    return lower < version < upper\n",
+    "tests/__init__.py": "",
+    "tests/test_contract.py": "import unittest\nfrom versions import supports\nclass Contract(unittest.TestCase):\n    def test_boundaries(self):\n        self.assertTrue(supports(\"1.0\", \"1.0\", \"2.0\"))\n        self.assertTrue(supports(\"2.0\", \"1.0\", \"2.0\"))\n    def test_numeric(self): self.assertTrue(supports(\"1.10\", \"1.9\", \"1.11\"))\n    def test_padding(self): self.assertTrue(supports(\"2\", \"2.0\", \"2.0.0\"))\n    def test_outside(self): self.assertFalse(supports(\"3\", \"1\", \"2\"))\n    def test_invalid(self):\n        with self.assertRaises(ValueError): supports(\"1.x\", \"1\", \"2\")\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "fix_0",
+          "name": "write_file",
+          "arguments": {
+            "path": "versions.py",
+            "content": "def supports(version, lower, upper):\n    def parse(value):\n        parts = value.split(\".\")\n        if not parts or any(not p.isascii() or not p.isdigit() for p in parts):\n            raise ValueError(\"invalid version\")\n        return tuple(int(p) for p in parts)\n    values = [parse(v) for v in (version, lower, upper)]\n    width = max(map(len, values))\n    current, first, last = [v + (0,) * (width-len(v)) for v in values]\n    return first <= current <= last\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Candidate source updated; independent checks decide acceptance."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "versions.py"
+    ]
+  }
+}

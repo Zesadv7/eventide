@@ -1,0 +1,54 @@
+{
+  "id": "retry-exception-diagnosis",
+  "version": 1,
+  "family": "retry-exception-diagnosis",
+  "category": "diagnosis",
+  "split": "holdout",
+  "prompt": "Identify the premature statement verbatim (id statement), and the exception class intended to trigger retry (id exception). Cite retry.py for both. Do not change files. Return only JSON with a facts array; each item has exactly id, answer (a string), path, start_line and end_line. Cite the smallest source line range supporting each answer.",
+  "workspace": {
+    "retry.py": "def fetch(operation):\n    for attempt in range(3):\n        try:\n            return operation()\n        except TimeoutError:\n            raise\n",
+    "incident.txt": "The first attempt times out and the request exits immediately.\nThe operation must retry TimeoutError at most three attempts.\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "read_0",
+          "name": "read_file",
+          "arguments": {
+            "path": "retry.py"
+          }
+        },
+        {
+          "id": "read_1",
+          "name": "read_file",
+          "arguments": {
+            "path": "incident.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "{\"facts\": [{\"id\": \"statement\", \"answer\": \"raise\", \"path\": \"retry.py\", \"start_line\": 6, \"end_line\": 6}, {\"id\": \"exception\", \"answer\": \"TimeoutError\", \"path\": \"retry.py\", \"start_line\": 5, \"end_line\": 5}]}"
+    }
+  ],
+  "grade": {
+    "kind": "facts",
+    "facts": [
+      {
+        "id": "statement",
+        "answer": "raise",
+        "path": "retry.py",
+        "start_line": 6,
+        "end_line": 6
+      },
+      {
+        "id": "exception",
+        "answer": "TimeoutError",
+        "path": "retry.py",
+        "start_line": 5,
+        "end_line": 5
+      }
+    ]
+  }
+}

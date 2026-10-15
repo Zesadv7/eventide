@@ -1,0 +1,47 @@
+{
+  "id": "catalog-filter-and-page",
+  "version": 1,
+  "family": "catalog-filter-and-page",
+  "category": "cross_file",
+  "split": "holdout",
+  "prompt": "Repair the business source according to README.md. Preserve every fixed test and all other files. Do not add dependencies, commit, merge, or approve your own patch. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "catalog.visible(items) returns only items with enabled exactly True, without mutating inputs. paging.page(items, offset, limit) returns a slice of up to limit elements, with nonnegative integer offset/limit; zero limit is empty, invalid values raise ValueError. Apply filtering before paging at call sites.\n",
+    "catalog.py": "def visible(items):\n    return [item for item in items if item.get(\"enabled\", True)]\n",
+    "paging.py": "def page(items, offset, limit):\n    return items[offset:limit]\n",
+    "tests/__init__.py": "",
+    "tests/test_contract.py": "import unittest\nfrom catalog import visible\nfrom paging import page\nclass Contract(unittest.TestCase):\n    def test_missing(self): self.assertEqual(visible([{}, {\"enabled\":1}]), [])\n    def test_flag(self): self.assertEqual(visible([{\"enabled\":True}, {\"enabled\":False}]), [{\"enabled\":True}])\n    def test_slice(self): self.assertEqual(page([0,1,2,3], 1, 2), [1,2])\n    def test_zero(self): self.assertEqual(page([0,1], 1, 0), [])\n    def test_invalid(self):\n        with self.assertRaises(ValueError): page([], -1, 2)\n    def test_integration(self): self.assertEqual(page(visible([{}, {\"enabled\":True,\"id\":1}, {\"enabled\":True,\"id\":2}]), 1, 1), [{\"enabled\":True,\"id\":2}])\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "fix_0",
+          "name": "write_file",
+          "arguments": {
+            "path": "catalog.py",
+            "content": "def visible(items):\n    return [item for item in items if item.get(\"enabled\") is True]\n"
+          }
+        },
+        {
+          "id": "fix_1",
+          "name": "write_file",
+          "arguments": {
+            "path": "paging.py",
+            "content": "def page(items, offset, limit):\n    if type(offset) is not int or type(limit) is not int or offset < 0 or limit < 0:\n        raise ValueError(\"invalid page\")\n    return items[offset:offset+limit]\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Candidate source updated; independent checks decide acceptance."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "catalog.py",
+      "paging.py"
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "receipt-counter-idempotency",
+  "version": 1,
+  "family": "receipt-counter-idempotency",
+  "category": "single_file",
+  "split": "holdout",
+  "prompt": "Repair the business source according to README.md. Preserve every fixed test and all other files. Do not add dependencies, commit, merge, or approve your own patch. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "Counter.apply(request_id, amount) adds amount only on first use of a request_id. Retrying the same id with a different amount raises ValueError without changing state. A zero amount is valid. Counter.value begins at zero.\n",
+    "counter.py": "class Counter:\n    def __init__(self):\n        self.value = 0\n        self.seen = {}\n    def apply(self, request_id, amount):\n        self.value += amount\n        self.seen[request_id] = amount\n        return self.value\n",
+    "tests/__init__.py": "",
+    "tests/test_contract.py": "import unittest\nfrom counter import Counter\nclass Contract(unittest.TestCase):\n    def test_retry(self):\n        c=Counter(); self.assertEqual(c.apply(\"a\", 2), 2); self.assertEqual(c.apply(\"a\", 2), 2)\n    def test_conflict(self):\n        c=Counter(); c.apply(\"a\", 2)\n        with self.assertRaises(ValueError): c.apply(\"a\", 3)\n        self.assertEqual(c.value, 2)\n    def test_zero(self):\n        c=Counter(); c.apply(\"a\", 0)\n        with self.assertRaises(ValueError): c.apply(\"a\", 1)\n    def test_independent(self):\n        c=Counter(); c.apply(\"a\", 2); self.assertEqual(c.apply(\"b\", 3), 5)\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "fix_0",
+          "name": "write_file",
+          "arguments": {
+            "path": "counter.py",
+            "content": "class Counter:\n    def __init__(self):\n        self.value = 0\n        self.seen = {}\n    def apply(self, request_id, amount):\n        if request_id in self.seen:\n            if self.seen[request_id] != amount:\n                raise ValueError(\"conflicting retry\")\n            return self.value\n        self.value += amount\n        self.seen[request_id] = amount\n        return self.value\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Candidate source updated; independent checks decide acceptance."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "counter.py"
+    ]
+  }
+}

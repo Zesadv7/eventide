@@ -373,3 +373,13 @@ Usage只读投影保留attempt既有provider/duration_ms/stop_reason，legacy仅
 P3源码证据补充：Host为接收、派发、只读工具基线、worker与恢复使用同一checkpoint策略生成证据。默认外置状态仍保留原指纹；若实际Store或状态产物位于源码内，`checkpoint_policy.version=2`固定精确相对路径及Runtime namespace。仅未跟踪的实际数据库/WAL/SHM/journal、实际租约、密钥，以及配置状态根下attachments/skill-packages/execution-snapshots被排除；不按扩展名或整个状态根忽略。tracked diff和恢复mtime检查始终包含同名已跟踪文件，符号链接替换仍是漂移。State等于Workspace根在接收前拒绝，避免混淆源码与保留namespace；普通项目Skills始终保留。源快照与附件标记不会因Runtime自己的持久化触发漂移。
 
 恢复不能把旧checkpoint静默升成新策略：旧口径与当前策略不同，crash-gap只记录不可恢复证据，不补写新基线；Continue保持拒绝，用户检查后显式放弃并新建。已经固定manifest的快照继续按其原身份校验。S3在源项目更新后复用旧Skill的验收使用真正固定snapshot；source任务的项目Skill漂移在模型派发前拒绝。
+
+### 冻结任务与独立判分（B1）
+
+`eval_suite.py` 解析 `evals/benchmark.yaml` 的严格版本化清单及 20 个 JSON 任务包，校验任务内容哈希、相对路径、无链接引用、类别／开发留出配额和家族隔离。清单固定理解4、定位4、单文件6、跨文件4、恢复交付2；其中开发12、留出8。历史 engineering 三题保留并全部进入开发集。任务或策略实验发生变化时须提升任务／清单版本；参考留出结果调参后须移动并补充题目，不继续复用旧留出标签。
+
+`evaluation.run_evaluations` 仍是唯一 Python 入口，旧 YAML suites 继续可用。冻结集先在读取环境或已保存凭据前禁止 live；离线数据注明 `scripted_mechanism_validation`，逐例带清单和任务版本哈希。每例源 Git 项目、状态根、冻结验收目录彼此独立，状态与验收目录作为源目录的兄弟目录，避免 worktree checkpoint 被评测自身数据库污染。模型步骤最多12、已观测 Token 软限最多20,000；整体实验预算与完整失败记录由 B2/B3 后续补齐，不把模型单请求超时冒充整例5分钟上限。
+
+`eval_grading.py` 仅编排已有 RuntimeHost/ToolExecutor/PolicyEngine、check_project 和 manage_delivery；没有替代执行器或结果数据库。事实题在持久 Plan 快照中运行，要求结构化事实和精确行号与人工标注一致；修复题在 Session 固定 worktree 中运行。验收先确认原版测试失败，再在独立 Python 进程运行事先冻结的 unittest；源码允许范围、固定测试、额外文件和原项目未被修改均参与判断，正文自报成功没有分数。
+
+恢复交付题明确区分 scripted Provider 经工具修改业务文件与评测程序控制动作：一题关闭重开 Host 后 verify/apply 并复验源，另一题在 verify 后注入独立源变化并要求拒绝 apply。测试及候选产物持久保留并引用 Run 身份，不注入“已通过”事实。该机制验证不证明真实模型自主修复、不包含未来 C 检索或 D 三候选流程；本地执行仍不是恶意代码安全沙箱。Web 评测未来必须纳入主服务模型额度和项目／日预算，不能复制账本制造第二事实源。

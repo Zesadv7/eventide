@@ -1,0 +1,54 @@
+{
+  "id": "mutable-default-diagnosis",
+  "version": 1,
+  "family": "mutable-default-diagnosis",
+  "category": "diagnosis",
+  "split": "holdout",
+  "prompt": "Find the shared default parameter name (id parameter), and the method mutating it (id method). Answer only their names and cite collector.py. Do not change files. Return only JSON with a facts array; each item has exactly id, answer (a string), path, start_line and end_line. Cite the smallest source line range supporting each answer.",
+  "workspace": {
+    "collector.py": "def collect(value, items=[]):\n    items.append(value)\n    return list(items)\n",
+    "incident.txt": "collect(\"one\") followed by collect(\"two\") returns [\"one\", \"two\"].\nEach call without an explicit collection should own a fresh list.\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "read_0",
+          "name": "read_file",
+          "arguments": {
+            "path": "collector.py"
+          }
+        },
+        {
+          "id": "read_1",
+          "name": "read_file",
+          "arguments": {
+            "path": "incident.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "{\"facts\": [{\"id\": \"parameter\", \"answer\": \"items\", \"path\": \"collector.py\", \"start_line\": 1, \"end_line\": 1}, {\"id\": \"method\", \"answer\": \"append\", \"path\": \"collector.py\", \"start_line\": 2, \"end_line\": 2}]}"
+    }
+  ],
+  "grade": {
+    "kind": "facts",
+    "facts": [
+      {
+        "id": "parameter",
+        "answer": "items",
+        "path": "collector.py",
+        "start_line": 1,
+        "end_line": 1
+      },
+      {
+        "id": "method",
+        "answer": "append",
+        "path": "collector.py",
+        "start_line": 2,
+        "end_line": 2
+      }
+    ]
+  }
+}

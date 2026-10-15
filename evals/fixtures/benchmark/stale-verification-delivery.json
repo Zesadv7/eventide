@@ -1,0 +1,38 @@
+{
+  "id": "stale-verification-delivery",
+  "version": 1,
+  "family": "stale-verification-delivery",
+  "category": "recovery_delivery",
+  "split": "holdout",
+  "prompt": "Repair the business source according to README.md. Preserve every fixed test and all other files. Do not add dependencies, commit, merge, or approve your own patch. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "retained(events, keep) returns the last keep items in original order. keep is a nonnegative integer; zero gives an empty list. The harness injects an external source change after verification and expects adoption to be refused while preserving the candidate.\n",
+    "retention.py": "def retained(events, keep):\n    return events[-keep:]\n",
+    "tests/__init__.py": "",
+    "tests/test_contract.py": "import unittest\nfrom retention import retained\nclass Contract(unittest.TestCase):\n    def test_zero(self): self.assertEqual(retained([1,2], 0), [])\n    def test_last(self): self.assertEqual(retained([1,2,3], 2), [2,3])\n    def test_large(self): self.assertEqual(retained([1], 3), [1])\n    def test_invalid(self):\n        for value in [-1, True]:\n            with self.assertRaises(ValueError): retained([], value)\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "fix_0",
+          "name": "write_file",
+          "arguments": {
+            "path": "retention.py",
+            "content": "def retained(events, keep):\n    if type(keep) is not int or keep < 0:\n        raise ValueError(\"invalid retention\")\n    return list(events[-keep:]) if keep else []\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Candidate source updated; independent checks decide acceptance."
+    }
+  ],
+  "grade": {
+    "kind": "recovery_delivery",
+    "allowed_changes": [
+      "retention.py"
+    ],
+    "scenario": "stale_acceptance_refused"
+  }
+}

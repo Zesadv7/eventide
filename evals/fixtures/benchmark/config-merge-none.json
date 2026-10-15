@@ -1,0 +1,37 @@
+{
+  "id": "config-merge-none",
+  "version": 1,
+  "family": "config-merge-none",
+  "category": "single_file",
+  "split": "development",
+  "prompt": "Repair config_merge.py so merge_config follows README.md, including explicit None overrides, nested dictionaries, and input ownership. Modify only config_merge.py; do not change fixed tests, README, or configuration, add dependencies, or commit. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "# Configuration merge contract\nmerge_config(base, overrides) merges two dictionaries and returns a new one.\nMissing override keys keep base values. An explicit None overrides a base\nvalue with None. Dictionaries merge recursively when both values are dicts;\nall other values, including lists, are replaced. Neither input may be changed,\nand mutating nested lists/dicts in the result must not change either input.\nEmpty nested overrides preserve existing keys. Fixed tests/config are immutable.\n",
+    "config_merge.py": "def merge_config(base, overrides):\n    result = base\n    for key, value in overrides.items():\n        if value is None:\n            continue\n        if isinstance(value, dict) and isinstance(result.get(key), dict):\n            result[key] = merge_config(result[key], value)\n        else:\n            result[key] = value\n    return result\n",
+    "tests/__init__.py": "",
+    "tests/test_config_merge.py": "import unittest\nfrom copy import deepcopy\n\nfrom config_merge import merge_config\n\n\nclass MergeTests(unittest.TestCase):\n    def test_explicit_none_overrides_and_missing_key_stays(self):\n        result = merge_config({\"timeout\": 30, \"retries\": 2}, {\"timeout\": None})\n        self.assertEqual(result, {\"timeout\": None, \"retries\": 2})\n\n    def test_nested_precedence_and_preserved_keys(self):\n        base = {\"database\": {\"host\": \"db\", \"port\": 5432}, \"enabled\": True}\n        result = merge_config(base, {\"database\": {\"port\": 5433}})\n        self.assertEqual(result, {\n            \"database\": {\"host\": \"db\", \"port\": 5433}, \"enabled\": True\n        })\n\n    def test_inputs_are_not_modified(self):\n        base = {\"database\": {\"host\": \"db\", \"port\": 5432}, \"enabled\": True}\n        overrides = {\"database\": {\"port\": 5433}, \"enabled\": False}\n        original_base, original_overrides = deepcopy(base), deepcopy(overrides)\n        merge_config(base, overrides)\n        self.assertEqual(base, original_base)\n        self.assertEqual(overrides, original_overrides)\n\n    def test_result_owns_nested_lists_from_both_inputs(self):\n        base = {\"base_names\": [\"base\"]}\n        overrides = {\"feature\": {\"names\": [\"override\"]}}\n        result = merge_config(base, overrides)\n        result[\"base_names\"].append(\"changed\")\n        result[\"feature\"][\"names\"].append(\"changed\")\n        self.assertEqual(base, {\"base_names\": [\"base\"]})\n        self.assertEqual(overrides, {\"feature\": {\"names\": [\"override\"]}})\n\n    def test_non_dictionary_values_replace(self):\n        result = merge_config({\"value\": {\"old\": True}}, {\"value\": [1, 2]})\n        self.assertEqual(result, {\"value\": [1, 2]})\n\n    def test_empty_nested_override_preserves_base(self):\n        base = {\"database\": {\"host\": \"db\"}}\n        result = merge_config(base, {\"database\": {}})\n        self.assertEqual(result, base)\n        result[\"database\"][\"host\"] = \"other\"\n        self.assertEqual(base[\"database\"][\"host\"], \"db\")\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "merge_copy",
+          "name": "write_file",
+          "arguments": {
+            "path": "config_merge.py",
+            "content": "from copy import deepcopy\n\n\ndef merge_config(base, overrides):\n    result = deepcopy(base)\n    for key, value in overrides.items():\n        if isinstance(value, dict) and isinstance(result.get(key), dict):\n            result[key] = merge_config(result[key], value)\n        else:\n            result[key] = deepcopy(value)\n    return result\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Business source updated; independent acceptance decides the outcome."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "config_merge.py"
+    ]
+  }
+}

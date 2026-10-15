@@ -1,0 +1,54 @@
+{
+  "id": "connection-finalization",
+  "version": 1,
+  "family": "connection-finalization",
+  "category": "understanding",
+  "split": "holdout",
+  "prompt": "Identify the cleanup method guaranteed by finally (id cleanup), and the attribute it sets (id attribute). Answer method/attribute names without parentheses. Do not change files. Return only JSON with a facts array; each item has exactly id, answer (a string), path, start_line and end_line. Cite the smallest source line range supporting each answer.",
+  "workspace": {
+    "reader.py": "async def receive(connection):\n    try:\n        return await connection.read()\n    finally:\n        await connection.close()\n",
+    "connection.py": "class Connection:\n    async def read(self):\n        return b\"ready\"\n    async def close(self):\n        self.closed = True\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "read_0",
+          "name": "read_file",
+          "arguments": {
+            "path": "reader.py"
+          }
+        },
+        {
+          "id": "read_1",
+          "name": "read_file",
+          "arguments": {
+            "path": "connection.py"
+          }
+        }
+      ]
+    },
+    {
+      "text": "{\"facts\": [{\"id\": \"cleanup\", \"answer\": \"close\", \"path\": \"reader.py\", \"start_line\": 5, \"end_line\": 5}, {\"id\": \"attribute\", \"answer\": \"closed\", \"path\": \"connection.py\", \"start_line\": 5, \"end_line\": 5}]}"
+    }
+  ],
+  "grade": {
+    "kind": "facts",
+    "facts": [
+      {
+        "id": "cleanup",
+        "answer": "close",
+        "path": "reader.py",
+        "start_line": 5,
+        "end_line": 5
+      },
+      {
+        "id": "attribute",
+        "answer": "closed",
+        "path": "connection.py",
+        "start_line": 5,
+        "end_line": 5
+      }
+    ]
+  }
+}

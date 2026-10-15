@@ -1,0 +1,47 @@
+{
+  "id": "invoice-total-and-format",
+  "version": 1,
+  "family": "invoice-total-and-format",
+  "category": "cross_file",
+  "split": "development",
+  "prompt": "Repair the business source according to README.md. Preserve every fixed test and all other files. Do not add dependencies, commit, merge, or approve your own patch. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "invoice.total(amount, rate) returns Decimal amount * (1 + rate), rounded HALF_UP to cents. formatters.render_total(value) returns exactly two decimal places, including trailing zeros. Nonnegative inputs only; invalid values raise ValueError.\n",
+    "invoice.py": "from decimal import Decimal\ndef total(amount, rate):\n    return Decimal(str(amount)) + Decimal(str(rate))\n",
+    "formatters.py": "def render_total(value):\n    return str(float(value))\n",
+    "tests/__init__.py": "",
+    "tests/test_contract.py": "import unittest\nfrom decimal import Decimal\nfrom invoice import total\nfrom formatters import render_total\nclass Contract(unittest.TestCase):\n    def test_tax(self): self.assertEqual(total(\"100\", \".2\"), Decimal(\"120.00\"))\n    def test_rounding(self): self.assertEqual(total(\"1.005\", 0), Decimal(\"1.01\"))\n    def test_format(self): self.assertEqual(render_total(Decimal(\"10\")), \"10.00\")\n    def test_integration(self): self.assertEqual(render_total(total(10, \".1\")), \"11.00\")\n    def test_invalid(self):\n        with self.assertRaises(ValueError): total(-1, 0)\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "fix_0",
+          "name": "write_file",
+          "arguments": {
+            "path": "invoice.py",
+            "content": "from decimal import Decimal, InvalidOperation\ndef total(amount, rate):\n    try:\n        a, r = Decimal(str(amount)), Decimal(str(rate))\n        if not a.is_finite() or not r.is_finite() or a < 0 or r < 0:\n            raise ValueError(\"invalid\")\n        return (a * (1+r)).quantize(Decimal(\".01\"), rounding=\"ROUND_HALF_UP\")\n    except InvalidOperation:\n        raise ValueError(\"invalid\") from None\n"
+          }
+        },
+        {
+          "id": "fix_1",
+          "name": "write_file",
+          "arguments": {
+            "path": "formatters.py",
+            "content": "def render_total(value):\n    return format(value, \".2f\")\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Candidate source updated; independent checks decide acceptance."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "invoice.py",
+      "formatters.py"
+    ]
+  }
+}

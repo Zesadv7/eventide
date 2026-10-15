@@ -1,0 +1,47 @@
+{
+  "id": "ttl-cache-clock",
+  "version": 1,
+  "family": "ttl-cache-clock",
+  "category": "single_file",
+  "split": "development",
+  "prompt": "Repair ttl_cache.py so TTLCache follows README.md. The tests use a deterministic injected clock; do not use sleeps or change the clock contract. Modify only ttl_cache.py; do not change fixed tests, README, or configuration, add dependencies, or commit. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "# TTL cache contract\nTTLCache(ttl, clock) uses a callable monotonic clock; ttl is finite and positive.\nset(key, value) replaces a value and starts its TTL from the current clock.\nget(key, default=None) returns the stored value strictly before its expiry.\nAt the exact expiry or later it returns the caller's default. Reads never\nextend expiry. Missing keys return the supplied default;\na stored None is a real value. Do not change fixed tests or configuration.\n",
+    "ttl_cache.py": "import math\nimport time\n\n\nclass TTLCache:\n    def __init__(self, ttl, clock=time.monotonic):\n        if not math.isfinite(ttl) or ttl <= 0:\n            raise ValueError(\"ttl must be finite and positive\")\n        self._ttl = ttl\n        self._clock = clock\n        self._entries = {}\n\n    def set(self, key, value):\n        self._entries[key] = (value, self._clock() + self._ttl)\n\n    def get(self, key, default=None):\n        entry = self._entries.get(key)\n        if entry is None:\n            return default\n        value, deadline = entry\n        now = self._clock()\n        if now > deadline:\n            del self._entries[key]\n            return default\n        self._entries[key] = (value, now + self._ttl)\n        return value\n",
+    "tests/__init__.py": "",
+    "tests/test_ttl_cache.py": "import unittest\n\nfrom ttl_cache import TTLCache\n\n\nclass Clock:\n    def __init__(self):\n        self.now = 100\n\n    def __call__(self):\n        return self.now\n\n\nclass CacheTests(unittest.TestCase):\n    def setUp(self):\n        self.clock = Clock()\n        self.cache = TTLCache(10, self.clock)\n\n    def test_read_before_expiry(self):\n        self.cache.set(\"key\", \"value\")\n        self.clock.now = 109\n        self.assertEqual(self.cache.get(\"key\"), \"value\")\n\n    def test_exact_expiry_returns_default(self):\n        self.cache.set(\"key\", \"value\")\n        self.clock.now = 110\n        self.assertEqual(self.cache.get(\"key\", \"expired\"), \"expired\")\n        self.assertIsNone(self.cache.get(\"key\"))\n\n    def test_read_does_not_extend_ttl(self):\n        self.cache.set(\"key\", \"value\")\n        self.clock.now = 109\n        self.assertEqual(self.cache.get(\"key\"), \"value\")\n        self.clock.now = 111\n        self.assertEqual(self.cache.get(\"key\", \"expired\"), \"expired\")\n\n    def test_replacing_value_restarts_ttl(self):\n        self.cache.set(\"key\", \"old\")\n        self.clock.now = 109\n        self.cache.set(\"key\", \"new\")\n        self.clock.now = 111\n        self.assertEqual(self.cache.get(\"key\"), \"new\")\n        self.clock.now = 119\n        self.assertIsNone(self.cache.get(\"key\"))\n\n    def test_missing_default_and_stored_none(self):\n        self.assertEqual(self.cache.get(\"missing\", \"fallback\"), \"fallback\")\n        self.cache.set(\"key\", None)\n        self.assertIsNone(self.cache.get(\"key\", \"fallback\"))\n\n    def test_rejects_nonpositive_or_nonfinite_ttl(self):\n        for ttl in (0, -1, float(\"inf\"), float(\"nan\")):\n            with self.subTest(ttl=ttl), self.assertRaises(ValueError):\n                TTLCache(ttl, self.clock)\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "ttl_expiry",
+          "name": "edit_file",
+          "arguments": {
+            "path": "ttl_cache.py",
+            "old_text": "if now > deadline:",
+            "new_text": "if now >= deadline:"
+          }
+        },
+        {
+          "id": "ttl_no_refresh",
+          "name": "edit_file",
+          "arguments": {
+            "path": "ttl_cache.py",
+            "old_text": "        self._entries[key] = (value, now + self._ttl)",
+            "new_text": "        # Reads preserve the deadline set by set()."
+          }
+        }
+      ]
+    },
+    {
+      "text": "Business source updated; independent acceptance decides the outcome."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "ttl_cache.py"
+    ]
+  }
+}

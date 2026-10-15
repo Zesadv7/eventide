@@ -1,0 +1,37 @@
+{
+  "id": "slug-whitespace",
+  "version": 1,
+  "family": "slug-whitespace",
+  "category": "single_file",
+  "split": "development",
+  "prompt": "Repair the business source according to README.md. Preserve every fixed test and all other files. Do not add dependencies, commit, merge, or approve your own patch. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "slug(text) trims leading/trailing whitespace, casefolds Unicode, and joins whitespace-separated words with one hyphen. Preserve punctuation. Empty whitespace returns an empty string.\n",
+    "slug.py": "def slug(text):\n    return text.lower().replace(\" \", \"-\")\n",
+    "tests/__init__.py": "",
+    "tests/test_contract.py": "import unittest\nfrom slug import slug\nclass Contract(unittest.TestCase):\n    def test_spaces(self): self.assertEqual(slug(\"  Hello   World  \"), \"hello-world\")\n    def test_tabs(self): self.assertEqual(slug(\"One\\tTwo\\nThree\"), \"one-two-three\")\n    def test_unicode(self): self.assertEqual(slug(\"Straße\"), \"strasse\")\n    def test_empty(self): self.assertEqual(slug(\" \\t\"), \"\")\n    def test_punctuation(self): self.assertEqual(slug(\"A.B\"), \"a.b\")\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "fix_0",
+          "name": "write_file",
+          "arguments": {
+            "path": "slug.py",
+            "content": "def slug(text):\n    return \"-\".join(text.casefold().split())\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Candidate source updated; independent checks decide acceptance."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "slug.py"
+    ]
+  }
+}

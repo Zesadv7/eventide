@@ -1,0 +1,47 @@
+{
+  "id": "event-codec-field-contract",
+  "version": 1,
+  "family": "event-codec-field-contract",
+  "category": "cross_file",
+  "split": "development",
+  "prompt": "Repair the business source according to README.md. Preserve every fixed test and all other files. Do not add dependencies, commit, merge, or approve your own patch. Independent acceptance decides success.",
+  "workspace": {
+    "README.md": "encode.dumps_event emits JSON with event_id and payload, preserving Unicode. decode.loads_event requires exactly these keys and a dictionary payload, and returns the same object. Invalid shape raises ValueError.\n",
+    "encode.py": "import json\ndef dumps_event(event_id, payload):\n    return json.dumps({\"id\": event_id, \"payload\": payload})\n",
+    "decode.py": "import json\ndef loads_event(text):\n    data = json.loads(text)\n    return {\"event_id\": data[\"event_id\"], \"payload\": str(data[\"payload\"])}\n",
+    "tests/__init__.py": "",
+    "tests/test_contract.py": "import unittest\nimport json\nfrom encode import dumps_event\nfrom decode import loads_event\nclass Contract(unittest.TestCase):\n    def test_keys(self): self.assertEqual(set(json.loads(dumps_event(\"a\", {}))), {\"event_id\", \"payload\"})\n    def test_decode(self): self.assertEqual(loads_event('{\"event_id\":\"a\",\"payload\":{\"n\":1}}')[\"payload\"], {\"n\":1})\n    def test_roundtrip(self): self.assertEqual(loads_event(dumps_event(\"a\", {\"文字\":\"值\"})), {\"event_id\":\"a\",\"payload\":{\"文字\":\"值\"}})\n    def test_invalid(self):\n        for value in [\"[]\", '{\"event_id\":\"a\",\"payload\":[]}', '{\"event_id\":\"a\",\"payload\":{},\"extra\":1}']:\n            with self.assertRaises(ValueError): loads_event(value)\n"
+  },
+  "script": [
+    {
+      "tool_calls": [
+        {
+          "id": "fix_0",
+          "name": "write_file",
+          "arguments": {
+            "path": "encode.py",
+            "content": "import json\ndef dumps_event(event_id, payload):\n    return json.dumps({\"event_id\": event_id, \"payload\": payload}, ensure_ascii=False)\n"
+          }
+        },
+        {
+          "id": "fix_1",
+          "name": "write_file",
+          "arguments": {
+            "path": "decode.py",
+            "content": "import json\ndef loads_event(text):\n    data = json.loads(text)\n    if not isinstance(data, dict) or set(data) != {\"event_id\", \"payload\"} or not isinstance(data[\"payload\"], dict):\n        raise ValueError(\"invalid event\")\n    return data\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Candidate source updated; independent checks decide acceptance."
+    }
+  ],
+  "grade": {
+    "kind": "acceptance",
+    "allowed_changes": [
+      "encode.py",
+      "decode.py"
+    ]
+  }
+}
