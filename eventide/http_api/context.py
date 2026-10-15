@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from eventide.host import RuntimeHost
+from eventide.http_control import check_mutation_origin
 from eventide.models import ToolCall
 
 
@@ -38,11 +39,20 @@ def require_local_request(request: Request) -> None:
     if host == "testclient":
         return
     try:
-        is_local = ipaddress.ip_address(host).is_loopback
+        address = ipaddress.ip_address(host)
+        is_local = address.is_loopback
+        host = str(address)
     except ValueError:
         is_local = host.lower() == "localhost"
-    if not is_local:
-        raise HTTPException(status_code=403, detail="模型凭据只能从运行服务的本机管理")
+    if is_local:
+        return
+    context: ApiContext = request.app.state.api_context
+    if host not in context.local_proxy_peers:
+        raise HTTPException(status_code=403, detail="管理操作只能从运行服务的本机访问")
+    try:
+        check_mutation_origin(request, require_origin=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Invalid local container origin") from exc
 
 
 @dataclass(slots=True)
@@ -51,6 +61,11 @@ class ApiContext:
     approvals: ApprovalBroker = field(default_factory=ApprovalBroker)
     tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     reserved: set[str] = field(default_factory=set)
+    local_proxy_peers: tuple[str, ...] = field(init=False)
+
+    def __post_init__(self) -> None:
+        # Freeze transport trust once; model configuration cannot widen this boundary.
+        self.local_proxy_peers = self.runtime.settings.local_proxy_peers
 
     async def get_session(self, session_id: str) -> dict[str, Any]:
         try:

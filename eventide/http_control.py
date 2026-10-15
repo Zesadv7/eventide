@@ -16,14 +16,16 @@ if TYPE_CHECKING:
     from eventide.host import RuntimeHost
 
 
-def check_mutation_origin(request: Request) -> None:
+def check_mutation_origin(request: Request, *, require_origin: bool = False) -> None:
     """Non-browser local clients may omit Origin; browser mutations must be same-origin."""
-    if request.method in {"GET", "HEAD", "OPTIONS"}:
+    if not require_origin and request.method in {"GET", "HEAD", "OPTIONS"}:
         return
     origin = request.headers.get("origin")
     if request.headers.get("sec-fetch-site") == "cross-site":
         raise HTTPException(403, "Cross-site mutation is not allowed")
     if origin is None:
+        if require_origin:
+            raise HTTPException(403, "Local container forwarding requires an Origin header")
         return
     source = urlparse(origin)
     target = urlparse(str(request.base_url))

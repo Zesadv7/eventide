@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,10 +49,27 @@ class Settings:
     embedding_base_url: str | None = None
     embedding_api_key: str | None = None
     embedding_dim: int = 256
+    local_proxy_peers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.run_token_limit < 0:
             raise ValueError("run_token_limit must be zero or positive")
+        if not isinstance(self.local_proxy_peers, tuple) or len(self.local_proxy_peers) > 32:
+            raise ValueError("local_proxy_peers must be a tuple of at most 32 exact IP addresses")
+        peers = []
+        for value in self.local_proxy_peers:
+            try:
+                if not isinstance(value, str) or "%" in value:
+                    raise ValueError
+                address = ipaddress.ip_address(value)
+                if address.is_unspecified or address.is_multicast:
+                    raise ValueError
+            except ValueError as exc:
+                raise ValueError("local_proxy_peers requires exact unicast IP addresses") from exc
+            peers.append(str(address))
+        if len(set(peers)) != len(peers):
+            raise ValueError("local_proxy_peers contains duplicate IP addresses")
+        object.__setattr__(self, "local_proxy_peers", tuple(peers))
 
     @classmethod
     def from_env(cls, workdir: Path | None = None) -> Settings:
@@ -62,6 +80,7 @@ class Settings:
         model = os.getenv("EVENTIDE_MODEL") or os.getenv("MODEL_ID") or DEFAULT_MODEL
         state_value = Path(os.getenv("EVENTIDE_STATE_DIR", str(user_state_dir())))
         state_dir = state_value if state_value.is_absolute() else root / state_value
+        peers_value = os.getenv("EVENTIDE_LOCAL_PROXY_PEERS", "").strip()
         return cls(
             workdir=root,
             state_dir=state_dir.resolve(),
@@ -88,6 +107,9 @@ class Settings:
                 or None
             ),
             embedding_dim=int(os.getenv("EVENTIDE_EMBEDDING_DIM", "256")),
+            local_proxy_peers=(
+                tuple(value.strip() for value in peers_value.split(",")) if peers_value else ()
+            ),
         )
 
     def require_api_key(self) -> str:

@@ -118,13 +118,8 @@ docker compose up --build
 - 状态根挂载在 `/data/eventide`（镜像内已通过 `EVENTIDE_STATE_DIR` 指定该绝对路径），保存 `runtime.sqlite`、`secret.key` 和 `host.lock`，必须用卷持久化。演示工作区挂载在 `/workspaces/demo`；接入真实项目时把这一项换成 bind mount 即可，注意容器内非 root 用户（UID 1000）需要对挂载目录有读写权限。
 - 容器内 `serve` 绑定 `0.0.0.0`，宿主侧端口映射保持 `127.0.0.1` 边界，与本机运行的默认行为一致。
 - 如果重建容器时既没有持久化状态根卷，也没有固定 `EVENTIDE_SECRET_KEY`，之前通过 Web 保存的 API Key 将无法解密，需要在设置中重新填写。
-- 注册工作区请在容器内执行 CLI：
-
-  ```bash
-  docker compose exec eventide eventide workspace add /workspaces/demo
-  ```
-
-  Web 的“添加工作区”、模型设置等变更操作只接受本机回环请求，经端口映射进入的请求来源是 docker 网关地址，会被 403 拒绝；这是既有的回环安全边界，不是部署故障。
+- Docker 转发可能使服务看到非回环的连接来源。可在启动时通过 `EVENTIDE_LOCAL_PROXY_PEERS` 配置实际测得的精确转发 IP（多个地址用逗号分隔）；默认空，不接受网段、主机名或通配符。配置后，来自这些地址的管理请求还必须使用 `localhost`／回环 IP 的 Host 与完全匹配的 Origin。宿主端口必须继续只发布到 `127.0.0.1`，不能将此配置用于公网服务。
+- 满足上述本机访问条件后，在 Web 的“添加项目”中填写容器内路径，例如 `/workspaces/demo`，模型和 Skills 也由页面管理。不要在服务运行期间另启 CLI Host 操作同一状态根；状态根锁会拒绝第二个 Host。服务入口禁用 Uvicorn 转发头处理，不从 `X-Forwarded-For` 等请求头授予本机权限。
 
 容器只是部署形态：Eventide 的权限策略与本地 Shell 执行器仍以容器用户身份运行，不构成操作系统沙箱（与 ADR-005、ADR-012 一致）。
 

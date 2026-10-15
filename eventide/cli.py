@@ -521,7 +521,9 @@ def _main(argv: list[str] | None = None) -> int:
         try:
             if args.workspace:
                 runtime.default_workspace = runtime.resolve_or_register_workspace(args.workspace)
-            uvicorn.run(create_app(runtime), host=args.host, port=args.port)
+            uvicorn.run(
+                create_app(runtime), host=args.host, port=args.port, proxy_headers=False
+            )
         finally:
             asyncio.run(runtime.close())
         return 0

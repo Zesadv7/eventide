@@ -89,6 +89,8 @@ Continue 从来源 `run.admitted` / `run.started` 继承 Plan 的只读限制与
 
 `api.py` 是 FastAPI 组装入口，保留 `create_app(runtime=None)`；现有 HTTP 路由按工作区、Session、Run、模型生成参数、Provider 配置、附件及 SSE/导出拆入 `http_api/`。请求模型集中声明；每个 router factory 接收同一应用的 `ApiContext`，其中只保存 Host 引用、审批 Future、暂存 reservation 与 Task 集合，不是新的运行状态库。每个应用独立创建上下文，禁止模块级共享可变状态。Host/Store 仍管理接收、执行和全部事实；应用 lifespan 在退出时取消并等待自己跟踪的 Task 后再关闭 Host。
 
+容器部署的本机转发可通过启动配置 `EVENTIDE_LOCAL_PROXY_PEERS` 指定最多32个精确IP，默认空。Settings启动时校验并规范化，ApiContext创建时固定副本；API及模型设置不能修改该信任边界。管理守卫仅在socket peer精确匹配时追加放行，并始终检查回环Host和匹配Origin（包括使用该守卫的GET）；缺少Origin或cross-site仍拒绝。`serve`禁用Uvicorn代理头解析，不信任请求中的转发地址。部署必须保持宿主回环发布；这不提供公网身份认证，也不自动信任私网段或Docker网关。
+
 同源写入守卫仍在应用级，领域路由继续执行原本的回环、身份和权限检查。统一 HTTP 错误包含 code/message/detail，保留状态码、HTTP 异常响应头以及字符串或列表 detail；RequestValidationError 不返回原始 input/ctx，内部异常仅返回通用错误。OpenAPI 使用共同 ErrorResponse 描述该契约；模型连接探测的 HTTP 200 失败结果不改为协议错误。38 条现有路由全部保留，用量查询仍覆盖完整历史，SSE 持久游标及 opt-in 临时预览语义不变。Skills 管理已由专用路由承接；索引、评测及交付长任务控制面仍待后续步骤，A1 尚未整体完成。
 
 HTTP写请求先校验浏览器同源与本机Origin；无Origin的可信非浏览器路径沿用现有权限边界。Run/Continue可用Idempotency-Key生成操作/Session隔离的确定性Run身份，在admission原子保存内容指纹；重复提交先查持久接收事实，再检查busy/parked，不重新启动已接收任务。未落库接收竞争仍拒绝为busy，不通过内存缓存伪造持久成功。
