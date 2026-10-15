@@ -8,6 +8,7 @@ from eventide.config import Settings
 from eventide.generation import wire_parameters
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
+from eventide.usage import normalize_provider_usage
 
 
 def _without_provider_state(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -92,8 +93,5 @@ class AnthropicProvider:
             elif getattr(raw_block, "type", "") == "tool_use":
                 calls.append(ToolCall(raw_block.id, raw_block.name, dict(raw_block.input)))
         usage_obj: Any = getattr(response, "usage", None)
-        usage = {
-            "input_tokens": int(getattr(usage_obj, "input_tokens", 0) or 0),
-            "output_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
-        }
+        usage = normalize_provider_usage("anthropic", usage_obj)
         return ModelResponse("\n".join(text_parts), tuple(calls), str(response.stop_reason), usage)

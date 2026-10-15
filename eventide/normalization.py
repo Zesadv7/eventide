@@ -14,6 +14,11 @@ _USAGE_KEYS = {
     "cached_tokens",
     "cache_creation_input_tokens",
     "cache_read_input_tokens",
+    "cache_miss_input_tokens",
+    "uncached_input_tokens",
+    "reasoning_tokens",
+    "max_output_tokens",
+    "max_tokens",
 }
 
 
@@ -26,8 +31,13 @@ def redact(value: Any, *, max_text: int | None = 4_000) -> Any:
         )
         return {
             key: "[REDACTED]"
-            if str(key).lower().replace("-", "_") not in _USAGE_KEYS
-            and _SECRET_KEY.search(str(key))
+            if _SECRET_KEY.search(str(key))
+            and not (
+                str(key).lower().replace("-", "_") in _USAGE_KEYS
+                and isinstance(item, int)
+                and not isinstance(item, bool)
+                and item >= 0
+            )
             else redact(item, max_text=limit)
             for key, item in value.items()
         }

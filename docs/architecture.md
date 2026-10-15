@@ -188,3 +188,12 @@ ContainerCommandExecutor通过Docker create/start/rm、argv执行和有界输出
 acceptance_tests工程评测使用一次性Git fixture，原测试复制到外部临时目录并保存SHA清单。基线必须退出1；结束后测试源/数据清单不变，清理fixture的派生bytecode，再以-I/-B独立Python、先导入stdlib unittest后加入候选源码，运行原版测试。check_project通过唯一ToolExecutor/Policy留下独立Run证据，不接受模型自判。report增加verification字段；baseline/verification run id、exit/timed_out、manifest与tests_unchanged可追溯。测试、数据与模型预算均有限，失败消费不推测；这些功能测试不构成恶意代码隔离证明。
 
 CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optional-extensions 安装全部 extras；container job 显式预拉测试镜像后开启真实 readonly boundary 测试；web job 固定 Playwright 版本并安装 headless Chromium，严格模式缺浏览器必须失败。默认离线门禁仍不依赖 Key；未执行的远程 CI 不能当成本机真实 Docker 验证证据。
+
+
+## 请求用量账本基础（U1 进行中）
+
+`usage.py` 提供纯供应商归一化和 `build_usage_ledger(events)`，不读数据库或网络。标准字段为 input_tokens/output_tokens，以及可选 cache_read_input_tokens/cache_creation_input_tokens/cache_miss_input_tokens/uncached_input_tokens/reasoning_tokens；缺失不补零，严格拒绝 bool、负数或字符串计数。OpenAI 缓存/推理字段为总量细项；Anthropic 的 input_tokens 先与缓存读取和创建求和为完整输入，另保留未缓存输入。该区别依据[Anthropic 提示缓存文档](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)。
+
+新账本按 Run 与 attempt_id 唯一归并 model.attempt_started/finished；同请求重试使用不同尝试身份。已有尝试事实的 Run 不再累计 model.response、context.summary_generated、worker.completed 或 run 终态中的汇总。缺结束事实或缺 usage 保持未知；reported 和 estimated 汇总分别输出，缓存细项不再额外加入输入/输出总量。只传父 Run 得到 exclusive 消费，汇总子任务须提供子 Run 自身事实，不能把父 inclusive 汇总相加。重复事件重放不增加消费，冲突的尝试事实拒绝静默改账。
+
+无尝试事实的历史 Run 仅回退已观察到的 model.response/context.summary_generated，标记历史证据不完整，不补造请求、重试或费用。JSON/OTel trace 对新 Run 直接派生尝试 span，仍只输出固定类别、哈希身份和数字，不导出请求参数或模型正文。Host 生产事件接线及 API 完整链路验收由 U1 后续集成完成，账本基础不等同全部 U1 已验收。

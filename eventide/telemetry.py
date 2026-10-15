@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from eventide import __version__
+from eventide.usage import TOKEN_FIELDS, build_usage_ledger
 
 _TERMINALS = {"run.completed", "run.failed", "run.interrupted"}
 _REASONS = {
@@ -216,13 +217,16 @@ def build_run_trace(
                     }
                 )
         operations = _operation_spans(identity, items, end, status, trace_ids[identity], abandoned)
-        for key in ("input_tokens", "output_tokens"):
+        for key in TOKEN_FIELDS:
             counter = f"eventide.usage.{key}"
-            run_span["attributes"][counter] = sum(
-                span["attributes"].get(counter, 0)
+            known = [
+                span["attributes"][counter]
                 for span in operations
                 if span["attributes"]["eventide.operation"] in {"model", "summary"}
-            )
+                and counter in span["attributes"]
+            ]
+            if known:
+                run_span["attributes"][counter] = sum(known)
         run_span["attributes"]["eventide.usage.complete"] = all(
             span["attributes"].get("eventide.usage.complete", False)
             for span in operations
@@ -258,9 +262,39 @@ def _operation_spans(
     pending: dict[str, dict[str, Any]] = {}
     tools: dict[str, dict[str, Any]] = {}
     has_summaries = any(e["type"] == "context.summary_generated" for e in events)
+    has_attempts = any(
+        e["type"] in {"model.attempt_started", "model.attempt_finished"} for e in events
+    )
+    if has_attempts:
+        for call in build_usage_ledger(events)["calls"]:
+            operation = "summary" if call["kind"] == "context_summary" else "model"
+            status = call["status"]
+            status = status if status in {"completed", "failed", "cancelled"} else "unknown"
+            attempt_attributes = {
+                "eventide.usage.complete": call["usage_complete"],
+                "eventide.usage.source": call["usage_source"],
+                "eventide.request_observed": call["request_observed"],
+            }
+            if call["usage_source"] == "reported":
+                attempt_attributes.update(
+                    {f"eventide.usage.{key}": count for key, count in call["usage"].items()}
+                )
+            spans.append(
+                _span(
+                    identity, trace_id, operation, call["attempt_id"],
+                    float(call["started_at"]),
+                    float(call["finished_at"] if call["finished_at"] is not None else end),
+                    status, parent_id, attempt_attributes,
+                )
+            )
     for event in events:
         kind, payload, timestamp = event["type"], event["payload"], float(event["ts"])
         operation = "summary" if kind.startswith("context.summary_") else "model"
+        if has_attempts and kind in {
+            "model.request", "model.retry", "model.response", "context.summary_requested",
+            "context.summary_generated", "context.compacted",
+        }:
+            continue
         if kind in {"model.request", "context.summary_requested"}:
             if operation in pending:
                 previous = pending.pop(operation)

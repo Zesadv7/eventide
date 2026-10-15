@@ -173,7 +173,7 @@ uv run eventide trace run_example ./trace.json
 uv run --extra telemetry eventide trace run_example --otel-endpoint http://127.0.0.1:4318/v1/traces
 ```
 
-默认离线 JSON；只有显式 endpoint 才发送 OTLP HTTP，依赖 `telemetry` extra。出口只含固定类别、哈希身份、状态、耗时和已观测用量，不发送正文、参数、工具结果或密钥。跨父子费用汇总使用各 Run 自身模型事件，避免把父 inclusive 用量再叠加子用量；失败/重试未返回用量会标为不完整，不推测费用。
+默认离线 JSON；只有显式 endpoint 才发送 OTLP HTTP，依赖 `telemetry` extra。出口只含固定类别、哈希身份、状态、耗时和已观测用量，不发送正文、参数、工具结果或密钥。跨父子费用汇总使用各 Run 自身模型事件，避免把父 inclusive 用量再叠加子用量；失败/重试未返回用量会标为不完整，不推测费用。供应商未返回 usage 时不再伪造零值；缓存和推理明细作为可选字段保留，不重复加到总量。Anthropic 的总输入按未缓存、缓存读取和缓存创建之和归一化，其他供应商按其总输入口径处理。当前页面和软预算仍使用兼容汇总，完整调用账本与费用页面按 U1/U3 分步接入。
 
 ## 受控只读 Agent 协作
 

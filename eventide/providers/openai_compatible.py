@@ -9,6 +9,7 @@ from eventide.config import Settings
 from eventide.generation import wire_parameters
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
+from eventide.usage import normalize_provider_usage
 
 
 def convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -133,10 +134,7 @@ class OpenAICompatibleProvider:
                 arguments = {"_invalid_json": raw_call.function.arguments}
             calls.append(ToolCall(raw_call.id, raw_call.function.name, arguments))
         usage_obj = getattr(response, "usage", None)
-        usage = {
-            "input_tokens": int(getattr(usage_obj, "prompt_tokens", 0) or 0),
-            "output_tokens": int(getattr(usage_obj, "completion_tokens", 0) or 0),
-        }
+        usage = normalize_provider_usage("openai_compatible", usage_obj)
         return ModelResponse(
             message.content or "", tuple(calls), choice.finish_reason or "stop", usage
         )

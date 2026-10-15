@@ -9,6 +9,7 @@ from eventide.config import Settings
 from eventide.generation import wire_parameters
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
+from eventide.usage import normalize_provider_usage
 
 
 def convert_response_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -146,10 +147,7 @@ class OpenAIResponsesProvider:
                 arguments = {"_invalid_json": arguments_text}
             calls.append(ToolCall(raw.call_id, raw.name, arguments))
         usage_obj: Any = getattr(response, "usage", None)
-        usage = {
-            "input_tokens": int(getattr(usage_obj, "input_tokens", 0) or 0),
-            "output_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
-        }
+        usage = normalize_provider_usage("openai_responses", usage_obj)
         status = str(getattr(response, "status", "completed") or "completed")
         if status == "incomplete":
             # Preserve the reason (e.g. max_output_tokens) so truncation is detectable.
