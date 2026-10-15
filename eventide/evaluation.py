@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
-import json
 import os
 import shlex
 import shutil
@@ -11,16 +11,27 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from eventide.budget_prices import PriceVersion
 from eventide.config import Settings
-from eventide.eval_grading import run_benchmark_case
+from eventide.eval_evidence import (
+    atomic_json,
+    case_evidence,
+    runtime_revision,
+    safe_configuration,
+    safe_failure,
+    summarize_usage,
+)
+from eventide.eval_grading import _tests_run, run_benchmark_case
 from eventide.eval_suite import load_benchmark
 from eventide.generation import GenerationPatch
 from eventide.host import RuntimeHost
 from eventide.models import RunRequest, RunResult
+from eventide.normalization import normalize
 from eventide.provider_config import resolve_provider_configuration
 from eventide.providers import ScriptedProvider, build_provider
 from eventide.rag.index import IndexStore
@@ -43,6 +54,14 @@ class EvalCaseResult:
     verification: dict[str, Any] = field(default_factory=dict)
     artifact_dir: str | None = None
     benchmark: dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
+    failure: dict[str, str] | None = None
+    run_id: str | None = None
+    session_id: str | None = None
+    turn_id: str | None = None
+    configuration: dict[str, Any] = field(default_factory=dict)
+    case_artifact_dir: str | None = None
+    agent_duration_ms: float | None = None
 
 
 def load_suite(path: Path) -> list[dict[str, Any]]:
@@ -54,6 +73,8 @@ def load_suite(path: Path) -> list[dict[str, Any]]:
     cases = data.get("cases", data) if isinstance(data, dict) else data
     if not isinstance(cases, list):
         raise ValueError("Evaluation suite must contain a 'cases' list")
+    if any(not isinstance(case, dict) or "prompt" not in case for case in cases):
+        raise ValueError("Evaluation cases must be objects with a prompt")
     return cases
 
 
@@ -154,44 +175,49 @@ async def _run_case(
         raise ValueError("acceptance_tests requires an inline workspace fixture")
     original = _test_manifest(sandbox)
     runtime.create_session(session_id)
-    with tempfile.TemporaryDirectory(prefix="eventide-fixed-tests-") as temporary:
-        frozen = Path(temporary) / "tests"
-        shutil.copytree(
-            sandbox / "tests", frozen, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
-        )
-        command = _acceptance_command(sandbox, frozen)
-        baseline = await runtime.check_project(session_id, command)
-        if baseline["passed"] or baseline["metadata"].get("exit_code") != 1:
-            raise ValueError("Acceptance fixture must have a failing baseline (exit code 1)")
-        if "EVENTIDE_ACCEPTANCE=" not in baseline["content"]:
-            raise ValueError("Acceptance baseline did not run the fixed test runner")
-        result = await runtime.run(request)
-        try:
-            unchanged = _test_manifest(sandbox) == original
-        except (OSError, ValueError):
-            unchanged = False
-        evidence = {
-            "baseline_run_id": baseline["run_id"],
-            "baseline_exit_code": baseline["metadata"]["exit_code"],
-            "tests_unchanged": unchanged,
-            "test_manifest": original,
-        }
-        if not unchanged:
-            return result, {**evidence, "passed": False}, ("acceptance tests changed",)
-        _clear_candidate_bytecode(sandbox)
-        checked = await runtime.check_project(session_id, command)
+    frozen = sandbox.parent / "acceptance-evidence" / "tests"
+    shutil.copytree(
+        sandbox / "tests", frozen, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+    )
+    command = _acceptance_command(sandbox, frozen)
+    baseline = await runtime.check_project(session_id, command)
+    if baseline["passed"] or baseline["metadata"].get("exit_code") != 1:
+        raise ValueError("Acceptance fixture must have a failing baseline (exit code 1)")
+    if _tests_run(baseline["content"]) is None:
+        raise ValueError("Acceptance baseline did not run the fixed test runner")
+    result = await runtime.run(request)
+    try:
         unchanged = _test_manifest(sandbox) == original
-        accepted = checked["passed"] and unchanged and "EVENTIDE_ACCEPTANCE=" in checked["content"]
-        evidence.update(
-            {
-                "verification_run_id": checked["run_id"],
-                "exit_code": checked["metadata"].get("exit_code"),
-                "timed_out": checked["metadata"].get("timed_out", False),
-                "tests_unchanged": unchanged,
-                "passed": accepted,
-            }
-        )
-        return result, evidence, () if accepted else ("independent acceptance failed",)
+    except (OSError, ValueError):
+        unchanged = False
+    evidence = {
+        "baseline_run_id": baseline["run_id"],
+        "baseline_exit_code": baseline["metadata"]["exit_code"],
+        "tests_unchanged": unchanged,
+        "test_manifest": original,
+        "frozen_tests": str(frozen),
+        "baseline_tests_run": _tests_run(baseline["content"]),
+    }
+    if not unchanged:
+        return result, {**evidence, "passed": False}, ("acceptance tests changed",)
+    _clear_candidate_bytecode(sandbox)
+    checked = await runtime.check_project(session_id, command)
+    unchanged = _test_manifest(sandbox) == original
+    frozen_unchanged = _test_manifest(frozen.parent) == original
+    accepted = (checked["passed"] and unchanged and frozen_unchanged
+                and _tests_run(checked["content"]) is not None)
+    evidence.update(
+        {
+            "verification_run_id": checked["run_id"],
+            "exit_code": checked["metadata"].get("exit_code"),
+            "timed_out": checked["metadata"].get("timed_out", False),
+            "tests_unchanged": unchanged,
+            "frozen_tests_unchanged": frozen_unchanged,
+            "tests_run": _tests_run(checked["content"]),
+            "passed": accepted,
+        }
+    )
+    return result, evidence, () if accepted else ("independent acceptance failed",)
 
 
 def _git_reasons(workdir: Path) -> list[str]:
@@ -274,165 +300,268 @@ def _judge(
     return not reasons, tuple(reasons)
 
 
-async def run_evaluations(
-    path: Path,
-    *,
-    live: bool = False,
-    settings: Settings | None = None,
-    output_dir: Path | None = None,
-) -> dict[str, Any]:
-    """Run cases in independent temporary projects, never in the caller's checkout.
+async def _bounded_case(
+    runtime: RuntimeHost, case: dict[str, Any], sandbox: Path, session_id: str,
+    timeout: float,
+) -> tuple[RunResult, dict[str, Any], tuple[str, ...]]:
+    task = asyncio.create_task(_run_case(runtime, case, sandbox, session_id))
+    try:
+        done, _ = await asyncio.wait({task}, timeout=timeout)
+        if not done:
+            raise TimeoutError("Evaluation case exceeded its wall-clock limit")
+        return task.result()
+    finally:
+        if not task.done():
+            task.cancel()
+            # Host cancellation may return an interrupted result after side-effect cleanup.
+            while not task.done():
+                with suppress(asyncio.CancelledError, Exception):
+                    await asyncio.shield(task)
+        if not task.cancelled():
+            task.exception()  # Observe failures even when a timeout/cancel owns the result.
 
-    Live mode resolves saved provider settings read-only before isolation. The
-    returned artifact_dir keeps all case databases and source evidence, including
-    failed cases. output_dir explicitly exports the report only; it is not a
-    state root and receives no credentials or runtime databases.
+
+async def _evaluate_case(
+    case: dict[str, Any], index: int, settings: Settings, directory: Path, *,
+    live: bool, prices: tuple[PriceVersion, ...], case_timeout: float,
+) -> tuple[EvalCaseResult, bool]:
+    mode = "live" if live else "offline"
+    started = time.perf_counter()
+    sandbox = None
+    store = None
+    runtime = None
+    result = None
+    verification: dict[str, Any] = {}
+    evidence: dict[str, Any] = {}
+    reasons: tuple[str, ...] = ()
+    failure = None
+    cancelled = False
+    stage = "fixture"
+    case_settings = settings
+    try:
+        directory.mkdir()
+        atomic_json(directory / "case-input.json", normalize(case, _secrets(settings)))
+        fixtures = case.get("workspace", {})
+        if not isinstance(fixtures, dict):
+            raise ValueError("Evaluation workspace must be an inline fixture mapping")
+        sandbox = _create_sandbox(fixtures, parent=directory)
+        case_settings = replace(
+            settings, workdir=sandbox,
+            state_dir=directory / "state" if "benchmark" in case else sandbox / ".eventide",
+            workers_enabled=case.get("readonly_workers") is True,
+        )
+        case_settings = replace(
+            case_settings, max_steps=min(settings.max_steps, 12),
+            run_token_limit=min(settings.run_token_limit or 20_000, 20_000),
+            model_timeout=min(settings.model_timeout, case_timeout),
+        )
+        if case.get("rag_index") is True:
+            case_settings = replace(
+                case_settings, embedding_provider="hash", embedding_model=None,
+                embedding_base_url=None, embedding_api_key=None, embedding_dim=256,
+            )
+            IndexStore(sandbox).build()
+        stage = "runtime"
+        provider = (build_provider(case_settings) if live
+                    else ScriptedProvider(case.get("script", [])))
+        store = RuntimeStore(case_settings.state_dir / "evals" / f"{mode}.db")
+        runtime = RuntimeHost(
+            settings=case_settings, provider=provider, store=store, enable_mcp=False,
+        )
+        for price in prices:
+            runtime.register_price(price)
+        session_id = f"eval_{mode}_{index}"
+        remaining = case_timeout - (time.perf_counter() - started)
+        if remaining <= 0:
+            raise TimeoutError("Evaluation fixture preparation exceeded its wall-clock limit")
+        result, verification, acceptance_reasons = await _bounded_case(
+            runtime, case, sandbox, session_id, remaining,
+        )
+        stage = "grading"
+        _, reasons = _judge(case, result.output, store.get_events(result.run_id),
+                           result.status, sandbox)
+        reasons += acceptance_reasons
+    except asyncio.CancelledError as exc:
+        cancelled = True
+        failure = safe_failure(exc, stage, settings)
+        reasons += ("evaluation cancelled",)
+    except Exception as exc:
+        failure = safe_failure(exc, stage, settings)
+        reasons += (f"{stage} failed: {type(exc).__name__}",)
+    finally:
+        if runtime is not None:
+            cleanup = asyncio.create_task(runtime.close())
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError as exc:
+                    cancelled = True
+                    failure = failure or safe_failure(exc, "cleanup", settings)
+                    reasons += ("evaluation cancelled",)
+                except Exception:
+                    break
+            try:
+                cleanup.result()
+            except (Exception, asyncio.CancelledError) as exc:
+                failure = failure or safe_failure(exc, "cleanup", settings)
+                reasons += ("runtime cleanup failed",)
+        if store is not None:
+            try:
+                evidence = case_evidence(
+                    store, directory, main_run_id=result.run_id if result else None,
+                )
+            except Exception as exc:
+                failure = failure or safe_failure(exc, "evidence", settings)
+                reasons += ("event evidence export failed",)
+            finally:
+                store.close()
+    status = ("cancelled" if cancelled else "timed_out"
+              if failure and failure["type"] == "TimeoutError" else "failed"
+              if failure else result.status if result else "unknown")
+    if status not in {"completed", "interrupted"} and not reasons:
+        reasons += (f"status={status}",)
+    metrics = evidence.get("tool_metrics", {})
+    main_run_id = evidence.get("main_run_id")
+    main_identity: dict[str, Any] = next((run for run in evidence.get("runs", [])
+                          if run["run_id"] == main_run_id), {})
+    record = EvalCaseResult(
+        id=str(case.get("id", f"case_{index}")), passed=not reasons,
+        output=result.output if result else "", duration_ms=(time.perf_counter() - started) * 1000,
+        tool_calls=metrics.get("calls", 0), tool_errors=metrics.get("errors", 0),
+        safety_blocks=metrics.get("safety_blocks", 0),
+        reasons=tuple(dict.fromkeys(reasons)), steps=result.steps if result else 0,
+        usage=dict(evidence.get("usage", {}).get("reported_totals", {})), status=status,
+        verification=verification, artifact_dir=str(sandbox) if sandbox else None,
+        benchmark=dict(case.get("benchmark", {})), evidence=evidence, failure=failure,
+        run_id=result.run_id if result else main_run_id,
+        session_id=result.session_id if result else main_identity.get("session_id"),
+        turn_id=result.turn_id if result else main_identity.get("turn_id"),
+        configuration=safe_configuration(case_settings, live=live),
+        case_artifact_dir=str(directory), agent_duration_ms=result.duration_ms if result else None,
+    )
+    try:
+        atomic_json(directory / "case-result.json", asdict(record))
+    except Exception as exc:
+        record = replace(
+            record, passed=False, status="cancelled" if cancelled else "failed",
+            failure=record.failure or safe_failure(exc, "evidence", settings),
+            reasons=(*record.reasons, "case result export failed"),
+        )
+    return record, cancelled
+
+
+def _secrets(settings: Settings) -> tuple[str, ...]:
+    return tuple(value for value in (settings.api_key, settings.embedding_api_key) if value)
+
+
+def _report(
+    path: Path, mode: str, directory: Path, results: list[EvalCaseResult], *,
+    started: float, total: int, status: str, provenance: dict[str, Any],
+) -> dict[str, Any]:
+    passed = sum(item.passed for item in results)
+    total_tools = sum(item.tool_calls for item in results)
+    errors = sum(item.tool_errors for item in results)
+    blocks = sum(item.safety_blocks for item in results)
+    attempted_tools = total_tools - blocks
+    failure_reasons: dict[str, int] = {}
+    for item in results:
+        for reason in item.reasons:
+            failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+    usage = summarize_usage(results)
+    report: dict[str, Any] = {
+        "schema_version": 2, "status": status, "mode": mode,
+        "measurement_kind": "provider_experiment" if mode == "live"
+        else "scripted_mechanism_validation", "billing_applicable": mode == "live",
+        "suite": str(path), "artifact_dir": str(directory),
+        "report_path": str(directory / f"{mode}-report.json"),
+        "passed": passed, "total": total, "attempted": len(results),
+        "remaining": total - len(results), "provenance": provenance,
+        "pass_rate": round(passed / total, 4) if total else 0,
+        "task_completion_rate": round(passed / total, 4) if total else 0,
+        "average_duration_ms": round(sum(item.duration_ms for item in results) / len(results), 2)
+        if results else 0,
+        "tool_success_rate": round((attempted_tools - errors) / attempted_tools, 4)
+        if attempted_tools else 1.0,
+        "safety_blocks": blocks, "failure_reasons": failure_reasons,
+        "average_steps": round(sum(item.steps for item in results) / len(results), 2)
+        if results else 0,
+        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        "usage": usage, "results": [asdict(item) for item in results],
+    }
+    if mode == "live":
+        report["total_input_tokens"] = usage["reported_totals"].get("input_tokens")
+        report["total_output_tokens"] = usage["reported_totals"].get("output_tokens")
+    else:
+        report["regression_smoke"] = True
+    return report
+
+
+async def run_evaluations(
+    path: Path, *, live: bool = False, settings: Settings | None = None,
+    output_dir: Path | None = None, prices: tuple[PriceVersion, ...] = (),
+    case_timeout: float = 300, split: str | None = None,
+) -> dict[str, Any]:
+    """Run isolated cases; retain canonical evidence and incremental reports on every outcome.
+
+    Frozen benchmark live is deliberately unavailable until shared scheduling and
+    budget ownership are integrated. Prices are explicit immutable experiment inputs;
+    this function never reads or copies a caller's budget/price ledger.
     """
+    if isinstance(case_timeout, bool) or not 0 < case_timeout <= 300:
+        raise ValueError("case_timeout must be positive and at most 300 seconds")
     cases = load_suite(path)
-    if live and any("benchmark" in case for case in cases):
+    benchmark = any("benchmark" in case for case in cases)
+    if live and benchmark:
         raise ValueError(
             "Frozen benchmark live experiments are not enabled; use offline validation"
         )
+    if split is not None:
+        if split not in {"development", "holdout"} or not benchmark:
+            raise ValueError("split requires a frozen benchmark and development or holdout")
+        cases = [case for case in cases if case["benchmark"]["split"] == split]
+    for price in prices:
+        price.payload()
     settings = settings or Settings.from_env()
     if live:
         settings = resolve_provider_configuration(settings)
     else:
         settings = replace(
-            settings,
-            api_key=None,
-            embedding_provider="hash",
-            embedding_model=None,
-            embedding_base_url=None,
-            embedding_api_key=None,
-            embedding_dim=256,
+            settings, api_key=None, embedding_provider="hash", embedding_model=None,
+            embedding_base_url=None, embedding_api_key=None, embedding_dim=256,
         )
     mode = "live" if live else "offline"
-    artifact_dir = Path(tempfile.mkdtemp(prefix=f"eventide-evaluation-{mode}-")).resolve()
-    results: list[EvalCaseResult] = []
-    suite_started = time.perf_counter()
-    for index, case in enumerate(cases, 1):
-        fixtures = case.get("workspace", {})
-        if not isinstance(fixtures, dict):
-            raise ValueError("Evaluation workspace must be an inline fixture mapping")
-        case_artifacts = artifact_dir / f"case-{index:03d}"
-        case_artifacts.mkdir()
-        sandbox = _create_sandbox(fixtures, parent=case_artifacts)
-        case_settings = replace(
-            settings,
-            workdir=sandbox,
-            state_dir=(case_artifacts / "state" if "benchmark" in case
-                       else sandbox / ".eventide"),
-            workers_enabled=case.get("readonly_workers") is True,
-        )
-        if "benchmark" in case:
-            case_settings = replace(
-                case_settings, max_steps=min(settings.max_steps, 12),
-                run_token_limit=min(settings.run_token_limit or 20_000, 20_000),
-                model_timeout=min(settings.model_timeout, 300),
-            )
-        rag_index = case.get("rag_index") is True
-        if rag_index:
-            # Fixture indexes are always deterministic, including live LLM runs.
-            case_settings = replace(
-                case_settings,
-                embedding_provider="hash",
-                embedding_model=None,
-                embedding_base_url=None,
-                embedding_api_key=None,
-                embedding_dim=256,
-            )
-            IndexStore(sandbox).build()
-        provider = (
-            build_provider(case_settings) if live else ScriptedProvider(case.get("script", []))
-        )
-        case_store = RuntimeStore(case_settings.state_dir / "evals" / f"{mode}.db")
-        runtime = None
-        try:
-            runtime = RuntimeHost(
-                settings=case_settings, provider=provider, store=case_store, enable_mcp=False
-            )
-            session_id = f"eval_{mode}_{index}_{int(time.time() * 1000)}"
-            result, verification, acceptance_reasons = await _run_case(
-                runtime, case, sandbox, session_id
-            )
-            events = case_store.get_events(result.run_id)
-            passed, reasons = _judge(case, result.output, events, result.status, sandbox)
-            reasons += acceptance_reasons
-            passed = passed and not acceptance_reasons
-            error_events = [
-                event
-                for event in events
-                if event["type"] == "tool.result" and event["payload"].get("is_error")
-            ]
-            safety_blocks = sum(
-                "Permission denied" in str(event["payload"].get("content", ""))
-                for event in error_events
-            )
-            results.append(
-                EvalCaseResult(
-                    id=str(case.get("id", f"case_{index}")),
-                    passed=passed,
-                    output=result.output,
-                    duration_ms=result.duration_ms,
-                    tool_calls=result.tool_calls,
-                    tool_errors=len(error_events) - safety_blocks,
-                    safety_blocks=safety_blocks,
-                    reasons=reasons,
-                    steps=result.steps,
-                    usage=dict(result.usage),
-                    status=result.status,
-                    verification=verification,
-                    artifact_dir=str(sandbox),
-                    benchmark=dict(case.get("benchmark", {})),
-                )
-            )
-        finally:
-            try:
-                if runtime is not None:
-                    await runtime.close()
-            finally:
-                case_store.close()
-    passed_count = sum(item.passed for item in results)
-    total_tools = sum(item.tool_calls for item in results)
-    total_errors = sum(item.tool_errors for item in results)
-    total_blocks = sum(item.safety_blocks for item in results)
-    attempted_tools = total_tools - total_blocks
-    failure_reasons: dict[str, int] = {}
-    for item in results:
-        for reason in item.reasons:
-            failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
-    report: dict[str, Any] = {
-        "mode": mode,
-        "measurement_kind": "provider_experiment" if live else "scripted_mechanism_validation",
-        "suite": str(path),
-        "artifact_dir": str(artifact_dir),
-        "report_path": str(artifact_dir / f"{mode}-report.json"),
-        "passed": passed_count,
-        "total": len(results),
-        "pass_rate": round(passed_count / len(results), 4) if results else 0,
-        "task_completion_rate": round(passed_count / len(results), 4) if results else 0,
-        "average_duration_ms": round(sum(item.duration_ms for item in results) / len(results), 2)
-        if results
-        else 0,
-        "tool_success_rate": round((attempted_tools - total_errors) / attempted_tools, 4)
-        if attempted_tools
-        else 1.0,
-        "safety_blocks": total_blocks,
-        "failure_reasons": failure_reasons,
-        "average_steps": round(sum(item.steps for item in results) / len(results), 2)
-        if results
-        else 0,
-        "duration_ms": round((time.perf_counter() - suite_started) * 1000, 2),
-        "results": [asdict(item) for item in results],
+    directory = Path(tempfile.mkdtemp(prefix=f"eventide-evaluation-{mode}-")).resolve()
+    inputs = atomic_json(directory / "suite-inputs.json", normalize(cases, _secrets(settings)))
+    provenance = {
+        "runtime": runtime_revision(),
+        "suite_source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "inputs": inputs, "split": split, "prices": [price.payload() for price in prices],
+        "case_timeout": case_timeout,
     }
-    if live:
-        report["total_input_tokens"] = sum(item.usage.get("input_tokens", 0) for item in results)
-        report["total_output_tokens"] = sum(item.usage.get("output_tokens", 0) for item in results)
-    else:
-        report["regression_smoke"] = True
-    body = json.dumps(report, ensure_ascii=False, indent=2)
-    Path(report["report_path"]).write_text(body, encoding="utf-8")
-    if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / f"{mode}-report.json").write_text(body, encoding="utf-8")
-    return report
+    results: list[EvalCaseResult] = []
+    started = time.perf_counter()
+
+    def save(status: str) -> dict[str, Any]:
+        report = _report(path, mode, directory, results, started=started, total=len(cases),
+                         status=status, provenance=provenance)
+        atomic_json(Path(report["report_path"]), report)
+        if output_dir is not None:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            atomic_json(output_dir / f"{mode}-report.json", report)
+        return report
+
+    save("running")
+    for index, case in enumerate(cases, 1):
+        entry, cancelled = await _evaluate_case(
+            case, index, settings, directory / f"case-{index:03d}",
+            live=live, prices=prices, case_timeout=case_timeout,
+        )
+        results.append(entry)
+        if cancelled:
+            save("cancelled")
+            raise asyncio.CancelledError
+        if live and entry.status in {"failed", "timed_out", "unknown"}:
+            # Stop enlarging a paid batch after an unclassified provider/protocol failure.
+            return save("aborted")
+        save("running")
+    return save("completed")

@@ -380,11 +380,21 @@ P3源码证据补充：Host为接收、派发、只读工具基线、worker与�
 
 `eval_suite.py` 解析 `evals/benchmark.yaml` 的严格版本化清单及 20 个 JSON 任务包，校验任务内容哈希、相对路径、无链接引用、类别／开发留出配额和家族隔离。清单固定理解4、定位4、单文件6、跨文件4、恢复交付2；其中开发12、留出8。历史 engineering 三题保留并全部进入开发集。任务或策略实验发生变化时须提升任务／清单版本；参考留出结果调参后须移动并补充题目，不继续复用旧留出标签。
 
-`evaluation.run_evaluations` 仍是唯一 Python 入口，旧 YAML suites 继续可用。冻结集先在读取环境或已保存凭据前禁止 live；离线数据注明 `scripted_mechanism_validation`，逐例带清单和任务版本哈希。每例源 Git 项目、状态根、冻结验收目录彼此独立，状态与验收目录作为源目录的兄弟目录，避免 worktree checkpoint 被评测自身数据库污染。模型步骤最多12、已观测 Token 软限最多20,000；整体实验预算与完整失败记录由 B2/B3 后续补齐，不把模型单请求超时冒充整例5分钟上限。
+`evaluation.run_evaluations` 仍是唯一 Python 入口，旧 YAML suites 继续可用。冻结集先在读取环境或已保存凭据前禁止 live；离线数据注明 `scripted_mechanism_validation`，逐例带清单和任务版本哈希。每例源 Git 项目、状态根、冻结验收目录彼此独立，状态与验收目录作为源目录的兄弟目录，避免 worktree checkpoint 被评测自身数据库污染。模型步骤最多12、已观测 Token 软限最多20,000；整例5分钟上限及部分失败记录由下文B2实现，真实批次成本预算仍由B3前置评估。
 
 `eval_grading.py` 仅编排已有 RuntimeHost/ToolExecutor/PolicyEngine、check_project 和 manage_delivery；没有替代执行器或结果数据库。事实题在持久 Plan 快照中运行，要求结构化事实和精确行号与人工标注一致；修复题在 Session 固定 worktree 中运行。验收先确认原版测试失败，再在独立 Python 进程运行事先冻结的 unittest；源码允许范围、固定测试、额外文件和原项目未被修改均参与判断，正文自报成功没有分数。
 
 恢复交付题明确区分 scripted Provider 经工具修改业务文件与评测程序控制动作：一题关闭重开 Host 后 verify/apply 并复验源，另一题在 verify 后注入独立源变化并要求拒绝 apply。测试及候选产物持久保留并引用 Run 身份，不注入“已通过”事实。该机制验证不证明真实模型自主修复、不包含未来 C 检索或 D 三候选流程；本地执行仍不是恶意代码安全沙箱。Web 评测未来必须纳入主服务模型额度和项目／日预算，不能复制账本制造第二事实源。
+
+### 评测证据与部分失败（B2）
+
+报告 schema v2 由 `evaluation.py` 编排、`eval_evidence.py` 从每例现有 Store 只读重建。批次先冻结标准化任务输入与 Runtime commit/dirty/code SHA-256，逐例保存有效配置、Run/Session/Turn、context.configured 工具／指令／Skill 指纹、skills.snapshot 版本、模型尝试配置及全部 canonical 事件快照的哈希。源、固定验收原文和唯一事件数据库保留；JSON 报告只是可重建的审计导出，不参与运行恢复或预算决策。
+
+用量直接调用 `build_usage_ledger`，收集用例全部 Session 的独占尝试；父终态汇总不重复累计，重试失败及取消无usage保持unknown。报告总量分别累计reported/estimated；完整性要求全部已尝试题有可用账本，缺失证据题显式列出；历史简表没有对应字段就缺省，live全未知总量为null，不填0。费用直接读取同一 Store 的 CostLedger，保存历史估算和精确价格版本。价格必须由实验调用方显式传入，不访问用户预算/费用库；费用按币种及用量来源分桶，脚本消费标注 `billing_applicable=false`。
+
+每例准备之后，剩余整例期限交给独立 asyncio Task；到期取消并等待清理，不把单请求超时等同整例上限。所有套件默认12步/20,000已观测Token/300秒，允许更严格配置；数据库、Git同步准备和实际副作用清理不能被描述成实时强制终止。保存初始running报告、每例结果和最终状态，写入采用同目录临时文件、fsync、replace。发生取消用独立清理Task和shield等待收尾，重复取消也不截断证据导出和部分报告，然后向调用者重新抛出CancelledError；剩余题不运行、不伪造用量。离线失败保留并继续，live失败/超时/未知终态停止扩大批次。报告total保留原定题数，attempted/remaining与终态分开；证据导出失败本身也是失败。
+
+冻结集live仍禁用，旧显式live接口只是独立开发实验入口，不等于Web共享预算评测已完成。B3重复实验、Web调度、价格成本对照及U5质量结论另行验收；本切片只保证证据与错误不被丢弃。
 
 ## 最终请求输入组成（U3）
 

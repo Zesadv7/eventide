@@ -70,5 +70,9 @@ async def test_model_claim_or_modified_tests_cannot_pass(isolated_workspace, tam
 async def test_fixture_path_cannot_escape_sandbox(isolated_workspace):
     suite = isolated_workspace / "bad.json"
     suite.write_text(json.dumps({"cases": [{"prompt": "bad", "workspace": {"../escape": "bad"}}]}))
-    with pytest.raises(ValueError, match="sandbox"):
-        await run_evaluations(suite, settings=settings_for(isolated_workspace))
+    report = await run_evaluations(suite, settings=settings_for(isolated_workspace))
+    assert report["passed"] == 0
+    failure = report["results"][0]["failure"]
+    assert failure["type"] == "ValueError" and failure["stage"] == "fixture"
+    assert "sandbox" in failure["message"]
+    assert not (Path(report["artifact_dir"]) / "case-001" / "escape").exists()
