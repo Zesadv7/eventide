@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from eventide.config import Settings
 from eventide.generation import wire_parameters
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
+from eventide.streaming import (
+    MAX_STREAM_ITEMS,
+    ModelStreamEvent,
+    StreamLimit,
+    closing_stream,
+    field,
+    parse_arguments,
+    stream_error,
+)
 from eventide.usage import normalize_provider_usage
 
 
@@ -116,32 +126,30 @@ class OpenAICompatibleProvider:
     async def close(self) -> None:
         await self._client.close()
 
+    def _parameters(self, request: ModelRequest) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "model": request.model,
+            "messages": cast(Any, convert_messages(request.messages, request.system)),
+            "max_tokens": request.max_tokens,
+        }
+        params.update(wire_parameters("openai_compatible", request.generation))
+        if request.tools:
+            params["tools"] = cast(Any, convert_tools(request.tools))
+        return params
+
     async def complete(self, request: ModelRequest) -> ModelResponse:
         try:
-            # Strict OpenAI-compatible backends (e.g. DashScope) reject an empty
-            # `tools` array; omit the field entirely when there are no tools.
-            params: dict[str, Any] = {
-                "model": request.model,
-                "messages": cast(Any, convert_messages(request.messages, request.system)),
-                "max_tokens": request.max_tokens,
-            }
-            params.update(wire_parameters("openai_compatible", request.generation))
-            if request.tools:
-                params["tools"] = cast(Any, convert_tools(request.tools))
-            response = await cast(Any, self._client).chat.completions.create(**params)
+            response = await cast(Any, self._client).chat.completions.create(
+                **self._parameters(request),
+            )
         except Exception as exc:
-            text = str(exc).lower()
-            retryable = any(token in text for token in ("429", "500", "502", "503", "529"))
-            raise ProviderError(str(exc), retryable=retryable) from exc
+            raise stream_error(exc, started=False) from exc
         choice = response.choices[0]
         message = choice.message
         calls: list[ToolCall] = []
         for call in message.tool_calls or []:
             raw_call: Any = call
-            try:
-                arguments = json.loads(raw_call.function.arguments or "{}")
-            except json.JSONDecodeError:
-                arguments = {"_invalid_json": raw_call.function.arguments}
+            arguments = parse_arguments(raw_call.function.arguments or "{}")
             calls.append(ToolCall(raw_call.id, raw_call.function.name, arguments))
         usage_obj = getattr(response, "usage", None)
         usage = normalize_provider_usage("openai_compatible", usage_obj)
@@ -151,3 +159,74 @@ class OpenAICompatibleProvider:
             ({"reasoning_content": reasoning},) if isinstance(reasoning, str) else (),
             "openai_compatible",
         )
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        started = False
+        limit = StreamLimit()
+        text_parts: list[str] = []
+        reasoning: list[str] = []
+        calls: dict[int, dict[str, str]] = {}
+        finish_reason: str | None = None
+        usage: dict[str, int] = {}
+        try:
+            raw = await cast(Any, self._client).chat.completions.create(
+                **self._parameters(request), stream=True, stream_options={"include_usage": True},
+            )
+            started = True
+            async with closing_stream(raw):
+                async for chunk in raw:
+                    limit.event()
+                    if field(chunk, "usage") is not None:
+                        usage = normalize_provider_usage("openai_compatible", field(chunk, "usage"))
+                    for choice in field(chunk, "choices", []) or []:
+                        if finish_reason is not None:
+                            raise ProviderError(
+                                "Model stream returned data after its terminal choice",
+                            )
+                        if field(choice, "index", 0) != 0:
+                            raise ProviderError("Model stream returned an unexpected choice")
+                        delta = field(choice, "delta")
+                        visible = field(delta, "content")
+                        if isinstance(visible, str) and visible:
+                            text_parts.append(limit.add(visible))
+                            yield ModelStreamEvent("text_delta", text=visible)
+                        thought = field(delta, "reasoning_content")
+                        if isinstance(thought, str):
+                            reasoning.append(limit.add(thought))
+                        for call in field(delta, "tool_calls", []) or []:
+                            index = field(call, "index")
+                            if type(index) is not int or not 0 <= index < MAX_STREAM_ITEMS:
+                                raise ProviderError("Invalid model stream tool index")
+                            target = calls.setdefault(
+                                index, {"id": "", "name": "", "arguments": ""},
+                            )
+                            function = field(call, "function")
+                            for key, value in (
+                                ("id", field(call, "id")),
+                                ("name", field(function, "name")),
+                                ("arguments", field(function, "arguments")),
+                            ):
+                                if isinstance(value, str):
+                                    target[key] += limit.add(value)
+                        reason = field(choice, "finish_reason")
+                        if reason is not None:
+                            if finish_reason is not None:
+                                raise ProviderError("Model stream repeated its terminal choice")
+                            finish_reason = str(reason)
+            if finish_reason is None:
+                raise ProviderError("Model stream ended without a finish reason")
+            tool_calls: list[ToolCall] = []
+            for _, item in sorted(calls.items()):
+                if not item["id"] or not item["name"]:
+                    raise ProviderError("Model stream returned an incomplete tool identity")
+                tool_calls.append(ToolCall(
+                    item["id"], item["name"], parse_arguments(item["arguments"]),
+                ))
+            result = ModelResponse(
+                "".join(text_parts), tuple(tool_calls), finish_reason, usage,
+                ({"reasoning_content": "".join(reasoning)},) if reasoning else (),
+                "openai_compatible",
+            )
+        except Exception as exc:
+            raise stream_error(exc, started=started) from exc
+        yield ModelStreamEvent("response_completed", response=result)

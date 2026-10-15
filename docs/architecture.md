@@ -93,6 +93,10 @@ HTTP写请求先校验浏览器同源与本机Origin；无Origin的可信非浏�
 
 SDK内部重试显式关闭，Host统一重试，因此每条attempt对应一次SDK请求。默认最大输出也纳入有效参数快照，重启改变启动默认不会改变Continue。Session覆盖查询同时绑定模型身份，切换模型再切回仍可恢复各自设置。Chat兼容adapter保留并回传其reasoning_content私有状态，不泄漏到其他Provider格式。
 
+三类 Provider adapter 同时提供 `complete(request)` 与可选 `stream(request)`。`streaming.ModelStreamEvent` 只有 `text_delta` 和 `response_completed`；只有后者含完整 ModelResponse 和工具调用，增量中没有可执行 ToolCall。Responses 读取 SDK 的终态对象，Chat 按调用 index 拼接参数，Anthropic 按消息/内容块生命周期拼接 JSON；各自保留必要的私有推理状态，增量只发送可见文本。收到最终对象前不会执行工具。Chat 等待结束原因并读取后续 usage，Anthropic 用累计 message_delta 覆盖临时用量，不把 message_start 的输出零值冒充最终消费。
+
+SDK stream 在终态返回前关闭；异常、取消和消费者 aclose 同样释放连接。SDK 请求创建成功后任何断流均为不可重试错误，不能因预览失败回退为 complete 重发。适配器限制保留内容/参数/推理合计 8 MiB、128 个输出项及 65,536 个事件；超限与缺终态均不返回完整响应。这些是响应组装边界，不是请求费用上限或操作系统隔离。适配器协议已通过内存 SSE 与官方 SDK 验证，Host 的临时预览、SSE 及尝试账本集成仍按 A6/A7 单独验收。
+
 `RuntimeStore.usage_events`在一个递归查询中选取指定Run/Session及可选持久子Run的调用事实；`usage.build_usage_ledger`纯派生去重、已报告/估算/未知及完整性，HTTP用量接口不依赖列表分页。终态/worker汇总不再次收费，历史只做不完整响应回退。价格、共享预算、输入组成估算与Vue视图仍按U2/U3实施。
 
 `RuntimeHost.run(RunRequest)`、create_session、Provider 配置和 RunResult 原字段保持当前契约；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。

@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from eventide.config import Settings
 from eventide.generation import wire_parameters
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
+from eventide.streaming import (
+    MAX_STREAM_ITEMS,
+    ModelStreamEvent,
+    StreamLimit,
+    closing_stream,
+    field,
+    parse_arguments,
+    stream_error,
+    to_dict,
+)
 from eventide.usage import normalize_provider_usage
 
 
@@ -109,56 +120,107 @@ class OpenAIResponsesProvider:
     async def close(self) -> None:
         await self._client.close()
 
+    def _parameters(self, request: ModelRequest) -> dict[str, Any]:
+        # Strict backends distinguish an absent tools field from an empty array.
+        params: dict[str, Any] = {
+            "model": request.model,
+            "instructions": request.system,
+            "input": cast(Any, convert_response_input(request.messages)),
+            "max_output_tokens": request.max_tokens,
+            "store": False,
+            "include": ["reasoning.encrypted_content"],
+        }
+        params.update(wire_parameters("openai_responses", request.generation))
+        if request.tools:
+            params["tools"] = cast(Any, convert_response_tools(request.tools))
+        return params
+
     async def complete(self, request: ModelRequest) -> ModelResponse:
         try:
-            # Omit the `tools` field when empty; the Responses API treats an
-            # empty list differently from an absent field on strict backends.
-            params: dict[str, Any] = {
-                "model": request.model,
-                "instructions": request.system,
-                "input": cast(Any, convert_response_input(request.messages)),
-                "max_output_tokens": request.max_tokens,
-                "store": False,
-                "include": ["reasoning.encrypted_content"],
-            }
-            params.update(wire_parameters("openai_responses", request.generation))
-            if request.tools:
-                params["tools"] = cast(Any, convert_response_tools(request.tools))
-            response = await cast(Any, self._client).responses.create(**params)
+            response = await cast(Any, self._client).responses.create(**self._parameters(request))
         except Exception as exc:
-            text = str(exc).lower()
-            retryable = any(token in text for token in ("429", "500", "502", "503", "529"))
-            raise ProviderError(str(exc), retryable=retryable) from exc
+            raise stream_error(exc, started=False) from exc
+        return parse_response(response)
 
-        calls: list[ToolCall] = []
-        provider_items: list[dict[str, Any]] = []
-        for item in getattr(response, "output", []) or []:
-            raw: Any = item
-            if getattr(raw, "type", "") == "reasoning":
-                if hasattr(raw, "model_dump"):
-                    provider_items.append(raw.model_dump(exclude_none=True))
-                elif isinstance(raw, dict):
-                    provider_items.append(dict(raw))
-                continue
-            if getattr(raw, "type", "") != "function_call":
-                continue
-            arguments_text = getattr(raw, "arguments", "{}") or "{}"
-            try:
-                arguments = json.loads(arguments_text)
-            except json.JSONDecodeError:
-                arguments = {"_invalid_json": arguments_text}
-            calls.append(ToolCall(raw.call_id, raw.name, arguments))
-        usage_obj: Any = getattr(response, "usage", None)
-        usage = normalize_provider_usage("openai_responses", usage_obj)
-        status = str(getattr(response, "status", "completed") or "completed")
-        if status == "incomplete":
-            # Preserve the reason (e.g. max_output_tokens) so truncation is detectable.
-            details = getattr(response, "incomplete_details", None)
-            status = str(getattr(details, "reason", "") or "") or "incomplete"
-        return ModelResponse(
-            str(getattr(response, "output_text", "") or ""),
-            tuple(calls),
-            "tool_use" if calls else status,
-            usage,
-            tuple(provider_items),
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        started = False
+        result: ModelResponse | None = None
+        limit = StreamLimit()
+        items: set[int] = set()
+        try:
+            raw = await cast(Any, self._client).responses.create(
+                **self._parameters(request), stream=True,
+            )
+            started = True
+            async with closing_stream(raw):
+                async for event in raw:
+                    limit.event()
+                    kind = field(event, "type", "")
+                    if kind == "response.output_text.delta":
+                        text = limit.add(str(field(event, "delta", "") or ""))
+                        if text:
+                            yield ModelStreamEvent("text_delta", text=text)
+                    elif kind in {
+                        "response.function_call_arguments.delta",
+                        "response.reasoning_text.delta",
+                        "response.reasoning_summary_text.delta",
+                    }:
+                        limit.add(str(field(event, "delta", "") or ""))
+                    elif kind == "response.output_item.added":
+                        index = field(event, "output_index")
+                        if type(index) is not int or index < 0 or index in items:
+                            raise ProviderError("Invalid model stream output item index")
+                        items.add(index)
+                        if len(items) > MAX_STREAM_ITEMS:
+                            raise ProviderError("Model stream exceeded the output item limit")
+                        limit.check_object(field(event, "item"))
+                    elif kind in {"response.completed", "response.incomplete"}:
+                        response = field(event, "response")
+                        if response is None:
+                            raise ProviderError("Model stream omitted its terminal response")
+                        limit.check_object(response)
+                        result = parse_response(response)
+                        break
+                    elif kind in {"response.failed", "error"}:
+                        raise ProviderError("Model response stream failed")
+            if result is None:
+                raise ProviderError("Model response stream ended without a terminal response")
+        except Exception as exc:
+            raise stream_error(exc, started=started) from exc
+        yield ModelStreamEvent("response_completed", response=result)
+
+
+def parse_response(response: Any) -> ModelResponse:
+    """Normalize both complete and terminal streaming Responses objects."""
+    calls: list[ToolCall] = []
+    provider_items: list[dict[str, Any]] = []
+    output = field(response, "output", []) or []
+    if len(output) > MAX_STREAM_ITEMS:
+        raise ProviderError("Model response exceeded the output item limit")
+    for item in output:
+        kind = field(item, "type", "")
+        if kind == "reasoning":
+            provider_items.append(to_dict(item))
+        elif kind == "function_call":
+            if not field(item, "call_id") or not field(item, "name"):
+                raise ProviderError("Model response returned an incomplete tool identity")
+            calls.append(ToolCall(
+                str(field(item, "call_id", "")), str(field(item, "name", "")),
+                parse_arguments(str(field(item, "arguments", "{}") or "{}")),
+            ))
+    usage = normalize_provider_usage("openai_responses", field(response, "usage"))
+    status = str(field(response, "status", "completed") or "completed")
+    if status == "incomplete":
+        status = str(field(field(response, "incomplete_details"), "reason", "") or "incomplete")
+    text = field(response, "output_text")
+    if text is None:
+        text = "".join(
+            str(field(part, "text", ""))
+            for item in output if field(item, "type") == "message"
+            for part in field(item, "content", [])
+            if field(part, "type") == "output_text"
         )
+    return ModelResponse(
+        str(text or ""), tuple(calls), "tool_use" if calls else status,
+        usage, tuple(provider_items),
+    )
