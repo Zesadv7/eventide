@@ -251,6 +251,13 @@ class ContainerCommandExecutor:
                     raise ContainerCleanupError(
                         f"Container cleanup was not confirmed for {name}; cleanup timed out"
                     ) from exc
+                except Exception as exc:
+                    # Even failing to start the Docker CLI leaves the daemon's
+                    # process state unknown. Preserve ownership and evidence.
+                    raise ContainerCleanupError(
+                        f"Container cleanup was not confirmed for {name}; "
+                        f"cleanup control failed ({type(exc).__name__})"
+                    ) from exc
                 already_removed = (
                     not result.timed_out and f"No such container: {name}" in result.stderr
                 )

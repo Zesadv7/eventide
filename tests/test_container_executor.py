@@ -306,6 +306,52 @@ async def test_pending_removal_has_a_total_deadline(fake_docker, tmp_path):
         await executor(fake_docker, cleanup_timeout=2).execute("ignored", tmp_path)
 
 
+async def test_cleanup_spawn_failure_parks_host_and_retains_skill_evidence(
+    fake_docker, isolated_workspace, monkeypatch,
+):
+    from eventide.host import RuntimeHost
+    from eventide.models import RunRequest
+    from eventide.providers import ScriptedProvider
+    from tests.test_runtime import settings_for
+    from tests.test_skill_runtime import call, package
+
+    package(isolated_workspace / "skills/diagnose", scripts=True)
+    provider = ScriptedProvider([
+        call("load_skill", {"name": "diagnose"}, "load"),
+        call("run_skill_script", {
+            "name": "project:diagnose", "path": "scripts/check.py", "args": [],
+        }, "script"),
+        {"text": "must not continue with an unknown container"},
+    ])
+    host = RuntimeHost(settings_for(isolated_workspace), provider)
+    runner = executor(fake_docker, read_only=False)
+    original = runner._control.run
+
+    async def fail_cleanup(args, cwd, env):
+        if "rm" in args:
+            raise OSError(24, "Too many open files")
+        return await original(args, cwd, env)
+
+    async def approve(*args):
+        return True
+
+    monkeypatch.setattr(runner._control, "run", fail_cleanup)
+    host.executor.command_executor = runner
+    try:
+        result = await host.run(RunRequest("run skill"), approval_handler=approve)
+        assert result.status == "interrupted"
+        assert host.store.get_run(result.run_id)["reason"] == "unknown_tool_outcome"
+        events = host.store.run_events(result.run_id)
+        assert any(event["type"] == "tool.outcome_unknown" for event in events)
+        assert not any(event["type"] == "tool.completed"
+                       and event["payload"]["name"] == "run_skill_script" for event in events)
+        assert len(provider.requests) == 2
+        evidence = list(isolated_workspace.glob(".eventide-skill-*"))
+        assert len(evidence) == 1 and (evidence[0] / "scripts/check.py").is_file()
+    finally:
+        await host.close()
+
+
 async def test_bad_container_identity_still_attempts_cleanup(fake_docker, tmp_path):
     configure(fake_docker, container_id="invalid")
     with pytest.raises(ContainerCleanupError, match="did not confirm container identity"):
