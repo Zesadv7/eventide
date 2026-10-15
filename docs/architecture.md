@@ -15,7 +15,7 @@ RuntimeHost
 
 RuntimeHost 是进程内唯一执行 Owner，持有状态根的 OS 文件锁、RuntimeStore、Provider 配置、SessionManager 和 Workspace 锁。CLI、FastAPI 和 Eval 直接复用 `RuntimeHost`；不再保留旧 Python 门面。首版不含后台 daemon 或 IPC client：同状态根已有 Host 时第二个进程失败。进程终止由 OS 释放文件锁。
 
-Workspace 保存稳定 ID、规范路径、Git 根、名称和创建时间；Git 子目录统一绑定仓库根。Session 的 Workspace 绑定不可改变；直接源运行按该绑定解析 cwd，显式快照运行按 canonical admission 固定的执行副本解析。同 Session 串行，直接源 Workspace 运行串行，独立 Plan 快照可以并发。Host 以 run_id 索引活跃执行，服务关闭或用户取消时先停止异步 Provider、MCP 与 Shell 子进程；同步线程工具结束后才释放 Workspace 所有权。
+Workspace 保存稳定 ID、规范路径、Git 根、名称和创建时间；Git 子目录统一绑定仓库根。Session 的 Workspace 绑定不可改变；直接源运行按该绑定解析 cwd，显式快照或 worktree 运行按 canonical admission 固定的执行副本解析。同 Session 串行，直接源 Workspace 运行串行，独立 Plan 快照和写入 worktree 可以并发。Host 以 run_id 索引活跃执行，服务关闭或用户取消时先停止异步 Provider、MCP 与 Shell 子进程；同步线程工具结束后才释放 Workspace 所有权。
 
 主要实现：`host.py` 管理生命周期与 Agent loop；`workspace.py` 管理路径、锁和 Git evidence；`store.py` 保存身份与事实；`projections.py`、`context_builder.py` 负责投影；`skills.py` 负责 Workspace Skill 的发现、快照和按需加载；`task_plan.py` 定义有界计划、依赖校验和紧凑提示；`worktrees.py` 提供注入 Workspace/状态根的 Git checkout 生命周期；`attachments.py` 管理 Session 附件生命周期、文本内联与多模态引用水合；`run_policy.py` 以纯函数定义每次 Run 的模式策略（plan/agent）；`model_catalog.py` 提供探测式模型列表辅助；`rag/` 负责 Workspace 文本切块、SQLite 混合索引、检索工具与离线检索评测。生产基础工具位于 `tools/runtime_catalog.py`，动态 Runtime 工具由 Host 注入，不导入 legacy 注册表。
 
@@ -23,15 +23,26 @@ Project 身份由 RuntimeStore 在 SQLite 事务内建立，按已验证的本�
 
 v4 迁移遍历原 Workspace，补齐一次性项目关系，保留 Workspace/Session/Run 身份、cwd 与历史事件字节。缺失或无法验证的历史路径保留独立身份，不在后续打开时偷偷重组。新 run.admitted/run.started 保存 project_id/source_workspace_id；交付 checkout 自动归属同项目，只读 worker 保留源 Workspace 绑定并使用已有 snapshot_id，不注册会消失的快照目录。Continue 从固定 Session 绑定得到同一项目；旧事件不补造字段。
 
-Project 查询聚合所有副本 Session，不改变原 Workspace API 的过滤语义。源 Workspace 有其他执行副本时拒绝删除，任何含 Session 的副本仍受原历史保护。Project 身份不是调度器或锁；U2按该身份共享预算。直接源运行使用 Workspace 锁，Plan 快照使用下述独立执行所有权，写副本和P3调度继续实施。
+Project 查询聚合所有副本 Session，不改变原 Workspace API 的过滤语义。源 Workspace 有其他执行副本时拒绝删除，任何含 Session 或 canonical admission 执行引用的副本仍受历史保护。Project 身份不是调度器或锁；U2按该身份共享预算。直接源运行使用 Workspace 锁，Plan 快照及写 worktree 使用下述独立执行所有权，P3调度继续实施。
 
-## 根 Run 固定快照与执行所有权（P2 首切片）
+## 根 Run 执行副本与所有权（P2）
 
-`RunRequest.execution_target` 默认 source，snapshot 仅允许 Plan。Host 接收时同时冻结模型配置、Skills、源 checkpoint、完整源码 manifest、相对 cwd 与 snapshot_id，写入同一个 run.admitted 事务；Session/Workspace/Project 的身份和绑定不改。execution_snapshots.py 将 SourceSnapshot 的有界文本复制持久化到状态根 execution-snapshots/<摘要>，只保存内容产物，不创建第二个运行事实源。相同源码可复用只读内容，但每个 Run 仍有独立执行所有权和取消身份。
+`RunRequest.execution_target` 默认 source，可显式选择 snapshot 或 worktree；snapshot 仅允许 Plan。Host 接收快照时同时冻结模型配置、Skills、源 checkpoint、完整源码 manifest、相对 cwd 与 snapshot_id，写入同一个 run.admitted 事务；Session/Workspace/Project 的身份和绑定不改。execution_snapshots.py 将 SourceSnapshot 的有界文本复制持久化到状态根 execution-snapshots/<摘要>，只保存内容产物，不创建第二个运行事实源。相同源码可复用只读内容，但每个 Run 仍有独立执行所有权和取消身份。
 
 准备阶段短暂获取源 Workspace 锁，复制、冻结 Skills 后再次验证源 checkpoint；取消准备时等待复制线程完成才释放锁。运行阶段获取 Session 锁与 snapshot_run:<RunID> 所有权，不持有源锁。工具 cwd、项目指令、Skill恢复和checkpoint全部从固定副本解析，模型/工具仍走唯一 `_execute`、ToolExecutor、PolicyEngine 和 U2 请求入口。Plan禁止Shell、写工具与Skill脚本，快照不连接MCP、源索引或嵌套worker，以免读取可变源数据。
 
-每次开始、Continue和成功终态重验资源摘要、大小、链接边界；副本损坏明确拒绝。Continue复用原admission绑定，源端漂移不影响副本，启动恢复只写停驻事实，不重放请求。快照中未知工具结果保留并阻止该次Continue，不将已知只读副本的异常扩散为源Workspace写入隔离。用户停止只影响精确Run；同Session的Python执行串行、HTTP并发接收拒绝。没有P3排队容量或请求信号量，写副本及Git共用元数据协调尚未完成。
+每次开始、Continue和成功终态重验资源摘要、大小、链接边界；副本损坏明确拒绝。Continue复用原admission绑定，源端漂移不影响副本，启动恢复只写停驻事实，不重放请求。快照中未知工具结果保留并阻止该次Continue，不将已知只读副本的异常扩散为源Workspace写入隔离。用户停止只影响精确Run；同Session的Python执行串行、HTTP并发接收拒绝。没有P3排队容量或请求信号量，不能把副本隔离等同完整调度。
+
+### 写入副本链与短期 Git 协调
+
+execution_worktrees.py 用 WorktreeService 从干净源 HEAD 创建副本，Run admission 保存完整受管身份、源checkpoint、相对cwd及实际 execution_workspace_id。后续新 Run 从该 Session 首次 canonical admission 复用副本，不从当前 HEAD 重建；Continue 和 abandon 同样保留绑定，Session 的逻辑 Workspace 不改。已绑定副本后拒绝 source/snapshot 切换，防止历史工具内容和实际文件不一致。首次创建失败保留已有受管记录用于人工检查，不伪造接收成功。
+
+执行键为 snapshot_run:<RunID>、worktree 实际 WorkspaceID 或 source WorkspaceID；Session 锁始终串行。接收在实际副本所有权内冻结 Skills/checkpoint，执行前重验；恢复和未知副作用按实际副本判断。源漂移不阻止现有副本工作，但副本漂移阻止已接收运行和 Continue。首次创建才检查源干净，后续脏修改必须保留；运行引用由 canonical admission 查询，不能移除虽无直属 Session 却被源 Session 使用的副本。
+
+文件根、项目指令和索引按实际副本解析；Skill 使用逻辑源启用配置及实际副本固定资源。只读 worker 从实际副本创建快照，子 Session 绑定实际 Workspace 并保留父项目预算归属，不继承父的可写 execution_binding。所有副本暂禁外部 MCP。SourceSnapshot 排除状态目录时只排除位于源码内部的状态树，不把状态根内的受管 checkout 全部误排除。
+
+项目级 asyncio 锁协调受管 Git 创建/移除、源码采集及 Shell/Skill 命令；锁顺序先执行 Workspace、再项目 Git。CoordinatedCommandExecutor 在真实调用期间持锁，显式委派 backend_kind 和 execute_argv，保留本地 Python 的 sys.executable/字面参数及容器固定资源的跨 UID 权限。等待模型不持项目 Git 锁，普通文件工具也不串行化；本机 Shell 的项目外副作用不由 worktree 隔离。
+
 
 ## 存储与事件契约
 
@@ -91,7 +102,7 @@ ContextBuilder 的可选 completion callback 把生产摘要接入 Host 的模�
 
 启动时扫描缺少终态的 run，不调用模型。崩溃可能正好落在「副作用工具已提交 tool.completed、它的 checkpoint 还没写」之间，此时 Host 用文件系统本身当证据：`changed_since()` 比较 Git 可见路径（已跟踪加未忽略的未跟踪）的 mtime 与已跟踪文件是否缺失，基准是该 run 最后一条持久事实的时间戳。全部早于该时刻且没有缺失时，当前工作区就是 Host 死亡时的状态，Host 先补记 workspace.checkpoint 再写 run.interrupted，Session 停驻但仍可 Continue；查到改动则不补 checkpoint，并把改动路径写进终态 payload 的 `gap_files`（最多 20 条），让用户知道该核对什么。无法作答（非 Git、不可读、文件数超过扫描上限）时按没有证据处理，行为与本次修改前一致。单次 run 用尽步数预算（`max_steps`，默认 30）时所有工具结果已提交，Host 先记录工作区 checkpoint，再写入 run.interrupted，Session 停驻，用户可 Continue 到新 turn 并获得新的步数预算。存在计划时还有一条更小的软边界：同一条 `in_progress` 任务连续占用超过 `task_max_steps`（默认 12，`0` 关闭）个 step 时同样停驻，终态 `reason` 记为 `task_step_budget` 并在错误信息中点名任务 id。用户停止运行（`reason=cancelled`）时也先补记工作区 checkpoint 再写 `run.interrupted`：取消可能正好落在"副作用工具已提交、它的 checkpoint 还没写"之间，补记这一步保证停驻后仍可 Continue。该计数只在本次 run 内存在、不落盘，因此 Continue 后重新计数；`max_steps` 始终是硬上限，Host 不因为单任务超时而改写计划状态。
 
-直接源运行的用户主动 Continue 必须通过 Workspace 锁内检查（快照运行改为校验固定副本）：
+直接源运行的用户主动 Continue 必须通过 Workspace 锁内检查（副本运行改为校验实际执行副本）：
 
 1. 最新 run 为 interrupted，且 Workspace 为可验证的 Git 仓库。
 2. 当前 HEAD、暂存与未暂存 binary diff digest、未跟踪文件路径和内容 digest 与最后可信 checkpoint 相同。
@@ -196,7 +207,7 @@ Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订�
 
 ## 工程边界
 
-本轮演进以 Web 工作台、同项目隔离并发、正式 Skills 与 Token 成本治理为目标，编号步骤及验收证据见根目录 `AGENTS.md`。该清单是实施目标，未完成步骤不代表现有能力；直接源运行继续使用 Workspace 串行，显式 Plan 快照可并发，Vue逐步承接原生前端；用户 CLI 在页面/API 承接前保留。长期取舍见 ADR-048。
+本轮演进以 Web 工作台、同项目隔离并发、正式 Skills 与 Token 成本治理为目标，编号步骤及验收证据见根目录 `AGENTS.md`。该清单是实施目标，未完成步骤不代表现有能力；直接源运行继续使用 Workspace 串行，显式 Plan 快照和独立 worktree 可并发，Vue逐步承接原生前端；用户 CLI 在页面/API 承接前保留。长期取舍见 ADR-048。
 
 系统仍面向可信单机使用：没有账号、多租户、公网鉴权、分布式锁或 Agent Graph。可选 Docker 只隔离 Shell 命令，不是覆盖文件工具与 Provider 的完整 Agent 沙箱；默认 Local 使用本机权限。状态根锁不等于工具安全隔离。AGENTS.md 是模型指令，不会扩张 PolicyEngine 权限。生产代码的 import、--help、测试与离线评测不需要 API Key 或网络。
 
@@ -206,7 +217,7 @@ Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订�
 
 `todo_write` 的 `depends_on` 使用已有稳定 id，按完整原子快照检查存在性、重复、自引用、成环及依赖完成状态；旧事件无该字段时投影为空数组，不改写日志。省略依赖保留旧值，显式 `[]` 清除；不能删除仍被引用的项。依赖图是计划约束，尚未成为工具或子 Agent 调度器。
 
-`WorktreeService` 不在 import/构造时写文件。记录与 checkout 位于源 Workspace 外的状态根，校验注册路径、分支、base commit、git-common-dir 和 Workspace 身份；创建前持久化身份，缺口记录保留用于人工检查。Host 控制面 `manage_worktree()` 持有 Workspace 锁，写入专用管理 Session 的 `worktree.requested` / `worktree.completed` 与 Run 终态；Git 在线程中执行时，即使调用方取消也保留所有权直到结果已记录。CLI 是用户管理入口，未向模型注册 worktree 工具，不绕过模型的 ToolExecutor。删除期间关闭目标 checkout 的 Workspace/Session admission，成功后移除没有 Session 的 checkout 注册。删除拒绝文件变动、ignored 内容、base 之后的提交、隐藏文件变动的索引标记或关联 Session；保留分支，没有 force/discard 通道，不自动处理旧目录。
+`WorktreeService` 不在 import/构造时写文件。记录与 checkout 位于源 Workspace 外的状态根，校验注册路径、分支、base commit、git-common-dir 和 Workspace 身份；创建前持久化身份，缺口记录保留用于人工检查。Host 控制面 `manage_worktree()` 持有源 Workspace 和项目 Git 锁，写入专用管理 Session 的 `worktree.requested` / `worktree.completed` 与 Run 终态；Git 在线程中执行时，即使调用方取消也保留所有权直到结果已记录。CLI 是用户管理入口，未向模型注册 worktree 工具，不绕过模型的 ToolExecutor。删除期间关闭目标 checkout 的 Workspace/Session admission，成功后移除没有 Session 的 checkout 注册。删除拒绝文件变动、ignored 内容、base 之后的提交、隐藏文件变动的索引标记或关联 Session；保留分支，没有 force/discard 通道，不自动处理旧目录。
 
 `CommandExecutor` 返回 `CommandResult`，携带退出码、stdout、stderr、超时、耗时和精确省略字节计数；`ToolResult.metadata` 向 canonical `tool.completed` 透出这些字段。默认每流保留 25,000 字节头尾，实时消费 pipe，不先完整缓冲再截断。模型能看到退出状态，工具错误来自退出码/超时；注入返回字符串的自定义执行器继续可用。Shell 丢弃的中段不进入日志或分页存储；这与非 Shell 全量结果的请求侧预览不同。取消会等待进程树清理，不伪造完成结果。
 
@@ -216,7 +227,7 @@ Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订�
 
 ## 受控只读子 Run
 
-`workers.py` 提供不可变 ReadonlyProfile、Git 当前源码快照、角色协议与严格报告校验，没有第二个 Agent loop。Host 的 delegate_readonly 是经过 ToolExecutor/PolicyEngine 的动态工具，默认关闭。父 Run 持有源 Workspace 所有权，创建绑定该 Workspace 的独立归档 Session，在自己的执行作用域内直接复用同一个 `_execute`，将全部文件根覆盖为独立快照；子 Run 不重新争用父锁，避免同 Workspace 等待死锁。直接源根任务继续串行，最多两个内部只读快照子任务可并发；显式根Plan快照本身可并发，但当前不再嵌套委派。子身份记录在 run.admitted/start 的 parent_run_id、worker_role、snapshot_id；普通接收和 Continue 按持久身份拒绝对子 Session 执行，API 拒绝附件。
+`workers.py` 提供不可变 ReadonlyProfile、Git 当前源码快照、角色协议与严格报告校验，没有第二个 Agent loop。Host 的 delegate_readonly 是经过 ToolExecutor/PolicyEngine 的动态工具，默认关闭。父 Run 持有实际执行 Workspace 所有权，创建绑定该 Workspace 的独立归档 Session，在自己的执行作用域内直接复用同一个 `_execute`，将全部文件根覆盖为独立快照；子 Run 不重新争用父锁，避免同 Workspace 等待死锁。直接源根任务继续串行，最多两个内部只读快照子任务可并发；显式根Plan快照本身可并发，但当前不再嵌套委派。子身份记录在 run.admitted/start 的 parent_run_id、worker_role、snapshot_id；普通接收和 Continue 按持久身份拒绝对子 Session 执行，API 拒绝附件。
 
 子 Run 不读取父消息、不连接 MCP、不使用 custom handlers/Skills/RAG/delegate，目录和执行器仅含四个安全读取工具。深度为 1，每父 Run 最多 4 个子任务，8 步/4,000 Token 软上限/60 秒批次期限；在开启父 Token 上限时按剩余量分配。worker.started 保留源 checkpoint、manifest 和排除数；worker.completed 保留子用量和报告校验状态，父 usage 为 inclusive，子 usage 为 exclusive。未知失败请求消费不估算。父取消或超时先取消并等待子终态，再删除自己创建的快照；重启不自动重派或采纳结果。
 
@@ -228,9 +239,9 @@ telemetry.py 的 build_run_trace 是纯日志派生；export_run_trace 只在显
 
 ## 写入交付与独立验收
 
-DeliveryController 是 Host 的控制面组件，无独立循环、Store 或状态库。prepare/run/verify/apply 使用源 Workspace owner；需要时再获取 checkout owner。每次操作建一个归档 control Run，delivery.prepared/verified/applied 为唯一事实，查询在源锁内重读最新状态，避免排队请求复用旧通过结论。worktree 继续由 WorktreeService 管理，receipt绑定干净源基线、路径/common dir、分支、base、保护清单；build_patch使用临时index与no-filters对象写入，不修改真实index。补丁文件是状态根的不可变派生产物，canonical receipt记录hash/checkpoint；不是第二份运行状态。
+DeliveryController 是 Host 的控制面组件，无独立循环、Store 或状态库。prepare/run/verify/apply 使用精确 delivery owner；每个交付使用独立归档管理 Session，每次操作建一个 control Run。delivery.prepared/verified/applied 为唯一事实，进入 delivery owner 后重读最新状态，避免排队请求复用旧通过结论。prepare 和源码比对短暂获取源 Workspace → 项目 Git 锁；writer 模型阶段释放源锁。verify 持 checkout owner，命令前后分别协调源并检查漂移；apply 持 checkout → source → 项目 Git 锁，直到采纳结果写入事实，取消不能提前释放同步副作用所有权。worktree 继续由 WorktreeService 管理，receipt绑定干净源基线、路径/common dir、分支、base、保护清单；build_patch使用临时index与no-filters对象写入，不修改真实index。补丁文件是状态根的不可变派生产物，canonical receipt记录hash/checkpoint；不是第二份运行状态。
 
-Writer通过同一durable admission创建独立checkout Session/Run，execution_config记录backend/image/disable_mcp/writer_delivery_id。Workspace后续Run、Continue和重启从事件派生执行配置，显式Local可由下一次控制面run选择；空image拒绝，不降级。根任务仍串行；容器仅替换CommandExecutor，不改变文件工具边界或Provider执行位置。verify使用ToolExecutor/PolicyEngine显式命令，绑定检查前后相同checkout checkpoint与patch；模型不能改受保护测试/配置伪造验收。apply须最新verified=passed，重读实际patch并再次验证source+checkout；不自动暂存或提交。apply在线程内已生效后被Stop，仍先落delivery.applied，再记interrupted，不假装撤销已发生的Git写入。
+Writer通过同一durable admission创建独立checkout Session/Run，execution_config记录backend/image/disable_mcp/writer_delivery_id。Workspace后续Run、Continue和重启从事件派生执行配置，显式Local可由下一次控制面run选择；空image拒绝，不降级。同一 checkout 串行，不同交付 writer 可以并发；容器仅替换CommandExecutor，不改变文件工具边界或Provider执行位置。verify使用ToolExecutor/PolicyEngine显式命令，绑定检查前后相同checkout checkpoint与patch；模型不能改受保护测试/配置伪造验收。apply须最新verified=passed，重读实际patch并再次验证source+checkout；不自动暂存或提交。apply在线程内已生效后被Stop，仍先落delivery.applied，再记interrupted，不假装撤销已发生的Git写入。
 
 ContainerCommandExecutor通过Docker create/start/rm、argv执行和有界输出，使用本机endpoint、预拉镜像、非root、network none、只挂载cwd、资源上限与readonly验收。创建/清理阶段屏蔽重复取消并有独立期限，运行停止后必须确认rm。Docker自动删除与显式rm竞争返回removal in progress时，在同一清理期限内重试；只有删除成功或已不存在才确认结束，不能把“正在删除”当作已完成。清理控制调用启动失败（如OSError）同样归为结果未知，保留Skill暂存资源并停驻，不能降为普通可重试工具错误。ContainerCleanupError携outcome_unknown，ToolExecutor保留此元数据；Host不把它变成tool.completed，而将Run停驻并按canonical tool.outcome_unknown隔离可能仍在写的Workspace。Delivery在源及checkout入口都检查该状态；readonly验收未知不宣称通过，也不误隔离原项目。普通同步处理器在多次取消下继续shield等待真实结束，已知结果提交后才释放owner。
 

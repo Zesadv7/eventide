@@ -105,7 +105,7 @@ uv run eventide eval evals/smoke.yaml
 | A6 | 已完成 | 2026-10-16：Host流式主链/有界脱敏预览SSE及3类官方SDK适配完成，完整终态前不派发工具；104项集成回归通过，真实DeepSeek普通/工具调用10次基线完成。预览不落库/不推进游标；页面在F。README/architecture/api-contract/ADR-053同步。 |
 | A7 | 已完成 | 2026-10-16：跨分片密钥lookahead脱敏、超长密钥禁预览，取消/断流/超时不重发或执行半成品；未知能力接收前明确拒绝采样参数。104项相关集成覆盖，详见test_stream_runtime/test_provider_streaming/test_generation；最终页面验收在F/R。 |
 | P1 | 已完成 | 2026-10-16：schema v4稳定Project/源Workspace/执行副本关联及只读聚合API，迁移保留旧身份与事件原文；接收/直接运行/Continue/Worker/交付固定项目归属。15项身份专项、82项主链相关回归、23项前端测试、build/typecheck、Ruff/Mypy73模块和smoke12/12通过；容器fixture启动期限修复后集成全量880通过/5个显式Docker跳过、覆盖93.78%。README/architecture/api-contract/ADR-060同步；项目身份已完成，并发进展见P2/P3。 |
-| P2 | 进行中 | 2026-10-16：显式Plan持久快照及精确Run/Session所有权已接Host/HTTP，同项目只读Run重叠执行、源修改不改变输入、停止互不影响、Continue/崩溃恢复和Skill/cwd固定、漂移/篡改/未知结果隔离已验证。19项快照专项、130项主链回归、全量885通过/1跳过覆盖93.51%、Ruff/Mypy75模块及smoke12/12通过；README/architecture/api-contract/ADR-063同步，OpenAPI/Vue已接入，4条真实API旅程含并发快照与独立停止通过。写Session稳定worktree及共享Git/采纳短期协调仍待下一切片，不标整体完成。 |
+| P2 | 已完成 | 2026-10-16：Plan持久快照与写Session固定worktree均接Host/HTTP；源逻辑身份不变，后续消息/Continue复用脏副本，同Session串行、不同副本模型与文件工具可重叠。实际副本工具/Skills/索引/worker/恢复及未知隔离、共享Git命令协调、交付准备/采纳短期源锁已落地。19项快照及12项写副本专项、含交付/Skills共52项定向回归，全量937通过/7个显式Docker跳过覆盖93.60%、Ruff/Mypy76模块、smoke12/12；另6项真实Docker全部通过（含Git包装器Skill）。README/architecture/api-contract/ADR-063同步；OpenAPI/Vue由集成任务更新，持久队列及容量属P3，不宣称已完成。 |
 | P3 | 进行中 | 2026-10-16：独立scheduler底座按既有admitted/started/终态重建队列，4根/20等待容量ticket与2模型槽分开；19项新专项及预算回归共66项通过，模块100%覆盖、Ruff/Mypy77模块通过，architecture/ADR-065同步。本切片不改Host/HTTP，尚未主链接入，不代表生产已限流。持久队列查询/取消、queued主投影及重启停驻仍待集成。 |
 | P4 | 待开始 | 精确审批/取消/用量身份；共享 Git 元数据协调；父子等待无额度死锁。 |
 | P5 | 待开始 | 接入 U2 原子预留结算，多窗口不超额派发。 |
@@ -130,7 +130,7 @@ uv run eventide eval evals/smoke.yaml
 | C4 | 待开始 | 至少40查询、开发/留出各20，词面/语义/混合/重排/改写消融。 |
 | C5 | 待开始 | 片段占用/输入/cache/改写开销/下游结果；Recall@5或MRR提升另一不降、p95≤基线2倍、任务通过不降才晋升默认。 |
 | D1 | 待开始 | DeliveryController 有界修复：初次+最多2次修正，总计3次候选验收。 |
-| D2 | 待开始 | Writer 独立 worktree，prepare/apply 协调源，不整轮阻塞其他隔离对话。 |
+| D2 | 已完成 | 2026-10-16：随P2落地独立writer checkout和每交付owner/管理Session；prepare、源码比对及apply短期协调source/Git，writer模型期不占源。并发交付、验收期间源漂移拒绝采纳、排队apply重读最新证据、取消后实际副作用收尾及writer重启恢复均通过；52项副本/交付/Skills回归、全量937通过/7跳过及6项真实Docker通过，architecture/README/ADR-063同步。D1/D3-D6有界流程仍待实施。 |
 | D3 | 待开始 | 交付默认36步/60,000已观测Token/15分钟，摘要/子任务累计；恢复不清零。 |
 | D4 | 待开始 | 通过/取消/超限/无进展/重复失败/保护变化/未知结果停止，等待副作用收尾。 |
 | D5 | 待开始 | 固定验收/保护范围，patch/checkpoint绑定，新改动使旧验收失效；显式采纳，不自动提交/合并/推送。 |

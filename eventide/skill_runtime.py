@@ -11,8 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from eventide.container_executor import ContainerCommandExecutor
-from eventide.executor import CommandExecutor, LocalCommandExecutor
+from eventide.executor import CommandExecutor
 from eventide.models import CommandResult
 from eventide.skill_packages import (
     SkillDiagnostic,
@@ -248,7 +247,8 @@ async def execute_skill_script(
             target = root / resource.path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(resource.content)
-        if isinstance(command_executor, ContainerCommandExecutor):
+        backend_kind = getattr(command_executor, "backend_kind", "custom")
+        if backend_kind == "container":
             # Only these frozen, temporary inputs are shared with UID 1000.
             # mkdtemp and a restrictive host umask otherwise prevent reading
             # scripts on Linux bind mounts. Never chmod the user's project.
@@ -257,14 +257,18 @@ async def execute_skill_script(
             root.chmod(0o755)
         relative = root.relative_to(cwd)
         interpreter = "python3" if path.endswith(".py") else "sh"
-        if isinstance(command_executor, LocalCommandExecutor):
+        if backend_kind == "local":
             if path.endswith(".sh") and os.name == "nt":
                 raise SkillPackageError("Shell Skill scripts require a POSIX or container backend")
-            return await command_executor.execute_argv(
+            execute = getattr(command_executor, "execute_argv", None)
+            if not callable(execute):
+                raise SkillPackageError("Local backend must support direct argument execution")
+            result: CommandResult | str = await execute(
                 [sys.executable if path.endswith(".py") else "sh", str(relative / path), *args],
                 cwd,
                 extra_env={"EVENTIDE_SKILL_ROOT": str(relative)},
             )
+            return result
         command = f"EVENTIDE_SKILL_ROOT={shlex.quote(str(relative))} " + shlex.join(
             [interpreter, str(relative / path), *args]
         )

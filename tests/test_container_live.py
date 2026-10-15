@@ -26,11 +26,14 @@ def image():
 
 
 @pytest.mark.parametrize("suffix", ["py", "sh"])
+@pytest.mark.parametrize("git_project", [False, True])
 async def test_real_skill_script_uses_frozen_resources_and_approved_container(
-    isolated_workspace, image, suffix
+    isolated_workspace, image, suffix, git_project
 ):
     root = isolated_workspace.resolve()
     root.chmod(0o777)
+    if git_project:
+        subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
     source = package(root / "skills/diagnose", scripts=True)
     path = f"scripts/check.{suffix}"
     script = (

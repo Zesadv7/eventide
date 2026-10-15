@@ -49,6 +49,8 @@ def create_router(context: ApiContext) -> APIRouter:
         require_local_request(request)
         await get_workspace(workspace_id)
         try:
+            if agent_runtime.workspace_busy(workspace_id):
+                raise ValueError("Workspace is busy")
             agent_runtime.store.remove_workspace(workspace_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

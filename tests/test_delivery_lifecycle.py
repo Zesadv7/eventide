@@ -191,10 +191,157 @@ async def test_verify_stop_preserves_unknown_cleanup_without_completed(
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        session = f"deliveries_{host.default_workspace.workspace_id}"
+        session = host.store.get_run_identity(prepared["control_run_id"])["session_id"]
         run = host.store.latest_run(session)
         assert run["status"] == "interrupted"
         types = [e["type"] for e in host.store.run_events(run["id"])]
         assert "tool.outcome_unknown" in types and "tool.completed" not in types
     finally:
         await host.close()
+
+
+async def test_delivery_writer_releases_source_and_different_deliveries_overlap(isolated_workspace):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Provider:
+        def __init__(self):
+            self.count = 0
+
+        async def complete(self, request):
+            self.count += 1
+            if self.count == 2:
+                entered.set()
+            await release.wait()
+            from eventide.models import ModelResponse
+
+            return ModelResponse(text="done")
+
+    host = delivery_host(isolated_workspace)
+    host.provider = Provider()
+    first = await host.manage_delivery("prepare", name="one")
+    second = await host.manage_delivery("prepare", name="two")
+    tasks = [
+        asyncio.create_task(
+            host.manage_delivery(
+                "run",
+                delivery_id=prepared["delivery_id"],
+                goal="inspect",
+            )
+        )
+        for prepared in (first, second)
+    ]
+    try:
+        await asyncio.wait_for(entered.wait(), 8)
+        assert not host.workspace_busy(host.default_workspace.workspace_id)
+        assert (
+            host.store.get_run_identity(first["control_run_id"])["session_id"]
+            != host.store.get_run_identity(second["control_run_id"])["session_id"]
+        )
+        (host.settings.workdir / "source-drift.txt").write_text("external source edit")
+        release.set()
+        assert all(result["status"] == "completed" for result in await asyncio.gather(*tasks))
+        with pytest.raises(ValueError, match="Source.*changed"):
+            await host.manage_delivery("verify", delivery_id=first["delivery_id"], checks=[CHECK])
+        with pytest.raises(ValueError, match="Source.*changed"):
+            await host.manage_delivery("apply", delivery_id=first["delivery_id"])
+    finally:
+        release.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await host.close()
+
+
+async def test_source_can_change_during_verification_but_result_cannot_be_adopted(
+    isolated_workspace, monkeypatch
+):
+    from eventide import delivery_runtime
+
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Check:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def execute(self, command, cwd):
+            entered.set()
+            await release.wait()
+            return CommandResult(0, stdout="check passed")
+
+    host = delivery_host(isolated_workspace)
+    prepared = await repaired_delivery(host, "drift-check")
+    monkeypatch.setattr(delivery_runtime, "LocalCommandExecutor", Check)
+    task = asyncio.create_task(
+        host.manage_delivery(
+            "verify",
+            delivery_id=prepared["delivery_id"],
+            checks=["check"],
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 3)
+        assert not host.workspace_busy(host.default_workspace.workspace_id)
+        (host.settings.workdir / "source.txt").write_text("source changed during independent check")
+        release.set()
+        with pytest.raises(ValueError, match="Source.*changed"):
+            await task
+        with pytest.raises(ValueError, match="Source.*changed"):
+            await host.manage_delivery("apply", delivery_id=prepared["delivery_id"])
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        await host.close()
+
+
+async def test_cancel_delivery_writer_releases_owners_and_restart_preserves_copy(
+    isolated_workspace,
+):
+    from eventide.models import ModelResponse
+
+    entered = asyncio.Event()
+
+    class Provider:
+        async def complete(self, request):
+            entered.set()
+            await asyncio.Event().wait()
+            return ModelResponse(text="unreachable")
+
+    host = delivery_host(isolated_workspace)
+    settings = host.settings
+    host.provider = Provider()
+    prepared = await host.manage_delivery("prepare", name="cancel-writer")
+    delivery_id = prepared["delivery_id"]
+    task = asyncio.create_task(host.manage_delivery("run", delivery_id=delivery_id, goal="inspect"))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        session = host.store.get_run_identity(prepared["control_run_id"])["session_id"]
+        control = host.store.latest_run(session)
+        writer = next(
+            event["payload"] for event in host.store.run_events(control["id"])
+            if event["type"] == "worker.started"
+        )
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert host.store.get_run(control["id"])["status"] == "interrupted"
+        assert host.store.get_run(writer["child_run_id"])["status"] == "interrupted"
+        assert not host.workspace_busy(host.default_workspace.workspace_id)
+        copy = host.sessions.workspace(writer["child_session_id"])
+        assert not host.workspace_busy(copy.workspace_id)
+        assert not host.workspace_busy(f"delivery:{delivery_id}")
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await host.close()
+    reopened = RuntimeHost(
+        settings, ScriptedProvider([{"text": "continued after explicit request"}]),
+    )
+    try:
+        result = await reopened.continue_session(writer["child_session_id"])
+        assert result.status == "completed"
+        assert reopened.sessions.workspace(result.session_id).workspace_id == copy.workspace_id
+        assert (await reopened.manage_delivery("verify", delivery_id=delivery_id, checks=[CHECK]))[
+            "status"
+        ] == "failed"
+        assert "price + fraction" in (settings.workdir / "calc.py").read_text()
+    finally:
+        await reopened.close()

@@ -259,10 +259,20 @@ class RuntimeStore:
                 )
             ]
 
+    def workspace_has_execution_history(self, workspace_id: str) -> bool:
+        with self._lock:
+            return bool(self._connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE partial=0 "
+                "AND type='run.admitted' "
+                "AND json_extract(payload_json,'$.execution_binding.execution_workspace_id')=?)",
+                (workspace_id,),
+            ).fetchone()[0])
+
     def remove_workspace(self, workspace_id: str) -> None:
         workspace = self.get_workspace(workspace_id)
         with self._lock, self._connection:
-            if self.list_sessions(workspace_id):
+            if (self.list_sessions(workspace_id)
+                    or self.workspace_has_execution_history(workspace_id)):
                 raise ValueError("Workspace has sessions; removal would orphan history")
             if workspace.kind == "source" and len(
                 self.list_project_workspaces(workspace.project_id)

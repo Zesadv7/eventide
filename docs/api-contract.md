@@ -142,7 +142,7 @@ POST /api/sessions/{id}/attachments
 
 ### Run 接收、Continue 与 Token 软上限 —— 已实现
 
-普通 Run 与 Continue 返回 202 前，Host 在同一事务写入 Run/turn 身份、`run.admitted`、用户消息或恢复事实及 checkpoint；返回后 GET 可立即查询，取消可以早于后台执行。默认 source 接收和执行均占用 Workspace；显式 snapshot 在准备完成后释放源锁，按 Session 和 Run 副本执行。同 Session 冲突、直接源 Workspace 冲突或停驻冲突返回 409，模式/模型/附件校验失败返回 422（Continue 恢复校验失败为 409）。重启只将未结束 Run 停驻，不自动执行。
+普通 Run 与 Continue 返回 202 前，Host 在同一事务写入 Run/turn 身份、`run.admitted`、用户消息或恢复事实及 checkpoint；返回后 GET 可立即查询，取消可以早于后台执行。默认 source 接收和执行均占用 Workspace；显式 snapshot/worktree 在准备完成后释放源锁，按 Session 和执行副本执行。同 Session 冲突、直接源 Workspace 冲突或停驻冲突返回 409，模式/模型/附件校验失败返回 422（Continue 恢复校验失败为 409）。重启只将未结束 Run 停驻，不自动执行。
 
 Continue 保持原 Plan，只在相同 Provider 和 Base URL 下沿用选定模型；连接变化则使用当前默认模型。原 Agent 模式恢复为 Auto，自动审批不跨 Run。附件的归属以完整 Session ID 为准，DELETE 对 canonical 引用返回 409，不仅依赖文件 used 标记。
 
@@ -197,7 +197,7 @@ PackageBody 严格接受 directory、archive_base64、bundled 三选一，以及
 - `GET /api/projects/{project_id}/workspaces`：项目的全部源目录和执行副本，返回原 Workspace 状态及新增 `project_id`、`source_workspace_id`、`kind=source|worktree`。
 - `GET /api/projects/{project_id}/sessions?include_archived=false`：跨该项目全部副本聚合 Session，归档过滤与原 Workspace 列表一致。Session 状态增加项目和源身份，保留实际 `workspace_id` 和 `working_directory`。
 
-注册继续通过 `POST /api/workspaces`；按规范路径重复注册返回同一身份。Git worktree由服务器验证共同元数据并关联，客户不能指定Project归属或修改已有Session绑定。独立clone不按remote合并。移除仍经原Workspace DELETE；源有副本或任一Workspace有Session时409，不能留下孤立历史。查询与模型执行不创建额外项目事实源；新Run在canonical接收/开始事实固定项目归属，旧事件不回写。Project聚合不改变202/SSE游标；执行并发与Continue采用下述P2快照契约。
+注册继续通过 `POST /api/workspaces`；按规范路径重复注册返回同一身份。Git worktree由服务器验证共同元数据并关联，客户不能指定Project归属或修改已有Session绑定。独立clone不按remote合并。移除仍经原Workspace DELETE；源有副本或任一Workspace有Session/Run执行引用时409，不能留下孤立历史。查询与模型执行不创建额外项目事实源；新Run在canonical接收/开始事实固定项目归属，旧事件不回写。Project聚合不改变202/SSE游标；执行并发与Continue采用下述P2执行副本契约。
 
 
 ## 请求预算事件（U2部分接入）
@@ -232,12 +232,16 @@ Run/Session现有usage接口仍只按model.attempt事实计费，不累加budget
 
 未知处理action必须显式选择：keep_unknown禁止携带actual_tokens，仅追加已核对审计并保留原额度；record_known必须给出非负整数actual_tokens且不低于已报告部分用量。reason必须为非空1–256字符，已知密钥脱敏后审计。处理需要调用结束或Run终态证据，不能干扰在途结算。人工总量只进入预算，Provider usage及旧费用仍保持原精度；未知处理没有释放成零的默认动作。
 
-## Plan 根快照执行（P2 首切片）
+## 根 Run 执行副本（P2）
 
-RunBody 新增 `execution_target: "source" | "snapshot"`，默认 source。snapshot 必须同时使用 mode=plan，否则422且不接收Run；未知target由请求schema拒绝。幂等指纹包括target，同键变更目标返回409。Python RunRequest提供同名字段，旧CLI仍使用source。
+RunBody 新增 `execution_target: "source" | "snapshot" | "worktree"`，默认 source。snapshot 必须同时使用 mode=plan，否则422且不接收Run；未知target由请求schema拒绝。幂等指纹包括target，同键变更目标返回409。Python RunRequest提供同名字段，旧CLI仍使用source。
 
 `GET /api/runs/{id}` 与 `GET /api/sessions/{id}`、Session列表增加 execution：source为 `{"kind":"source"}`；snapshot为 `{"kind":"snapshot","workspace_id":"原逻辑WorkspaceID","snapshot_id":"64位摘要","working_directory":"相对cwd","skipped":0}`。Session顶层working_directory仍是逻辑源路径；execution明确实际副本，不返回内部绝对产物路径或重绑Session。完整manifest和源checkpoint保存在canonical run.admitted/run.started中，可由已有事件/export读取。
 
 同Session接收冲突409；不同Session的snapshot模型执行可以同时进行。准备时源目录独占，已在直接运行的源Workspace拒绝新快照；复制期间漂移、无可信Git HEAD、规模超限、产物损坏或附件/参数无效422。快照执行期间源目录释放，直接源操作仍按原规则独占。停止按精确Run归属，Continue自动继承原snapshot，不接受客户端改换执行副本；恢复校验失败409。重启仅停驻，用户显式Continue。快照暂不提供MCP、源知识索引、嵌套worker和脚本执行，排除的文件不会静默回读源路径。
 
 Vue预算写入共享持久mutation客户端，按操作、正文摘要和路由保存请求身份，不把凭据或完整正文写入浏览器存储。确定拒绝可生成新键，未标记409和网络失败保留原键。接口类型已随预算、价格、Unknown处理和execution_target重新生成；前端响应展示不改变服务端全历史、未知值、UTC日或价格版本口径。
+
+worktree 使用现有 auto/agent/plan 模式，首次接收要求源目录干净且可信，失败422并不接收Run。Run/Session 的 execution 为 `{"kind":"worktree","workspace_id":"逻辑源ID","execution_workspace_id":"实际副本ID","working_directory":"相对cwd","name":"受管副本名","base_commit":"完整提交哈希"}`；顶层 Workspace/cwd 保持逻辑身份。完整副本身份及源checkpoint留在 canonical admission，客户端不能指定实际副本或项目归属。
+
+同 Session 后续 Run 必须继续传 worktree，服务复用首次副本和未提交修改；省略字段恢复默认 source 也会422，不能静默更换执行目录。Continue 自动继承绑定；新副本由新建 Session 获得。放弃中断保留绑定及副本未知结果隔离。接收后副本漂移阻止模型派发，Continue 的副本漂移/未知结果为409；源后来的变化不改变已创建副本。不同 Session 的写入 Run 可并发，同 Session 或实际副本冲突仍409。Worktree引用阻止DELETE，源忙状态不代表所有隔离对话都忙；共享Git命令仍由服务协调。

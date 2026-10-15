@@ -34,6 +34,32 @@ class CommandExecutor(Protocol):
     async def execute(self, command: str, cwd: Path) -> CommandResult | str: ...
 
 
+class CoordinatedCommandExecutor:
+    """Serialize commands that may mutate Git metadata shared by linked checkouts."""
+
+    def __init__(self, delegate: CommandExecutor, lock: asyncio.Lock):
+        self.delegate = delegate
+        self.lock = lock
+
+    @property
+    def backend_kind(self) -> str:
+        return str(getattr(self.delegate, "backend_kind", "custom"))
+
+    async def execute(self, command: str, cwd: Path) -> CommandResult | str:
+        async with self.lock:
+            return await self.delegate.execute(command, cwd)
+
+    async def execute_argv(
+        self, arguments: list[str], cwd: Path, *, extra_env: dict[str, str] | None = None,
+    ) -> CommandResult | str:
+        execute = getattr(self.delegate, "execute_argv", None)
+        if not callable(execute):
+            raise ValueError("Command backend does not support direct argument execution")
+        async with self.lock:
+            result: CommandResult | str = await execute(arguments, cwd, extra_env=extra_env)
+            return result
+
+
 class _BoundedOutput:
     """Retain the beginning and end while draining every output byte."""
 
@@ -87,6 +113,8 @@ class _BoundedOutput:
 
 class LocalCommandExecutor:
     """Run commands on the host; this is explicitly not a security sandbox."""
+
+    backend_kind = "local"
 
     def __init__(self, timeout: float = 120.0, output_limit: int = 25_000):
         if timeout <= 0 or output_limit < 2:

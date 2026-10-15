@@ -95,6 +95,8 @@ class ContainerCommandExecutor:
     Python file tools, the Provider, MCP and the Docker daemon remain on the host.
     """
 
+    backend_kind = "container"
+
     def __init__(
         self,
         image: str,

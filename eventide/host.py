@@ -22,9 +22,11 @@ from eventide.budgets import BudgetExceeded, BudgetScope
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
 from eventide.execution_snapshots import ExecutionSnapshots
+from eventide.execution_worktrees import ExecutionWorktrees
 from eventide.executor import (
     ApprovalHandler,
     CommandExecutor,
+    CoordinatedCommandExecutor,
     LocalCommandExecutor,
     ToolContext,
     ToolExecutor,
@@ -173,6 +175,7 @@ class RuntimeHost:
         try:
             self.store = store or RuntimeStore(self.settings.state_dir / "runtime.sqlite")
             self.execution_snapshots = ExecutionSnapshots(self.state_dir)
+            self.execution_worktrees = ExecutionWorktrees(self.state_dir)
             self._recover_interrupted_runs()
             self._secret_box = SecretBox(self.settings.state_dir)
             self._provider_secret_error: str | None = None
@@ -197,6 +200,7 @@ class RuntimeHost:
         self._workspace_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._snapshot_preparing: set[str] = set()
+        self._project_git_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._admissions: dict[str, str] = {}
         self._admission_done: dict[str, _Admission] = {}
         self._active_tasks: set[asyncio.Task[Any]] = set()
@@ -317,7 +321,10 @@ class RuntimeHost:
         self._active_tasks.add(task)
         removal_path: Path | None = None
         try:
-            async with self._workspace_execution(workspace.workspace_id):
+            async with (
+                self._workspace_execution(workspace.workspace_id),
+                self._project_git(workspace.project_id),
+            ):
                 if action != "list" and self.store.workspace_has_unknown_outcome(
                     workspace.workspace_id
                 ):
@@ -330,8 +337,11 @@ class RuntimeHost:
                     if record is None:
                         raise ValueError(f"Managed worktree not found: {name}")
                     for checkout in self.store.list_workspaces():
-                        if checkout.path == record.path and self.store.list_sessions(
-                            workspace_id=checkout.workspace_id, include_archived=True
+                        if checkout.path == record.path and (
+                            self.store.list_sessions(
+                                workspace_id=checkout.workspace_id, include_archived=True,
+                            ) or self.store.workspace_has_execution_history(checkout.workspace_id)
+                            or self.workspace_busy(checkout.workspace_id)
                         ):
                             raise ValueError(
                                 "Worktree has Session history; keep it for review and recovery"
@@ -929,7 +939,7 @@ class RuntimeHost:
         run_id: str | None = None,
     ) -> RunResult:
         session_id = request if isinstance(request, str) else request.session_id
-        if self.session_execution_target(session_id) == "snapshot":
+        if self.session_execution_target(session_id) != "source":
             identity = run_id or f"run_{uuid.uuid4().hex[:16]}"
             await self.admit_continue(session_id, identity)
             return await self.start_admitted_run(
@@ -947,7 +957,7 @@ class RuntimeHost:
     def validate_continue(self, session_id: str) -> WorkspaceRecord:
         """Validate recovery admission before an asynchronous transport accepts it."""
         workspace = self.sessions.workspace(session_id)
-        if self.session_execution_target(session_id) == "snapshot":
+        if self.session_execution_target(session_id) != "source":
             self._validate_continue(workspace, self.store.latest_run(session_id))
             return workspace
         root = Path(workspace.path)
@@ -958,13 +968,20 @@ class RuntimeHost:
         return workspace
 
     def _execution_binding(self, run_id: str | None) -> dict[str, Any] | None:
-        intent = self._admitted_intent(run_id) if run_id else None
-        return intent.get("execution_binding") if intent else None
+        if not run_id:
+            return None
+        return next((event["payload"]["execution_binding"]
+                     for event in self.store.run_events(run_id)
+                     if event["type"] in {"run.admitted", "run.started"}
+                     and "execution_binding" in event["payload"]), None)
 
     @staticmethod
     def _execution_key(run_id: str, intent: dict[str, Any]) -> str:
-        if intent.get("execution_binding", {}).get("kind") == "snapshot":
+        binding = intent.get("execution_binding", {})
+        if binding.get("kind") == "snapshot":
             return f"snapshot_run:{run_id}"
+        if binding.get("kind") == "worktree":
+            return str(binding["execution_workspace_id"])
         return str(intent["workspace_id"])
 
     def session_execution_target(self, session_id: str) -> str:
@@ -981,9 +998,36 @@ class RuntimeHost:
         binding = self._execution_binding(run_id)
         if not binding:
             return {"kind": "source"}
+        if binding["kind"] == "worktree":
+            return {key: binding[key] for key in (
+                "kind", "workspace_id", "execution_workspace_id", "working_directory",
+            )} | {"name": binding["worktree"]["name"],
+                 "base_commit": binding["worktree"]["base_commit"]}
         return {key: binding[key] for key in (
             "kind", "workspace_id", "snapshot_id", "working_directory", "skipped",
         )}
+
+    def _session_worktree(self, session_id: str) -> dict[str, Any] | None:
+        return next((event["payload"]["execution_binding"]
+                     for event in self.store.session_events(session_id)
+                     if event["type"] == "run.admitted"
+                     and event["payload"].get("execution_binding", {}).get("kind") == "worktree"),
+                    None)
+
+    def _execution_paths(self, binding: dict[str, Any]) -> tuple[Path, Path]:
+        service = (self.execution_snapshots if binding["kind"] == "snapshot"
+                   else self.execution_worktrees)
+        return service.restore(binding)
+
+    def _execution_checkpoint(self, binding: dict[str, Any]) -> dict[str, Any]:
+        service = (self.execution_snapshots if binding["kind"] == "snapshot"
+                   else self.execution_worktrees)
+        return service.checkpoint(binding)
+
+    @asynccontextmanager
+    async def _project_git(self, project_id: str) -> AsyncIterator[None]:
+        async with self._project_git_locks[project_id]:
+            yield
 
     @asynccontextmanager
     async def _session_execution(self, session_id: str, run_id: str) -> AsyncIterator[None]:
@@ -1013,6 +1057,14 @@ class RuntimeHost:
         """Run one independent bounded check, without asking the model to judge itself."""
         await self.initialize()
         workspace = self.sessions.workspace(session_id)
+        if self.session_execution_target(session_id) == "snapshot":
+            raise ValueError("Independent commands cannot run inside a Plan snapshot")
+        binding = self._session_worktree(session_id)
+        if binding:
+            workspace = self.store.get_workspace(binding["execution_workspace_id"])
+            _, working_root = self._execution_paths(binding)
+        else:
+            working_root = self.sessions.working_directory(session_id)
         task = asyncio.current_task()
         assert task is not None
         self._active_tasks.add(task)
@@ -1041,13 +1093,16 @@ class RuntimeHost:
                 )
                 executor = ToolExecutor(
                     {"bash": lambda **_args: ""},
-                    command_executor=LocalCommandExecutor(min(self.settings.command_timeout, 30)),
+                    command_executor=CoordinatedCommandExecutor(
+                        LocalCommandExecutor(min(self.settings.command_timeout, 30)),
+                        self._project_git_locks[workspace.project_id],
+                    ),
                 )
                 execution = asyncio.create_task(
                     executor.execute(
                         call,
                         ToolContext(
-                            self.sessions.working_directory(session_id), run_id, self.policy
+                            working_root, run_id, self.policy
                         ),
                     )
                 )
@@ -1230,10 +1285,10 @@ class RuntimeHost:
             return dict(await self._admission_check(install_project))
 
     async def _freeze_skills(
-        self, workspace: WorkspaceRecord, request: RunRequest | None,
+        self, workspace: WorkspaceRecord, request: RunRequest | None, *, root: Path | None = None,
     ) -> dict[str, Any]:
         return dict(await self._admission_check(lambda: self.skills.freeze(self.skills.catalog(
-            workspace.workspace_id, Path(workspace.path),
+            workspace.workspace_id, root or Path(workspace.path),
             selected=request.selected_skills if request else None,
         ))))
 
@@ -1401,12 +1456,15 @@ class RuntimeHost:
             raise ValueError("Run identity already used")
         if self.session_busy(session_id):
             raise ValueError("Session is busy")
-        if request and request.execution_target not in {"source", "snapshot"}:
+        if (request and self._session_worktree(session_id)
+                and request.execution_target != "worktree"):
+            raise ValueError("Session owns a worktree; choose worktree or create a new Session")
+        if request and request.execution_target not in {"source", "snapshot", "worktree"}:
             raise ValueError("Unknown execution target")
-        if (request and request.execution_target == "snapshot") or (
-            request is None and self.session_execution_target(session_id) == "snapshot"
+        if (request and request.execution_target != "source") or (
+            request is None and self.session_execution_target(session_id) != "source"
         ):
-            return await self._reserve_snapshot_run(
+            return await self._reserve_copy_run(
                 session_id, run_id, request, workspace, request_fingerprint,
             )
         if self.workspace_busy(workspace.workspace_id):
@@ -1493,11 +1551,12 @@ class RuntimeHost:
             if not already_active:
                 self._active_tasks.discard(task)
 
-    async def _reserve_snapshot_run(
+    async def _reserve_copy_run(
         self, session_id: str, run_id: str, request: RunRequest | None,
         workspace: WorkspaceRecord, request_fingerprint: str | None,
     ) -> str:
-        if request and run_policy.normalize_mode(request.mode) != "plan":
+        target = request.execution_target if request else self.session_execution_target(session_id)
+        if target == "snapshot" and request and run_policy.normalize_mode(request.mode) != "plan":
             raise ValueError("Snapshot execution requires Plan mode")
         task = asyncio.current_task()
         assert task is not None
@@ -1514,28 +1573,66 @@ class RuntimeHost:
                 try:
                     intent = self._run_intent(request, source_id, session_id)
                     if source_id:
-                        await self._admission_check(self._validate_continue, workspace, previous)
                         binding = self._execution_binding(source_id)
                         assert binding is not None
+                        key = self._execution_key(source_id, {"execution_binding": binding})
+                        if binding["kind"] == "worktree":
+                            if self.workspace_busy(key):
+                                raise ValueError("Execution worktree is busy")
+                            self._admissions[key] = run_id
+                        async with self._workspace_execution(key, run_id):
+                            await self._admission_check(
+                                self._validate_continue, workspace, previous,
+                            )
+                    elif target == "worktree" and (binding := self._session_worktree(session_id)):
+                        copy_id = binding["execution_workspace_id"]
+                        if self.workspace_busy(copy_id):
+                            raise ValueError("Execution worktree is busy")
+                        self._admissions[copy_id] = run_id
+                        async with self._workspace_execution(copy_id, run_id):
+                            if self.store.workspace_has_unknown_outcome(copy_id):
+                                raise ValueError(
+                                    "Execution worktree has an unresolved tool outcome"
+                                )
+                            root, _ = await self._admission_check(self._execution_paths, binding)
+                            intent["skill_snapshot"] = await self._freeze_skills(
+                                workspace, request, root=root,
+                            )
                     else:
                         if (self.workspace_busy(workspace.workspace_id)
                                 and workspace.workspace_id not in self._snapshot_preparing):
                             raise ValueError("Workspace is busy")
-                        async with self._workspace_execution(workspace.workspace_id):
+                        async with (
+                            self._workspace_execution(workspace.workspace_id),
+                            self._project_git(workspace.project_id),
+                        ):
                             self._snapshot_preparing.add(workspace.workspace_id)
                             try:
                                 if self.store.workspace_has_unknown_outcome(workspace.workspace_id):
                                     raise ValueError("Workspace has an unresolved tool outcome")
                                 root = Path(workspace.path)
+                                if not root.is_dir() or root.resolve() != root:
+                                    raise ValueError("Workspace missing or path identity changed")
                                 self.sessions.working_directory(session_id)
                                 session = self.store.get_session(session_id)
                                 assert session is not None
                                 binding = await self._admission_check(
-                                    self.execution_snapshots.create, workspace.workspace_id, root,
+                                    (self.execution_snapshots.create if target == "snapshot"
+                                     else self.execution_worktrees.create),
+                                    workspace.workspace_id, root,
                                     session["working_directory"],
                                 )
+                                if target == "worktree":
+                                    copy_root, _ = self._execution_paths(binding)
+                                    copy = self.resolve_or_register_workspace(copy_root)
+                                    if copy.project_id != workspace.project_id:
+                                        raise ValueError("Execution copy has a different project")
+                                    binding["execution_workspace_id"] = copy.workspace_id
+                                    self._admissions[copy.workspace_id] = run_id
+                                else:
+                                    copy_root = root
                                 intent["skill_snapshot"] = await self._freeze_skills(
-                                    workspace, request,
+                                    workspace, request, root=copy_root,
                                 )
                                 current = await self._admission_check(workspace_checkpoint, root)
                                 if current != binding["source_checkpoint"]:
@@ -1548,9 +1645,12 @@ class RuntimeHost:
                         saved = self.store.workspace_execution_config(workspace.workspace_id)
                         if saved:
                             intent["execution_config"] = saved
-                    checkpoint = await self._admission_check(
-                        self.execution_snapshots.checkpoint, binding,
-                    )
+                    if target == "worktree":
+                        copy_id = binding["execution_workspace_id"]
+                        if self.store.workspace_has_unknown_outcome(copy_id):
+                            raise ValueError("Execution worktree has an unresolved tool outcome")
+                        self._admissions[copy_id] = run_id
+                    checkpoint = await self._admission_check(self._execution_checkpoint, binding)
                     ids = list(request.attachment_ids) if request else []
                     records = attachments.load_attachments(self.state_dir, session_id, ids)
                     attachments.validate_for_provider(records, self.settings.provider)
@@ -1587,7 +1687,7 @@ class RuntimeHost:
             if not already_active:
                 self._active_tasks.discard(task)
 
-    async def _execute_snapshot_run(
+    async def _execute_copy_run(
         self, session_id: str, run_id: str, workspace: WorkspaceRecord,
         request: RunRequest | None, sink: EventSink | None,
         approval_handler: ApprovalHandler | None, binding: dict[str, Any],
@@ -1596,13 +1696,24 @@ class RuntimeHost:
         intent = self._admitted_intent(run_id)
         if not admitted or not intent or self.store.run_is_terminal(run_id):
             raise ValueError("Snapshot Run is not awaiting execution")
-        if binding["workspace_id"] != workspace.workspace_id or intent["mode"] != "plan":
-            raise ValueError("Snapshot execution binding mismatch")
+        if binding["workspace_id"] != workspace.workspace_id or (
+            binding["kind"] == "snapshot" and intent["mode"] != "plan"
+        ):
+            raise ValueError("Execution copy binding mismatch")
         async with (
             self._session_execution(session_id, run_id),
             self._workspace_execution(self._execution_key(run_id, intent), run_id),
         ):
-            await self._admission_check(self.execution_snapshots.restore, binding)
+            await self._admission_check(self._execution_paths, binding)
+            if binding["kind"] == "worktree" and self.store.workspace_has_unknown_outcome(
+                binding["execution_workspace_id"]
+            ):
+                raise ValueError("Execution worktree has an unresolved tool outcome")
+            if binding["kind"] == "worktree":
+                observed = await self._admission_check(self._execution_checkpoint, binding)
+                accepted = self.store.get_run(run_id)
+                if not accepted or observed != accepted["checkpoint"]:
+                    raise ValueError("Execution worktree changed after admission")
             if self._closed:
                 raise RuntimeError("Host is closed")
             task = asyncio.current_task()
@@ -1703,70 +1814,77 @@ class RuntimeHost:
             raise ValueError("Worker sessions cannot accept ordinary runs or Continue")
         self._active_tasks.add(task)
         try:
-            async with self._workspace_execution(workspace.workspace_id):
-                previous = self.store.latest_run(session_id)
-                if not previous or previous["status"] != "interrupted":
-                    raise ValueError("Only an interrupted, parked session can be abandoned")
-                started = time.perf_counter()
-                run_id = f"run_{uuid.uuid4().hex[:16]}"
-                turn_id = self.store.create_run(
-                    run_id,
-                    session_id,
-                    continuation_of=previous["id"],
-                )
-                await self._emit(
-                    run_id,
-                    "run.started",
-                    {
-                        "session_id": session_id,
-                        "workspace_id": workspace.workspace_id,
-                        "provider": self.settings.provider,
-                        "model": self.settings.model,
-                        "continuation_of": previous["id"],
-                        "recovery_action": "abandon",
-                    },
-                    sink,
-                    author="user",
-                )
-                await self._resolve_interrupted_history(
-                    run_id,
-                    previous,
-                    sink,
-                    "Recovery abandoned by user; tool outcome was not assumed or replayed.",
-                )
-                await self._emit(
-                    run_id,
-                    "recovery.abandoned",
-                    {"source_run_id": previous["id"]},
-                    sink,
-                    author="user",
-                )
-                duration = (time.perf_counter() - started) * 1000
-                await self._emit(
-                    run_id,
-                    "run.completed",
-                    {
-                        "output": "",
-                        "error": None,
-                        "steps": 0,
-                        "tool_calls": 0,
-                        "duration_ms": duration,
-                        "usage": {},
-                    },
-                    sink,
-                )
-                return RunResult(
-                    run_id,
-                    session_id,
-                    "completed",
-                    "",
-                    0,
-                    0,
-                    duration,
-                    {},
-                    turn_id,
-                    previous["id"],
-                )
+            async with self._session_execution(session_id, ""):
+                previous_run = self.store.latest_run(session_id)
+                binding = self._execution_binding(previous_run["id"]) if previous_run else None
+                key = (self._execution_key(previous_run["id"], {"execution_binding": binding})
+                       if binding and previous_run else workspace.workspace_id)
+                async with self._workspace_execution(key):
+                    previous = self.store.latest_run(session_id)
+                    if not previous or previous["status"] != "interrupted":
+                        raise ValueError("Only an interrupted, parked session can be abandoned")
+                    started = time.perf_counter()
+                    run_id = f"run_{uuid.uuid4().hex[:16]}"
+                    turn_id = self.store.create_run(
+                        run_id,
+                        session_id,
+                        continuation_of=previous["id"],
+                    )
+                    await self._emit(
+                        run_id,
+                        "run.started",
+                        {
+                            "session_id": session_id,
+                            "workspace_id": workspace.workspace_id,
+                            "provider": self.settings.provider,
+                            "model": self.settings.model,
+                            "continuation_of": previous["id"],
+                            "recovery_action": "abandon",
+                            **({"execution_binding": self._execution_binding(previous["id"])}
+                               if self._execution_binding(previous["id"]) else {}),
+                        },
+                        sink,
+                        author="user",
+                    )
+                    await self._resolve_interrupted_history(
+                        run_id,
+                        previous,
+                        sink,
+                        "Recovery abandoned by user; tool outcome was not assumed or replayed.",
+                    )
+                    await self._emit(
+                        run_id,
+                        "recovery.abandoned",
+                        {"source_run_id": previous["id"]},
+                        sink,
+                        author="user",
+                    )
+                    duration = (time.perf_counter() - started) * 1000
+                    await self._emit(
+                        run_id,
+                        "run.completed",
+                        {
+                            "output": "",
+                            "error": None,
+                            "steps": 0,
+                            "tool_calls": 0,
+                            "duration_ms": duration,
+                            "usage": {},
+                        },
+                        sink,
+                    )
+                    return RunResult(
+                        run_id,
+                        session_id,
+                        "completed",
+                        "",
+                        0,
+                        0,
+                        duration,
+                        {},
+                        turn_id,
+                        previous["id"],
+                    )
         finally:
             self._active_tasks.discard(task)
 
@@ -1805,10 +1923,12 @@ class RuntimeHost:
             workspace = self.sessions.workspace(session_id)
             binding = self._execution_binding(admitted_run_id)
             if binding:
-                return await self._execute_snapshot_run(
+                return await self._execute_copy_run(
                     session_id, admitted_run_id, workspace, request, sink,
                     approval_handler, binding,
                 )
+            if request and self._session_worktree(session_id):
+                raise ValueError("Session owns a worktree; choose worktree or create a new Session")
             root = Path(workspace.path)
             if not root.is_dir() or root.resolve() != root:
                 raise ValueError("Workspace missing or path identity changed")
@@ -1905,18 +2025,21 @@ class RuntimeHost:
         if not workspace or not events:
             return None
         binding = self._execution_binding(run_id)
+        root = Path(workspace.path)
         if binding:
             try:
-                return [], self.execution_snapshots.checkpoint(binding)
+                if binding["kind"] == "snapshot":
+                    return [], self._execution_checkpoint(binding)
+                root, _ = self._execution_paths(binding)
             except (ValueError, OSError):
-                return ["execution snapshot changed or missing"], None
-        report = changed_since(Path(workspace.path), events[-1]["ts"])
+                return ["execution copy changed or missing"], None
+        report = changed_since(root, events[-1]["ts"])
         if report is None:
             return None
         files, _truncated = report
         if files:
             return files, None
-        return [], workspace_checkpoint(Path(workspace.path))
+        return [], workspace_checkpoint(root)
 
     def _validate_continue(
         self,
@@ -1928,7 +2051,7 @@ class RuntimeHost:
         binding = self._execution_binding(previous["id"])
         evidence: dict[str, Any] | None
         if binding:
-            evidence = self.execution_snapshots.checkpoint(binding)
+            evidence = self._execution_checkpoint(binding)
         else:
             if not workspace.git_root:
                 raise ValueError("Continue requires a Git workspace")
@@ -2035,14 +2158,20 @@ class RuntimeHost:
             continuation_of=continuation_of,
         )
         if execution_binding:
-            workspace_root, working_root = self.execution_snapshots.restore(execution_binding)
+            workspace_root, working_root = self._execution_paths(execution_binding)
         else:
             workspace_root = snapshot_root or Path(workspace.path)
             working_root = snapshot_root or self.sessions.working_directory(session_id)
 
+        snapshot_execution = bool(execution_binding and execution_binding["kind"] == "snapshot")
+        execution_workspace = (
+            self.store.get_workspace(execution_binding["execution_workspace_id"])
+            if execution_binding and execution_binding["kind"] == "worktree" else workspace
+        )
+
         def execution_checkpoint(_root: Path) -> dict[str, Any] | None:
             if execution_binding:
-                return self.execution_snapshots.checkpoint(execution_binding)
+                return self._execution_checkpoint(execution_binding)
             return workspace_checkpoint(_root)
 
         manager = MCPManager()
@@ -2082,6 +2211,10 @@ class RuntimeHost:
                     execution_config["image"],
                     timeout=self.settings.command_timeout,
                     read_only=False,
+                )
+            if workspace.git_root:
+                command_executor = CoordinatedCommandExecutor(
+                    command_executor, self._project_git_locks[workspace.project_id],
                 )
             mode, selected_model = intent["mode"], intent["model"]
             generation = {} if readonly_profile else intent.get("generation", {})
@@ -2291,13 +2424,14 @@ class RuntimeHost:
                                 SourceSnapshot.create(workspace_root, working_root, self.state_dir)
                             )
 
-                        await self._admission_check(make_snapshot)
+                        async with self._project_git(workspace.project_id):
+                            await self._admission_check(make_snapshot)
                         snapshot = snapshots[-1]
                         if snapshot.checkpoint != snapshots[0].checkpoint:
                             raise ValueError("Source changed between worker snapshots")
                     for goal, snapshot in zip(goals, snapshots, strict=True):
                         child_session = self.create_session(
-                            workspace_id=workspace.workspace_id,
+                            workspace_id=execution_workspace.workspace_id,
                             working_directory=str(working_root),
                         )
                         self.store.update_session(
@@ -2312,7 +2446,7 @@ class RuntimeHost:
                         )
                         child_intent = {
                             **intent,
-                            "workspace_id": workspace.workspace_id,
+                            "workspace_id": execution_workspace.workspace_id,
                             "project_id": workspace.project_id,
                             "source_workspace_id": workspace.source_workspace_id,
                             "session_id": child_session,
@@ -2323,6 +2457,7 @@ class RuntimeHost:
                             "snapshot_id": snapshot.identity,
                         }
                         child_intent.pop("execution_config", None)
+                        child_intent.pop("execution_binding", None)
                         child_turn = self.store.admit_run(
                             child_id,
                             child_session,
@@ -2351,7 +2486,7 @@ class RuntimeHost:
                             self._execute(
                                 child_session,
                                 child_id,
-                                workspace,
+                                execution_workspace,
                                 None,
                                 None,
                                 None,
@@ -2446,7 +2581,7 @@ class RuntimeHost:
             worker_tools = (
                 [READONLY_WORKER_TOOL]
                 if self.settings.workers_enabled and workspace.git_root
-                and not readonly_profile and not execution_binding
+                and not readonly_profile and not snapshot_execution
                 else []
             )
             tools = [
@@ -2629,10 +2764,10 @@ class RuntimeHost:
                     {
                         "call_id": call.id,
                         "name": call.name,
-                        "readonly": bool(execution_binding),
-                        "workspace_id": workspace.workspace_id,
+                        "readonly": snapshot_execution,
+                        "workspace_id": execution_workspace.workspace_id,
                         **({"snapshot_id": execution_binding["snapshot_id"]}
-                           if execution_binding else {}),
+                           if snapshot_execution and execution_binding else {}),
                         "error": self._semantic(content),
                     },
                     sink,
@@ -2883,7 +3018,7 @@ class RuntimeHost:
                 status, error = "interrupted", park_message
             else:
                 if execution_binding:
-                    await asyncio.to_thread(self.execution_snapshots.restore, execution_binding)
+                    await asyncio.to_thread(self._execution_paths, execution_binding)
                 status, error = "completed", None
         except _UnknownToolOutcome as exc:
             status, error, park_kind = "interrupted", str(exc), "unknown_tool_outcome"
@@ -2927,7 +3062,7 @@ class RuntimeHost:
                 any(event["type"] == "tool.outcome_unknown"
                     for event in self.store.run_events(run_id))
                 if execution_binding else
-                self.store.workspace_has_unknown_outcome(workspace.workspace_id)
+                self.store.workspace_has_unknown_outcome(execution_workspace.workspace_id)
             )
             await self._emit(
                 run_id,

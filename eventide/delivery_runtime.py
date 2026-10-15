@@ -6,7 +6,8 @@ import asyncio
 import hashlib
 import re
 import uuid
-from contextlib import suppress
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,8 +18,14 @@ from eventide.delivery import (
     validate_delivery_source,
     verify_source_unchanged,
 )
-from eventide.executor import CommandExecutor, LocalCommandExecutor, ToolContext, ToolExecutor
-from eventide.models import RunRequest, ToolCall
+from eventide.executor import (
+    CommandExecutor,
+    CoordinatedCommandExecutor,
+    LocalCommandExecutor,
+    ToolContext,
+    ToolExecutor,
+)
+from eventide.models import RunRequest, ToolCall, WorkspaceRecord
 from eventide.worktrees import WorktreeService
 
 if TYPE_CHECKING:
@@ -57,6 +64,16 @@ class DeliveryController:
         if not path.resolve().is_relative_to(self.host.state_dir):
             raise ValueError("Delivery artifact escapes state root")
         return path
+
+    @asynccontextmanager
+    async def _source_owner(self, workspace: WorkspaceRecord) -> AsyncIterator[None]:
+        async with (
+            self.host._workspace_execution(workspace.workspace_id),
+            self.host._project_git(workspace.project_id),
+        ):
+            if self.host.store.workspace_has_unknown_outcome(workspace.workspace_id):
+                raise ValueError("Source Workspace has an unresolved tool outcome")
+            yield
 
     async def execute(
         self,
@@ -99,7 +116,7 @@ class DeliveryController:
         host._active_tasks.add(task)
         run_id: str | None = None
         try:
-            async with host._workspace_execution(workspace.workspace_id):
+            async with host._workspace_execution(f"delivery:{delivery_id}"):
                 if host.store.workspace_has_unknown_outcome(workspace.workspace_id):
                     raise ValueError("Source Workspace has an unresolved tool outcome")
                 if action != "prepare":
@@ -107,7 +124,7 @@ class DeliveryController:
                     if value["applied"]:
                         raise ValueError("Delivery was already applied")
                 session = host.create_session(
-                    f"deliveries_{workspace.workspace_id}", workspace_id=workspace.workspace_id
+                    f"deliveries_{delivery_id}", workspace_id=workspace.workspace_id
                 )
                 host.store.update_session(session, title="Delivery 管理", archived=True)
                 run_id = f"run_{uuid.uuid4().hex[:16]}"
@@ -140,32 +157,34 @@ class DeliveryController:
                 if action == "prepare":
                     if name is None:
                         raise ValueError("Managed worktree name is required")
-                    service = WorktreeService(source, host.state_dir, workspace.workspace_id)
-                    await host._admission_check(validate_delivery_source, source)
-                    # All worktree mutation finishes before source ownership is released.
-                    created: list[Any] = []
-                    await host._admission_check(
-                        lambda: created.append(service.create(name, "HEAD"))
-                    )
-                    checkout = Path(created[0].path)
-                    receipt = await host._admission_check(
-                        lambda: capture_delivery(
-                            source, checkout, protected_patterns=protected_patterns
+                    async with self._source_owner(workspace):
+                        service = WorktreeService(source, host.state_dir, workspace.workspace_id)
+                        await host._admission_check(validate_delivery_source, source)
+                        # All worktree mutation finishes before source ownership is released.
+                        created: list[Any] = []
+                        await host._admission_check(
+                            lambda: created.append(service.create(name, "HEAD"))
                         )
-                    )
-                    result = {
-                        "delivery_id": delivery_id,
-                        "workspace_id": workspace.workspace_id,
-                        "name": name,
-                        "receipt": receipt,
-                    }
-                    await host._emit(run_id, "delivery.prepared", result, None)
+                        checkout = Path(created[0].path)
+                        receipt = await host._admission_check(
+                            lambda: capture_delivery(
+                                source, checkout, protected_patterns=protected_patterns
+                            )
+                        )
+                        result = {
+                            "delivery_id": delivery_id,
+                            "workspace_id": workspace.workspace_id,
+                            "name": name,
+                            "receipt": receipt,
+                        }
+                        await host._emit(run_id, "delivery.prepared", result, None)
                 else:
                     assert value is not None
                     receipt = dict(value["receipt"])
                     checkout = Path(receipt["checkout"])
                     checkout_ws = host.resolve_or_register_workspace(checkout)
-                    await host._admission_check(verify_source_unchanged, source, receipt)
+                    async with self._source_owner(workspace):
+                        await host._admission_check(verify_source_unchanged, source, receipt)
                     if action == "run":
                         if not goal or not goal.strip() or len(goal) > 20_000:
                             raise ValueError("Worker goal must contain 1-20000 characters")
@@ -227,32 +246,33 @@ class DeliveryController:
                                     image,
                                 )
                             else:
-                                verified = value["verification"]
-                                if not verified or verified["status"] != "passed":
-                                    raise ValueError(
-                                        "Delivery has no passing independent verification"
-                                    )
-                                receipt = dict(verified["receipt"])
-                                patch = self._artifact(
-                                    delivery_id, receipt["patch_sha256"]
-                                ).read_bytes()
-                                applied: list[dict[str, Any]] = []
-                                try:
-                                    await host._admission_check(
-                                        lambda: applied.append(
-                                            apply_delivery(source, patch, receipt)
+                                async with self._source_owner(workspace):
+                                    verified = value["verification"]
+                                    if not verified or verified["status"] != "passed":
+                                        raise ValueError(
+                                            "Delivery has no passing independent verification"
                                         )
-                                    )
-                                finally:
-                                    if applied:
-                                        await host._emit(
-                                            run_id,
-                                            "delivery.applied",
-                                            {"delivery_id": delivery_id, **applied[0]},
-                                            None,
-                                            author="user",
+                                    receipt = dict(verified["receipt"])
+                                    patch = self._artifact(
+                                        delivery_id, receipt["patch_sha256"]
+                                    ).read_bytes()
+                                    applied: list[dict[str, Any]] = []
+                                    try:
+                                        await host._admission_check(
+                                            lambda: applied.append(
+                                                apply_delivery(source, patch, receipt)
+                                            )
                                         )
-                                result = {"delivery_id": delivery_id, **applied[0]}
+                                    finally:
+                                        if applied:
+                                            await host._emit(
+                                                run_id,
+                                                "delivery.applied",
+                                                {"delivery_id": delivery_id, **applied[0]},
+                                                None,
+                                                author="user",
+                                            )
+                                    result = {"delivery_id": delivery_id, **applied[0]}
                 await host._emit(
                     run_id,
                     "run.completed",
@@ -297,7 +317,9 @@ class DeliveryController:
             raise ValueError(
                 "Verification requires 1-4 explicit commands, at most 2000 characters each"
             )
-        patch = await host._admission_check(build_patch, source, checkout, receipt)
+        source_workspace = host.resolve_or_register_workspace(source)
+        async with self._source_owner(source_workspace):
+            patch = await host._admission_check(build_patch, source, checkout, receipt)
         command_executor: CommandExecutor = LocalCommandExecutor(host.settings.command_timeout)
         if image is not None:
             from eventide.container_executor import ContainerCommandExecutor
@@ -305,6 +327,9 @@ class DeliveryController:
             command_executor = ContainerCommandExecutor(
                 image, timeout=host.settings.command_timeout
             )
+        command_executor = CoordinatedCommandExecutor(
+            command_executor, host._project_git_locks[source_workspace.project_id],
+        )
         tools = ToolExecutor({"bash": lambda **_args: ""}, command_executor=command_executor)
         results: list[dict[str, Any]] = []
         for index, command in enumerate(checks):
@@ -373,7 +398,8 @@ class DeliveryController:
                 break
             await host._emit(run_id, "tool.completed", evidence, None)
         after_receipt = dict(receipt)
-        after_patch = await host._admission_check(build_patch, source, checkout, after_receipt)
+        async with self._source_owner(source_workspace):
+            after_patch = await host._admission_check(build_patch, source, checkout, after_receipt)
         if (
             after_receipt["checkout_checkpoint"] != receipt["checkout_checkpoint"]
             or after_patch != patch

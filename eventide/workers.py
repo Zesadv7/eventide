@@ -159,7 +159,7 @@ class SourceSnapshot:
             scoped = source.relative_to(working_root).as_posix()
             if (
                 _excluded(relative)
-                or source.is_relative_to(state_dir)
+                or (state_dir.is_relative_to(workspace) and source.is_relative_to(state_dir))
                 or _has_link(source, workspace)
                 or not source.is_file()
                 or "\\" in scoped

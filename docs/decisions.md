@@ -646,15 +646,17 @@
 **验证：** 21项新增生产派发用例覆盖预派发拒绝、原子回滚、失败重试、摘要拒绝/未采用、worker父子、交付Continue、并发额度竞争、取消/断流/超时/缺usage、重启及实际超额；102项定向回归和完整868通过/1跳过（93.61%覆盖）、Ruff/Mypy74模块、smoke12/12通过，无付费模型调用。
 
 
-## ADR-063：执行副本绑定于 Run，Plan 先用持久固定快照并发
+## ADR-063：Run 固定执行副本，写入 Session 复用其首个 worktree
 
-**状态：Accepted（Plan 快照切片）**。P2写worktree及共享Git协调尚未完成，不把该切片等同完整并发调度。
+**状态：Accepted（P2 执行隔离）**。持久队列和全局容量仍由 P3 实施，交付有界修复属于 D。
 
-**决策：** Session保持原Workspace/cwd绑定，Run显式选择source或snapshot。snapshot仅Plan，由源Workspace短期独占下复制当前Git可见源码并冻结Skills，在同一admission写入源checkpoint、manifest和副本身份；模型执行时只持有Session与精确Run所有权。相同内容复用持久产物，不共享消息、审批、取消或预算请求身份。直接源Python/CLI方式继续兼容。
+**决策：** Session保持原Workspace/cwd绑定，Run显式选择source、snapshot或worktree。snapshot仅Plan，在源Workspace短期独占下复制当前Git可见源码并冻结Skills；持久产物及完整manifest绑定admission。worktree首次从干净HEAD创建，后续新Run和Continue复用该Session首次副本，保留未提交修改，不能切回source/snapshot。需要新副本则建立新Session。实际执行Workspace关联同一Project，模型、工具、Skills、检索和worker都使用实际文件根。
 
-**恢复与边界：** Continue沿用固定副本，源后来变化不重定义已接收任务；快照丢失/篡改明确失败，重启不重放。副本只读位与摘要是内容完整性措施，不是OS沙箱。复用既有有界源码复制：2,000候选文件、10MiB文本、单文件1MiB，敏感路径/链接/二进制排除并显示数量。Skills固定版本可读取，MCP、源索引和嵌套worker暂不提供，避免在不知情时跨回可变源。
+**所有权：** Session始终串行；快照使用精确Run所有权，写副本使用实际Workspace所有权。项目Git锁只覆盖共享元数据操作及Shell/Skill命令，模型等待不持有；后端能力显式委派，包装器保持原本地argv和容器资源权限。Delivery使用每交付owner和独立管理Session；准备/比对/采纳短期获取源和Git，writer及检查阶段不整轮占源。采纳重查源码与当前验收，取消先完成副作用收尾。
 
-**取舍：** 显式字段避免改变已有直接源调用者语义；持久副本增加状态根存储量，当前保留以支持恢复，不自动删除。P3排队、写入副本和采纳将在同一执行主链继续补齐，不另建Agent框架。测试覆盖同项目重叠、同Session拒绝、精确停止、准备取消收尾、源漂移、恢复、内容篡改、Skill/cwd与未知结果隔离。
+**恢复与边界：** Continue沿用绑定，源漂移不重定义已接收任务；副本丢失/篡改/未知结果明确拒绝。重启仅停驻不重放，abandon不能更换副本或绕过未知隔离。运行引用阻止副本删除。固定快照限制2,000候选/10MiB文本/单文件1MiB，排除敏感路径/链接/二进制；快照无Shell/MCP/源索引/嵌套worker，worktree暂不连接MCP。worktree和只读位不是OS沙箱，外部用户与本机Shell仍可改变共享环境。
+
+**取舍与验证：** 显式字段保持直接源Python/CLI兼容；副本增加存储量，当前保留恢复，不自动清理失败准备留下的受管记录。定向覆盖真实并发、同Session串行、稳定脏副本/Continue/重启、精确停止、源与副本漂移、未知结果、worker读取副本和共享预算身份、命令协调、交付验收/采纳与取消；Git项目的本地argv及真实Docker Skill通过生产主链验证。此设计复用同一个Runtime/Store，不新建执行事实源。
 
 ## ADR-064：预算控制面复用唯一账本，历史查询保留未知
 

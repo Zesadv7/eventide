@@ -24,7 +24,7 @@ def create_router(context: ApiContext) -> APIRouter:
     reserved = context.reserved
 
     def reservation_key(session_id: str, workspace_id: str, target: str) -> str:
-        return f"session:{session_id}" if target == "snapshot" else workspace_id
+        return f"session:{session_id}" if target != "source" else workspace_id
 
     def is_busy(session_id: str, key: str, target: str) -> bool:
         return (key in reserved or agent_runtime.session_busy(session_id)
@@ -86,16 +86,17 @@ def create_router(context: ApiContext) -> APIRouter:
     async def abandon_interruption(session_id: str) -> dict[str, Any]:
         record = await get_session(session_id)
         workspace_id = record["workspace_id"]
-        if (agent_runtime.session_busy(session_id) or workspace_id in reserved
-                or agent_runtime.workspace_busy(workspace_id)):
+        target = agent_runtime.session_execution_target(session_id)
+        key = reservation_key(session_id, workspace_id, target)
+        if is_busy(session_id, key, target):
             raise HTTPException(status_code=409, detail="Workspace is busy")
-        reserved.add(workspace_id)
+        reserved.add(key)
         try:
             return asdict(await agent_runtime.abandon_interruption(session_id))
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         finally:
-            reserved.discard(workspace_id)
+            reserved.discard(key)
 
     @router.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(session_id: str, body: RunBody, request: Request) -> dict[str, str]:

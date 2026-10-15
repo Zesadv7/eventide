@@ -1,12 +1,14 @@
 """Skills keep canonical activation, fixed run bytes, and production policy."""
 
+import asyncio
 import os
+import sys
 from dataclasses import replace
 
 import pytest
 
 from eventide.container_executor import ContainerCleanupError, ContainerCommandExecutor
-from eventide.executor import LocalCommandExecutor
+from eventide.executor import CoordinatedCommandExecutor, LocalCommandExecutor
 from eventide.host import RuntimeHost
 from eventide.models import CommandResult, RunRequest
 from eventide.providers import ScriptedProvider
@@ -249,8 +251,10 @@ def test_three_bundled_packages_are_distributable():
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mount permissions")
+@pytest.mark.parametrize("coordinated", [False, True])
 async def test_container_staged_resources_are_readable_without_changing_project_permissions(
     isolated_workspace,
+    coordinated,
 ):
     import stat
 
@@ -258,8 +262,11 @@ async def test_container_staged_resources_are_readable_without_changing_project_
     catalog = SkillCatalog.discover(isolated_workspace)
     project_mode = stat.S_IMODE(isolated_workspace.stat().st_mode)
 
+    lock = asyncio.Lock()
+
     class InspectMount(ContainerCommandExecutor):
         async def execute(self, command, cwd):
+            assert not coordinated or lock.locked()
             staging = next(cwd.glob(".eventide-skill-*"))
             for path in (staging, *staging.rglob("*")):
                 assert stat.S_IMODE(path.stat().st_mode) == (0o755 if path.is_dir() else 0o644)
@@ -273,9 +280,42 @@ async def test_container_staged_resources_are_readable_without_changing_project_
             "scripts/check.py",
             [],
             isolated_workspace,
-            InspectMount("python:3.12-slim"),
+            (
+                CoordinatedCommandExecutor(InspectMount("python:3.12-slim"), lock)
+                if coordinated
+                else InspectMount("python:3.12-slim")
+            ),
         )
     finally:
         os.umask(old_umask)
     assert stat.S_IMODE(isolated_workspace.stat().st_mode) == project_mode
+    assert not list(isolated_workspace.glob(".eventide-skill-*"))
+
+
+async def test_coordinated_local_skill_keeps_argv_interpreter_and_lock(isolated_workspace):
+    package(isolated_workspace / "skills/diagnose", scripts=True)
+    catalog = SkillCatalog.discover(isolated_workspace)
+    lock = asyncio.Lock()
+
+    class InspectArgv(LocalCommandExecutor):
+        async def execute(self, command, cwd):
+            raise AssertionError("Local Skill must not fall back to a shell")
+
+        async def execute_argv(self, arguments, cwd, *, extra_env=None):
+            assert lock.locked()
+            assert arguments[0] == sys.executable
+            assert arguments[-1] == "literal; touch injected"
+            assert extra_env["EVENTIDE_SKILL_ROOT"].startswith(".eventide-skill-")
+            return CommandResult(0, stdout="literal argv checked")
+
+    result = await execute_skill_script(
+        catalog,
+        "project:diagnose",
+        "scripts/check.py",
+        ["literal; touch injected"],
+        isolated_workspace,
+        CoordinatedCommandExecutor(InspectArgv(), lock),
+    )
+    assert not result.is_error
+    assert not lock.locked()
     assert not list(isolated_workspace.glob(".eventide-skill-*"))
