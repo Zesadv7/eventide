@@ -12,9 +12,10 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, TypeVar
 
-from eventide.models import RuntimeEvent, WorkspaceRecord
+from eventide.models import ProjectRecord, RuntimeEvent, WorkspaceRecord
 from eventide.normalization import redact
 from eventide.projections import TERMINALS, MessagesProjection, RuntimeStateProjection
+from eventide.workspace import project_source
 
 _FactResult = TypeVar("_FactResult")
 
@@ -54,7 +55,7 @@ class RuntimeStore:
                 version = self._connection.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
-                if version not in {1, 2, 3}:
+                if version not in {1, 2, 3, 4}:
                     raise ValueError(f"Unsupported runtime schema version: {version}")
             self._connection.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -69,6 +70,16 @@ class RuntimeStore:
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces,
                     created_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS projects (
+                    project_id TEXT PRIMARY KEY,
+                    source_workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces,
+                    name TEXT NOT NULL, git_common_dir TEXT UNIQUE, created_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workspace_projects (
+                    workspace_id TEXT PRIMARY KEY REFERENCES workspaces,
+                    project_id TEXT NOT NULL REFERENCES projects,
+                    kind TEXT NOT NULL CHECK(kind IN ('source','worktree'))
                 );
                 CREATE TABLE IF NOT EXISTS turns (
                     id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions,
@@ -132,9 +143,88 @@ class RuntimeStore:
                 self._connection.execute(
                     "INSERT OR IGNORE INTO schema_migrations VALUES (3, unixepoch())"
                 )
+            if version < 4:
+                # Only add identity relationships; preserve all historic IDs and facts.
+                rows = self._connection.execute(
+                    "SELECT * FROM workspaces ORDER BY created_at, workspace_id"
+                ).fetchall()
+                for row in rows:
+                    source, common = project_source(Path(row["path"]), row["git_root"])
+                    self._bind_project(dict(row), source, common)
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations VALUES (4, unixepoch())"
+                )
+
+    def _bind_project(
+        self, row: dict[str, Any], source: Path, common: str | None,
+    ) -> None:
+        """Create immutable identities within the caller's SQLite transaction."""
+        if self._connection.execute(
+            "SELECT 1 FROM workspace_projects WHERE workspace_id=?", (row["workspace_id"],)
+        ).fetchone():
+            return
+        project = self._connection.execute(
+            "SELECT * FROM projects WHERE git_common_dir=?", (common,)
+        ).fetchone() if common else None
+        if project is None:
+            source_row = self._connection.execute(
+                "SELECT * FROM workspaces WHERE path=?", (str(source),)
+            ).fetchone()
+            if source_row is None:
+                source_row = {
+                    "workspace_id": f"ws_{uuid.uuid4().hex[:16]}", "name": source.name,
+                    "path": str(source), "git_root": str(source) if common else None,
+                    "created_at": time.time(),
+                }
+                self._connection.execute(
+                    "INSERT INTO workspaces VALUES "
+                    "(:workspace_id,:name,:path,:git_root,:created_at)",
+                    source_row,
+                )
+            project = self._connection.execute(
+                "SELECT p.* FROM projects p JOIN workspace_projects w USING(project_id) "
+                "WHERE w.workspace_id=?", (source_row["workspace_id"],)
+            ).fetchone()
+            if project is None:
+                project = {
+                    "project_id": f"project_{uuid.uuid4().hex[:16]}",
+                    "source_workspace_id": source_row["workspace_id"],
+                    "name": source_row["name"], "git_common_dir": common,
+                    "created_at": source_row["created_at"],
+                }
+                self._connection.execute(
+                    "INSERT INTO projects VALUES "
+                    "(:project_id,:source_workspace_id,:name,:git_common_dir,:created_at)",
+                    project,
+                )
+                self._connection.execute(
+                    "INSERT INTO workspace_projects VALUES (?,?,'source')",
+                    (source_row["workspace_id"], project["project_id"]),
+                )
+            elif project["git_common_dir"] is None and common is not None:
+                # A registered plain directory may later become a Git repository.
+                # Enrich its identity evidence without changing any association.
+                self._connection.execute(
+                    "UPDATE projects SET git_common_dir=? WHERE project_id=?",
+                    (common, project["project_id"]),
+                )
+            elif project["git_common_dir"] != common:
+                raise ValueError("Project source identity changed; existing binding is immutable")
+        kind = "source" if row["workspace_id"] == project["source_workspace_id"] else "worktree"
+        self._connection.execute(
+            "INSERT OR IGNORE INTO workspace_projects VALUES (?,?,?)",
+            (row["workspace_id"], project["project_id"], kind),
+        )
 
     def register_workspace(self, path: Path, git_root: str | None) -> WorkspaceRecord:
+        path = path.expanduser().resolve()
         with self._lock, self._connection:
+            existing = self._connection.execute(
+                "SELECT workspace_id FROM workspaces WHERE path=?", (str(path),)
+            ).fetchone()
+            if existing is not None:
+                return self.get_workspace(existing["workspace_id"])
+            source, common = project_source(path, git_root)
             self._connection.execute(
                 "INSERT OR IGNORE INTO workspaces VALUES (?, ?, ?, ?, ?)",
                 (f"ws_{uuid.uuid4().hex[:16]}", path.name, str(path), git_root, time.time()),
@@ -142,12 +232,16 @@ class RuntimeStore:
             row = self._connection.execute(
                 "SELECT * FROM workspaces WHERE path=?", (str(path),)
             ).fetchone()
-        return WorkspaceRecord(**dict(row))
+            self._bind_project(dict(row), source, common)
+            return self.get_workspace(row["workspace_id"])
 
     def get_workspace(self, workspace_id: str) -> WorkspaceRecord:
         with self._lock:
             row = self._connection.execute(
-                "SELECT * FROM workspaces WHERE workspace_id=?", (workspace_id,)
+                "SELECT w.*,a.project_id,a.kind,p.source_workspace_id FROM workspaces w "
+                "JOIN workspace_projects a USING(workspace_id) "
+                "JOIN projects p USING(project_id) "
+                "WHERE workspace_id=?", (workspace_id,)
             ).fetchone()
         if row is None:
             raise ValueError(f"Workspace not found: {workspace_id}")
@@ -158,16 +252,60 @@ class RuntimeStore:
             return [
                 WorkspaceRecord(**dict(r))
                 for r in self._connection.execute(
-                    "SELECT * FROM workspaces ORDER BY created_at, workspace_id"
+                    "SELECT w.*,a.project_id,a.kind,p.source_workspace_id FROM workspaces w "
+                    "JOIN workspace_projects a USING(workspace_id) "
+                    "JOIN projects p USING(project_id) "
+                    "ORDER BY w.created_at, workspace_id"
                 )
             ]
 
     def remove_workspace(self, workspace_id: str) -> None:
-        self.get_workspace(workspace_id)
+        workspace = self.get_workspace(workspace_id)
         with self._lock, self._connection:
             if self.list_sessions(workspace_id):
                 raise ValueError("Workspace has sessions; removal would orphan history")
+            if workspace.kind == "source" and len(
+                self.list_project_workspaces(workspace.project_id)
+            ) > 1:
+                raise ValueError("Project source has execution copies; removal would orphan them")
+            self._connection.execute(
+                "DELETE FROM workspace_projects WHERE workspace_id=?", (workspace_id,)
+            )
+            if workspace.kind == "source":
+                self._connection.execute(
+                    "DELETE FROM projects WHERE project_id=?", (workspace.project_id,)
+                )
             self._connection.execute("DELETE FROM workspaces WHERE workspace_id=?", (workspace_id,))
+
+    def get_project(self, project_id: str) -> ProjectRecord:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM projects WHERE project_id=?", (project_id,)
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"Project not found: {project_id}")
+        return ProjectRecord(**dict(row))
+
+    def list_projects(self) -> list[ProjectRecord]:
+        with self._lock:
+            return [ProjectRecord(**dict(row)) for row in self._connection.execute(
+                "SELECT * FROM projects ORDER BY created_at, project_id"
+            )]
+
+    def list_project_workspaces(self, project_id: str) -> list[WorkspaceRecord]:
+        self.get_project(project_id)
+        return [item for item in self.list_workspaces() if item.project_id == project_id]
+
+    def list_project_sessions(
+        self, project_id: str, *, include_archived: bool = True,
+    ) -> list[dict[str, Any]]:
+        self.get_project(project_id)
+        with self._lock:
+            return [dict(row) for row in self._connection.execute(
+                "SELECT s.* FROM sessions s JOIN workspace_projects w USING(workspace_id) "
+                "WHERE w.project_id=? " + ("" if include_archived else "AND s.archived=0 ")
+                + "ORDER BY s.created_at,s.id", (project_id,),
+            )]
 
     def create_session(
         self,

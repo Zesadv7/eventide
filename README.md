@@ -123,6 +123,14 @@ docker compose up --build
 
 容器只是部署形态：Eventide 的权限策略与本地 Shell 执行器仍以容器用户身份运行，不构成操作系统沙箱（与 ADR-005、ADR-012 一致）。
 
+## Project 与执行副本
+
+Project 将一个本地源码项目与它的 Git worktree 工作副本聚合起来；Workspace 继续表示具体目录，Session 仍固定绑定原 Workspace 和工作目录。注册 Git worktree 时，服务按真实 Git common directory 关联同一项目，并登记主 checkout；独立 clone 即使 remote 相同也不合并。非 Git 目录各自作为项目。
+
+`GET /api/projects`、`/api/projects/{id}`、`/api/projects/{id}/workspaces` 和 `/api/projects/{id}/sessions` 可查询项目及其全部执行副本、对话。现有添加工作区接口继续使用，响应增加 `project_id`、`source_workspace_id`、`kind`；不接受客户端重绑既有对话。创建受管 worktree 会自动注册副本，交付 Writer 与源项目共享 Project 身份，新 Run 的接收及开始事件固定记录该归属。
+
+首次升级自动补齐身份关系，既有 Workspace、Session、Run 和事件保持原身份及原文；旧路径已丢失或无法验证 Git 时保留为独立项目，后续不静默改绑。源项目还有执行副本时不能移除注册；任何有会话历史的 Workspace 仍不能移除。这里只完成项目关联，**同 Workspace 仍串行**，快照并发和调度队列继续按 P2/P3 实施。
+
 ## Workspace 与 Continue
 
 ```bash

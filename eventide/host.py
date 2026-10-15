@@ -308,7 +308,12 @@ class RuntimeHost:
                 await self._emit(
                     run_id,
                     "run.started",
-                    {"workspace_id": workspace.workspace_id, "source": "worktree"},
+                    {
+                        "workspace_id": workspace.workspace_id,
+                        "project_id": workspace.project_id,
+                        "source_workspace_id": workspace.source_workspace_id,
+                        "source": "worktree",
+                    },
                     None,
                     author="user",
                 )
@@ -334,6 +339,10 @@ class RuntimeHost:
                         for checkout in self.store.list_workspaces():
                             if checkout.path == result["path"]:
                                 self.store.remove_workspace(checkout.workspace_id)
+                    elif action == "create":
+                        checkout = self.resolve_or_register_workspace(result["path"])
+                        if checkout.project_id != workspace.project_id:
+                            raise ValueError("Managed worktree has a different project identity")
                     await self._emit(run_id, "worktree.completed", result, None, author="user")
                     await self._emit(
                         run_id,
@@ -377,6 +386,8 @@ class RuntimeHost:
         return {
             "session_id": session_id,
             "workspace_id": workspace.workspace_id,
+            "project_id": workspace.project_id,
+            "source_workspace_id": workspace.source_workspace_id,
             "working_directory": str(self.sessions.working_directory(session_id)),
             "created_at": session["created_at"],
             "updated_at": activity["updated_at"],
@@ -397,6 +408,16 @@ class RuntimeHost:
         workspace = self.store.get_workspace(workspace_id)
         metadata = git_metadata(Path(workspace.path))
         return {**asdict(workspace), **metadata}
+
+    def project_status(self, project_id: str) -> dict[str, Any]:
+        project = self.store.get_project(project_id)
+        source = self.store.get_workspace(project.source_workspace_id)
+        return {
+            **asdict(project),
+            "source_path": source.path,
+            "workspace_count": len(self.store.list_project_workspaces(project_id)),
+            "session_count": len(self.store.list_project_sessions(project_id)),
+        }
 
     def workspace_capabilities(self, workspace_id: str) -> dict[str, Any]:
         """Read-only capability introspection built from pure file parsing.
@@ -1294,6 +1315,8 @@ class RuntimeHost:
                         **intent,
                         "session_id": session_id,
                         "workspace_id": workspace.workspace_id,
+                        "project_id": workspace.project_id,
+                        "source_workspace_id": workspace.source_workspace_id,
                         "attachment_ids": ids,
                         "continuation_of": source_id,
                         "request_fingerprint": (
@@ -1787,6 +1810,8 @@ class RuntimeHost:
                 {
                     "session_id": session_id,
                     "workspace_id": workspace.workspace_id,
+                    "project_id": workspace.project_id,
+                    "source_workspace_id": workspace.source_workspace_id,
                     "provider": self.settings.provider,
                     "model": selected_model,
                     "mode": mode,
@@ -1996,6 +2021,8 @@ class RuntimeHost:
                         child_intent = {
                             **intent,
                             "workspace_id": workspace.workspace_id,
+                            "project_id": workspace.project_id,
+                            "source_workspace_id": workspace.source_workspace_id,
                             "session_id": child_session,
                             "mode": "plan",
                             "attachment_ids": [],

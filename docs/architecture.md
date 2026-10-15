@@ -4,12 +4,13 @@
 
 ```text
 RuntimeHost
-  └─ Workspace
-      └─ Session
-          └─ Runtime Event Log
-              ├─ MessagesProjection
-              ├─ RuntimeStateProjection
-              └─ ContextBuilder
+  └─ Project（源码项目）
+      └─ Workspace（源目录或 Git 执行副本）
+          └─ Session（固定 Workspace/cwd）
+              └─ Runtime Event Log
+                  ├─ MessagesProjection
+                  ├─ RuntimeStateProjection
+                  └─ ContextBuilder
 ```
 
 RuntimeHost 是进程内唯一执行 Owner，持有状态根的 OS 文件锁、RuntimeStore、Provider 配置、SessionManager 和 Workspace 锁。CLI、FastAPI 和 Eval 直接复用 `RuntimeHost`；不再保留旧 Python 门面。首版不含后台 daemon 或 IPC client：同状态根已有 Host 时第二个进程失败。进程终止由 OS 释放文件锁。
@@ -18,12 +19,20 @@ Workspace 保存稳定 ID、规范路径、Git 根、名称和创建时间；Git
 
 主要实现：`host.py` 管理生命周期与 Agent loop；`workspace.py` 管理路径、锁和 Git evidence；`store.py` 保存身份与事实；`projections.py`、`context_builder.py` 负责投影；`skills.py` 负责 Workspace Skill 的发现、快照和按需加载；`task_plan.py` 定义有界计划、依赖校验和紧凑提示；`worktrees.py` 提供注入 Workspace/状态根的 Git checkout 生命周期；`attachments.py` 管理 Session 附件生命周期、文本内联与多模态引用水合；`run_policy.py` 以纯函数定义每次 Run 的模式策略（plan/agent）；`model_catalog.py` 提供探测式模型列表辅助；`rag/` 负责 Workspace 文本切块、SQLite 混合索引、检索工具与离线检索评测。生产基础工具位于 `tools/runtime_catalog.py`，动态 Runtime 工具由 Host 注入，不导入 legacy 注册表。
 
+Project 身份由 RuntimeStore 在 SQLite 事务内建立，按已验证的本地 Git common directory 聚合主 checkout 与 worktree；不使用 remote URL 合并独立 clone。注册执行副本会同时登记缺失的主 checkout。bare 仓库没有可运行主目录时，第一个注册的 checkout 固定为 source；非 Git 目录独立成项目。身份表仅保存不可变关联，全部运行状态仍由 Event Log 派生。原普通目录后来初始化Git时可补齐common-directory证据，不改变项目、源或Session身份。
+
+v4 迁移遍历原 Workspace，补齐一次性项目关系，保留 Workspace/Session/Run 身份、cwd 与历史事件字节。缺失或无法验证的历史路径保留独立身份，不在后续打开时偷偷重组。新 run.admitted/run.started 保存 project_id/source_workspace_id；交付 checkout 自动归属同项目，只读 worker 保留源 Workspace 绑定并使用已有 snapshot_id，不注册会消失的快照目录。Continue 从固定 Session 绑定得到同一项目；旧事件不补造字段。
+
+Project 查询聚合所有副本 Session，不改变原 Workspace API 的过滤语义。源 Workspace 有其他执行副本时拒绝删除，任何含 Session 的副本仍受原历史保护。并发仍是 Workspace 锁；Project 身份不是调度器、锁或新预算执行路径，P2/P3/U2另行接入。
+
 ## 存储与事件契约
 
-默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。EVENTIDE_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。当前 schema 版本为 3，版本 1/2 在同一 v0.3 数据模型内自动升级；未知版本和直接作为 RuntimeStore 打开的未版本化旧数据库明确拒绝，不自动删除。`migrate-v02` 通过独立只读连接校验旧 TraceStore schema，再把数据以单个目标事务导入当前库。
+默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。EVENTIDE_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。当前 schema 版本为 4，版本 1/2/3 在同一 Runtime 数据模型内自动升级；未知版本和直接作为 RuntimeStore 打开的未版本化旧数据库明确拒绝，不自动删除。`migrate-v02` 通过独立只读连接校验旧 TraceStore schema，再把数据以单个目标事务导入当前库。
 
 | 表 | 职责 |
 |---|---|
+| projects | 稳定项目身份、固定源 Workspace、本地 Git common directory（可空） |
+| workspace_projects | Workspace 到 Project 的不可变关系及 source/worktree 类型 |
 | workspaces | Workspace 身份、规范路径、Git 根 |
 | sessions | 身份、固定 Workspace/working directory 绑定、显式标题、归档状态、创建时间 |
 | turns | 用户回合身份、session、continuation_of |

@@ -91,6 +91,18 @@ class WorkspaceRecord:
     path: str
     git_root: str | None
     created_at: float
+    project_id: str
+    source_workspace_id: str
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectRecord:
+    project_id: str
+    source_workspace_id: str
+    name: str
+    git_common_dir: str | None
+    created_at: float
 
 
 @dataclass(frozen=True, slots=True)

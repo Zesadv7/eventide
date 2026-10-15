@@ -18,6 +18,7 @@ from eventide.http_api import (
     attachments,
     config,
     models,
+    projects,
     runs,
     sessions,
     skills,
@@ -117,6 +118,8 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok", "runtime": "eventide"}
 
-    for domain in (workspaces, sessions, runs, models, config, attachments, streams, skills):
+    for domain in (
+        projects, workspaces, sessions, runs, models, config, attachments, streams, skills,
+    ):
         app.include_router(domain.create_router(context))
     return app

@@ -611,6 +611,17 @@
 **边界：** 全历史折叠保证当前单机正确性，投影缓存可在测量后优化且必须可重建。本阶段测试组件原子性与账本口径，不代表模型请求已受其限制；接线前仍保留现有软限，并在后续测试覆盖发出请求、取消、重试与重启的全部分支。
 
 
+## ADR-060：Project 聚合本地执行副本，Session 绑定保持稳定
+
+**状态：Accepted**。落实 P1，调度与隔离并发由 P2/P3 单独验收。
+
+**决策：** Project 表示本地源码项目，Workspace表示具体checkout。RuntimeStore新增schema v4的项目与关联身份表，在同一事务内按Git common directory关联源与worktree；不同clone不因remote相同而合并。关联创建后不可修改，Session继续固定Workspace/cwd，不通过重绑定偷换执行位置。受管worktree创建自动登记，交付Writer自动共享源Project，只读worker继续使用源身份加snapshot_id。
+
+**迁移与事实：** 保留全部既有Workspace/Session/Run身份和事件字节，只补齐项目关系；不可验证的历史目录独立保留，不延后静默重分配。身份表不存运行状态或预算，运行事实仍在唯一Event Log。新接收/开始事件冻结Project与源Workspace；旧事件不虚构历史归属。
+
+**影响：** 新增只读项目聚合API，原Workspace接口保持，源有副本或副本有Session时不能删除。提供后续共享预算与并发的可信归属，不提前放开Workspace锁或修改权限边界。真实Git主目录/先注册worktree、独立clone、跨连接注册、历史迁移、重启Continue、交付/worker及HTTP隔离均有离线回归。
+
+
 ## ADR-061：容器本机管理使用显式连接来源与同源约束
 
 **状态：Accepted（协议与离线验证）**；真实镜像及桌面转发环境由F5独立验收。补充ADR-010的本机传输边界，保持ADR-012的单机部署范围。

@@ -53,7 +53,12 @@ def git(path: Path, *args: str) -> bytes:
         ["git", "-C", str(path), *args],
         capture_output=True,
         timeout=30,
-        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        env={
+            **{key: value for key, value in os.environ.items() if key not in {
+                "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+            }},
+            "GIT_OPTIONAL_LOCKS": "0",
+        },
     )
     if result.returncode:
         raise ValueError("Cannot inspect Git workspace")
@@ -69,6 +74,31 @@ def canonical_workspace(path: Path) -> tuple[Path, str | None]:
     except (ValueError, OSError, subprocess.TimeoutExpired):
         return root, None
     return top, str(top)
+
+
+def project_source(path: Path, git_root: str | None) -> tuple[Path, str | None]:
+    """Identify local Git siblings, never merge independent clones by remote URL.
+
+    Missing historical paths remain independent identities. A linked checkout of
+    a bare repository uses its first registered checkout as the source.
+    """
+    if git_root is None:
+        return path, None
+    try:
+        common = Path(os.fsdecode(git(path, "rev-parse", "--git-common-dir")).strip())
+        common = (path / common).resolve()
+        entries = git(path, "worktree", "list", "--porcelain", "-z").split(b"\0")
+        primary = next(field[9:] for field in entries if field.startswith(b"worktree "))
+        candidate = Path(os.fsdecode(primary)).resolve()
+        source, source_git = canonical_workspace(candidate)
+        if source_git is None:
+            return path, str(common)
+        source_common = Path(os.fsdecode(git(source, "rev-parse", "--git-common-dir")).strip())
+        if (source / source_common).resolve() != common:
+            raise ValueError("Git project source identity changed")
+        return source, str(common)
+    except (ValueError, OSError, subprocess.TimeoutExpired, StopIteration):
+        return path, None
 
 
 def session_working_directory(workspace: Path, target: str | Path | None) -> tuple[str, Path]:

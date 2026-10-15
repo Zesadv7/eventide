@@ -119,6 +119,8 @@ class DeliveryController:
                     {
                         "source": "delivery",
                         "workspace_id": workspace.workspace_id,
+                        "project_id": workspace.project_id,
+                        "source_workspace_id": workspace.source_workspace_id,
                         "delivery_id": delivery_id,
                         "action": action,
                     },

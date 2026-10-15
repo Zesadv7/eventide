@@ -188,3 +188,13 @@ PackageBody 严格接受 directory、archive_base64、bundled 三选一，以及
 ## Vue 静态入口
 
 `GET /workbench/` 提供Python包内Vue页面；Hash路由无需后端路径回退，HTTP/SSE仍走同源`/api`。静态资源缺失404；整个构建缺失时工作台返回503 JSON错误，healthz/API仍可使用。根地址旧前端继续保留到X验收。`/workbench/manifest.json` 仅含构建来源指纹与文件校验清单，不含运行状态或凭据。
+
+
+## Project 聚合与执行副本身份
+
+- `GET /api/projects`：返回稳定 `project_id`、`source_workspace_id`、`name`、`git_common_dir`（可空）、`created_at`、`source_path`、`workspace_count`、`session_count`。
+- `GET /api/projects/{project_id}`：单项目；不存在为404。
+- `GET /api/projects/{project_id}/workspaces`：项目的全部源目录和执行副本，返回原 Workspace 状态及新增 `project_id`、`source_workspace_id`、`kind=source|worktree`。
+- `GET /api/projects/{project_id}/sessions?include_archived=false`：跨该项目全部副本聚合 Session，归档过滤与原 Workspace 列表一致。Session 状态增加项目和源身份，保留实际 `workspace_id` 和 `working_directory`。
+
+注册继续通过 `POST /api/workspaces`；按规范路径重复注册返回同一身份。Git worktree由服务器验证共同元数据并关联，客户不能指定Project归属或修改已有Session绑定。独立clone不按remote合并。移除仍经原Workspace DELETE；源有副本或任一Workspace有Session时409，不能留下孤立历史。查询与模型执行不创建额外项目事实源；新Run在canonical接收/开始事实固定项目归属，旧事件不回写。本阶段不改变同Workspace串行、202/SSE游标或Continue语义。
