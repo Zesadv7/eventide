@@ -1000,3 +1000,7 @@ td small {
   flex-shrink: 0;
   white-space: nowrap;
 }
+
+.usage-failures code {
+  overflow-wrap: anywhere;
+}
