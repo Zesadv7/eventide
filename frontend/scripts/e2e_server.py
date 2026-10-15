@@ -16,12 +16,11 @@ def main() -> None:
         os.environ.get("EVENTIDE_E2E_REPOSITORY", Path(__file__).resolve().parents[2])
     ).resolve()
     sys.path.insert(0, str(repository))
-    from eventide.streaming import ModelStreamEvent
-
     from eventide.api import create_app
     from eventide.config import Settings
     from eventide.host import RuntimeHost
     from eventide.models import ModelResponse, ToolCall
+    from eventide.streaming import ModelStreamEvent
     from tests.e2e_server import E2EUvicornServer, FakeProvider, build_fixtures
 
     class JourneyProvider(FakeProvider):

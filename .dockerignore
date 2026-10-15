@@ -1,4 +1,10 @@
-# 构建上下文只保留构建包所需：pyproject.toml、uv.lock、eventide/、README.md、LICENSE
+# Python 包和 Vue 构建源码；不携带本机状态或依赖目录。
+**/node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+frontend/coverage
+.video_agent
 .git
 .venv
 venv
@@ -18,6 +24,8 @@ mcp.json
 __pycache__
 *.py[cod]
 *.egg-info
+build
+dist
 .pytest_cache
 .mypy_cache
 .ruff_cache

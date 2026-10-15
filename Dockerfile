@@ -1,5 +1,12 @@
 # Eventide 部署镜像：uv 托管依赖，非 root 运行。
 # 容器只是部署形态，Eventide 的权限策略与本地 Shell 执行器不是操作系统沙箱。
+FROM node:22-bookworm-slim AS web-build
+WORKDIR /build/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # 工作区规范化与 Continue 证据依赖 git
@@ -14,6 +21,8 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-install-project
 
 COPY eventide/ eventide/
+RUN rm -rf /app/eventide/workbench
+COPY --from=web-build /build/eventide/workbench/ eventide/workbench/
 COPY README.md LICENSE ./
 RUN uv sync --locked
 

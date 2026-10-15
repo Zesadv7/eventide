@@ -4,7 +4,7 @@ test("real Skills API: reviewed import, explicit activation, resources and durab
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/#/skills");
+  await page.goto("./#/skills");
   await page.getByRole("button", { name: "检查导入内容", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "导入已检查版本" }),
@@ -41,7 +41,7 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/#/chat");
+  await page.goto("./#/chat");
   await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
   const input = page.getByRole("textbox", { name: "任务输入" });
   await input.fill("流式场景");

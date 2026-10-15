@@ -53,6 +53,7 @@ __all__ = [
 ]
 
 WEB_DIR = Path(__file__).with_name("web")
+WORKBENCH_DIR = Path(__file__).with_name("workbench")
 
 
 def _probe_error(exc: Exception) -> tuple[str, str]:
@@ -99,6 +100,14 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
         return await call_next(request)
 
     app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
+    if (WORKBENCH_DIR / "index.html").is_file():
+        app.mount("/workbench", StaticFiles(directory=WORKBENCH_DIR, html=True), name="workbench")
+    else:
+        @app.get("/workbench/", include_in_schema=False)
+        async def missing_workbench() -> None:
+            raise HTTPException(
+                503, "Workbench assets missing; install a complete Eventide package"
+            )
 
     @app.get("/", response_class=HTMLResponse)
     async def console() -> str:

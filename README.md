@@ -438,7 +438,7 @@ Vue 的「Skills」页支持以下流程：
 
 `frontend/` 提供 Vue 3、TypeScript、Vite、Vue Router 和 Pinia 工作台。已接入真实项目/会话、对话记录、流式临时预览、审批、停止、Continue、附件、模型连接、生成参数，以及按请求尝试去重的 Run/Session 用量。切页或关闭观察连接不会停止后台运行；草稿按 Session 保存在当前浏览器标签页，模型密钥只保留在设置表单内存并在保存后清空。
 
-当前后端默认仍提供旧页面，生产静态资源挂载与安装包承接由 F5 完成。开发时先启动同机 API，再运行：
+启动服务后访问 `http://127.0.0.1:8000/workbench/` 使用 Vue 工作台；页面、脚本和样式随 Python 安装包提供，使用者无需安装 Node。根地址旧页面保留至 X 阶段迁移验收结束。构建资源缺失时工作台返回明确的503，后端API仍可用。开发前端时先启动同机 API，再运行：
 
 ```bash
 cd frontend
@@ -465,3 +465,7 @@ uv run --project .. npm run test:e2e
 ```
 
 浏览器旅程使用确定性流式 Provider，不需要模型密钥或供应商网络。`EVENTIDE_CHROMIUM` 可显式指定已有浏览器，缺少浏览器时测试失败；不自动下载。旧前端和用户 CLI 在全部功能承接前继续保留。
+
+`npm run build` 同时将构建结果写入 `eventide/workbench/`，附源码指纹和资源SHA-256清单；修改前端后须重建并一起提交，Python测试会发现陈旧或缺失的产物。`EVENTIDE_E2E_BUILT=1 npm run test:e2e` 直接测试FastAPI托管页面，不启动Vite。安装包验证可运行 `uv build --wheel --out-dir .task_outputs/dist` 和 `uv run python frontend/scripts/check_wheel.py .task_outputs/dist/eventide-0.4.0-py3-none-any.whl`，后者在临时目录隔离导入wheel并检查资源及接口。
+
+Dockerfile 使用Node构建阶段和Python运行阶段，运行镜像不需要Node。当前主机没有Docker，尚未实测容器构建；CI定义和本地wheel测试不作为容器成功证据。

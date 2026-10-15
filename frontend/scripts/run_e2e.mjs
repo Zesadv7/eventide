@@ -42,12 +42,15 @@ try {
     "scripts/e2e_server.py",
   ]);
   const port = await line(backend, /E2E_PORT=(\d+)/);
-  const vite = launch(
-    process.execPath,
-    ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "0"],
-    { EVENTIDE_API_URL: `http://127.0.0.1:${port}` },
-  );
-  const url = await line(vite, /Local:\s+(http:\/\/127\.0\.0\.1:\d+\/)/);
+  let url = `http://127.0.0.1:${port}/workbench/`;
+  if (process.env.EVENTIDE_E2E_BUILT !== "1") {
+    const vite = launch(
+      process.execPath,
+      ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "0"],
+      { EVENTIDE_API_URL: `http://127.0.0.1:${port}` },
+    );
+    url = await line(vite, /Local:\s+(http:\/\/127\.0\.0\.1:\d+\/)/);
+  }
   const runner = launch(
     process.execPath,
     ["node_modules/@playwright/test/cli.js", "test"],
