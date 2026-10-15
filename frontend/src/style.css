@@ -547,6 +547,15 @@ summary:hover {
   background: var(--soft);
   margin-bottom: 20px;
 }
+.usage-page .segmented {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.cost-call {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+  overflow-wrap: anywhere;
+}
 .segmented button {
   border: 0;
   background: transparent;

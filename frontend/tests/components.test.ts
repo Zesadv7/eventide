@@ -6,8 +6,9 @@ import GenerationEditor from "../src/components/GenerationEditor.vue";
 import SettingsView from "../src/views/SettingsView.vue";
 import UsageView from "../src/views/UsageView.vue";
 import { api } from "../src/api/client";
+import { budgetsApi } from "../src/api/budgets";
 import { useWorkbench } from "../src/stores/workbench";
-import { provider, generation, ledger } from "./fixtures";
+import { provider, generation, costs } from "./fixtures";
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
@@ -87,7 +88,8 @@ describe("content and generation controls", () => {
     expect(wrapper.text()).not.toContain("secret-key-fixture");
   });
   it("shows unknown usage rather than inventing zero tokens or a price", async () => {
-    vi.spyOn(api, "usage").mockResolvedValue(ledger);
+    vi.spyOn(budgetsApi, "costs").mockResolvedValue(costs);
+    vi.spyOn(budgetsApi, "prices").mockResolvedValue({ prices: [] });
     const store = useWorkbench();
     store.selectedSession = "session-1";
     const wrapper = mount(UsageView);

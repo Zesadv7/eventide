@@ -18,6 +18,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public mutationOutcome?: "rejected",
   ) {
     super(message);
     this.name = "ApiError";
@@ -49,7 +50,13 @@ export async function request<T>(
     } catch {
       /* HTTP status remains useful */
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(
+      response.status,
+      message,
+      response.headers?.get("X-Eventide-Mutation-Outcome") === "rejected"
+        ? "rejected"
+        : undefined,
+    );
   }
   return response.json() as Promise<T>;
 }

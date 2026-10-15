@@ -1,29 +1,51 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { api } from "../api/client";
+import { budgetsApi, type Costs, type Scope } from "../api/budgets";
 import type { UsageLedger } from "../api/types";
 import { useWorkbench } from "../stores/workbench";
+import BudgetPanel from "../components/BudgetPanel.vue";
+import CostSummary from "../components/CostSummary.vue";
+import PriceEditor from "../components/PriceEditor.vue";
 const store = useWorkbench(),
-  scope = ref<"sessions" | "runs">("sessions"),
+  scope = ref<"session" | "run" | "project" | "day">("session"),
+  day = ref(new Date().toISOString().slice(0, 10)),
   ledger = ref<UsageLedger | null>(null),
+  costs = ref<Costs | null>(null),
   error = ref(""),
   loading = ref(false);
 let version = 0,
+  loadingKey = "",
   timer: ReturnType<typeof setInterval> | undefined;
-const identity = computed(() =>
-  scope.value === "sessions" ? store.selectedSession : store.currentRun?.run_id,
+const identity = computed(() => {
+  if (scope.value === "session") return store.selectedSession;
+  if (scope.value === "run") return store.currentRun?.run_id;
+  if (scope.value === "day") return day.value;
+  return store.workspaces.find(
+    (item) => item.workspace_id === store.selectedWorkspace,
+  )?.project_id;
+});
+const selectedScope = computed<Scope | null>(() =>
+  identity.value ? { kind: scope.value, identity: identity.value } : null,
 );
 async function load() {
+  const key = `${scope.value}:${identity.value || ""}`;
+  if (loading.value && loadingKey === key) return;
+  loadingKey = key;
   const current = ++version;
   error.value = "";
   if (!identity.value) {
     ledger.value = null;
+    costs.value = null;
+    loading.value = false;
     return;
   }
   loading.value = true;
   try {
-    const result = await api.usage(identity.value, scope.value);
-    if (current === version) ledger.value = result;
+    const result = await budgetsApi.costs(selectedScope.value!);
+    if (current === version) {
+      costs.value = result;
+      ledger.value = result.usage;
+    }
   } catch (e) {
     if (current === version)
       error.value = e instanceof Error ? e.message : "读取失败";
@@ -35,6 +57,7 @@ watch(
   [identity, scope],
   () => {
     ledger.value = null;
+    costs.value = null;
     void load();
   },
   { immediate: true },
@@ -95,14 +118,26 @@ const grouped = computed(() => {
     </header>
     <div class="segmented">
       <button
-        :class="{ selected: scope === 'sessions' }"
-        @click="scope = 'sessions'"
+        :class="{ selected: scope === 'session' }"
+        @click="scope = 'session'"
       >
         当前会话全部历史</button
-      ><button :class="{ selected: scope === 'runs' }" @click="scope = 'runs'">
+      ><button :class="{ selected: scope === 'run' }" @click="scope = 'run'">
         最近运行
       </button>
+      <button
+        :class="{ selected: scope === 'project' }"
+        @click="scope = 'project'"
+      >
+        当前项目全部对话
+      </button>
+      <button :class="{ selected: scope === 'day' }" @click="scope = 'day'">
+        每日（UTC）
+      </button>
     </div>
+    <label v-if="scope === 'day'" class="button-row"
+      >统计日期（UTC）<input v-model="day" type="date" required
+    /></label>
     <p v-if="!identity" class="empty-state">
       先选择一个项目对话，运行后即可查看用量。
     </p>
@@ -128,11 +163,15 @@ const grouped = computed(() => {
           ><span>{{ ledger.complete ? "统计完整" : "统计不完整" }}</span>
         </article>
       </div>
-      <div class="alert">
-        <span
-          >费用、共享预算和输入组成分析仍待后端接入。未报价显示为未知，未返回用量不会当作零消费。</span
-        >
-      </div>
+      <CostSummary v-if="costs" :costs="costs" />
+      <BudgetPanel
+        v-if="selectedScope && scope !== 'session'"
+        :scope="selectedScope"
+      />
+      <p v-else class="muted">
+        会话统计包含 Continue
+        与子任务。共享预算可在“当前项目全部对话”、“最近运行”或“每日”范围管理。
+      </p>
       <section class="panel">
         <h2>调用分类</h2>
         <div class="table-scroll">
@@ -224,5 +263,6 @@ const grouped = computed(() => {
         </div>
       </section></template
     >
+    <PriceEditor />
   </section>
 </template>

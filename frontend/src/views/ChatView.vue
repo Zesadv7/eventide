@@ -9,6 +9,7 @@ import SafeContent from "../components/SafeContent.vue";
 const store = useWorkbench(),
   route = useRoute(),
   mode = ref("auto"),
+  executionTarget = ref<"source" | "snapshot">("source"),
   model = ref(""),
   generation = ref<Generation>({}),
   modelList = ref<string[]>([]),
@@ -79,6 +80,8 @@ async function submit() {
     await store.submit({
       prompt: draft.value,
       mode: mode.value,
+      execution_target:
+        mode.value === "plan" ? executionTarget.value : "source",
       model: model.value || null,
       generation: generation.value,
       attachment_ids: (store.attachments[store.selectedSession] || []).map(
@@ -150,6 +153,9 @@ async function abandon() {
         </h1>
         <p class="muted">
           {{ session?.working_directory || "从左侧添加项目并创建对话。" }}
+        </p>
+        <p v-if="run?.execution?.kind === 'snapshot'" class="muted">
+          本轮使用固定只读快照 · 源码变化不影响在途读取
         </p>
       </div>
       <span v-if="run" class="badge" :class="run.status">{{
@@ -281,7 +287,7 @@ async function abandon() {
           尚未配置模型连接。<RouterLink to="/settings">前往设置</RouterLink>
         </div>
         <div v-if="busyOther" class="composer-notice">
-          同一源工作副本有任务运行中。当前后端暂时限制并发，请等待结束。
+          源工作副本正在使用中，暂不能开始源任务或制作新快照。已接收的快照对话可独立运行。
         </div>
         <div v-if="pending" class="composer-notice">
           上次请求的接收结果待确认。<button
@@ -315,8 +321,17 @@ async function abandon() {
             <select v-model="mode" aria-label="运行模式">
               <option value="auto">Auto · 风险操作询问</option>
               <option value="plan">Plan · 只读分析</option>
-              <option value="agent">Agent · 自动批准风险操作</option></select
-            ><select v-model="model" aria-label="本次模型">
+              <option value="agent">Agent · 自动批准风险操作</option>
+            </select>
+            <select
+              v-if="mode === 'plan'"
+              v-model="executionTarget"
+              aria-label="只读执行位置"
+            >
+              <option value="source">当前源码 · 独占读取</option>
+              <option value="snapshot">固定快照 · 可并发</option>
+            </select>
+            <select v-model="model" aria-label="本次模型">
               <option v-for="item in models" :key="item" :value="item">
                 {{ item }}
               </option></select
@@ -373,6 +388,14 @@ async function abandon() {
         </details>
         <p v-if="mode === 'agent'" class="inline-warning">
           Agent 模式会自动批准本轮风险工具，请确认项目与任务范围。
+        </p>
+        <p
+          v-if="mode === 'plan' && executionTarget === 'snapshot'"
+          class="muted"
+        >
+          需要 Git 项目和可用
+          HEAD。快照排除密钥、链接、二进制及过大文件；本轮使用固定
+          Skills，不连接 MCP 或读取源目录索引。Continue 继续使用原快照。
         </p>
         <small class="muted"
           >⌘ / Ctrl + Enter 发送 · 切换页面不会停止运行 · 本地 Shell

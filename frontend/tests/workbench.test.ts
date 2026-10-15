@@ -28,11 +28,27 @@ afterEach(() => {
 const input = {
   prompt: "修复测试",
   mode: "auto",
+  execution_target: "source" as const,
   generation: {},
   attachment_ids: [],
   model: null,
 };
 describe("request identity and UI isolation", () => {
+  it("keeps source ownership exclusive while admitted snapshots can overlap", () => {
+    const store = useWorkbench();
+    store.selectedWorkspace = session.workspace_id;
+    store.sessions[session.workspace_id] = [
+      { ...session, status: "running", execution: { kind: "snapshot" } },
+    ];
+    expect(store.workspaceBusy).toBe(false);
+    store.sessions[session.workspace_id]!.push({
+      ...session,
+      session_id: "source",
+      status: "running",
+      execution: { kind: "source" },
+    });
+    expect(store.workspaceBusy).toBe(true);
+  });
   it("keeps the same idempotency key after an ambiguous network failure", async () => {
     const submit = vi
       .spyOn(api, "submit")

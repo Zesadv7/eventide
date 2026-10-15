@@ -1,5 +1,6 @@
 import type { components } from "./schema";
-import { ApiError, request } from "./client";
+import { request } from "./client";
+import { durableMutation } from "./mutations";
 
 export type PackageInput = components["schemas"]["PackageBody"];
 export type SkillConfiguration =
@@ -52,36 +53,8 @@ export interface SkillDiff {
 const id = encodeURIComponent;
 const root = (workspace: string) => `/api/workspaces/${id(workspace)}/skills`;
 
-// Retain only request fingerprints and identities, never local paths or ZIP bytes.
-// An uncertain retry reuses its original identity even after a page reload.
-async function mutate<T>(
-  path: string,
-  method: string,
-  body: unknown,
-): Promise<T> {
-  const encoded = JSON.stringify(body);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`${method}:${path}:${encoded}`),
-  );
-  const storage = `eventide.skill-request.${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`;
-  const key = sessionStorage.getItem(storage) || crypto.randomUUID();
-  sessionStorage.setItem(storage, key);
-  try {
-    const result = await request<T>(path, {
-      method,
-      body: encoded,
-      headers: { "Idempotency-Key": key },
-    });
-    sessionStorage.removeItem(storage);
-    return result;
-  } catch (error) {
-    if (error instanceof ApiError && [403, 404, 422].includes(error.status))
-      sessionStorage.removeItem(storage);
-    // A 409 may be an unresolved prior write: never automatically create a new identity.
-    throw error;
-  }
-}
+const mutate = <T>(path: string, method: string, body: unknown) =>
+  durableMutation<T>("skill", path, method, body);
 export const skillsApi = {
   status: (workspace: string) => request<SkillStatus>(root(workspace)),
   bundled: () => request<PackagePreview[]>("/api/skills/bundled"),

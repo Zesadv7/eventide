@@ -116,3 +116,131 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
   });
   expect(errors).toEqual([]);
 });
+
+test("real budgets API: price versions, zero admission limit, reload and shared Continue", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("./#/usage");
+  await page
+    .getByRole("button", { name: "当前项目全部对话", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "共享预算", exact: true }),
+  ).toBeVisible();
+  await page.getByText(/管理价格版本（/).click();
+  await page
+    .getByLabel("价格对应的模型", { exact: true })
+    .fill("vue-fixture-model");
+  await page.getByLabel("每百万 Token 单价", { exact: true }).fill("1");
+  await page.getByRole("button", { name: "保存价格版本", exact: true }).click();
+  await expect(
+    page.getByText(
+      "价格版本已保存。历史费用快照保留原版本，新价格用于后续请求。",
+    ),
+  ).toBeVisible();
+  await page
+    .getByLabel("计费类别", { exact: true })
+    .selectOption("output_tokens");
+  await page.getByLabel("每百万 Token 单价", { exact: true }).fill("2");
+  await page.getByRole("button", { name: "保存价格版本", exact: true }).click();
+  await expect(page.getByText(/管理价格版本（2 条）/)).toBeVisible();
+  await page.getByLabel("预算开关", { exact: true }).selectOption("true");
+  await page.getByLabel("Token 上限", { exact: true }).fill("0");
+  await page.getByRole("button", { name: "保存预算", exact: true }).click();
+  await expect(
+    page.getByText("已达到预算阈值，禁止新模型请求。"),
+  ).toBeVisible();
+  await page.reload();
+  await page
+    .getByRole("button", { name: "当前项目全部对话", exact: true })
+    .click();
+  await expect(page.getByLabel("Token 上限", { exact: true })).toHaveValue("0");
+  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await page.getByRole("textbox", { name: "任务输入" }).fill("预算阻止场景");
+  await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
+  await expect(page.getByText("本轮已停驻", { exact: true })).toBeVisible();
+  await expect(page.locator(".parked-card")).toContainText("token_budget");
+  const conversation = page.url();
+  await page.getByRole("link", { name: "▥ 用量", exact: true }).click();
+  await page.getByRole("button", { name: "最近运行", exact: true }).click();
+  await expect(
+    page
+      .locator(".stat-grid article")
+      .filter({ hasText: "调用尝试" })
+      .locator("strong"),
+  ).toHaveText("0");
+  await page
+    .getByRole("button", { name: "当前项目全部对话", exact: true })
+    .click();
+  await page.getByLabel("预算开关", { exact: true }).selectOption("false");
+  await page.getByRole("button", { name: "保存预算", exact: true }).click();
+  await expect(page.getByText("已关闭这一范围的预算限制。")).toBeVisible();
+  await page.goto(conversation);
+  await page.getByRole("button", { name: "检查并继续", exact: true }).click();
+  await expect(
+    page.getByText("已读取项目：预算阻止场景", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "▥ 用量", exact: true }).click();
+  await page.getByRole("button", { name: "最近运行", exact: true }).click();
+  await expect(page.getByText("CNY 已知费用", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "费用估算" })).toContainText(
+    "当前范围估算完整",
+  );
+  await page.screenshot({
+    path: "test-results/budget-costs.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".sidebar")).not.toBeInViewport();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: "test-results/budget-mobile.png",
+    fullPage: true,
+  });
+  expect(errors).toEqual([]);
+});
+
+test("real snapshot API: concurrent project conversations and independent stop", async ({
+  page,
+  context,
+}) => {
+  await page.goto("./#/chat");
+  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await page.getByLabel("运行模式", { exact: true }).selectOption("plan");
+  await page
+    .getByLabel("只读执行位置", { exact: true })
+    .selectOption("snapshot");
+  await page.getByRole("textbox", { name: "任务输入" }).fill("并发快照场景 A");
+  await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
+  await expect(
+    page.getByText("本轮使用固定只读快照 · 源码变化不影响在途读取"),
+  ).toBeVisible();
+  const first = page.url();
+  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await page.getByLabel("运行模式", { exact: true }).selectOption("plan");
+  await page
+    .getByLabel("只读执行位置", { exact: true })
+    .selectOption("snapshot");
+  await page.getByRole("textbox", { name: "任务输入" }).fill("并发快照场景 B");
+  await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "■ 停止", exact: true }),
+  ).toBeVisible();
+  const monitor = await context.newPage();
+  await monitor.goto(first);
+  await expect(
+    monitor.getByRole("button", { name: "■ 停止", exact: true }),
+  ).toBeVisible();
+  await monitor.getByRole("button", { name: "■ 停止", exact: true }).click();
+  await expect(monitor.getByText("本轮已停驻", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("快照已完成：并发快照场景 B", { exact: true }),
+  ).toBeVisible({ timeout: 15000 });
+  await page.reload();
+  await expect(
+    page.getByText("本轮使用固定只读快照 · 源码变化不影响在途读取"),
+  ).toBeVisible();
+  await monitor.close();
+});

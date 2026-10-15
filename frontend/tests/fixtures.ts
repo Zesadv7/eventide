@@ -5,6 +5,7 @@ import type {
   GenerationState,
   UsageLedger,
 } from "../src/api/types";
+import type { BudgetStatus, Costs } from "../src/api/budgets";
 export const provider: ProviderStatus = {
   provider: "openai_responses",
   model: "fixture-model",
@@ -66,4 +67,57 @@ export const ledger: UsageLedger = {
   unknown_attempts: 1,
   incomplete_attempts: 1,
   complete: false,
+};
+export const costs: Costs = {
+  known_costs: {},
+  estimated_usage_costs: {},
+  unknown_attempts: 1,
+  estimated_attempts: 0,
+  unpriced_attempt_ids: ["attempt-1"],
+  historical_unreserved_attempt_ids: [],
+  complete: false,
+  latest: [],
+  history: [],
+  usage: ledger,
+  attempt_count: 1,
+  timezone: "UTC",
+};
+export const budgetStatus: BudgetStatus = {
+  timezone: "UTC",
+  budgets: [
+    {
+      kind: "project",
+      identity: "project-1",
+      token_limit: null,
+      actual_tokens: 0,
+      reserved_tokens: 42,
+      committed_tokens: 42,
+      unsettled_attempts: 1,
+      remaining_tokens: null,
+      warning: false,
+      blocked: false,
+      configuration_hash: "a".repeat(64),
+    },
+  ],
+  reservations: [
+    {
+      attempt_id: "attempt-1",
+      run_id: "run-1",
+      session_id: "session-1",
+      status: "unsettled",
+      reserved_tokens: 42,
+      actual_tokens: null,
+      usage_source: "unknown",
+      input_estimate: 32,
+      output_estimate: 10,
+      estimate_method: "serialized_utf8_bytes_v1",
+      reserved_at: "2026-10-16T00:00:00+00:00",
+      context: {
+        project_id: "project-1",
+        root_run_id: "run-1",
+        delivery_id: null,
+      },
+      audit: [],
+    },
+  ],
 };

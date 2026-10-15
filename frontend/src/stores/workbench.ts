@@ -63,7 +63,11 @@ export const useWorkbench = defineStore("workbench", () => {
       null,
   );
   const workspaceBusy = computed(() =>
-    currentSessions.value.some((s) => active(s.status)),
+    currentSessions.value.some(
+      (s) =>
+        active(s.status) &&
+        (s.execution || s.latest_run?.execution)?.kind !== "snapshot",
+    ),
   );
   let selectionVersion = 0;
   const refreshVersions: Record<string, number> = {};

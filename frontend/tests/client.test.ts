@@ -42,6 +42,7 @@ describe("HTTP identity contract", () => {
       generation: { temperature: 0 },
       attachment_ids: [],
       mode: "auto",
+      execution_target: "source" as const,
       model: null,
     };
     const fetch = vi.fn().mockResolvedValue(

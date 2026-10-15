@@ -4,6 +4,9 @@ export type RunInput = components["schemas"]["RunBody"];
 export type ProviderInput = components["schemas"]["ProviderConfigBody"];
 export interface Workspace {
   workspace_id: string;
+  project_id?: string;
+  source_workspace_id?: string;
+  kind?: "source" | "worktree";
   name: string;
   path: string;
   git_branch?: string | null;
@@ -22,6 +25,14 @@ export interface Run {
   tool_calls?: number;
   started_at?: number;
   usage?: Record<string, number>;
+  execution?: Execution;
+}
+export interface Execution {
+  kind: "source" | "snapshot";
+  workspace_id?: string;
+  snapshot_id?: string;
+  working_directory?: string;
+  skipped?: number;
 }
 export interface Approval {
   approval_id: string;
@@ -39,6 +50,7 @@ export interface Session {
   working_directory: string;
   archived: boolean;
   latest_run: Run | null;
+  execution?: Execution;
   task_plan?: Array<{
     id: string;
     content: string;

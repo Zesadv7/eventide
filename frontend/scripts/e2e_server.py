@@ -32,6 +32,10 @@ def main() -> None:
                 yield ModelStreamEvent("text_delta", text="正在等待工具准备。" * 50)
                 await asyncio.sleep(30)
                 response = ModelResponse(text="不应完成", usage=usage)
+            elif "并发快照场景" in prompt:
+                yield ModelStreamEvent("text_delta", text="正在分析独立只读快照。" * 50)
+                await asyncio.sleep(8)
+                response = ModelResponse(text="快照已完成：" + prompt, usage=usage)
             elif "审批场景" in prompt:
                 response = self._approval(step, usage)
             elif "停驻场景" in prompt:

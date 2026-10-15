@@ -137,7 +137,7 @@ Project 将一个本地源码项目与它的 Git worktree 工作副本聚合起�
 
 ## 同项目 Plan 快照并发
 
-HTTP 创建 Run 时传 `execution_target: "snapshot"` 和 `mode: "plan"`，或 Python 使用 `RunRequest(..., mode="plan", execution_target="snapshot")`，即可让不同 Session 在同一个项目上同时调查。省略 `execution_target` 仍使用原来的 `source` 执行方式；此切片不改变旧 CLI。一个 Session 同时只能执行一个 Run。Run 和 Session 查询返回 `execution`，说明实际使用源目录还是哪个固定快照。
+在 Vue 对话页选择“Plan · 只读分析”及“固定快照 · 可并发”，即可创建隔离调查；页面显示本轮快照状态，停止只影响当前 Run。HTTP 创建 Run 时传 `execution_target: "snapshot"` 和 `mode: "plan"`，或 Python 使用 `RunRequest(..., mode="plan", execution_target="snapshot")`，即可让不同 Session 在同一个项目上同时调查。省略 `execution_target` 仍使用原来的 `source` 执行方式；此切片不改变旧 CLI。一个 Session 同时只能执行一个 Run。Run 和 Session 查询返回 `execution`，说明实际使用源目录还是哪个固定快照。
 
 接收时短暂独占源 Workspace，从当前 Git 可见源码（包含未提交改动）创建持久副本，复制前后验证 checkpoint。快照要求有可信 Git HEAD；最多 2,000 个候选文件、10 MiB 文本，单文件最多 1 MiB；忽略、密钥、链接、二进制与过大文件排除，排除数在 `execution.skipped` 显示。模型运行期间不占源目录锁，其他 Session 的快照和直接源操作可以继续；新快照不能在正在直接写源目录时创建。
 
@@ -190,7 +190,7 @@ uv run eventide trace run_example ./trace.json
 uv run --extra telemetry eventide trace run_example --otel-endpoint http://127.0.0.1:4318/v1/traces
 ```
 
-默认离线 JSON；只有显式 endpoint 才发送 OTLP HTTP，依赖 `telemetry` extra。出口只含固定类别、哈希身份、状态、耗时和已观测用量，不发送正文、参数、工具结果或密钥。跨父子费用汇总使用各 Run 自身模型事件，避免把父 inclusive 用量再叠加子用量；失败/重试未返回用量会标为不完整，不推测费用。供应商未返回 usage 时不再伪造零值；缓存和推理明细作为可选字段保留，不重复加到总量。Anthropic 的总输入按未缓存、缓存读取和缓存创建之和归一化，其他供应商按其总输入口径处理。当前页面和软预算仍使用兼容汇总，完整调用账本与费用页面按 U1/U3 分步接入。
+默认离线 JSON；只有显式 endpoint 才发送 OTLP HTTP，依赖 `telemetry` extra。出口只含固定类别、哈希身份、状态、耗时和已观测用量，不发送正文、参数、工具结果或密钥。跨父子费用汇总使用各 Run 自身模型事件，避免把父 inclusive 用量再叠加子用量；失败/重试未返回用量会标为不完整，不推测费用。供应商未返回 usage 时不再伪造零值；缓存和推理明细作为可选字段保留，不重复加到总量。Anthropic 的总输入按未缓存、缓存读取和缓存创建之和归一化，其他供应商按其总输入口径处理。Vue用量页使用独立尝试账本及固定价格快照；兼容的Run已观测软限仍独立保留，完整U1/U3验收见AGENTS.md。
 
 ## 受控只读 Agent 协作
 
@@ -451,7 +451,7 @@ Vue 的「Skills」页支持以下流程：
 
 ## Vue 工作台（迁移中）
 
-`frontend/` 提供 Vue 3、TypeScript、Vite、Vue Router 和 Pinia 工作台。已接入真实项目/会话、对话记录、流式临时预览、审批、停止、Continue、附件、模型连接、生成参数，以及按请求尝试去重的 Run/Session 用量。切页或关闭观察连接不会停止后台运行；草稿按 Session 保存在当前浏览器标签页，模型密钥只保留在设置表单内存并在保存后清空。
+`frontend/` 提供 Vue 3、TypeScript、Vite、Vue Router 和 Pinia 工作台。已接入真实项目/会话、对话记录、流式临时预览、审批、停止、Continue、附件、模型连接、生成参数，以及按请求尝试去重的 Run/Session/项目/UTC每日用量与费用。切页或关闭观察连接不会停止后台运行；草稿按 Session 保存在当前浏览器标签页，模型密钥只保留在设置表单内存并在保存后清空。
 
 启动服务后访问 `http://127.0.0.1:8000/workbench/` 使用 Vue 工作台；页面、脚本和样式随 Python 安装包提供，使用者无需安装 Node。根地址旧页面保留至 X 阶段迁移验收结束。构建资源缺失时工作台返回明确的503，后端API仍可用。开发前端时先启动同机 API，再运行：
 
@@ -463,7 +463,7 @@ npm run dev
 
 需要 Node.js 22.12 及以上。默认代理到 `http://127.0.0.1:8000`，可通过 `EVENTIDE_API_URL` 指定本机 API 地址；代理保留浏览器 Host，与后端同源写请求检查配合，不开放任意 CORS。模型列表仅在用户点击“联网刷新模型列表”后探测，进入页面不会自动发起模型网络请求。
 
-Skills 已接入导入、版本、配置、诊断和运行加载记录。知识索引、评测与交付管理页面尚待接入；费用、共享预算、每日/项目用量和输入组成分析仍由后续步骤实现，用量缺失显示“未报告”。
+Skills 已接入导入、版本、配置、诊断和运行加载记录。用量页已提供项目、Run与UTC每日预算开关、80%及超限提示、未结算请求的显式核对和不可变价格版本。费用按币种分列，调用明细可追溯计价类别与价格版本，缺失用量或价格显示未知。知识索引、评测与交付管理页面，以及输入组成分析仍待后续步骤。
 
 前端验证与接口类型生成：
 
@@ -502,4 +502,8 @@ RuntimeHost 的主Agent、摘要和只读worker请求现已共用预留/结算�
 
 预算控制写入若确定尚未生效，错误响应携带`X-Eventide-Mutation-Outcome: rejected`，同键重放也保留标记；客户端可以在条件满足后换新键重试。例如正在生成时不能核对未知用量，生成结束后应使用新键。没有此标记的失败或409仍需保留原键并检查当前状态，不能据此推断操作没有发生。
 
-当前没有精确tokenizer，输入采用`serialized_utf8_bytes_v1`序列化UTF-8字节数估算、输出预留完整请求上限；图片等内联数据可能明显高估，不能视为实际Token或计费保证。估算只写数值和方法，不写提示正文或附件。预算Vue控制面及P调度仍待接入；模型连接探测与API embedding尚未纳入此Run派发控制，embedding按C阶段补齐。旧调用不补造预留/费用。
+当前没有精确tokenizer，输入采用`serialized_utf8_bytes_v1`序列化UTF-8字节数估算、输出预留完整请求上限；图片等内联数据可能明显高估，不能视为实际Token或计费保证。估算只写数值和方法，不写提示正文或附件。Vue预算和费用控制面已接入，持久调度及交付页面仍待后续步骤；模型连接探测与API embedding尚未纳入此Run派发控制，embedding按C阶段补齐。旧调用不补造预留/费用。
+
+Vue用量页的配置草稿不会被后台轮询覆盖；旧标签配置冲突时须重新读取后再保存。价格由用户依据供应商价目填写，生效时间明确为UTC，新增版本不改历史报告。未知消费默认保持预留，只有明确填写已核对总量及理由才会调整预算；页面不自动重试结果未知的写请求。
+
+2026-10-16预算/快照页面集成验证：35项前端回归、4条真实API浏览器旅程、后端965通过/5项默认Docker跳过（覆盖93.79%），Ruff/Mypy77模块和离线smoke12/12通过。最新镜像再次验证非root、3个静态资源、同源管理与重启持久化，90项真实容器及关联回归通过；浏览器和容器验证均使用隔离fixture，无付费模型调用。
