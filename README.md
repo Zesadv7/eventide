@@ -357,7 +357,7 @@ uv run eventide run "调用 demo MCP echo 工具"
 
 ## 使用知识检索
 
-RAG 索引由用户显式构建，不会在文件变化时自动刷新。v0.4 只索引 Git Workspace 中已跟踪及未忽略的未跟踪 UTF-8 文本；二进制、符号链接、超过 1 MiB 的文件以及 `.git/`、`.eventide/` 会跳过。索引是可重建的派生数据，保存在 Workspace 的 `.eventide/index.sqlite`，不进入 Git：
+RAG 索引由用户显式构建，不会在文件变化时自动刷新。v0.4 只索引 Git Workspace 中已跟踪及未忽略的未跟踪 UTF-8 文本；二进制、文件或祖先目录的符号链接、超过 1 MiB 的文件以及 `.git/`、`.eventide/` 会跳过。每次读取限制为 1 MiB 加一个检测字节，避免文件增长后突破读取上限。索引是可重建的派生数据，保存在 Workspace 的 `.eventide/index.sqlite`，不进入 Git：
 
 ```bash
 uv run eventide rag build --workspace /path/to/project
@@ -365,7 +365,7 @@ uv run eventide rag search "where is verify_token called" --workspace /path/to/p
 uv run eventide rag eval evals/retrieval.yaml
 ```
 
-`rag build` 默认增量更新；embedding provider、模型、维度或算法身份变化时会拒绝混用旧向量，需要显式加 `--force`。默认 `HashEmbedder` 完全离线、确定性且零额外依赖，只用于验证切块、索引、融合、工具和评测机制，**不代表真实语义检索质量**。需要语义 embedding 时可配置 OpenAI-compatible endpoint：
+`rag build` 默认按内容 SHA-256 增量更新；相同时间戳和文件大小也不能掩盖内容变化，未改文件复用向量、删除文件同步移除索引。embedding provider、模型、地址、维度、算法或切块配置变化时会拒绝混用旧向量，需要显式加 `--force`；损坏的已存指纹也不会被普通增量构建悄悄修复。默认 `HashEmbedder` 完全离线、确定性且零额外依赖，只用于验证切块、索引、融合、工具和评测机制，**不代表真实语义检索质量**。需要语义 embedding 时可配置 OpenAI-compatible endpoint：
 
 ```dotenv
 EVENTIDE_EMBEDDING_PROVIDER=openai_compatible
@@ -379,6 +379,8 @@ API Key 未单独配置时回退 `EVENTIDE_API_KEY`。Hash 模式可通过 `EVEN
 索引有效时，下一个 Run 会动态获得只读工具 `search_knowledge(query, k)`；没有索引时工具不会出现在模型目录中。检索工具在 Auto、Plan、Agent 三种模式下都沿用 `ToolExecutor`、`PolicyEngine` 和 canonical `tool.prepared` / `tool.completed` 事件，不新增旁路或专用事件。检索评测使用标注的 query→期望文件计算 recall@5 与 MRR，不调用模型评判检索质量。
 
 查询以只读事务固定索引快照，后台重建不会让两路候选混用不同代的 chunk。损坏或不兼容的索引会使工具暂不注册，不影响普通 Run；查询不会自动创建或修复数据库。离线评测强制本地 Hash embedding，忽略本机 API embedding 配置；smoke 还会检查检索工具确实返回成功，而不只是被调用过。
+
+`.eventide` 必须是项目中的真实目录，数据库及 WAL/SHM/journal 文件不能通过符号链接、目录重定向或硬链接指向其他位置。连接和提交前会检查目录与文件身份；源码、索引代次或路径在构建期间变化会拒绝发布，保留已提交快照。构建期间应避免移动项目、重定向索引或编辑语料；这些检查不锁住外部文件操作，也不提供操作系统沙箱。
 
 ### 检索对照实验
 

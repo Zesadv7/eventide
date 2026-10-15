@@ -6,6 +6,7 @@ import hashlib
 import math
 import os
 import sqlite3
+import stat as stat_module
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -135,26 +136,90 @@ class IndexStore:
         if git_root is None:
             raise ValueError("RAG indexing requires a Git workspace")
         self.workspace = root
+        self._workspace_identity = self._identity(root)
         self.path = root / INDEX_RELATIVE_PATH
         self._snapshot: sqlite3.Connection | None = None
 
+    @staticmethod
+    def _identity(path: Path) -> tuple[int, int]:
+        info = path.stat()
+        return info.st_dev, info.st_ino
+
+    def _validate_workspace(self) -> None:
+        try:
+            if (
+                self.workspace.resolve(strict=True) == self.workspace
+                and self.workspace.is_dir()
+                and self._identity(self.workspace) == self._workspace_identity
+            ):
+                return
+        except (OSError, RuntimeError):
+            pass
+        raise ValueError("Knowledge index Workspace path changed; reopen the Workspace")
+
+    def _validate_index_path(self) -> None:
+        """Reject redirected index artifacts before SQLite can open or create them."""
+        self._validate_workspace()
+        if self.path != self.workspace / INDEX_RELATIVE_PATH:
+            raise ValueError("Knowledge index path must remain inside its Workspace")
+        paths = [self.path.parent, self.path]
+        paths.extend(self.path.with_name(self.path.name + suffix) for suffix in (
+            "-wal", "-shm", "-journal",
+        ))
+        for path in paths:
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                continue
+            directory = path == self.path.parent
+            valid_type = stat_module.S_ISDIR if directory else stat_module.S_ISREG
+            if (
+                not valid_type(info.st_mode)
+                or path.resolve(strict=True) != path
+                or (not directory and info.st_nlink != 1)
+            ):
+                raise ValueError("Knowledge index path contains a link or unsupported file type")
+
+    def _index_identity(self) -> tuple[tuple[int, int], tuple[int, int]]:
+        self._validate_index_path()
+        return self._identity(self.path.parent), self._identity(self.path)
+
     def _connect(self, *, create: bool) -> sqlite3.Connection:
+        self._validate_index_path()
         if create:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         elif not self.path.is_file():
             raise ValueError("No knowledge index; run 'eventide rag build'")
+        self._validate_index_path()
+        # Create an empty regular file first so even a new SQLite connection can
+        # be checked against a known inode before its first SQL statement.
+        if create:
+            try:
+                descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                pass
+            else:
+                os.close(descriptor)
+        identity = self._index_identity()
         target = str(self.path) if create else f"{self.path.as_uri()}?mode=ro"
         connection = sqlite3.connect(target, uri=not create, timeout=5, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 5000")
-        if create:
-            connection.execute("PRAGMA journal_mode = WAL")
+        try:
+            if self._index_identity() != identity:
+                raise RuntimeError("Knowledge index path changed while opening; retry")
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA busy_timeout = 5000")
+            if create:
+                connection.execute("PRAGMA journal_mode = WAL")
+        except BaseException:
+            connection.close()
+            raise
         return connection
 
     @contextmanager
     def snapshot(self) -> Iterator[IndexStore]:
         """Pin metadata and both retrieval paths to one WAL read transaction."""
+        self._validate_workspace()
         reader = IndexStore(self.workspace)
         connection = reader._connect(create=False)
         try:
@@ -210,6 +275,7 @@ class IndexStore:
         return sorted(os.fsdecode(item) for item in raw.split(b"\0") if item)
 
     def _scan(self, *, include_chunks: bool, code_structure: bool = False) -> _Scan:
+        self._validate_workspace()
         sources: list[_SourceFile] = []
         signature: list[tuple[str, str]] = []
         skipped = 0
@@ -222,17 +288,38 @@ class IndexStore:
                 continue
             candidate = self.workspace / Path(*parts)
             try:
-                if candidate.is_symlink() or not candidate.is_file():
+                if (
+                    relative != raw_path
+                    or PurePosixPath(relative).is_absolute()
+                    or ".." in parts
+                    or "\\" in raw_path
+                    or candidate.resolve(strict=True) != candidate
+                    or not candidate.is_file()
+                ):
                     skipped += 1
                     signature.append((relative, "skipped"))
                     continue
-                stat = candidate.stat()
-                if stat.st_size > MAX_SOURCE_BYTES:
-                    skipped += 1
-                    signature.append((relative, f"large:{stat.st_mtime_ns}:{stat.st_size}"))
-                    continue
-                body = candidate.read_bytes()
-            except OSError:
+                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                with os.fdopen(os.open(candidate, flags), "rb") as stream:
+                    stat = os.fstat(stream.fileno())
+                    if (
+                        not stat_module.S_ISREG(stat.st_mode)
+                        or candidate.resolve(strict=True) != candidate
+                        or self._identity(candidate) != (stat.st_dev, stat.st_ino)
+                    ):
+                        skipped += 1
+                        signature.append((relative, "skipped"))
+                        continue
+                    body = (
+                        stream.read(MAX_SOURCE_BYTES + 1)
+                        if stat.st_size <= MAX_SOURCE_BYTES else b""
+                    )
+                    if stat.st_size > MAX_SOURCE_BYTES or len(body) > MAX_SOURCE_BYTES:
+                        skipped += 1
+                        size = max(stat.st_size, len(body))
+                        signature.append((relative, f"large:{stat.st_mtime_ns}:{size}"))
+                        continue
+            except (OSError, RuntimeError):
                 skipped += 1
                 signature.append((relative, "unreadable"))
                 continue
@@ -265,6 +352,7 @@ class IndexStore:
                     chunks=chunks,
                 )
             )
+        self._validate_workspace()
         return _Scan(
             tuple(sources),
             skipped,
@@ -340,6 +428,7 @@ class IndexStore:
             raise ValueError("Embedding profile is required with a custom provider")
         connection = self._connect(create=True)
         try:
+            index_identity = self._index_identity()
             self._ensure_schema(connection)
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             generation = self._generation(connection)
@@ -349,6 +438,15 @@ class IndexStore:
                 for row in connection.execute("SELECT path, content_hash FROM files")
             }
             stored_chunking = meta.get("chunking_fingerprint")
+            stored_chunking_profile = meta.get("chunking_profile")
+            if not force and (
+                (stored_chunking is None) != (stored_chunking_profile is None)
+                or (
+                    stored_chunking_profile is not None
+                    and chunking_fingerprint(stored_chunking_profile) != stored_chunking
+                )
+            ):
+                raise ValueError("Knowledge index chunking fingerprint is invalid; rebuild --force")
             if (
                 existing
                 and not force
@@ -363,6 +461,8 @@ class IndexStore:
             ).fetchone()
             chunk_total = int(chunk_total)
             null_total = int(null_total or 0)
+            if version == 2 and not force:
+                self._validated_embedding_profile(meta)
             stored_dimension = (
                 int(meta["embedding_dimension"])
                 if meta.get("embedding_dimension")
@@ -418,6 +518,8 @@ class IndexStore:
             if stored_dimension is not None and not force and dimension != stored_dimension:
                 raise ValueError("Embedding dimension changed; rebuild with --force")
             resolved_profile = profile.resolved(dimension)
+            if self._index_identity() != index_identity:
+                raise RuntimeError("Knowledge index path changed during build; retry")
             connection.execute("BEGIN IMMEDIATE")
             try:
                 if self._generation(connection) != generation:
@@ -427,6 +529,8 @@ class IndexStore:
                     raise RuntimeError("Workspace changed during index build; retry")
                 if chunking_identity(code_structure=code_structure) != chunking_profile:
                     raise RuntimeError("Chunking configuration changed during build; retry")
+                if self._index_identity() != index_identity:
+                    raise RuntimeError("Knowledge index path changed during build; retry")
                 if force:
                     connection.execute("DELETE FROM files")
                 else:
@@ -554,6 +658,10 @@ class IndexStore:
             if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 2:
                 raise ValueError("Knowledge index has no vectors; run 'eventide rag build'")
             meta = self._meta(connection)
+        return self._validated_embedding_profile(meta)
+
+    @staticmethod
+    def _validated_embedding_profile(meta: dict[str, str]) -> EmbeddingProfile:
         required = {
             "embedding_provider",
             "embedding_model",

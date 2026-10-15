@@ -163,7 +163,11 @@ RunBody 支持每次 Run 的 `mode`（auto/plan/agent，未知值按 auto 处理
 
 RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户显式运行 `eventide rag build` 后，Git Workspace 内 `.eventide/index.sqlite` 保存 `files`、带文件/行号/标题路径的 `chunks`、float32 embedding BLOB、FTS5 trigram 索引和 embedding fingerprint；数据库可随时删除重建，不进入 canonical Runtime schema 或 Event Log。v0.4 只枚举 `git ls-files --cached --others --exclude-standard` 可见的 UTF-8 文本，跳过 symlink、二进制、超过 1 MiB 的文件以及 `.git/`、`.eventide/`。增量判断以内容 SHA-256 为准；构建在写事务外完成读取、切块和 embedding，提交时重新核对语料与 index generation，并以单个 SQLite 事务替换文件、chunk、FTS 和 meta，因此查询只看到旧或新完整快照。
 
+C1 进一步固定 `IndexStore` 的 Workspace 目录身份。扫描拒绝非规范相对路径及任何祖先链接，打开文件后检查常规文件类型与身份，读取最多 1 MiB 加一个检测字节。索引只允许固定 `.eventide/index.sqlite` 路径；父目录、数据库与三个 SQLite 附属文件检查真实路径、文件类型与链接，数据库和附属文件拒绝硬链接。新建数据库先以独占创建取得已知文件身份，SQLite 打开后复核，失败关闭连接；构建在 embedding 完成后及提交扫描后再核对索引目录/数据库身份。链接与目录重定向拒绝，不改变 Runtime 的状态根配置或预算事实。
+
 Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源码和普通文本再使用 600～800 字符窗口及约 100 字符 overlap；每块保存准确的 1-based 闭区间行号。默认 HashEmbedder 用 SHA-256 token hashing 生成确定性本地向量，只验证离线机制，不声称具备学习得到的语义能力；可选 OpenAI-compatible provider 只在显式配置后惰性调用。provider、model、base URL、dimension 和算法版本组成 fingerprint，任何变化都要求 `--force`，避免比较来自不同向量空间的 BLOB。
+
+增量复用前同时验证已存 embedding 及切块指纹与其元数据一致，损坏时要求显式全量重建；不以写入新指纹掩盖旧向量身份不明。历史索引同时缺少切块元数据时仍按原固定窗口兼容，单项缺失或内容不一致则拒绝。未变化文件不重新 embedding，新增/改变/删除统一在一笔写事务生效；计算异常、源码漂移或另一个构建已提交新 generation 时，旧快照或另一个构建的获胜快照保持可读。此处仍是可重建索引，不建立第二运行事实源；embedding 网络请求治理属于后续 U1，未在 C1 扩充。
 
 读连接使用 SQLite URI `mode=ro`，不运行 schema 初始化。查询 embedding 在读事务外生成，随后在同一个 WAL 快照内重验 fingerprint、读取 dense 和 sparse 候选，防止重建复用 chunk ID 导致跨代融合。构建的第二次 manifest 检查在 `BEGIN IMMEDIATE` 之后、写入之前执行；它检测两次扫描之间的变化，但不等价于锁住工作区文件系统，用户仍应避免构建期间编辑语料。Host 将 SQLite 错误视为索引不可用。
 
