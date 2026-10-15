@@ -7,13 +7,16 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from eventide.models import RuntimeEvent, WorkspaceRecord
 from eventide.normalization import redact
 from eventide.projections import TERMINALS, MessagesProjection, RuntimeStateProjection
+
+_FactResult = TypeVar("_FactResult")
 
 
 class RuntimeStore:
@@ -340,10 +343,35 @@ class RuntimeStore:
                 self._decode(row)
                 for row in self._connection.execute(
                     "SELECT * FROM runtime_events WHERE partial=0 AND type IN ("
-                    + placeholders + ") ORDER BY ts,rowid",
+                    + placeholders + ") ORDER BY rowid",
                     types,
                 )
             ]
+
+    def transact_facts(
+        self,
+        session_id: str,
+        types: tuple[str, ...],
+        decide: Callable[
+            [list[dict[str, Any]]],
+            tuple[_FactResult, list[tuple[str, dict[str, Any]]]],
+        ],
+        *,
+        author: str = "runtime",
+    ) -> _FactResult:
+        """Read, decide and append in one SQLite transaction across writers.
+
+        The trusted callback is synchronous and must not mutate Store itself.
+        Session facts may reference terminated Runs without changing their history.
+        """
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            if self.get_session(session_id) is None:
+                raise ValueError(f"Session not found: {session_id}")
+            result, additions = decide(self.facts_by_type(types))
+            for event_type, payload in additions:
+                self._append_fact_locked(session_id, event_type, payload, author=author)
+            return result
 
     def append_fact(
         self,

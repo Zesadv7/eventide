@@ -37,7 +37,7 @@ RuntimeEvent 包含 event_id、session_id、严格递增 session_seq、turn_id�
 
 身份表不保存独立运行状态。消息与状态查询每次折叠事件，不依赖不可重建的缓存或 messages 表。`RuntimeStore` 是唯一存储入口；`append_message()` 仅作为导入/测试辅助追加 `message.imported`，生产 Agent loop 不调用它。
 
-全局控制面使用 `facts_by_type(types)` 在 Store 锁内读取指定类型的全部非 partial 事实，按时间及 rowid 排序，不受列表导航的 100 条分页影响；控制面不直接访问私有 SQLite 连接。
+全局控制面使用 `facts_by_type(types)` 在 Store 锁内读取指定类型的全部非 partial 事实，按 SQLite rowid 的追加顺序排序，不受列表导航的 100 条分页影响；控制面不直接访问私有 SQLite 连接。
 
 主要事件：
 
@@ -281,3 +281,16 @@ Vite采用相对资源地址与Hash Router，FastAPI通过StaticFiles挂载/work
 package_web.mjs在构建后替换专用eventide/workbench目录，写入每个产物的SHA-256与前端源码/锁文件/构建配置指纹。资源作为Python package-data提交和打包，源码安装与wheel使用者无需Node；维护者修改前端后必须重建。离线pytest校验源码指纹及全部资源，CI重建并比较版本库差异，再直接运行FastAPI静态页面浏览器旅程。
 
 wheel验证在临时目录解包并以隔离Python进程导入，断言Eventide来源为安装包，再通过TestClient获取页面、清单、所有资源及healthz。Docker多阶段构建只在web-build阶段使用Node，Python镜像复制新产物；本机无Docker，真实镜像构建和运行仍待外部验证。
+
+
+## 预算事务与价格版本底座（U2）
+
+RuntimeStore.transact_facts在BEGIN IMMEDIATE内读取指定事实、调用同步纯决策函数并追加事实，同一事务失败整体回滚；SQLite协调两个连接的竞争请求，Python锁只保护单连接。全局事实采用rowid追加顺序，不用可回拨的wall clock排列配置。新增控制面事实仍在runtime_events中，没有平行预算表、可变余额文件或分布式锁。
+
+BudgetLedger从budget.configured/reserved/settled/resolved派生状态，预留按attempt_id幂等；同身份不同内容拒绝。预算覆盖实际根Run及子Run、交付、项目和预留时的UTC日期，跨午夜不转移已派发消费。根身份由run.admitted/started父关系验证，同Run家族不能切换项目/交付归属；正式P1接线必须从Host控制事实推导项目和交付身份，不能接受模型或客户端自选归属。Continue可有新Run额度，交付/项目/当日桶保持累计。
+
+只有reported且同时具有input_tokens/output_tokens才释放预留并结算实际量。未知/estimated/partial继续保留预留；部分reported高于估算时保留已观察下界。完整用量后迟到的未知回执不降级状态；用户确认未知消费必须有独立身份、实际量和理由，配置/确认事实author=user。超限响应真实记录，后续请求拒绝，不宣称账单硬上限。
+
+CostLedger从同一预留/结算事实生成cost.estimated；price.registered按Provider/model/category/currency/effective_at固定版本，价格使用严格Decimal字符串。费用行从总量划分有价格的cache/reasoning子集；不一致的细项整组标未知，不能将超出总量的缓存作为已知费用。缺价格不显示免费，不同币种分别汇总；estimated用量费用独立于reported用量费用。首次费用快照固定当时采用的价格版本；重新估价必须显式引用旧快照并生成新身份，历史保留，汇总按每次尝试最新一份去重。
+
+当前是有测试的控制面底座，尚未从Host每次模型派发调用，未提供预算HTTP/UI，旧调用历史不伪造预留或价格。下一步需在P1项目身份和P调度中接入，并补齐所有失败/取消/流式/辅助调用的派发前预留及结算验证。

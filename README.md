@@ -469,3 +469,12 @@ uv run --project .. npm run test:e2e
 `npm run build` 同时将构建结果写入 `eventide/workbench/`，附源码指纹和资源SHA-256清单；修改前端后须重建并一起提交，Python测试会发现陈旧或缺失的产物。`EVENTIDE_E2E_BUILT=1 npm run test:e2e` 直接测试FastAPI托管页面，不启动Vite。安装包验证可运行 `uv build --wheel --out-dir .task_outputs/dist` 和 `uv run python frontend/scripts/check_wheel.py .task_outputs/dist/eventide-0.4.0-py3-none-any.whl`，后者在临时目录隔离导入wheel并检查资源及接口。
 
 Dockerfile 使用Node构建阶段和Python运行阶段，运行镜像不需要Node。当前主机没有Docker，尚未实测容器构建；CI定义和本地wheel测试不作为容器成功证据。
+
+
+## 共享预算与费用估算底座（U2 进行中）
+
+`BudgetLedger` 已提供Run、交付、项目及UTC日期四类Token额度的原子预留与结算。额度为null表示关闭，0阻止新请求；输入估算与输出预留共同占用额度，80%产生提示。完整供应商用量返回后按输入+输出结算；缺失、部分或估算用量继续保留预留，重启不消失，人工确认必须附理由并留审计。实际响应超出预留时保留真实消费，不削减成预算上限。
+
+`CostLedger` 使用版本化价格、Decimal和币种分别估价；缓存和推理细项只在相应价格配置存在时从总量中划分，不重复相加。无价格或用量不完整明确显示未知，估算Token对应的费用单独汇总；重估生成新事实，不改旧报告。
+
+这些组件已通过并发事务、恢复、父子归属、未知结算和价格回归。Host请求派发、项目身份绑定及Web预算页面仍待P/U2接入，当前用户运行仍沿用已有已观测Token软限；组件测试不能视为已启用预算控制，也不构成供应商账单硬上限。
