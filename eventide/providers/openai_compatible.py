@@ -65,6 +65,14 @@ def convert_messages(messages: list[dict[str, Any]], system: str) -> list[dict[s
             text = "\n".join(b.get("text", "") for b in content if b.get("type") == "text")
             calls = [b for b in content if b.get("type") == "tool_use"]
             item: dict[str, Any] = {"role": "assistant", "content": text or None}
+            for block in content:
+                if (
+                    block.get("type") == "provider_state"
+                    and block.get("provider") == "openai_compatible"
+                ):
+                    for state in block.get("items", []):
+                        if isinstance(state.get("reasoning_content"), str):
+                            item["reasoning_content"] = state["reasoning_content"]
             if calls:
                 item["tool_calls"] = [
                     {
@@ -101,7 +109,9 @@ class OpenAICompatibleProvider:
             from openai import AsyncOpenAI
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("The openai package is required for OpenAI-compatible use") from exc
-        self._client = AsyncOpenAI(api_key=settings.require_api_key(), base_url=settings.base_url)
+        self._client = AsyncOpenAI(
+            api_key=settings.require_api_key(), base_url=settings.base_url, max_retries=0,
+        )
 
     async def close(self) -> None:
         await self._client.close()
@@ -135,6 +145,9 @@ class OpenAICompatibleProvider:
             calls.append(ToolCall(raw_call.id, raw_call.function.name, arguments))
         usage_obj = getattr(response, "usage", None)
         usage = normalize_provider_usage("openai_compatible", usage_obj)
+        reasoning = getattr(message, "reasoning_content", None)
         return ModelResponse(
-            message.content or "", tuple(calls), choice.finish_reason or "stop", usage
+            message.content or "", tuple(calls), choice.finish_reason or "stop", usage,
+            ({"reasoning_content": reasoning},) if isinstance(reasoning, str) else (),
+            "openai_compatible",
         )

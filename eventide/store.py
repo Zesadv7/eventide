@@ -367,16 +367,19 @@ class RuntimeStore:
             )
 
     def generation_config(
-        self, scope: str, identity: str
+        self, scope: str, identity: str, model_identity: str | None = None,
     ) -> dict[str, Any]:
         """Latest immutable configuration event; no independent mutable fact table."""
         with self._lock:
+            where = " AND json_extract(payload_json,'$.model_identity')=?" if model_identity else ""
+            arguments = (scope, identity, model_identity) if model_identity else (scope, identity)
             row = self._connection.execute(
                 "SELECT payload_json FROM runtime_events WHERE partial=0 "
                 "AND type='generation.configured' "
                 "AND json_extract(payload_json,'$.scope')=? "
-                "AND json_extract(payload_json,'$.identity')=? ORDER BY rowid DESC LIMIT 1",
-                (scope, identity),
+                "AND json_extract(payload_json,'$.identity')=?" + where
+                + " ORDER BY rowid DESC LIMIT 1",
+                arguments,
             ).fetchone()
         return json.loads(row[0]) if row else {}
 
@@ -508,6 +511,36 @@ class RuntimeStore:
             parameters.append(limit)
         with self._lock:
             return [self._decode(row) for row in self._connection.execute(query, parameters)]
+
+    def usage_events(
+        self, *, session_id: str | None = None, run_id: str | None = None,
+        include_children: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Select exclusive call facts and optional descendants across all history pages."""
+        if (session_id is None) == (run_id is None):
+            raise ValueError("Choose exactly one Session or Run usage scope")
+        if session_id and self.get_session(session_id) is None:
+            raise ValueError("Session not found")
+        if run_id and self.get_run_identity(run_id) is None:
+            raise ValueError("Run not found")
+        selector = "session_id" if session_id else "id"
+        descendants = (
+            " UNION SELECT e.run_id FROM runtime_events e JOIN selected p "
+            "ON json_extract(e.payload_json,'$.parent_run_id')=p.id "
+            "WHERE e.type IN ('run.admitted','run.started') AND e.partial=0 "
+            "AND e.run_id IS NOT NULL"
+        ) if include_children else ""
+        with self._lock:
+            rows = self._connection.execute(
+                f"WITH RECURSIVE selected(id) AS (SELECT id FROM runs WHERE {selector}=?"
+                + descendants + ") SELECT e.*,s.workspace_id FROM runtime_events e "
+                "JOIN selected p ON e.run_id=p.id JOIN sessions s ON e.session_id=s.id "
+                "WHERE e.partial=0 AND e.type IN ('model.attempt_started',"
+                "'model.attempt_finished','model.response','context.summary_generated') "
+                "ORDER BY e.rowid",
+                (session_id or run_id,),
+            ).fetchall()
+        return [self._decode(row) for row in rows]
 
     def get_tool_result(self, session_id: str, run_id: str, call_id: str) -> dict[str, Any] | None:
         """Return one completed result only when both identities belong to the session."""

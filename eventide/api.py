@@ -28,6 +28,7 @@ from eventide.host import RuntimeHost
 from eventide.models import RunRequest, ToolCall
 from eventide.normalization import normalize, redact
 from eventide.secrets import SecretKeyError
+from eventide.usage import build_usage_ledger
 
 WEB_DIR = Path(__file__).with_name("web")
 
@@ -319,6 +320,22 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
             return agent_runtime.store.load_messages(session_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/sessions/{session_id}/usage")
+    async def session_usage(session_id: str, include_children: bool = True) -> dict[str, Any]:
+        await get_session(session_id)
+        return build_usage_ledger(agent_runtime.store.usage_events(
+            session_id=session_id, include_children=include_children,
+        ))
+
+    @app.get("/api/runs/{run_id}/usage")
+    async def run_usage(run_id: str, include_children: bool = True) -> dict[str, Any]:
+        try:
+            return build_usage_ledger(agent_runtime.store.usage_events(
+                run_id=run_id, include_children=include_children,
+            ))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/sessions/{session_id}/runs")
     async def list_runs(

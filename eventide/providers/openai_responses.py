@@ -102,7 +102,9 @@ class OpenAIResponsesProvider:
             from openai import AsyncOpenAI
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("The openai package is required for OpenAI Responses use") from exc
-        self._client = AsyncOpenAI(api_key=settings.require_api_key(), base_url=settings.base_url)
+        self._client = AsyncOpenAI(
+            api_key=settings.require_api_key(), base_url=settings.base_url, max_retries=0,
+        )
 
     async def close(self) -> None:
         await self._client.close()

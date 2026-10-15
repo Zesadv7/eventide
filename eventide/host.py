@@ -711,6 +711,7 @@ class RuntimeHost:
             identity = {
                 "request_id": request_id, "attempt_id": attempt_id, "attempt": attempt,
                 "kind": kind, "model": request.model, "generation": request.generation,
+                "max_output_tokens": request.max_tokens,
             }
             await self._emit(run_id, "model.attempt_started", identity, sink)
             try:
@@ -963,7 +964,9 @@ class RuntimeHost:
             GenerationCapabilities.model_validate(declared) if declared
             else capabilities(self.settings.provider, self.settings.base_url, model)
         )
-        session = self.store.generation_config("session", session_id) if session_id else {}
+        session = (
+            self.store.generation_config("session", session_id, identity) if session_id else {}
+        )
         # Session overrides are endpoint/model scoped; changing models does not carry them over.
         overrides = (
             session.get("generation", {}) if session.get("model_identity") == identity else {}
@@ -1043,6 +1046,7 @@ class RuntimeHost:
             layers, provider=self.settings.provider, base_url=self.settings.base_url, model=model,
             declared=GenerationCapabilities.model_validate(state["capabilities"]),
         )
+        generation.setdefault("max_output_tokens", self.settings.max_tokens)
         return {
             "mode": mode,
             "model": model,

@@ -33,6 +33,7 @@ class ModelResponse:
     stop_reason: str = "end_turn"
     usage: dict[str, int] = field(default_factory=dict)
     provider_items: tuple[dict[str, Any], ...] = ()
+    state_provider: str = "openai_responses"
 
     def content_blocks(self) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
@@ -40,7 +41,7 @@ class ModelResponse:
             blocks.append(
                 {
                     "type": "provider_state",
-                    "provider": "openai_responses",
+                    "provider": self.state_provider,
                     "items": list(self.provider_items),
                 }
             )

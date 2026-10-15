@@ -10,7 +10,6 @@ _USAGE_KEYS = {
     "input_tokens",
     "output_tokens",
     "total_tokens",
-    "max_output_tokens",
     "cached_tokens",
     "cache_creation_input_tokens",
     "cache_read_input_tokens",

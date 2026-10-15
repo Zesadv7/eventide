@@ -257,3 +257,63 @@ async def test_attempts_record_unknown_failures_and_distinct_identities(isolated
         assert attempts[0]["attempt_id"] != attempts[1]["attempt_id"]
     finally:
         await host.close()
+
+
+async def test_session_model_switch_and_default_limit_survive_restart(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    settings = replace(
+        settings_for(repo), state_dir=isolated_workspace / "state", max_steps=1, max_tokens=100
+    )
+    provider = ScriptedProvider(
+        [{"tool_calls": [{"id": "read", "name": "read_file", "arguments": {"path": "missing"}}]}]
+    )
+    host = RuntimeHost(settings, provider)
+    session = host.create_session()
+    for model, temperature in [("one", 0.1), ("two", 0.8)]:
+        host.configure_generation(model, {}, declared=DECLARED)
+        host.configure_generation(model, {"temperature": temperature}, session_id=session)
+    try:
+        assert host.generation_settings("one", session)["session"] == {"temperature": 0.1}
+        await host.run(RunRequest("read", session, model="one"))
+        assert provider.requests[0].max_tokens == 100
+    finally:
+        await host.close()
+    next_provider = ScriptedProvider([{"text": "done"}])
+    reopened = RuntimeHost(replace(settings, max_tokens=200), next_provider)
+    try:
+        assert reopened.generation_settings("two", session)["session"] == {"temperature": 0.8}
+        await reopened.continue_session(session)
+        assert next_provider.requests[0].generation["temperature"] == 0.1
+        assert next_provider.requests[0].max_tokens == 100
+    finally:
+        await reopened.close()
+
+
+async def test_compatible_reasoning_is_replayed_for_tool_roundtrip(isolated_workspace):
+    from eventide.providers.openai_compatible import convert_messages
+
+    provider = OpenAICompatibleProvider(replace(settings_for(isolated_workspace), api_key="fake"))
+    assert provider._client.max_retries == 0
+    await provider.close()
+
+    async def create(**kwargs):
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="next", tool_calls=[], reasoning_content="opaque reasoning"
+                    ),
+                    finish_reason="stop",
+                )
+            ]
+        )
+
+    provider._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    response = await provider.complete(ModelRequest("s", [], [], "m"))
+    message = {"role": "assistant", "content": response.content_blocks()}
+    assert convert_messages([message], "s")[1]["reasoning_content"] == "opaque reasoning"
+    from eventide.providers.openai_responses import convert_response_input
+
+    assert "opaque reasoning" not in str(convert_response_input([message]))

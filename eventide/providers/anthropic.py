@@ -61,6 +61,7 @@ class AnthropicProvider:
         self._client = AsyncAnthropic(
             api_key=settings.require_api_key(),
             base_url=settings.base_url,
+            max_retries=0,
         )
 
     async def close(self) -> None:
