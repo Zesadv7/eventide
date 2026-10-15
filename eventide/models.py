@@ -60,6 +60,7 @@ class RunRequest:
     attachment_ids: list[str] = field(default_factory=list)
     model: str | None = None
     generation: dict[str, Any] = field(default_factory=dict)
+    request_fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,6 +4,12 @@
 
 ## 现有接口（前端已依赖）
 
+### 浏览器写请求与运行幂等 —— 已实现
+
+写请求的Origin必须匹配本机服务源，cross-site/null/异常端口和DNS-rebinding来源拒绝；本机非浏览器客户端可省略Origin。没有放开CORS，开发前端应使用同源代理。
+
+Run与Continue接受可选`Idempotency-Key`（1–128个可见ASCII字符）。同Session/操作/键确定一个持久Run身份，内容hash写入admission。重试相同内容返回原202接收凭据，不新增消息、调用或turn；相同键不同内容409。接收尚未持久化的竞争请求可返回busy，客户端保留相同键稍后重试。幂等接收不等于自动重放工具，未知结果仍停驻。Skills导入和Delivery幂等将随对应控制面实现。
+
 ### 模型生成参数 —— 后端已实现，Vue 展示待迁移
 
 - `GET /api/generation/defaults?model=...` 返回 `model_identity/defaults/session/capabilities`，身份绑定Provider、endpoint和模型。

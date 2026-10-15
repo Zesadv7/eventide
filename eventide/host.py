@@ -1062,8 +1062,12 @@ class RuntimeHost:
         await self._reserve_run(session_id, run_id, request)
         return run_id
 
-    async def admit_continue(self, session_id: str, run_id: str) -> str:
-        return await self._reserve_run(session_id, run_id, None)
+    async def admit_continue(
+        self, session_id: str, run_id: str, *, request_fingerprint: str | None = None,
+    ) -> str:
+        return await self._reserve_run(
+            session_id, run_id, None, request_fingerprint=request_fingerprint,
+        )
 
     async def _admission_check(self, function: Any, *args: Any) -> Any:
         """Retain the Store/Workspace owner until a threaded check has finished."""
@@ -1086,6 +1090,7 @@ class RuntimeHost:
         request: RunRequest | None,
         *,
         execution_config: dict[str, Any] | None = None,
+        request_fingerprint: str | None = None,
     ) -> str:
         """Own a Workspace and atomically persist the request before transport acceptance."""
         await self.initialize()
@@ -1139,6 +1144,9 @@ class RuntimeHost:
                         "workspace_id": workspace.workspace_id,
                         "attachment_ids": ids,
                         "continuation_of": source_id,
+                        "request_fingerprint": (
+                            request.request_fingerprint if request else request_fingerprint
+                        ),
                     }
                     facts = [("run.admitted", self._semantic(payload), "system", "user")]
                     if previous and request is None:

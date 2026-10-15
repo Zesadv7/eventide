@@ -85,6 +85,8 @@ Continue 从来源 `run.admitted` / `run.started` 继承 Plan 的只读限制与
 
 ## 入口、模型与 MCP
 
+HTTP写请求先校验浏览器同源与本机Origin；无Origin的可信非浏览器路径沿用现有权限边界。Run/Continue可用Idempotency-Key生成操作/Session隔离的确定性Run身份，在admission原子保存内容指纹；重复提交先查持久接收事实，再检查busy/parked，不重新启动已接收任务。未落库接收竞争仍拒绝为busy，不通过内存缓存伪造持久成功。
+
 生成参数使用 `generation.py` 严格校验和能力描述。模型默认/会话覆盖保存在 `generation.configured` 追加事实中，通过 Provider、endpoint、model 的哈希隔离；模型默认管理使用归档 Session，不新增独立可变配置表。省略继承、null清除、0有效，`run.admitted/started.generation` 保存有效请求快照。Continue在原接入下继承并重验，切换接入则重新解析；摘要/只读子Run不隐式继承用户采样覆盖。`ModelRequest.generation` 由adapter映射到SDK参数，最大输出仍受现有请求字段约束。
 
 每次模型调用记录 `model.attempt_started/finished`，同重试组共享request_id，每次真实尝试有独立attempt_id。成功保存报告usage，失败/取消无usage记unknown；事件不记录请求正文。原model.response和summary事件继续提供上下文事实，后续用量账本只以attempt事实计算，避免重复计数。

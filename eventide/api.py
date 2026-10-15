@@ -7,7 +7,6 @@ import ipaddress
 import json
 import re
 import time
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -17,7 +16,7 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
@@ -25,6 +24,7 @@ from eventide import attachments
 from eventide.config import Settings, normalize_provider
 from eventide.generation import GenerationCapabilities, GenerationPatch
 from eventide.host import RuntimeHost
+from eventide.http_control import check_mutation_origin, run_receipt
 from eventide.models import RunRequest, ToolCall
 from eventide.normalization import normalize, redact
 from eventide.secrets import SecretKeyError
@@ -193,6 +193,17 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
     )
     app.state.runtime = agent_runtime
     app.state.approvals = broker
+
+    @app.middleware("http")
+    async def same_origin_mutations(request: Request, call_next: Any) -> Response:
+        try:
+            check_mutation_origin(request)
+        except (HTTPException, ValueError) as exc:
+            return JSONResponse(
+                {"detail": exc.detail if isinstance(exc, HTTPException) else "Invalid origin",
+                 "code": "invalid_origin"}, status_code=403,
+            )
+        return await call_next(request)
     app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 
     @app.get("/", response_class=HTMLResponse)
@@ -352,17 +363,23 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
         "/api/sessions/{session_id}/continue",
         status_code=status.HTTP_202_ACCEPTED,
     )
-    async def continue_session(session_id: str) -> dict[str, str]:
+    async def continue_session(session_id: str, request: Request) -> dict[str, str]:
         # Continue validation is part of admission; a rejected request returns 409,
         # without creating a run that could hide the parked source run.
         record = await get_session(session_id)
+        receipt = run_receipt(agent_runtime, request, session_id, "continue", {})
+        if receipt.existing:
+            return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
         workspace_id = record["workspace_id"]
         if workspace_id in reserved or agent_runtime.workspace_busy(workspace_id):
             raise HTTPException(status_code=409, detail="Workspace is busy")
         reserved.add(workspace_id)
-        run_id = f"run_{uuid.uuid4().hex[:16]}"
+        run_id = receipt.run_id
         try:
-            await agent_runtime.admit_continue(session_id, run_id)
+            await agent_runtime.admit_continue(
+                session_id, run_id,
+                **({"request_fingerprint": receipt.fingerprint} if receipt.fingerprint else {}),
+            )
         except ValueError as exc:
             reserved.discard(workspace_id)
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -588,17 +605,21 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
         return {"deleted": deleted["attachment_id"]}
 
     @app.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
-    async def create_run(session_id: str, body: RunBody) -> dict[str, str]:
+    async def create_run(session_id: str, body: RunBody, request: Request) -> dict[str, str]:
         # Keep custom Session identities while making transport acceptance durable.
         agent_runtime.create_session(session_id)
         record = agent_runtime.session_status(session_id)
+        payload = {**body.model_dump(), "generation": body.generation.patch()}
+        receipt = run_receipt(agent_runtime, request, session_id, "run", payload)
+        if receipt.existing:
+            return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
         workspace_id = record["workspace_id"]
         if workspace_id in reserved or agent_runtime.workspace_busy(workspace_id):
             raise HTTPException(status_code=409, detail="Workspace is busy")
         if record["status"] == "parked":
             raise HTTPException(status_code=409, detail="Session is parked")
         reserved.add(workspace_id)
-        run_id = f"run_{uuid.uuid4().hex[:16]}"
+        run_id = receipt.run_id
         try:
             await agent_runtime.admit_run(
                 RunRequest(
@@ -609,6 +630,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
                     attachment_ids=list(body.attachment_ids),
                     model=body.model,
                     generation=body.generation.patch(),
+                    request_fingerprint=receipt.fingerprint,
                 )
             )
             task = agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
