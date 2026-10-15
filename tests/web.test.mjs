@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {chapters, contextPct, mergeEvents, parkLabel, parkSummary, planGroups, planRevisions, projectWork, runActivity, timeline, toolStats} from "../eventide/web/projection.js";
 import {EventFeed, parseSse} from "../eventide/web/transport.js";
+import {testConnection} from "../eventide/web/probe.js";
 
 const event = (seq, type, payload, run_id = "r1", extra = {}) => ({event_id: `e${seq}`, run_id, session_seq: seq, type, payload, ...extra});
 const prepared = (seq, name, args, id = "c1") => event(seq, "tool.prepared", {call_id: id, name, arguments: args});
@@ -10,6 +11,104 @@ const project = (events) => projectWork([{id: "r1", status: "completed"}], new M
 
 const taskState = (tasks, activeTaskId = null) => ({tasks, active_task_id: activeTaskId, updated_seq: 9});
 const task = (id, status, extra = {}) => ({id, content: `${id} 内容`, status, ...extra});
+
+function probeHarness(fetcher) {
+  const original = {fetch: globalThis.fetch, sessionStorage: globalThis.sessionStorage};
+  const saved = new Map();
+  globalThis.sessionStorage = {
+    getItem: (key) => saved.get(key) ?? null,
+    setItem: (key, value) => saved.set(key, value),
+    removeItem: (key) => saved.delete(key),
+  };
+  globalThis.fetch = fetcher;
+  return {saved, restore: () => Object.assign(globalThis, original)};
+}
+const probeBody = {provider: "openai_compatible", model: "candidate-model", api_key: "secret-candidate"};
+
+test("connection check keeps its random identity through network failure and module reload", async () => {
+  const requests = [];
+  const h = probeHarness(async (_url, options) => {
+    requests.push(options);
+    if (requests.length === 1) throw new TypeError("offline");
+    return Response.json({success: true, run_id: "probe-original"});
+  });
+  try {
+    await assert.rejects(testConnection(probeBody), /offline/);
+    assert.equal(h.saved.size, 1);
+    assert.ok(!JSON.stringify([...h.saved]).includes("secret-candidate"));
+    assert.ok(!JSON.stringify([...h.saved]).includes("candidate-model"));
+    const reloaded = await import("../eventide/web/probe.js?reload-test");
+    assert.equal((await reloaded.testConnection(probeBody)).run_id, "probe-original");
+    assert.equal(requests[0].headers["Idempotency-Key"], requests[1].headers["Idempotency-Key"]);
+    assert.equal(requests[1].headers["Content-Type"], "application/json");
+    assert.equal(h.saved.size, 0);
+    await testConnection(probeBody);
+    assert.notEqual(requests[1].headers["Idempotency-Key"], requests[2].headers["Idempotency-Key"]);
+  } finally { h.restore(); }
+});
+
+test("connection check does not replace an uncertain identity for edited input or 5xx/409", async () => {
+  const keys = [];
+  const h = probeHarness(async (_url, options) => {
+    keys.push(options.headers["Idempotency-Key"]);
+    return Response.json({detail: "still unknown"}, {status: keys.length === 1 ? 500 : 409,
+      headers: {"X-Eventide-Run-ID": "probe-running"}});
+  });
+  try {
+    await assert.rejects(testConnection(probeBody), /still unknown/);
+    await assert.rejects(testConnection({...probeBody, model: "changed"}), /恢复原候选配置/);
+    assert.equal(keys.length, 1);
+    await assert.rejects(testConnection(probeBody), (error) => error.runId === "probe-running");
+    assert.equal(keys[0], keys[1]);
+    assert.equal(h.saved.size, 1);
+  } finally { h.restore(); }
+});
+
+test("connection check clears only certain rejection and completed business failure", async () => {
+  const keys = [];
+  const h = probeHarness(async (_url, options) => {
+    keys.push(options.headers["Idempotency-Key"]);
+    return keys.length === 1 ? Response.json({detail: "invalid"}, {status: 422})
+      : Response.json({success: false, error_type: "timeout", run_id: "probe-failed"});
+  });
+  try {
+    await assert.rejects(testConnection(probeBody), /invalid/);
+    assert.equal(h.saved.size, 0);
+    const result = await testConnection(probeBody);
+    assert.equal(result.success, false);
+    assert.notEqual(keys[0], keys[1]);
+    assert.equal(h.saved.size, 0);
+  } finally { h.restore(); }
+});
+
+test("connection check blocks concurrent clicks before hashing and dispatch", async () => {
+  let resolve;
+  let entered;
+  const ready = new Promise((done) => { entered = done; });
+  let count = 0;
+  const h = probeHarness(async () => {
+    count++; entered();
+    return new Promise((done) => { resolve = done; });
+  });
+  try {
+    const first = testConnection(probeBody);
+    await assert.rejects(testConnection(probeBody), /正在进行/);
+    await ready;
+    assert.equal(count, 1);
+    resolve(Response.json({success: true}));
+    await first;
+  } finally { h.restore(); }
+});
+
+test("connection check requires durable retry identity before network dispatch", async () => {
+  let count = 0;
+  const h = probeHarness(async () => { count++; return Response.json({success: true}); });
+  try {
+    globalThis.sessionStorage.setItem = () => { throw new Error("storage unavailable"); };
+    await assert.rejects(testConnection(probeBody), /storage unavailable/);
+    assert.equal(count, 0);
+  } finally { h.restore(); }
+});
 
 test("plan groups count statuses and keep only server-side facts", () => {
   const plan = planGroups(taskState([

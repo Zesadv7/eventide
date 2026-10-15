@@ -4,7 +4,7 @@ import {el, button, icon, reconcile, markdown} from "./view.js?v=14";
 
 // config.js is null-safe for nodes the v2 console dropped, so a failed import is
 // the only remaining degrade path: the app keeps running as "unconfigured".
-const config = await import("./config.js?v=13").catch(() => null);
+const config = await import("./config.js?v=14").catch(() => null);
 
 const $ = (selector) => document.querySelector(selector);
 const state = {

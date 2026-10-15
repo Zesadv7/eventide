@@ -314,7 +314,8 @@ def test_probe_http_returns_run_evidence_and_unknown_can_be_reconciled(
     provider = ProbeProvider(error=ProviderError("401 candidate-secret", retryable=True))
     host = make_host(isolated_workspace, monkeypatch, provider)
     with TestClient(create_app(host)) as client:
-        response = client.post("/api/config/provider/test", json={
+        response = client.post("/api/config/provider/test",
+                               headers={"Idempotency-Key": "check"}, json={
             "provider": "openai_compatible", "model": "candidate-model",
             "api_key": "candidate-secret",
         })

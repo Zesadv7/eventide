@@ -1,4 +1,5 @@
 import {request} from "./transport.js?v=12";
+import {testConnection} from "./probe.js?v=1";
 const $ = (selector) => document.querySelector(selector);
 let configured = false;
 function normalizeBaseUrl(value) {
@@ -66,11 +67,16 @@ async function testProviderConfig() {
   result.hidden = false;
   result.textContent = "正在检查连接…";
   try {
-    const probe = await request("/api/config/provider/test", { method: "POST", body: JSON.stringify(providerBody()) });
-    result.textContent = `${probe.message} · ${Math.round(probe.latency_ms)} ms`;
+    const probe = await testConnection(providerBody());
+    result.textContent = probe.message;
+    if (probe.latency_ms !== null) result.textContent += ` · ${Math.round(probe.latency_ms)} ms`;
+    if (probe.run_id) result.textContent += `\n检查记录：${probe.run_id}`;
     if (!probe.success && probe.detail) result.textContent += `\n${probe.detail}`;
     result.className = `connection-result ${probe.success ? "success" : "failure"}`;
-  } catch (error) { result.textContent = error.message; result.className = "connection-result failure"; }
+  } catch (error) {
+    result.textContent = error.message + (error.runId ? `\n检查记录：${error.runId}` : "");
+    result.className = "connection-result failure";
+  }
   finally { $("#test-model-config").disabled = false; }
 }
 

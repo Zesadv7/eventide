@@ -99,6 +99,13 @@ class MutationReceipt:
     result: dict[str, Any] | None = None
 
 
+def mutation_key(request: Request) -> str:
+    key = request.headers.get("idempotency-key", "")
+    if not key or len(key) > 128 or any(ord(char) <= 32 or ord(char) >= 127 for char in key):
+        raise HTTPException(422, "Idempotency-Key must be 1–128 visible ASCII characters")
+    return key
+
+
 def begin_mutation(
     runtime: RuntimeHost,
     request: Request,
@@ -107,9 +114,7 @@ def begin_mutation(
     payload: dict[str, Any],
 ) -> MutationReceipt:
     """Persist an at-most-once local mutation; ambiguous writes are never replayed."""
-    key = request.headers.get("idempotency-key", "")
-    if not key or len(key) > 128 or any(ord(char) <= 32 or ord(char) >= 127 for char in key):
-        raise HTTPException(422, "Idempotency-Key must be 1–128 visible ASCII characters")
+    key = mutation_key(request)
     identity = "mutation_" + digest([owner, operation, key])
     fingerprint = digest(payload)
     events = [

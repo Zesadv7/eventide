@@ -641,7 +641,7 @@
 
 **一致性：** 预留与model.attempt_started同事务，结算与model.attempt_finished同事务。完整供应商响应同步结算后才交付工具调用；失败、断流、取消和无usage继续占用预留。重试每次单独预留，预算不足不重试；进程重启不自动释放未知消费。费用快照单独追加，崩溃缺口明确为unpriced，不补零。摘要预算拒绝必须上抛给Host停驻。
 
-**边界：** 输入估算可高估多模态数据，不能保证硬账单上限；不用缓存/父子汇总充当第二消费。配置暂由Host Python接口提供，HTTP/UI、P调度和API embedding仍后续，连接探测未纳入Run预算。既有已观测Token软限继续独立生效，不悄悄改变环境变量零值语义。
+**边界：** 输入估算可高估多模态数据，不能保证硬账单上限；不用缓存/父子汇总充当第二消费。配置暂由Host Python接口提供，HTTP/UI、P调度和API embedding仍后续，连接探测后由ADR-067纳入Run与UTC日预算。既有已观测Token软限继续独立生效，不悄悄改变环境变量零值语义。
 
 **验证：** 21项新增生产派发用例覆盖预派发拒绝、原子回滚、失败重试、摘要拒绝/未采用、worker父子、交付Continue、并发额度竞争、取消/断流/超时/缺usage、重启及实际超额；102项定向回归和完整868通过/1跳过（93.61%覆盖）、Ruff/Mypy74模块、smoke12/12通过，无付费模型调用。
 
@@ -683,7 +683,7 @@ Vue集成验证：35项前端回归、typecheck/build/format与4条真实FastAPI
 
 ## ADR-067：连接探测使用真实控制 Run 与服务级预算归属
 
-**状态：Accepted（调用生命周期与预算）；HTTP幂等接收待下一切片。**
+**状态：Accepted。**
 
 **决策：** 沿用既有control Session/Run，而非引入operation_id及另一套账本。connection_probe是一次真实后台请求，不伪装用户Agent；没有用户消息、admission或工具，不占根Agent槽，仍共享模型额度。取得槽后原子预留，Provider单次请求采用冻结超时，失败及缺失usage保留未知。关闭客户端后才写Run终态，重启不重放、不读取或补造源码证据。
 
@@ -691,7 +691,9 @@ Vue集成验证：35项前端回归、typecheck/build/format与4条真实FastAPI
 
 **保密：** 候选Provider/model与默认连接分离，凭据只在内存，事实只保存脱敏元数据和数值。失败返回稳定分类，分类后的类型和文案也统一清洗（含自定义ProbeError），Python/HTTP均不暴露含候选密钥的SDK异常链。HTTP的30秒期限触发取消，仍等客户端收尾后才终态，因此不承诺严格总墙钟上限。
 
-**验证：** 21项新离线专项覆盖准确归属/候选价格、日与Run预算拒绝、8类None项目伪造、取消/超时/缺usage、等待槽取消、重复停止收尾、Host关闭及重启、Python/HTTP脱敏和未知人工核对；相关既有160项回归通过。未调用真实API。
+**幂等：** 连接测试虽不修改源码，仍会真实消费模型额度，因此HTTP必须先持久接收。复用mutation事实及控制Run，不新增operation事实源。HTTP200业务结果可回放，在途/未知409保留原键；Run终态存在时可恢复丢失回执但绝不重发，恢复结果不虚构原耗时。候选密钥仅参与内存摘要计算，页面只保存随机键/表单摘要。未显式密钥的同一请求回放首次结果，不能因默认配置改变而变成第二次调用。
+
+**验证：** 23项核心离线专项覆盖准确归属/候选价格、日与Run预算拒绝、8类None项目伪造、取消/超时/缺usage、等待槽取消、重复停止收尾、Host关闭及重启、Python/HTTP脱敏和未知人工核对；相关既有160项回归通过。HTTP另有14项专项及159项关联回归，探测HTTP模块覆盖100%；旧页34项JS（新增5项）及真实Chrome丢响应/刷新/同键回放旅程通过，账本仅1次attempt，Ruff/Mypy83模块通过。全部使用假Provider，未调用真实API。
 
 ## ADR-065：调度从Run事实派生，根所有权与模型额度分开
 
@@ -708,7 +710,7 @@ Vue集成验证：35项前端回归、typecheck/build/format与4条真实FastAPI
 
 **P3主链接线补充：** Host委派RunDispatch管理临时ticket/root/通知，只从既有事实投影接收队列；不增加第二事实源。Python/HTTP/Delivery writer共用同一个admission和等待/执行Task，Python返回最终RunResult；删除HTTP的执行task/reservation所有者。queued释放实际执行claim但保留Session身份；调度在同步claim后启动，精确取消/异常/实际清理结束后才释放根额度，控制面锁释放也唤醒队列。
 
-为避免把半成品源当基线，忙源直接拒绝；等待的source没有可信Git checkpoint则接收前拒绝。source/worktree在执行锁内重验，未started重启不补写当前checkpoint。非Git即时源执行保留原限制。每次模型attempt在拿到全局2槽后才做U2预留，backoff/工具/子任务等待释放槽；Delivery控制Run和readonly子Run不重复占根。配置守卫同时覆盖未start队列和准备ticket，不只看活跃Task。模型连接探测共享槽但仍未纳入Run账本。
+为避免把半成品源当基线，忙源直接拒绝；等待的source没有可信Git checkpoint则接收前拒绝。source/worktree在执行锁内重验，未started重启不补写当前checkpoint。非Git即时源执行保留原限制。每次模型attempt在拿到全局2槽后才做U2预留，backoff/工具/子任务等待释放槽；Delivery控制Run和readonly子Run不重复占根。配置守卫同时覆盖未start队列和准备ticket，不只看活跃Task。模型连接探测共享槽，并由后续ADR-067纳入控制Run账本。
 
 **接线验证：** 200项接收/快照/写副本/交付/worker/预算/HTTP回归及最终38项调度专项通过；scheduler与run_dispatch均100%覆盖，Ruff/Mypy81模块、help和smoke12/12通过。专项包含真实进程退出保留接收checkpoint、24接收/25拒绝、精确取消/无消费、Continue漂移、控制锁唤醒、启动失败释放、同步写重复取消、4父+8worker及5交付writer容量。前端与整包全量由集成任务单列，未调用真实模型。
 

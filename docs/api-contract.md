@@ -14,7 +14,11 @@ HTTP 状态码保持原义，JSON 错误包含 `code`、可读 `message` 与兼�
 
 连接检查另返回`run_id`及`usage`（统一attempt账本）。接收前配置验证失败时run_id为null且无调用；已建立控制Run则成功及业务失败均返回精确身份。预算拒绝error_type为budget_exceeded。控制Session标记connection_probe，不可接受普通Run/Continue；不进入根Agent队列，使用共享模型槽、该Run及UTC日预算。取消/超时无usage保留未知，重启不重发。
 
-预算reservation.context.project_id为string|null；只有事务内验证的独立连接检查可以为null，其费用不归属控制Session存储目录所在项目。已有Run、每日usage/cost及未知核对接口均适用。HTTP幂等接收由下一A2切片补齐。
+预算reservation.context.project_id为string|null；只有事务内验证的独立连接检查可以为null，其费用不归属控制Session存储目录所在项目。已有Run、每日usage/cost及未知核对接口均适用。
+
+`POST /api/config/provider/test`必须携带1–128个可见ASCII字符的`Idempotency-Key`；缺失或非法时422且不创建控制Session。相同键及候选内容返回原HTTP200结果，不新建请求；不同内容409。在途或未确认Run返回409并附`X-Eventide-Run-ID`，应保留原键查询/重试，不能换键规避未知消费。接收事实仅保存内容摘要；候选密钥不落库。未显式提供密钥时首次检查使用当时冻结的已保存配置；同键重试仍返回首次结果，不因之后配置变化重新调用。
+
+重启或响应记录中断后，重试只读取原Run终态并补齐HTTP回执，不重新派发。恢复结果`recovered=true`，无法复原的`latency_ms`和`checked_at`为null；已接收但未建立Run的中断记录返回`error_type=not_dispatched`和null run_id。普通结果`recovered=false`。成功/业务失败继续HTTP200；请求身份、来源或格式错误仍用HTTP错误包裹。30秒触发取消后等待客户端收尾，不保证严格30秒总墙钟上限。
 
 ### 浏览器写请求与运行幂等 —— 已实现
 

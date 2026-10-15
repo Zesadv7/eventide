@@ -7,6 +7,7 @@ export async function request(url, options = {}) {
     try { detail = (await response.json()).detail || detail; } catch { /* non-JSON error */ }
     const error = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
     error.status = response.status;
+    error.runId = response.headers?.get("X-Eventide-Run-ID") || null;
     throw error;
   }
   return response.json();

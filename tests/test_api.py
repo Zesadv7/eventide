@@ -153,6 +153,7 @@ def test_api_tests_candidate_config_and_returns_latency(isolated_workspace):
     with TestClient(create_app(runtime)) as client:
         response = client.post(
             "/api/config/provider/test",
+            headers={"Idempotency-Key": "check-model"},
             json={
                 "provider": "openai_responses",
                 "api_key": "candidate-secret",
@@ -180,6 +181,7 @@ def test_api_probe_failure_is_stable_and_redacted(isolated_workspace):
     with TestClient(create_app(runtime)) as client:
         response = client.post(
             "/api/config/provider/test",
+            headers={"Idempotency-Key": "check-model"},
             json={"provider": "anthropic", "model": "model", "api_key": "highly-secret-value"},
         )
         result = response.json()
