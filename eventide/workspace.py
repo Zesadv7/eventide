@@ -132,7 +132,48 @@ def digest(value: Any) -> str:
     ).hexdigest()
 
 
-def workspace_checkpoint(path: Path) -> dict[str, Any] | None:
+def runtime_checkpoint_files(database: Path, state_dir: Path) -> tuple[Path, ...]:
+    """Exact runtime-owned files, never the state directory or a filename glob."""
+    lease = database.parent.resolve() / "host.lock"
+    database = database.resolve()
+    return (
+        database, *(Path(f"{database}{suffix}") for suffix in ("-wal", "-shm", "-journal")),
+        lease, state_dir.resolve() / "secret.key",
+    )
+
+
+def runtime_checkpoint_directories(state_dir: Path) -> tuple[Path, ...]:
+    """Only Runtime artifact namespaces; never project `skills` or arbitrary data."""
+    root = state_dir.resolve()
+    return tuple(root / name for name in ("attachments", "skill-packages", "execution-snapshots"))
+
+
+def _checkpoint_exclusions(path: Path, files: tuple[Path, ...]) -> set[str]:
+    root = path.resolve()
+    return {
+        file.relative_to(root).as_posix()
+        for file in files if file.is_relative_to(root) and file != root
+    }
+
+
+def _excluded_untracked(
+    path: Path, name: str, files: set[str], directories: set[str],
+) -> bool:
+    if name not in files and not any(name.startswith(f"{root}/") for root in directories):
+        return False
+    candidate = path / name
+    # A link replacing an owned artifact is drift, not an ignorable runtime file.
+    while candidate != path:
+        if candidate.is_symlink():
+            return False
+        candidate = candidate.parent
+    return True
+
+
+def workspace_checkpoint(
+    path: Path, *, exclude_untracked: tuple[Path, ...] = (),
+    exclude_untracked_directories: tuple[Path, ...] = (),
+) -> dict[str, Any] | None:
     """Hash Git-visible state without staging, refreshing the index, or following links."""
     try:
         head = git(path, "rev-parse", "--verify", "HEAD").decode().strip()
@@ -142,12 +183,16 @@ def workspace_checkpoint(path: Path) -> dict[str, Any] | None:
             ("unstaged", ("diff", "--binary", "--no-ext-diff", "--no-textconv")),
         ):
             changes[key] = hashlib.sha256(git(path, *args)).hexdigest()
+        exclusions = _checkpoint_exclusions(path, exclude_untracked)
+        directories = _checkpoint_exclusions(path, exclude_untracked_directories)
         untracked = []
         for raw in git(path, "ls-files", "--others", "--exclude-standard", "-z").split(b"\0"):
             if not raw:
                 continue
             name = os.fsdecode(raw)
             candidate = path / name
+            if _excluded_untracked(path, name, exclusions, directories):
+                continue
             if candidate.is_symlink():
                 body = os.fsencode(os.readlink(candidate))
             else:
@@ -158,7 +203,14 @@ def workspace_checkpoint(path: Path) -> dict[str, Any] | None:
         # Dirty submodules have state that a top-level diff cannot fully describe.
         if git(path, "submodule", "status", "--recursive").strip():
             return None
-        return {"head": head, **changes, "untracked": sorted(untracked)}
+        result: dict[str, Any] = {"head": head, **changes, "untracked": sorted(untracked)}
+        if exclusions or directories:
+            # Never silently compare an old, unfiltered baseline with a new policy.
+            result["checkpoint_policy"] = {
+                "version": 2, "excluded_untracked": sorted(exclusions),
+                "excluded_untracked_directories": sorted(directories),
+            }
+        return result
     except (ValueError, OSError, subprocess.TimeoutExpired):
         return None
 
@@ -167,7 +219,10 @@ CRASH_GAP_FILE_LIMIT = 20
 CRASH_GAP_SCAN_LIMIT = 50_000
 
 
-def changed_since(path: Path, since: float) -> tuple[list[str], bool] | None:
+def changed_since(
+    path: Path, since: float, *, exclude_untracked: tuple[Path, ...] = (),
+    exclude_untracked_directories: tuple[Path, ...] = (),
+) -> tuple[list[str], bool] | None:
     """Return Git-visible paths touched strictly after `since`, and whether the list was cut.
 
     A crash can kill the Host between a completed side-effecting tool and the
@@ -195,9 +250,19 @@ def changed_since(path: Path, since: float) -> tuple[list[str], bool] | None:
         return None
     if len(names) > CRASH_GAP_SCAN_LIMIT:
         return None
+    exclusions = _checkpoint_exclusions(path, exclude_untracked)
+    directories = _checkpoint_exclusions(path, exclude_untracked_directories)
+    tracked: set[str] = set()
+    if exclusions or directories:
+        try:
+            tracked = {os.fsdecode(raw) for raw in git(path, "ls-files", "-z").split(b"\0")}
+        except (ValueError, OSError, subprocess.TimeoutExpired):
+            return None
     changed: list[str] = []
     for name in names:
         candidate = path / name
+        if name not in tracked and _excluded_untracked(path, name, exclusions, directories):
+            continue
         try:
             stamp = os.stat(candidate, follow_symlinks=False).st_mtime
         except FileNotFoundError:

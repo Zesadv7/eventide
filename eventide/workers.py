@@ -125,7 +125,11 @@ class SourceSnapshot:
     _temporary: tempfile.TemporaryDirectory[str] = field(repr=False, compare=False)
 
     @classmethod
-    def create(cls, workspace: Path, working_root: Path, state_dir: Path) -> SourceSnapshot:
+    def create(
+        cls, workspace: Path, working_root: Path, state_dir: Path,
+        *, checkpoint_files: tuple[Path, ...] = (),
+        checkpoint_directories: tuple[Path, ...] = (),
+    ) -> SourceSnapshot:
         workspace = workspace.resolve(strict=True)
         working_root = working_root.resolve(strict=True)
         state_dir = state_dir.resolve()
@@ -133,7 +137,12 @@ class SourceSnapshot:
             raise ValueError("Source Workspace and working directory must be directories")
         if not working_root.is_relative_to(workspace):
             raise ValueError("Source working directory escapes Workspace")
-        before = workspace_checkpoint(workspace)
+        if state_dir == workspace:
+            raise ValueError("State directory must not be the Workspace root")
+        before = workspace_checkpoint(
+            workspace, exclude_untracked=checkpoint_files,
+            exclude_untracked_directories=checkpoint_directories,
+        )
         if before is None:
             raise ValueError(
                 "Read-only workers require a Git Workspace with a trustworthy checkpoint"
@@ -202,7 +211,10 @@ class SourceSnapshot:
                     "sha256": hashlib.sha256(raw).hexdigest(),
                     "lines": len(text.splitlines()),
                 }
-            after = workspace_checkpoint(workspace)
+            after = workspace_checkpoint(
+                workspace, exclude_untracked=checkpoint_files,
+                exclude_untracked_directories=checkpoint_directories,
+            )
             if after is None or before != after:
                 raise ValueError("Source Workspace changed during snapshot creation")
             identity = digest(

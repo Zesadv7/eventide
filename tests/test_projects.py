@@ -246,7 +246,7 @@ async def test_run_facts_freeze_authoritative_project(isolated_workspace, admitt
             for e in host.store.run_events(run_id)
             if e["type"] in {"run.started", "run.admitted"}
         ]
-        assert len(identities) == (2 if admitted else 1)
+        assert len(identities) == 2
         assert all(item["project_id"] == host.default_workspace.project_id for item in identities)
         assert all(
             item["source_workspace_id"] == host.default_workspace.workspace_id

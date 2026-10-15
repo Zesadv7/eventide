@@ -261,3 +261,6 @@ GET Run/Session/list-runs中的queued不是终态；SSE持续观察到真实终�
 Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入口。6个真实API对话验证4根/2模型/2等待，取消等待后的usage.attempt_count=0且预算预留为空；停止根任务后自动认领下一项。
 
 用量账本calls新增兼容字段`provider: string|null`、`duration_ms: number|null`、`stop_reason: string|null`，Run/Session usage及costs内嵌usage共用同一投影。耗时仅透传非负有限的已记录数值（含真实0），started-only尝试不生成终态耗时/结束原因；历史事件缺失返回null，不以finished_at-started_at推算。原Token去重、来源和完整性口径不变。
+
+
+源码checkpoint现可包含`checkpoint_policy:{version:2,excluded_untracked:[相对文件],excluded_untracked_directories:[相对产物目录]}`；它随原canonical checkpoint事实保存，不是客户端可配置的排除项。仅实际Runtime产物为例外，项目Skill或普通源码变化仍拒绝派发。状态目录等于Workspace根的Run接收返回422；历史停驻Run的指纹策略与当前不同，Continue返回409且原checkpoint不变，不能由重试或重启覆盖。

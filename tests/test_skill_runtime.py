@@ -77,8 +77,10 @@ async def test_admitted_snapshot_survives_project_update_and_restart(isolated_wo
     session = host.create_session()
     try:
         run_id = await host.admit_run(
-            RunRequest("diagnose", session, selected_skills=["project:diagnose"])
+            RunRequest("diagnose", session, mode="plan", execution_target="snapshot",
+                       selected_skills=["project:diagnose"])
         )
+        snapshot_id = host.run_execution(run_id)["snapshot_id"]
         package(source, body="version two")
         result = await host.start_admitted_run(run_id)
         loaded = next(e for e in host.store.run_events(run_id) if e["type"] == "tool.completed")
@@ -87,7 +89,7 @@ async def test_admitted_snapshot_survives_project_update_and_restart(isolated_wo
     finally:
         await host.close()
     # The current project has version two. Continue must still reuse the prior
-    # run's fixed version one, with its unchanged parked source checkpoint.
+    # run's fixed version one and source copy, not the externally updated source.
     settings = replace(settings, max_steps=2)
     provider = ScriptedProvider(
         [call("load_skill", {"name": "diagnose"}, "second"), {"text": "done"}]
@@ -96,10 +98,31 @@ async def test_admitted_snapshot_survives_project_update_and_restart(isolated_wo
     try:
         resumed = await host.continue_session(session)
         assert resumed.status == "completed"
+        assert host.run_execution(resumed.run_id)["snapshot_id"] == snapshot_id
         loaded = next(
             e for e in host.store.run_events(resumed.run_id) if e["type"] == "tool.completed"
         )
         assert "version one" in loaded["payload"]["content"]
+        assert "version two" not in loaded["payload"]["content"]
+    finally:
+        await host.close()
+
+
+async def test_source_admission_rejects_project_skill_drift_before_model(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    source = package(repo / "skills" / "diagnose")
+    provider = ScriptedProvider([{"text": "must not execute against changed source"}])
+    host = RuntimeHost(
+        replace(settings_for(repo), state_dir=isolated_workspace / "state"), provider,
+    )
+    try:
+        run_id = await host.admit_run(RunRequest("diagnose", selected_skills=["project:diagnose"]))
+        package(source, body="version two")
+        with pytest.raises(ValueError, match="Source Workspace changed after admission"):
+            await host.start_admitted_run(run_id)
+        assert host.store.get_run(run_id)["status"] == "failed"
+        assert not provider.requests and not host.store.usage_events(run_id=run_id)
+        assert not host.dispatch.snapshot()["active"]
     finally:
         await host.close()
 

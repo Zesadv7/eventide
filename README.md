@@ -143,6 +143,8 @@ Project 将一个本地源码项目与它的 Git worktree 工作副本聚合起�
 
 快照使用固定 Skills 和快照内文件工具，暂不接外部 MCP、源目录知识索引或嵌套 worker，也没有 Shell/写文件/Skill 脚本权限。Continue 和重启后的人工恢复沿用原副本，源代码后来变化不改变该次调查；副本丢失或内容被改则拒绝运行。快照产物保存在状态根，不能手工清理后期待恢复；文件只读位与摘要校验不等于操作系统沙箱。持久排队及全局并发容量限制仍由 P3 后续实现。
 
+显式把状态目录放进项目内部时，源码指纹只排除实际运行数据库及其 WAL/SHM/journal、租约/密钥和该状态根的附件、固定 Skill 包、快照产物中的未跟踪文件；普通源码、项目 `skills/`、其他数据库和已跟踪文件仍检查漂移。状态目录不能等于 Workspace 根；默认状态目录位于项目外，写 worktree 仍要求外置状态。新指纹保存排除策略版本；旧内置状态的停驻任务若口径不同会保守拒绝 Continue，需要人工检查后放弃旧恢复并新建任务，不能自动换基线。
+
 ## 同项目写入对话与交付协调
 
 HTTP Run 使用 `execution_target: "worktree"`，Python 使用 `RunRequest(..., execution_target="worktree")`，可让同项目的不同 Session 使用独立 Git 工作副本。首个 Run 要求源目录干净并有可信 HEAD；接收前后检查源码没有变化。首次副本准备结束后释放源目录，后续模型执行与文件工具使用各自副本。`execution.execution_workspace_id` 标识实际工作目录，Session 的 Workspace/cwd 逻辑绑定仍保留。

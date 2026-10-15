@@ -18,13 +18,21 @@ from eventide.workspace import digest
 
 
 class ExecutionSnapshots:
-    def __init__(self, state_dir: Path):
+    def __init__(
+        self, state_dir: Path, *, checkpoint_files: tuple[Path, ...] = (),
+        checkpoint_directories: tuple[Path, ...] = (),
+    ):
+        self.checkpoint_files = checkpoint_files
+        self.checkpoint_directories = checkpoint_directories
         self.directory = state_dir / "execution-snapshots"
         self.state_dir = state_dir
 
     def create(self, workspace_id: str, root: Path, working_directory: str) -> dict[str, Any]:
         self._relative_directory(working_directory)
-        copied = SourceSnapshot.create(root, root, self.state_dir)
+        copied = SourceSnapshot.create(
+            root, root, self.state_dir, checkpoint_files=self.checkpoint_files,
+            checkpoint_directories=self.checkpoint_directories,
+        )
         binding = {
             "kind": "snapshot",
             "workspace_id": workspace_id,

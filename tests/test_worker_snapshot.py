@@ -101,12 +101,12 @@ def test_snapshot_rejects_drift_and_removes_partial_copy(isolated_workspace, mon
     original = workers.workspace_checkpoint
     calls = 0
 
-    def changing_checkpoint(root):
+    def changing_checkpoint(root, **kwargs):
         nonlocal calls
         calls += 1
         if calls == 2:
             source.write_text("after\n", encoding="utf-8")
-        return original(root)
+        return original(root, **kwargs)
 
     monkeypatch.setattr(workers, "workspace_checkpoint", changing_checkpoint)
     state = isolated_workspace / "state"

@@ -360,3 +360,8 @@ GET /api/queue只读查询上述事实与所有权；project_id只过滤列表�
 Vue队列控制面只读取Host队列快照，不维护浏览器调度器；全局counts/limits与带精确Run/Session/副本身份的列表分开。queued被视为同Session活跃工作，但不作为源Workspace执行锁；UI取消只发送该Run身份。每次单一在途轮询、卸载后停止回填，后台任务继续由Host拥有；狭窄屏幕横向滚动任务表。
 
 Usage只读投影保留attempt既有provider/duration_ms/stop_reason，legacy仅透传真实存在字段。重放/墙钟回拨不重算延迟，未结束和缺失值不填零；页面读取原值并对缺失作独立展示，不将元数据补齐算作用量完整性提升。90项usage/预算回归与真实API页面验证通过。
+
+
+P3源码证据补充：Host为接收、派发、只读工具基线、worker与恢复使用同一checkpoint策略生成证据。默认外置状态仍保留原指纹；若实际Store或状态产物位于源码内，`checkpoint_policy.version=2`固定精确相对路径及Runtime namespace。仅未跟踪的实际数据库/WAL/SHM/journal、实际租约、密钥，以及配置状态根下attachments/skill-packages/execution-snapshots被排除；不按扩展名或整个状态根忽略。tracked diff和恢复mtime检查始终包含同名已跟踪文件，符号链接替换仍是漂移。State等于Workspace根在接收前拒绝，避免混淆源码与保留namespace；普通项目Skills始终保留。源快照与附件标记不会因Runtime自己的持久化触发漂移。
+
+恢复不能把旧checkpoint静默升成新策略：旧口径与当前策略不同，crash-gap只记录不可恢复证据，不补写新基线；Continue保持拒绝，用户检查后显式放弃并新建。已经固定manifest的快照继续按其原身份校验。S3在源项目更新后复用旧Skill的验收使用真正固定snapshot；source任务的项目Skill漂移在模型派发前拒绝。

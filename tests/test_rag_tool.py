@@ -58,7 +58,10 @@ async def test_tool_appears_on_next_run_and_is_audited_read_only(
         assert prepared["payload"]["readonly"] is True
         assert completed["payload"]["is_error"] is False
         assert "knowledge.txt:1-1" in completed["payload"]["content"]
-        assert len([event for event in events if event["type"] == "workspace.checkpoint"]) == 1
+        checkpoints = [event for event in events if event["type"] == "workspace.checkpoint"]
+        assert len(checkpoints) == 2  # Durable admission, then execution baseline.
+        assert checkpoints[0]["payload"] == checkpoints[1]["payload"]
+        assert checkpoints[-1]["session_seq"] < prepared["session_seq"]
     finally:
         await host.close()
 

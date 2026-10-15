@@ -701,3 +701,8 @@ Vue集成验证：35项前端回归、typecheck/build/format与4条真实FastAPI
 **接线验证：** 200项接收/快照/写副本/交付/worker/预算/HTTP回归及最终38项调度专项通过；scheduler与run_dispatch均100%覆盖，Ruff/Mypy81模块、help和smoke12/12通过。专项包含真实进程退出保留接收checkpoint、24接收/25拒绝、精确取消/无消费、Continue漂移、控制锁唤醒、启动失败释放、同步写重复取消、4父+8worker及5交付writer容量。前端与整包全量由集成任务单列，未调用真实模型。
 
 Vue/分发集成补充（ADR-065）：42项前端回归、6条真实API静态旅程、typecheck/build/format和wheel通过；队列读取/取消/刷新/自动补位经实际6对话验证。新Docker镜像的静态资源、非root/无需Node、管理来源及重启后数据与队列额度通过。全量后端集成另发现内部状态文件影响源码checkpoint及旧断言未适配，P3保留进行中直到修复和全量验收。
+
+
+**P3全量回归修正：** 显式内置状态时，SQLite追加自身日志不能算源码漂移。采用精确Runtime文件与3个受管产物namespace的untracked排除，保留全部tracked diff、普通文件和项目Skills；state==Workspace布局接收前拒绝。策略随checkpoint版本化，旧基线不能静默改写；crash-gap与worker使用相同口径。直接Python现在先admission再started，测试不再假设只有一个身份事实或一个运行基线。Skill在源更新后继续使用旧内容须固定snapshot，source执行仍严格拒绝漂移。
+
+修正验证：19项新增源码证据测试包含默认/自定义内置状态、真实附件和持久快照、worker、重启Continue、旧口径保守拒绝、普通文件/数据库/项目Skills/已跟踪同名产物/链接保护；相关40项及161项生命周期回归全部通过，Ruff/Mypy81模块通过，独立只读复核未发现阻断。完整集成门禁由主分支继续运行。

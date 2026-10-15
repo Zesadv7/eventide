@@ -126,18 +126,30 @@ async def test_runtime_retries_and_compacts(isolated_workspace):
 
 
 async def test_sessions_are_isolated_and_can_run_concurrently(isolated_workspace):
+    from tests.test_host import make_repo
+
+    entered = 0
+    both_entered = asyncio.Event()
+
     class EchoProvider:
         async def complete(self, request):
-            await asyncio.sleep(0.01)
+            nonlocal entered
+            entered += 1
+            if entered == 2:
+                both_entered.set()
+            await asyncio.wait_for(both_entered.wait(), 5)
             from eventide.models import ModelResponse
 
             return ModelResponse(str(request.messages[-1]["content"]))
 
     store = RuntimeStore(isolated_workspace / "shared.db")
-    runtime = RuntimeHost(settings_for(isolated_workspace), EchoProvider(), store=store)
+    repo = make_repo(isolated_workspace / "repo")
+    runtime = RuntimeHost(
+        settings_for(repo, state_dir=isolated_workspace / "state"), EchoProvider(), store=store,
+    )
     first, second = await asyncio.gather(
-        runtime.run(RunRequest("alpha", session_id="a")),
-        runtime.run(RunRequest("beta", session_id="b")),
+        runtime.run(RunRequest("alpha", session_id="a", mode="plan", execution_target="snapshot")),
+        runtime.run(RunRequest("beta", session_id="b", mode="plan", execution_target="snapshot")),
     )
     assert first.output == "alpha" and second.output == "beta"
     assert store.load_messages("a")[0]["content"] == "alpha"

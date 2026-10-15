@@ -103,10 +103,10 @@ async def test_direct_run_cannot_steal_pending_admission(
 
     original = host_module.workspace_checkpoint
 
-    def checkpoint(root):
+    def checkpoint(root, **kwargs):
         entered.set()
         assert release.wait(5)
-        return original(root)
+        return original(root, **kwargs)
 
     monkeypatch.setattr(host_module, "workspace_checkpoint", checkpoint)
     admission = asyncio.create_task(host.admit_run(RunRequest("first", first, "reserved")))
@@ -133,7 +133,7 @@ async def test_host_close_waits_for_admission_thread(isolated_workspace, monkeyp
     finished = threading.Event()
     from eventide import host as host_module
 
-    def checkpoint(root):
+    def checkpoint(root, **kwargs):
         entered.set()
         assert release.wait(5)
         # The database owner must still be alive while this thread completes.

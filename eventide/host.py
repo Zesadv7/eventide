@@ -88,6 +88,8 @@ from eventide.workspace import (
     changed_since,
     digest,
     git_metadata,
+    runtime_checkpoint_directories,
+    runtime_checkpoint_files,
     session_working_directory,
     workspace_checkpoint,
 )
@@ -175,7 +177,12 @@ class RuntimeHost:
         self._lease = HostLease(store.path.parent if store else self.settings.state_dir)
         try:
             self.store = store or RuntimeStore(self.settings.state_dir / "runtime.sqlite")
-            self.execution_snapshots = ExecutionSnapshots(self.state_dir)
+            self._checkpoint_files = runtime_checkpoint_files(self.store.path, self.state_dir)
+            self._checkpoint_directories = runtime_checkpoint_directories(self.state_dir)
+            self.execution_snapshots = ExecutionSnapshots(
+                self.state_dir, checkpoint_files=self._checkpoint_files,
+                checkpoint_directories=self._checkpoint_directories,
+            )
             self.execution_worktrees = ExecutionWorktrees(self.state_dir)
             self._recover_interrupted_runs()
             self._secret_box = SecretBox(self.settings.state_dir)
@@ -252,6 +259,12 @@ class RuntimeHost:
     def state_dir(self) -> Path:
         """State root for runtime-owned session files such as attachments."""
         return self.settings.state_dir
+
+    def _workspace_checkpoint(self, root: Path) -> dict[str, Any] | None:
+        return workspace_checkpoint(
+            root, exclude_untracked=self._checkpoint_files,
+            exclude_untracked_directories=self._checkpoint_directories,
+        )
 
     def _provider(self) -> Provider:
         if self.provider is None:
@@ -1486,6 +1499,8 @@ class RuntimeHost:
         if self._configuring:
             raise ValueError("Provider configuration is changing")
         workspace = self.sessions.workspace(session_id)
+        if self.state_dir.resolve() == Path(workspace.path):
+            raise ValueError("State directory must not be the Workspace root")
         if run_id in self._admission_done or self.store.get_run_identity(run_id):
             raise ValueError("Run identity already used")
         if self.session_busy(session_id):
@@ -1535,7 +1550,7 @@ class RuntimeHost:
                         saved = self.store.workspace_execution_config(workspace.workspace_id)
                         if saved:
                             intent["execution_config"] = saved
-                    checkpoint = await self._admission_check(workspace_checkpoint, root)
+                    checkpoint = await self._admission_check(self._workspace_checkpoint, root)
                     if require_checkpoint and checkpoint is None:
                         raise ValueError("Queued source execution requires a Git checkpoint")
                     ids = list(request.attachment_ids) if request else []
@@ -1670,7 +1685,9 @@ class RuntimeHost:
                                 intent["skill_snapshot"] = await self._freeze_skills(
                                     workspace, request, root=copy_root,
                                 )
-                                current = await self._admission_check(workspace_checkpoint, root)
+                                current = await self._admission_check(
+                                    self._workspace_checkpoint, root,
+                                )
                                 if current != binding["source_checkpoint"]:
                                     raise ValueError(
                                         "Source Workspace changed during snapshot admission"
@@ -1993,7 +2010,7 @@ class RuntimeHost:
                 ):
                     raise ValueError("Run identity already used")
                 if admitted:
-                    observed = await self._admission_check(workspace_checkpoint, root)
+                    observed = await self._admission_check(self._workspace_checkpoint, root)
                     accepted = self.store.get_run(admitted_run_id)
                     if not accepted or observed != accepted["checkpoint"]:
                         raise ValueError("Source Workspace changed after admission")
@@ -2087,13 +2104,22 @@ class RuntimeHost:
                 root, _ = self._execution_paths(binding)
             except (ValueError, OSError):
                 return ["execution copy changed or missing"], None
-        report = changed_since(root, events[-1]["ts"])
+        report = changed_since(
+            root, events[-1]["ts"], exclude_untracked=self._checkpoint_files,
+            exclude_untracked_directories=self._checkpoint_directories,
+        )
         if report is None:
             return None
         files, _truncated = report
         if files:
             return files, None
-        return [], workspace_checkpoint(root)
+        checkpoint = self._workspace_checkpoint(root)
+        previous = run.get("checkpoint") if run else None
+        if checkpoint and checkpoint.get("checkpoint_policy") != (
+            previous.get("checkpoint_policy") if previous else None
+        ):
+            return ["checkpoint policy changed"], None
+        return [], checkpoint
 
     def _validate_continue(
         self,
@@ -2109,7 +2135,7 @@ class RuntimeHost:
         else:
             if not workspace.git_root:
                 raise ValueError("Continue requires a Git workspace")
-            evidence = workspace_checkpoint(Path(workspace.path))
+            evidence = self._workspace_checkpoint(Path(workspace.path))
         if evidence is None or evidence != previous["checkpoint"]:
             raise ValueError("Workspace changed or checkpoint unavailable; session remains parked")
         events = self.store.run_events(previous["id"])
@@ -2226,7 +2252,7 @@ class RuntimeHost:
         def execution_checkpoint(_root: Path) -> dict[str, Any] | None:
             if execution_binding:
                 return self._execution_checkpoint(execution_binding)
-            return workspace_checkpoint(_root)
+            return self._workspace_checkpoint(_root)
 
         manager = MCPManager()
         usage = {"input_tokens": 0, "output_tokens": 0}
@@ -2475,7 +2501,11 @@ class RuntimeHost:
 
                         def make_snapshot() -> None:
                             snapshots.append(
-                                SourceSnapshot.create(workspace_root, working_root, self.state_dir)
+                                SourceSnapshot.create(
+                                    workspace_root, working_root, self.state_dir,
+                                    checkpoint_files=self._checkpoint_files,
+                                    checkpoint_directories=self._checkpoint_directories,
+                                )
                             )
 
                         async with self._project_git(workspace.project_id):
