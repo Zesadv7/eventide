@@ -215,6 +215,8 @@ def _format_eval_summary(report: dict[str, Any]) -> str:
     passed, total = report.get("passed", 0), report.get("total", 0)
     rate = report.get("task_completion_rate", report.get("pass_rate", 0))
     lines.append(f"任务完成率：{passed}/{total}（{rate * 100:.1f}%）")
+    if report.get("report_path"):
+        lines.append(f"评测报告：{report['report_path']}")
     lines.append(
         f"平均步数：{report.get('average_steps', 0)} · "
         f"工具成功率：{report.get('tool_success_rate', 1.0)} · "

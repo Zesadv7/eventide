@@ -45,6 +45,7 @@ from eventide.normalization import normalize, redact
 from eventide.policy import PolicyEngine
 from eventide.previews import PreviewStore, SafeTextBuffer
 from eventide.projections import TaskPlanProjection
+from eventide.provider_config import apply_provider_configuration
 from eventide.providers import Provider, ProviderError, build_provider
 from eventide.rag.embedding import provider_from_settings
 from eventide.rag.index import INDEX_RELATIVE_PATH
@@ -497,25 +498,13 @@ class RuntimeHost:
                 await result
 
     def _load_persisted_provider(self) -> None:
-        record = self.store.get_provider_config()
-        if not record:
-            return
-        api_key = self._startup_settings.api_key
-        encrypted = record.get("api_key_ciphertext")
-        self._provider_secret_error = None
-        if encrypted:
-            try:
-                api_key = self._secret_box.decrypt(str(encrypted))
-            except SecretKeyError as exc:
-                api_key = None
-                self._provider_secret_error = str(exc)
-        self.settings = replace(
+        resolved = apply_provider_configuration(
             self._startup_settings,
-            provider=str(record["provider"]),
-            base_url=str(record["base_url"]) if record["base_url"] else None,
-            model=str(record["model"]),
-            api_key=api_key,
+            self.store.get_provider_config(),
+            self._secret_box,
         )
+        self.settings = resolved.settings
+        self._provider_secret_error = resolved.secret_error
 
     def provider_config_status(self) -> dict[str, Any]:
         record = self.store.get_provider_config()

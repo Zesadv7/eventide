@@ -68,6 +68,8 @@ uv run eventide rag eval evals/retrieval.yaml
 uv run eventide eval evals/tasks.yaml
 ```
 
+全部评测用例都在各自的一次性 Git 项目和独立状态根中运行；未声明 `workspace` 时使用空项目，不读取或修改启动目录的源码。离线与 live 均关闭外部 MCP。每次评测保留临时产物目录、逐用例源码与数据库，包括失败结果；摘要显示报告路径，JSON 的 `artifact_dir` / `report_path` 及逐用例 `artifact_dir` 可定位证据。临时产物不会自动删除，也不写入用户状态根。
+
 默认输出人类可读摘要：任务完成率、平均步数、失败原因分布和失败用例；加 `--json` 打印完整报告。报告中的 `task_completion_rate` 是通过用例占比，`failure_reasons` 汇总失败原因，live 模式另汇总输入/输出 tokens。离线结果是 scripted 回归冒烟（`regression_smoke: true`），不代表真实模型的任务完成率。
 
 ### 一个可以复现的工程闭环
@@ -289,6 +291,8 @@ uv run eventide chat
 ```bash
 uv run eventide eval evals/smoke.yaml --live
 ```
+
+live 在隔离状态根之前只读解析已保存的模型配置，与正常 Host 使用相同的优先级；加密凭据只在内存中传递，不复制到评测数据库或报告。缺失或错误的解密密钥会明确报错，不重新生成密钥、不回退到环境密钥，也不启动模型请求。离线评测不读取保存的配置或凭据。Python 的 `run_evaluations(..., output_dir=...)` 可显式导出报告，源码和数据库仍留在临时目录。
 
 live 摘要会汇总输入/输出 tokens 与总耗时；`--json` 输出完整报告（含逐用例 steps、usage 与 status）。任务级套件 `evals/tasks.yaml` 同样支持 `--live`，其完成率才反映真实模型表现；离线运行同一套件只是回归冒烟。
 

@@ -87,10 +87,9 @@ cases:
     assert report["passed"] == 2
     assert report["safety_blocks"] == 1
     assert report["tool_success_rate"] == 1.0
-    saved = json.loads(
-        (isolated_workspace / ".eventide/evals/offline-report.json").read_text(encoding="utf-8")
-    )
+    saved = json.loads(Path(report["report_path"]).read_text(encoding="utf-8"))
     assert saved["pass_rate"] == 1.0
+    assert not (isolated_workspace / ".eventide").exists()
 
 
 def _judge(expected, output="ok", events=None, status="completed", workdir=None):
@@ -238,7 +237,8 @@ cases:
     assert (sandboxed.workdir / "seed.txt").read_text(encoding="utf-8") == "hello"
     assert sandboxed.state_dir == sandboxed.workdir / ".eventide"
     assert (sandboxed.workdir / ".eventide" / "evals" / "offline.db").is_file()
-    assert (isolated_workspace / ".eventide" / "evals" / "offline-report.json").is_file()
+    assert Path(report["report_path"]).is_file()
+    assert not (isolated_workspace / ".eventide").exists()
 
 
 async def test_denied_write_leaves_no_file(isolated_workspace):

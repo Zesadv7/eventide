@@ -94,8 +94,8 @@ uv run eventide eval evals/smoke.yaml
 | 编号 | 状态 | 实施与验收要求 / 证据 |
 |---|---|---|
 | 0.1 | 已完成 | 2026-10-15：本计划和逐步状态制度已写入本文件；README 过时 Subagent 表述已修正，架构/ADR 区分目标与现状；文档检查和 git diff --check。 |
-| 0.2 | 待开始 | 正常运行与 live eval 共用有效配置解析；隔离状态根前解析，凭据只在内存，解密失败明确报告；离线不读真实凭据。 |
-| 0.3 | 待开始 | 工程评测临时项目、独立数据库，默认关闭外部 MCP，不写用户状态。 |
+| 0.2 | 已完成 | 2026-10-15：Host/live 共用配置优先级；live 只读解析已提交 WAL 配置、隔离前解密且不创建 Host/密钥，错误不回退。88 项定向回归、Ruff、Mypy 50 模块通过；README/architecture/ADR-051 已同步。真实调用另属 0.4。 |
+| 0.3 | 已完成 | 2026-10-15：全部用例独立临时 Git 项目/数据库，live/offline 均关闭 MCP；失败产物保留，报告可逐例定位，凭据不写产物、用户源码/状态不变。88 项回归及 smoke12/tasks14/engineering3/workers1 全通过；README/architecture/ADR-051 同步。 |
 | 0.4 | 待开始 | 普通响应/只读调用及三个工程 fixture 各两次；默认每次 12 步/20,000 已观测 Token/5 分钟，失败保留。 |
 | A1 | 待开始 | 模块化项目/会话/运行/模型/Skills/索引/评测/交付路由；统一错误，长任务持久身份、查询与停止。 |
 | A2 | 进行中 | Run/Continue持久幂等接收、重启重试、内容冲突及同源/DNS-rebinding防护已实现；43项HTTP/接收/API回归、Ruff/mypy52模块通过。api-contract/architecture同步；Skills/Delivery等新写控制面按后续步骤接入。 |

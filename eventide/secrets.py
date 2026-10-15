@@ -20,7 +20,7 @@ class SecretBox:
         self.key_path = state_dir / "secret.key"
         self._fernet: Fernet | None = None
 
-    def _load(self) -> Fernet:
+    def _load(self, *, create: bool = True) -> Fernet:
         if self._fernet is not None:
             return self._fernet
         configured = os.getenv("EVENTIDE_SECRET_KEY")
@@ -30,8 +30,11 @@ class SecretBox:
             except UnicodeEncodeError as exc:
                 raise SecretKeyError("EVENTIDE_SECRET_KEY 必须使用 URL-safe Base64 字符") from exc
         elif self.key_path.exists():
-            raw_key = self.key_path.read_bytes().strip()
-        else:
+            try:
+                raw_key = self.key_path.read_bytes().strip()
+            except OSError as exc:
+                raise SecretKeyError("无法读取解密密钥；请检查 secret.key 的路径和权限") from exc
+        elif create:
             self.key_path.parent.mkdir(parents=True, exist_ok=True)
             raw_key = Fernet.generate_key()
             temporary = self.key_path.with_suffix(".tmp")
@@ -39,6 +42,10 @@ class SecretBox:
             with suppress(OSError):
                 temporary.chmod(0o600)
             os.replace(temporary, self.key_path)
+        else:
+            raise SecretKeyError(
+                "已保存的 API Key 缺少解密密钥；请恢复 secret.key 或 EVENTIDE_SECRET_KEY"
+            )
         try:
             self._fernet = Fernet(raw_key)
         except (ValueError, TypeError) as exc:
@@ -52,8 +59,8 @@ class SecretBox:
 
     def decrypt(self, value: str) -> str:
         try:
-            return self._load().decrypt(value.encode("ascii")).decode("utf-8")
-        except InvalidToken as exc:
+            return self._load(create=False).decrypt(value.encode("ascii")).decode("utf-8")
+        except (InvalidToken, UnicodeError, ValueError) as exc:
             raise SecretKeyError(
                 "已保存的 API Key 无法解密；请恢复原 EVENTIDE_SECRET_KEY 或重新保存密钥"
             ) from exc

@@ -18,6 +18,7 @@ from typing import Any
 from eventide.config import Settings
 from eventide.host import RuntimeHost
 from eventide.models import RunRequest, RunResult
+from eventide.provider_config import resolve_provider_configuration
 from eventide.providers import ScriptedProvider, build_provider
 from eventide.rag.index import IndexStore
 from eventide.store import RuntimeStore
@@ -37,6 +38,7 @@ class EvalCaseResult:
     usage: dict[str, int] = field(default_factory=dict)
     status: str = "unknown"
     verification: dict[str, Any] = field(default_factory=dict)
+    artifact_dir: str | None = None
 
 
 def load_suite(path: Path) -> list[dict[str, Any]]:
@@ -58,7 +60,7 @@ def _run_git(path: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     )
 
 
-def _create_sandbox(fixtures: dict[str, Any]) -> Path:
+def _create_sandbox(fixtures: dict[str, Any], *, parent: Path | None = None) -> Path:
     """Materialize one case's fixtures in a throwaway Git workspace.
 
     The sandbox is deliberately not auto-deleted: failed cases keep their
@@ -66,7 +68,7 @@ def _create_sandbox(fixtures: dict[str, Any]) -> Path:
     root and the repo-local git identity live inside the sandbox, so later
     commits (seeded or model-driven) need no global git configuration.
     """
-    sandbox = Path(tempfile.mkdtemp(prefix="eventide-eval-"))
+    sandbox = Path(tempfile.mkdtemp(prefix="eventide-eval-", dir=parent))
     for relative, content in fixtures.items():
         path = Path(str(relative))
         if path.is_absolute() or ".." in path.parts or "\\" in str(relative):
@@ -261,12 +263,26 @@ def _judge(
 
 
 async def run_evaluations(
-    path: Path, *, live: bool = False, settings: Settings | None = None
+    path: Path,
+    *,
+    live: bool = False,
+    settings: Settings | None = None,
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
+    """Run cases in independent temporary projects, never in the caller's checkout.
+
+    Live mode resolves saved provider settings read-only before isolation. The
+    returned artifact_dir keeps all case databases and source evidence, including
+    failed cases. output_dir explicitly exports the report only; it is not a
+    state root and receives no credentials or runtime databases.
+    """
     settings = settings or Settings.from_env()
-    if not live:
+    if live:
+        settings = resolve_provider_configuration(settings)
+    else:
         settings = replace(
             settings,
+            api_key=None,
             embedding_provider="hash",
             embedding_model=None,
             embedding_base_url=None,
@@ -275,83 +291,81 @@ async def run_evaluations(
         )
     cases = load_suite(path)
     mode = "live" if live else "offline"
-    database = settings.state_dir / "evals" / f"{mode}.db"
-    suite_store = RuntimeStore(database)
+    artifact_dir = Path(tempfile.mkdtemp(prefix=f"eventide-evaluation-{mode}-"))
     results: list[EvalCaseResult] = []
     suite_started = time.perf_counter()
     for index, case in enumerate(cases, 1):
-        case_settings = replace(settings, workers_enabled=case.get("readonly_workers") is True)
-        case_store = suite_store
-        sandbox: Path | None = None
-        fixtures = case.get("workspace")
+        fixtures = case.get("workspace", {})
+        if not isinstance(fixtures, dict):
+            raise ValueError("Evaluation workspace must be an inline fixture mapping")
+        sandbox = _create_sandbox(fixtures, parent=artifact_dir)
+        case_settings = replace(
+            settings,
+            workdir=sandbox,
+            state_dir=sandbox / ".eventide",
+            workers_enabled=case.get("readonly_workers") is True,
+        )
         rag_index = case.get("rag_index") is True
-        if rag_index and not isinstance(fixtures, dict):
-            raise ValueError("rag_index requires an inline workspace fixture")
-        if isinstance(fixtures, dict):
-            sandbox = _create_sandbox(fixtures)
-            case_settings = replace(case_settings, workdir=sandbox, state_dir=sandbox / ".eventide")
-            case_store = RuntimeStore(case_settings.state_dir / "evals" / f"{mode}.db")
-            if rag_index:
-                # Fixture indexes are always deterministic, including live LLM runs.
-                case_settings = replace(
-                    case_settings,
-                    embedding_provider="hash",
-                    embedding_model=None,
-                    embedding_base_url=None,
-                    embedding_api_key=None,
-                    embedding_dim=256,
-                )
-                IndexStore(sandbox).build()
+        if rag_index:
+            # Fixture indexes are always deterministic, including live LLM runs.
+            case_settings = replace(
+                case_settings,
+                embedding_provider="hash",
+                embedding_model=None,
+                embedding_base_url=None,
+                embedding_api_key=None,
+                embedding_dim=256,
+            )
+            IndexStore(sandbox).build()
         provider = (
             build_provider(case_settings) if live else ScriptedProvider(case.get("script", []))
         )
-        runtime = RuntimeHost(
-            settings=case_settings, provider=provider, store=case_store, enable_mcp=live
-        )
-        session_id = f"eval_{mode}_{index}_{int(time.time() * 1000)}"
+        case_store = RuntimeStore(case_settings.state_dir / "evals" / f"{mode}.db")
+        runtime = None
         try:
+            runtime = RuntimeHost(
+                settings=case_settings, provider=provider, store=case_store, enable_mcp=False
+            )
+            session_id = f"eval_{mode}_{index}_{int(time.time() * 1000)}"
             result, verification, acceptance_reasons = await _run_case(
                 runtime, case, sandbox, session_id
             )
-        except BaseException:
-            await runtime.close()
-            if case_store is not suite_store:
-                case_store.close()
-            suite_store.close()
-            raise
-        events = case_store.get_events(result.run_id)
-        passed, reasons = _judge(case, result.output, events, result.status, sandbox)
-        reasons += acceptance_reasons
-        passed = passed and not acceptance_reasons
-        error_events = [
-            event
-            for event in events
-            if event["type"] == "tool.result" and event["payload"].get("is_error")
-        ]
-        safety_blocks = sum(
-            "Permission denied" in str(event["payload"].get("content", ""))
-            for event in error_events
-        )
-        tool_errors = len(error_events) - safety_blocks
-        results.append(
-            EvalCaseResult(
-                id=str(case.get("id", f"case_{index}")),
-                passed=passed,
-                output=result.output,
-                duration_ms=result.duration_ms,
-                tool_calls=result.tool_calls,
-                tool_errors=tool_errors,
-                safety_blocks=safety_blocks,
-                reasons=reasons,
-                steps=result.steps,
-                usage=dict(result.usage),
-                status=result.status,
-                verification=verification,
+            events = case_store.get_events(result.run_id)
+            passed, reasons = _judge(case, result.output, events, result.status, sandbox)
+            reasons += acceptance_reasons
+            passed = passed and not acceptance_reasons
+            error_events = [
+                event
+                for event in events
+                if event["type"] == "tool.result" and event["payload"].get("is_error")
+            ]
+            safety_blocks = sum(
+                "Permission denied" in str(event["payload"].get("content", ""))
+                for event in error_events
             )
-        )
-        await runtime.close()
-        if case_store is not suite_store:
-            case_store.close()
+            results.append(
+                EvalCaseResult(
+                    id=str(case.get("id", f"case_{index}")),
+                    passed=passed,
+                    output=result.output,
+                    duration_ms=result.duration_ms,
+                    tool_calls=result.tool_calls,
+                    tool_errors=len(error_events) - safety_blocks,
+                    safety_blocks=safety_blocks,
+                    reasons=reasons,
+                    steps=result.steps,
+                    usage=dict(result.usage),
+                    status=result.status,
+                    verification=verification,
+                    artifact_dir=str(sandbox),
+                )
+            )
+        finally:
+            try:
+                if runtime is not None:
+                    await runtime.close()
+            finally:
+                case_store.close()
     passed_count = sum(item.passed for item in results)
     total_tools = sum(item.tool_calls for item in results)
     total_errors = sum(item.tool_errors for item in results)
@@ -364,6 +378,8 @@ async def run_evaluations(
     report: dict[str, Any] = {
         "mode": mode,
         "suite": str(path),
+        "artifact_dir": str(artifact_dir),
+        "report_path": str(artifact_dir / f"{mode}-report.json"),
         "passed": passed_count,
         "total": len(results),
         "pass_rate": round(passed_count / len(results), 4) if results else 0,
@@ -387,10 +403,9 @@ async def run_evaluations(
         report["total_output_tokens"] = sum(item.usage.get("output_tokens", 0) for item in results)
     else:
         report["regression_smoke"] = True
-    report_dir = settings.state_dir / "evals"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    (report_dir / f"{mode}-report.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    suite_store.close()
+    body = json.dumps(report, ensure_ascii=False, indent=2)
+    Path(report["report_path"]).write_text(body, encoding="utf-8")
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / f"{mode}-report.json").write_text(body, encoding="utf-8")
     return report
