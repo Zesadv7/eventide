@@ -412,6 +412,20 @@ usage投影只验证attempt_started中的固定字段、方法、单位、非负
 
 Vue的InputComposition只展示服务端已校验的固定字符统计，旧值为null时不补造。UsageInsights由costs返回的全历史独占calls按精确run_id分组：排名只加reported输入/输出，缓存与推理细项不重复相加；仅estimated/unknown的运行不以零参与排名，部分报告保留不完整次数。父子Run各自列出，不再次求父终态和。context_summary按真实attempt数计数，重复失败仅取status=failed、取消不算失败。组件刷新替换投影，无本地累计状态。48项前端回归与6条真实API旅程验证刷新、零值、缺失和分类；桌面/移动端输入详情在跨列区域展示。
 
+### Web 评测控制Run（B4，离线切片）
+
+`EvaluationController`依赖唯一主RuntimeHost/RuntimeStore。每个Project固定一个归档control Session（kind=evaluation），逻辑绑定源Workspace。`Store.admit_run`同事务写入run.admitted和evaluation.accepted：包含全部已校验任务正文、manifest原字节与规范化哈希、选定cases哈希、split、固定限制和接收时Runtime版本。排队后从该事实恢复输入，不能重读用户路径或重新选择当前版本；报告分别记录接收及实际执行的Runtime证据。
+
+接收通过现有RuntimeScheduler ticket竞争4根/20等待；RunDispatch.start执行评测控制器回调，不进入Agent循环、不重新构造提示词。执行键为evaluation_run:<id>，只持有自己的Session，不占用户源码Workspace锁。终态后的实际清理仍由_track_run_task唯一回收根lease。没有独立后台队列、任务表或状态文件；状态查询从主Store事实重建，SSE沿用Run流。
+
+受控runner直接await已有run_evaluations：显式常量Settings、ScriptedProvider、Hash embedding、禁MCP，不读取环境或已保存凭据，不调用真实SDK。每题仍在独立Git项目和Store中测试Runtime，包括恢复题关闭重开它自己的Host；这些数据库是测试产物，不能关闭主服务或把case调用/usage再次导入主账本。主控制Run没有模型尝试，不伪造费用为免费，billing_applicable=false明确表示不适用。
+
+同步progress回调在案例开始/结束及原子报告保存后追加主事实。报告快照各自不可变，主Store只保存受控文件名及SHA256。GET报告限制命名、10MiB、目录身份、无链接和hash，不从报告文件反推主任务终态。取消沿用B2实际收尾和重复取消保护，保存部分证据后再向外传播；排队取消不创建fixture。Host重启严格识别evaluation control身份并直接写interrupted，不检查用户源码crash gap、不重放，普通Run/Continue/abandon入口拒绝control Session。
+
+状态根的evaluations专用namespace加入现有精确untracked排除列表；不排除整个state，已跟踪内容和symlink仍参与源码漂移。checkpoint_policy中目录列表随之变化，旧checkpoint不会被静默升级。服务安装包使用内置资源，不依赖当前工作目录或顶层evals。
+
+此路径仅支持offline。未来live须将真实案例请求接入主Host的两个模型槽及项目/UTC日预算，并设计服务端可信的执行项目与计费项目归属；不得把本切片的独立case Host切换为付费Provider或事后复制账本。
+
 ### Vue 离线评测控制面（B4）
 
 `EvaluationsView`消费项目级评测目录、接收、历史、详情、取消和报告API；任务集仅固定为`engineering-v1`，允许development/holdout/all，mode始终offline。页面不生成prompt或模型配置，不把控制Run的完成状态当作每题通过。脚本机制验证、实际模型效果、真实费用口径始终分开。

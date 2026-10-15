@@ -974,6 +974,8 @@ class RuntimeHost:
     @staticmethod
     def _execution_key(run_id: str, intent: dict[str, Any]) -> str:
         binding = intent.get("execution_binding", {})
+        if binding.get("kind") == "evaluation":
+            return f"evaluation_run:{run_id}"
         if binding.get("kind") == "snapshot":
             return f"snapshot_run:{run_id}"
         if binding.get("kind") == "worktree":
@@ -998,6 +1000,8 @@ class RuntimeHost:
         binding = self._execution_binding(run_id)
         if not binding:
             return {"kind": "source"}
+        if binding["kind"] == "evaluation":
+            return {key: binding[key] for key in ("kind", "workspace_id", "evaluation_id")}
         if binding["kind"] == "worktree":
             return {key: binding[key] for key in (
                 "kind", "workspace_id", "execution_workspace_id", "working_directory",
@@ -1791,6 +1795,8 @@ class RuntimeHost:
         intent = self._admitted_intent(run_id)
         if not run or not intent or self.store.run_is_terminal(run_id):
             raise ValueError("Run is not awaiting execution")
+        if self.is_control_session(run["session_id"]):
+            raise ValueError("Control Runs require their dedicated controller")
         if run_id in self._run_tasks:
             raise ValueError("Run is already scheduled")
         if run_id not in self._admission_done:
@@ -1856,7 +1862,7 @@ class RuntimeHost:
         workspace = self.sessions.workspace(session_id)
         task = asyncio.current_task()
         assert task is not None
-        if self.is_worker_session(session_id):
+        if self.is_worker_session(session_id) or self.is_control_session(session_id):
             raise ValueError("Worker sessions cannot accept ordinary runs or Continue")
         self._active_tasks.add(task)
         try:
@@ -2046,6 +2052,8 @@ class RuntimeHost:
         it cannot justify one, record which paths changed instead, so the user can see
         what to check before deciding to abandon.
         """
+        from eventide.evaluation_control import is_evaluation_run
+
         for run_id in self.store.unfinished_runs():
             payload: dict[str, Any] = {"error": "Host stopped before terminal fact"}
             started = any(event["type"] == "run.started"
@@ -2054,6 +2062,7 @@ class RuntimeHost:
             # Replacing it with the current filesystem would hide queue-time drift.
             queued = not started and self._admitted_intent(run_id) is not None
             evidence = (None if queued or is_service_probe_run(self.store, run_id)
+                        or is_evaluation_run(self.store, run_id)
                         else self._crash_gap_evidence(run_id))
             if queued:
                 payload["reason"] = "host_stopped_before_dispatch"

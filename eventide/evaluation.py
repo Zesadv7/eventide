@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import shlex
 import shutil
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -506,6 +508,10 @@ async def run_evaluations(
     path: Path, *, live: bool = False, settings: Settings | None = None,
     output_dir: Path | None = None, prices: tuple[PriceVersion, ...] = (),
     case_timeout: float = 300, split: str | None = None,
+    cases_snapshot: list[dict[str, Any]] | None = None,
+    suite_metadata: dict[str, Any] | None = None,
+    artifact_parent: Path | None = None,
+    progress: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run isolated cases; retain canonical evidence and incremental reports on every outcome.
 
@@ -515,7 +521,12 @@ async def run_evaluations(
     """
     if isinstance(case_timeout, bool) or not 0 < case_timeout <= 300:
         raise ValueError("case_timeout must be positive and at most 300 seconds")
-    cases = load_suite(path)
+    # A trusted controller freezes validated JSON at admission. Never re-read a
+    # mutable path when dispatching a queued batch. This is not an HTTP input.
+    cases = (load_suite(path) if cases_snapshot is None
+             else json.loads(json.dumps(cases_snapshot)))
+    if cases_snapshot is not None and (live or settings is None or suite_metadata is None):
+        raise ValueError("Frozen controlled evaluation requires explicit offline settings/metadata")
     benchmark = any("benchmark" in case for case in cases)
     if live and benchmark:
         raise ValueError(
@@ -536,13 +547,19 @@ async def run_evaluations(
             embedding_base_url=None, embedding_api_key=None, embedding_dim=256,
         )
     mode = "live" if live else "offline"
-    directory = Path(tempfile.mkdtemp(prefix=f"eventide-evaluation-{mode}-")).resolve()
+    if artifact_parent is not None:
+        artifact_parent.mkdir(parents=True, exist_ok=True)
+    directory = Path(tempfile.mkdtemp(
+        prefix=f"eventide-evaluation-{mode}-", dir=artifact_parent,
+    )).resolve()
     inputs = atomic_json(directory / "suite-inputs.json", normalize(cases, _secrets(settings)))
     provenance = {
         "runtime": runtime_revision(),
-        "suite_source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "suite_source_sha256": (suite_metadata["manifest_sha256"] if suite_metadata is not None
+                                else hashlib.sha256(path.read_bytes()).hexdigest()),
         "inputs": inputs, "split": split, "prices": [price.payload() for price in prices],
         "case_timeout": case_timeout,
+        **({"builtin_suite": suite_metadata} if suite_metadata is not None else {}),
     }
     results: list[EvalCaseResult] = []
     started = time.perf_counter()
@@ -554,15 +571,21 @@ async def run_evaluations(
         if output_dir is not None:
             output_dir.mkdir(parents=True, exist_ok=True)
             atomic_json(output_dir / f"{mode}-report.json", report)
+        if progress is not None:
+            progress("report_saved", report)
         return report
 
     save("running")
     for index, case in enumerate(cases, 1):
+        if progress is not None:
+            progress("case_started", {"id": case["id"], "index": index})
         entry, cancelled = await _evaluate_case(
             case, index, settings, directory / f"case-{index:03d}",
             live=live, prices=prices, case_timeout=case_timeout,
         )
         results.append(entry)
+        if progress is not None:
+            progress("case_completed", asdict(entry))
         if cancelled:
             save("cancelled")
             raise asyncio.CancelledError

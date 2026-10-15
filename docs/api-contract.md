@@ -287,6 +287,19 @@ Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入�
 
 统计是最终Provider中立system/messages/tools对象经json.dumps(ensure_ascii=False)序列化后的Unicode字符，含转义/结构，不是供应商wire、Token或费用。instructions统计system序列化字符串，tool_catalog统计整个tools数组；message.content块按已确认配对的工具结果分别归skills/retrieval/tool_results，其他内容及message中role/content以外的扩展字段值归history，剩余角色/字段名和JSON结构归envelope。仅唯一且先出现的assistant tool_use可为user tool_result建立归属，加载Skill正文/资源和search_knowledge分别归对应项；错序/孤立/重复ID不猜来源。摘要、图片及provider_state按当前请求本身统计，不还原已压缩来源；不能把Skills字符项解释为其完整因果成本。
 
+## 离线评测
+
+仅支持内置工程冻结集和scripted机制验证。所有响应标注`measurement_kind=scripted_mechanism_validation`、`billing_applicable=false`，不代表真实模型成功率。以下POST沿用本机/同源防护，`Idempotency-Key`必填（1–128可见ASCII字符）。
+
+- `GET /api/evaluations/suites` → 数组：`id,benchmark_id,version(int),description,split(null),total,splits,manifest_sha256,suite_sha256,inputs_sha256,supported_modes:[offline]`及上述机制标记。先完整验证20题再公布，损坏不能静默隐藏。
+- `POST /api/projects/{project_id}/evaluations` → 202：`evaluation_id,run_id,session_id,project_id,status=accepted,status_url,events_url`。严格请求为`{suite_id:engineering-v1,suite_sha256:<catalog hash>,split:development|holdout|all,mode:offline}`；split默认development，mode默认offline。额外字段及live均422，禁止路径、脚本、模型或凭据输入。同键同内容返回原202和身份，包括重启/终态；同键异内容409。suite过期、同项目busy为409，全局队列满429，确定未接收的拒绝带`X-Eventide-Mutation-Outcome: rejected`。不得在内容冲突或结果未知时自行换键。
+- `GET /api/projects/{project_id}/evaluations?limit=20&before=<run_id>` → 最新在前的详情数组，limit范围1–100。
+- `GET /api/evaluations/{evaluation_id}` → 身份、suite_id/suite_version/suite_sha256、split/mode、机制标记、`status`（queued/running/completed/failed/interrupted）、`dispatch_state`（queued/starting/running/finishing/null）、queue_position、total/attempted/passed/failed/remaining、current_case、cases、report_available/report_url/events_url/error。cases逐项`id,category,split,status,passed(bool|null),reasons,duration_ms`；未执行passed为null。批次completed表示全部案例执行完，失败数另计。
+- `POST /api/evaluations/{evaluation_id}/cancel` → 当前详情；排队/运行取消均等待实际收尾并变为interrupted，终态重复停止无副作用。活动取消请求按键摘要记入原Run事实；已完成终态不追加事实、不重启。通用Run取消端点亦有效。
+- `GET /api/evaluations/{evaluation_id}/report` → B2 schema_version=2完整JSON（含status/passed/total/attempted/remaining/results/provenance等），验证文件名、目录身份与不可变SHA256。无报告404，已有证据文件丢失/变更/越界409。此为只读GET，容器同源浏览器不需Origin；POST仍严格校验。
+
+事件复用`GET /api/runs/{run_id}/events`；评测事实为evaluation.accepted/case_started/case_completed/report_saved/finished及普通Run生命周期。通用Run/queue的execution投影为`{kind:evaluation,workspace_id,evaluation_id}`，不使用snapshot专属字段。刷新读取持久事实，不重复计数。重启将未完成批次标interrupted，已完成案例仍可查询，活动案例中断、剩余未执行；禁止普通Run、Continue和abandon进入控制Session，新测试使用新身份。
+
 ### Vue 离线评测请求恢复
 
 Vue仅提交固定`engineering-v1`任务集目录返回的`suite_sha256`、development/holdout/all及`mode=offline`；接收和取消均使用随机Idempotency-Key。网络错误或未明确拒绝的409保留原身份，刷新重试也固定原指纹与划分。明确无副作用拒绝（X-Eventide-Mutation-Outcome: rejected）或403/404/422才允许新请求身份，成功202只代表持久接收，运行结果从详情和报告查询。
