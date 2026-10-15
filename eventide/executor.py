@@ -12,10 +12,17 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from eventide.models import CommandResult, ToolCall, ToolResult
 from eventide.policy import PolicyDecision, PolicyEngine
+from eventide.tool_contracts import (
+    BUILTIN_ARGUMENTS,
+    ToolArgumentsError,
+    ToolContractError,
+    builtin_schema,
+    contract_catalog,
+)
 from eventide.utils import decode_output
 
 ApprovalHandler = Callable[[str, ToolCall, str], Awaitable[bool]]
@@ -219,52 +226,107 @@ class ToolExecutor:
         handlers: dict[str, Callable[..., object]],
         readonly_tools: set[str] | None = None,
         command_executor: CommandExecutor | None = None,
+        *,
+        tools: list[dict[str, Any]] | None = None,
     ):
-        self.handlers = handlers
-        self.readonly_tools = readonly_tools or set()
+        self.handlers = dict(handlers)
+        self.readonly_tools = set(readonly_tools or ())
         self.command_executor = command_executor or LocalCommandExecutor()
+        self.contracts = contract_catalog(
+            tools
+            if tools is not None
+            else [
+                {"name": name, "input_schema": builtin_schema(name)}
+                for name in handlers
+                if name in BUILTIN_ARGUMENTS
+            ]
+        )
 
     async def execute(self, call: ToolCall, context: ToolContext) -> ToolResult:
+        handler = self.handlers.get(call.name)
+        if handler is None:
+            return ToolResult(
+                call.id, call.name, f"Unknown tool: {call.name}", True, {"code": "unknown_tool"}
+            )
+        contract = self.contracts.get(call.name)
+        if contract is None or isinstance(contract, ToolContractError):
+            reason = str(contract) if contract is not None else "No input contract was registered"
+            return ToolResult(
+                call.id,
+                call.name,
+                f"Error: invalid tool contract: {reason}",
+                True,
+                {"code": "invalid_tool_contract"},
+            )
+        try:
+            arguments = contract.validate(call.arguments)
+        except (ToolArgumentsError, ToolContractError) as exc:
+            return ToolResult(
+                call.id,
+                call.name,
+                f"Error: {exc}",
+                True,
+                {
+                    "code": (
+                        "invalid_arguments"
+                        if isinstance(exc, ToolArgumentsError)
+                        else "invalid_tool_contract"
+                    )
+                },
+            )
         policy = context.policy.evaluate(
             call.name,
-            dict(call.arguments),
+            arguments,
             context.cwd,
             trusted_readonly=call.name in self.readonly_tools,
         )
         if policy.decision == PolicyDecision.DENY:
-            return ToolResult(call.id, call.name, f"Permission denied: {policy.reason}", True)
+            return ToolResult(
+                call.id, call.name, f"Permission denied: {policy.reason}", True,
+                {"code": "permission_denied"},
+            )
         if policy.decision == PolicyDecision.ASK:
             if not context.approval_handler:
-                return ToolResult(call.id, call.name, f"Permission denied: {policy.reason}", True)
-            approval_id = f"approval_{call.id}_{int(time.time() * 1000)}"
-            if not await context.approval_handler(approval_id, call, policy.reason):
                 return ToolResult(
-                    call.id, call.name, "Permission denied by user or approval timeout", True
+                    call.id, call.name, f"Permission denied: {policy.reason}", True,
+                    {"code": "permission_denied"},
                 )
-        handler = self.handlers.get(call.name)
-        if handler is None:
-            return ToolResult(call.id, call.name, f"Unknown tool: {call.name}", True)
-        arguments = dict(call.arguments)
+            approval_id = f"approval_{call.id}_{int(time.time() * 1000)}"
+            validated_call = ToolCall(call.id, call.name, arguments)
+            if not await context.approval_handler(approval_id, validated_call, policy.reason):
+                return ToolResult(
+                    call.id, call.name, "Permission denied by user or approval timeout", True,
+                    {"code": "permission_denied"},
+                )
         if call.name in {"bash", "read_file", "write_file", "edit_file", "glob"}:
             arguments["cwd"] = context.cwd
         try:
             output: object
             if call.name == "bash":
                 output = await self.command_executor.execute(
-                    str(arguments.get("command", "")), context.cwd
+                    arguments["command"], context.cwd
                 )
             elif inspect.iscoroutinefunction(handler):
                 output = await handler(**arguments)
             else:
                 output = await asyncio.to_thread(handler, **arguments)
             if isinstance(output, CommandResult):
+                metadata = output.metadata()
+                if output.is_error:
+                    metadata["code"] = "timeout" if output.timed_out else "execution_failed"
                 return ToolResult(
-                    call.id, call.name, output.render(), output.is_error, output.metadata()
+                    call.id, call.name, output.render(), output.is_error, metadata
                 )
             text = str(output)
-            return ToolResult(call.id, call.name, text, text.startswith("Error:"))
+            failed = text.startswith("Error:")
+            return ToolResult(
+                call.id, call.name, text, failed,
+                {"code": "execution_failed"} if failed else {},
+            )
         except Exception as exc:
-            metadata = {"outcome_unknown": True} if getattr(exc, "outcome_unknown", False) else {}
+            metadata = {"code": "timeout" if isinstance(exc, TimeoutError) else "execution_failed"}
+            if getattr(exc, "outcome_unknown", False):
+                metadata.update({"outcome_unknown": True, "code": "outcome_unknown"})
             return ToolResult(
                 call.id, call.name, f"Error: {type(exc).__name__}: {exc}", True, metadata
             )

@@ -18,7 +18,14 @@ async def test_executor_handles_sync_async_unknown_and_errors(isolated_workspace
         raise RuntimeError("boom")
 
     executor = ToolExecutor(
-        {"custom_sync": sync_handler, "custom_async": async_handler, "broken": broken}
+        {"custom_sync": sync_handler, "custom_async": async_handler, "broken": broken},
+        tools=[
+            {"name": name, "input_schema": {
+                "type": "object", "properties": {"value": {"type": "integer"}},
+                "required": ["value"], "additionalProperties": False,
+            }}
+            for name in ("custom_sync", "custom_async")
+        ] + [{"name": "broken", "input_schema": {"type": "object", "properties": {}}}],
     )
     context = ToolContext(isolated_workspace, "run", PolicyEngine())
     sync_result = await executor.execute(ToolCall("1", "custom_sync", {"value": 2}), context)
@@ -32,7 +39,10 @@ async def test_executor_handles_sync_async_unknown_and_errors(isolated_workspace
 
 
 async def test_readonly_external_tool_skips_approval(isolated_workspace):
-    executor = ToolExecutor({"mcp__demo__read": lambda: "ok"}, {"mcp__demo__read"})
+    executor = ToolExecutor(
+        {"mcp__demo__read": lambda: "ok"}, {"mcp__demo__read"},
+        tools=[{"name": "mcp__demo__read", "input_schema": {"type": "object"}}],
+    )
     result = await executor.execute(
         ToolCall("1", "mcp__demo__read", {}),
         ToolContext(isolated_workspace, "run", PolicyEngine()),

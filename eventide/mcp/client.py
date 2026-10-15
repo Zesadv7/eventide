@@ -20,6 +20,27 @@ def normalize_mcp_name(name: str) -> str:
     return _DISALLOWED_CHARS.sub("_", name)
 
 
+def _tool_handler(session: Any, tool_name: str, timeout: float | None) -> Callable[..., Any]:
+    """Capture transport state lexically, never as model-overridable keywords."""
+
+    async def invoke(**kwargs: Any) -> str:
+        request = session.call_tool(tool_name, arguments=kwargs)
+        result = await request if timeout is None else await asyncio.wait_for(request, timeout)
+        parts: list[str] = []
+        for block in result.content:
+            text = getattr(block, "text", None)
+            parts.append(str(text) if text is not None else str(block))
+        structured = getattr(result, "structured_content", None) or getattr(
+            result, "structuredContent", None
+        )
+        if structured:
+            parts.append(json.dumps(structured, ensure_ascii=False))
+        is_error = getattr(result, "is_error", False) or getattr(result, "isError", False)
+        return ("Error: " if is_error else "") + "\n".join(parts)
+
+    return invoke
+
+
 @dataclass(frozen=True, slots=True)
 class MCPServerConfig:
     name: str
@@ -135,36 +156,7 @@ class MCPManager:
             if annotation_data.get("readOnlyHint") or annotation_data.get("read_only_hint"):
                 self.readonly_tools.add(safe_name)
 
-            async def invoke(
-                *,
-                _session: Any = session,
-                _tool_name: str = tool.name,
-                _timeout: float | None = timeout,
-                **kwargs: Any,
-            ) -> str:
-                request = _session.call_tool(_tool_name, arguments=kwargs)
-                result = (
-                    await request
-                    if _timeout is None
-                    else await asyncio.wait_for(request, _timeout)
-                )
-                parts: list[str] = []
-                for block in result.content:
-                    text = getattr(block, "text", None)
-                    if text is not None:
-                        parts.append(str(text))
-                    else:
-                        parts.append(str(block))
-                structured = getattr(result, "structured_content", None) or getattr(
-                    result, "structuredContent", None
-                )
-                if structured:
-                    parts.append(json.dumps(structured, ensure_ascii=False))
-                is_error = getattr(result, "is_error", False) or getattr(result, "isError", False)
-                prefix = "Error: " if is_error else ""
-                return prefix + "\n".join(parts)
-
-            self.handlers[safe_name] = invoke
+            self.handlers[safe_name] = _tool_handler(session, tool.name, timeout)
 
     async def close(self) -> None:
         await self._stack.aclose()

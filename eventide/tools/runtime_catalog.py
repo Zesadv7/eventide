@@ -2,45 +2,35 @@
 
 from typing import Any
 
+from eventide.tool_contracts import builtin_schema
 from eventide.tools.filesystem import run_edit, run_glob, run_read, run_write
 
 
-def _tool(
-    name: str, description: str, properties: dict[str, Any], required: list[str]
-) -> dict[str, Any]:
+def _tool(name: str, description: str) -> dict[str, Any]:
     return {
         "name": name,
         "description": description,
-        "input_schema": {"type": "object", "properties": properties, "required": required},
+        "input_schema": builtin_schema(name),
     }
 
 
-TEXT = {"type": "string"}
 TOOLS = [
-    _tool(
-        "bash", "Run a command on the local host (not a sandbox).", {"command": TEXT}, ["command"]
-    ),
+    _tool("bash", "Run a command on the local host (not a sandbox)."),
     _tool(
         "read_file",
         "Read a workspace text file. Long files are paged; the header reports the "
         "total line count and the next offset.",
-        {"path": TEXT, "offset": {"type": "integer"}, "limit": {"type": "integer"}},
-        ["path"],
     ),
     _tool(
         "write_file",
         "Write a workspace file.",
-        {"path": TEXT, "content": TEXT},
-        ["path", "content"],
     ),
     _tool(
         "edit_file",
         "Replace text once in a workspace file.",
-        {"path": TEXT, "old_text": TEXT, "new_text": TEXT},
-        ["path", "old_text", "new_text"],
     ),
-    _tool("glob", "Find workspace paths.", {"pattern": TEXT}, ["pattern"]),
-    _tool("compact", "Request context compaction of completed turns.", {"focus": TEXT}, []),
+    _tool("glob", "Find workspace paths."),
+    _tool("compact", "Request context compaction of completed turns."),
 ]
 
 

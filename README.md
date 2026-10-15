@@ -296,6 +296,14 @@ live 在隔离状态根之前只读解析已保存的模型配置，与正常 Ho
 
 live 摘要会汇总输入/输出 tokens 与总耗时；`--json` 输出完整报告（含逐用例 steps、usage 与 status）。任务级套件 `evals/tasks.yaml` 同样支持 `--live`，其完成率才反映真实模型表现；离线运行同一套件只是回归冒烟。
 
+## 工具参数契约
+
+生产执行器在审批或 handler 之前校验原始 JSON 参数。内置工具的 schema 从严格 Pydantic 类型生成，拒绝未知字段、错误类型和非法范围，不把字符串转换成数字；省略字段不会被擅自补入，显式空值按各字段契约处理。模型不能传入文件工具的 `cwd`，它始终由运行时注入。参数有效仍须通过 PolicyEngine，文件工具继续检查路径。
+
+自定义和 MCP 工具必须提供对象类型的 `input_schema`。动态 schema 只允许可解析的文档内引用，不联网加载引用；无效工具按条目拒绝执行，不绕过校验。工具错误 metadata 使用 `invalid_arguments`、`invalid_tool_contract`、`unknown_tool`、`permission_denied`、`timeout`、`execution_failed` 或 `outcome_unknown`，正文仍保留可读原因。未知结果不等于失败后可以重跑。
+
+此步骤的 Host 动态目录与有限参数修正仍待 A3 集成验收，状态以 AGENTS.md 为准。
+
 ## 使用 MCP
 
 复制示例配置并启动一次任务：

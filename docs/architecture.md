@@ -107,6 +107,16 @@ CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/l
 
 RunBody 支持每次 Run 的 `mode`（auto/plan/agent，未知值按 auto 处理）、`attachment_ids` 与可选 `model`，策略在 `run_policy.py` 中保持为纯函数，wiring 在 Host。`plan` 把模型可见的工具目录收敛为只读白名单（`read_file`/`glob`/`read_tool_result`/`compact`/`todo_write`/`load_skill`/`search_knowledge`），system 追加只读声明；executor handlers 同步裁剪到可见名字，模型幻觉出的写调用不会命中处理器；MCP 服务仍按 Workspace 配置连接，只是其工具不进入目录。`agent` 在该 Run 内自动允许 ASK 决策，不再等待审批处理器，`approval.resolved` payload 带 `auto: true` 且 `author="runtime"`，审计事实完整。附件上传采用 JSON base64、单文件 ≤10MB，存储在状态根 `attachments/~<sha256(session_id)>/{attachment_id}`，不属于 SQLite schema；内部 v3 记录保存精确 session_id，读取、标记、删除和水合均校验；新目录始终使用完整 ID 的 SHA-256，拒绝链接逃逸与重名覆盖。旧安全目录保守只读兼容，无法确认归属的旧记录拒绝访问。清单默认只返回未使用附件，used 由文件缓存或 canonical 引用共同确定；下载保持原始媒体类型，删除只允许未使用附件。HTTP 在返回 202 前校验归属与当前 Provider 能力。UTF-8 文本以分隔符内联且单附件超过 512KB 时截断；图片和 PDF 在事件中只保存不可变引用，每次 Provider 请求前从状态根水合，避免 canonical Event Log、审计导出和字符预算复制 base64。图片映射到 Anthropic、OpenAI-compatible 与 OpenAI Responses 的各自多模态协议；PDF 只映射到 Anthropic 与 OpenAI Responses。普通二进制可以存取，但没有协议映射时明确拒绝提交。
 
+## 工具参数契约
+
+`tool_contracts.py` 是内置工具参数的类型来源：严格 Pydantic 模型生成目录 schema，`production_tool_catalog()` 将 Host 动态内置目录映射到同一类型，并保留当前 Skill 名称枚举。省略字段通过 `exclude_unset` 保留省略，传入的 JSON 不作类型强制转换。依赖拓扑、Session 归属和文件路径仍由既有处理器及策略验证。
+
+`ToolExecutor` 固定 handler、只读集合及 schema 快照。未知 handler、缺契约、无效 schema 和无效参数均在 PolicyEngine/审批/实际 handler 前返回带稳定 `metadata.code` 的错误。验证成功的原始参数继续通过策略；只有文件与 Shell 工具可在验证后注入运行时 cwd。CommandResult 的 timeout/exit code 和已知未知副作用继续保留，参数修正不得成为副作用重放路径。
+
+动态 schema 使用 jsonschema 和显式空的 referencing Registry。构造时按 dialect 遍历真实子 schema，拒绝网络/文件/相对外部引用、未知 dialect、未支持的引用关键字和无法解析的本地引用；const/default 中的普通数据不会被当作 schema。坏条目不使其他工具不可用。MCP 的 session、工具原名及 timeout 通过词法闭包绑定，模型 `_session` 等同名字段只能作为远端工具参数，无法替换 transport。
+
+本提交交付执行器和目录基础；Host 对实际可用目录传入 `tools=`、请求目录归一化以及每个 Run 最多一次参数修正仍待 A3 的集成步骤。定向测试覆盖严格类型、字段省略/空值、权限边界、冻结目录、局部引用、失败隔离和两个真实本地 MCP transport。
+
 ## Workspace 知识检索
 
 RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户显式运行 `eventide rag build` 后，Git Workspace 内 `.eventide/index.sqlite` 保存 `files`、带文件/行号/标题路径的 `chunks`、float32 embedding BLOB、FTS5 trigram 索引和 embedding fingerprint；数据库可随时删除重建，不进入 canonical Runtime schema 或 Event Log。v0.4 只枚举 `git ls-files --cached --others --exclude-standard` 可见的 UTF-8 文本，跳过 symlink、二进制、超过 1 MiB 的文件以及 `.git/`、`.eventide/`。增量判断以内容 SHA-256 为准；构建在写事务外完成读取、切块和 embedding，提交时重新核对语料与 index generation，并以单个 SQLite 事务替换文件、chunk、FTS 和 meta，因此查询只看到旧或新完整快照。
