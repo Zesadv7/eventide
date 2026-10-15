@@ -1,209 +1,94 @@
-"""FastAPI surface and approval broker for Eventide."""
+"""FastAPI composition root; domain routes share one RuntimeHost."""
 
 from __future__ import annotations
 
 import asyncio
-import ipaddress
-import json
-import re
-import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import asdict
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
-from urllib.parse import quote
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, SecretStr
 
-from eventide import attachments
-from eventide.config import Settings, normalize_provider
-from eventide.generation import GenerationCapabilities, GenerationPatch
+from eventide.config import Settings
 from eventide.host import RuntimeHost
-from eventide.http_control import check_mutation_origin, run_receipt
-from eventide.models import RunRequest, ToolCall
-from eventide.normalization import normalize, redact
-from eventide.secrets import SecretKeyError
-from eventide.usage import build_usage_ledger
+from eventide.http_api import attachments, config, models, runs, sessions, streams, workspaces
+from eventide.http_api.context import ApiContext, ApprovalBroker
+from eventide.http_api.errors import ERROR_RESPONSES, error_response, register_error_handlers
+from eventide.http_api.schemas import (
+    ApprovalBody,
+    AttachmentBody,
+    GenerationBody,
+    ProviderConfigBody,
+    RunBody,
+    SessionBody,
+    SessionUpdateBody,
+    WorkspaceBody,
+)
+from eventide.http_control import check_mutation_origin
+
+# Existing imports remain available while requests are owned by their domain.
+__all__ = [
+    "ApprovalBody",
+    "ApprovalBroker",
+    "AttachmentBody",
+    "GenerationBody",
+    "ProviderConfigBody",
+    "RunBody",
+    "SessionBody",
+    "SessionUpdateBody",
+    "WorkspaceBody",
+    "create_app",
+]
 
 WEB_DIR = Path(__file__).with_name("web")
 
 
-class RunBody(BaseModel):
-    prompt: str = Field(min_length=1, max_length=100_000)
-    mode: str = "auto"
-    attachment_ids: list[str] = Field(default_factory=list)
-    model: str | None = Field(default=None, max_length=256)
-    generation: GenerationPatch = Field(default_factory=GenerationPatch)
-
-
-class GenerationBody(BaseModel):
-    model: str = Field(min_length=1, max_length=256)
-    generation: GenerationPatch = Field(default_factory=GenerationPatch)
-    capabilities: GenerationCapabilities | None = None
-
-
-class AttachmentBody(BaseModel):
-    name: str = Field(min_length=1)
-    content_base64: str = ""
-    media_type: str | None = Field(default=None, max_length=128)
-
-
-class SessionBody(BaseModel):
-    workspace_id: str | None = None
-    working_directory: str | None = Field(default=None, min_length=1)
-
-
-class SessionUpdateBody(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=96)
-    archived: bool | None = None
-
-
-class WorkspaceBody(BaseModel):
-    path: str = Field(min_length=1)
-
-
-class ApprovalBody(BaseModel):
-    approved: bool
-
-
-class ProviderConfigBody(BaseModel):
-    provider: Literal["anthropic", "openai_compatible", "openai-compatible", "openai_responses"]
-    api_key: SecretStr | None = None
-    base_url: str | None = Field(default=None, max_length=2_048)
-    model: str = Field(min_length=1, max_length=256)
-    clear_api_key: bool = False
-
-
-def _require_local_request(request: Request) -> None:
-    host = request.client.host if request.client else ""
-    if host == "testclient":
-        return
-    try:
-        is_local = ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        is_local = host.lower() == "localhost"
-    if not is_local:
-        raise HTTPException(status_code=403, detail="模型凭据只能从运行服务的本机管理")
-
-
-_ERROR_BY_CLASS = {
-    "AuthenticationError": ("authentication", "鉴权失败，请检查 API Key"),
-    "PermissionDeniedError": ("permission_denied", "账号无权限，请检查 API Key 的访问范围"),
-    "NotFoundError": ("model_not_found", "模型不存在或当前账号无权访问"),
-    "RateLimitError": ("rate_limit", "请求受到限流，请稍后重试"),
-    "BadRequestError": ("bad_request", "请求被模型服务拒绝，请检查模型名称与参数"),
-}
-
-
 def _probe_error(exc: Exception) -> tuple[str, str]:
-    # 优先按异常类型分类：adapter 用 `raise ProviderError(...) from exc` 把原始
-    # SDK 异常挂在 __cause__ 链上；openai/anthropic 共用稳定类名，故按类名匹配。
-    node: BaseException | None = exc
-    seen: set[int] = set()
-    while node is not None and id(node) not in seen:
-        seen.add(id(node))
-        name = type(node).__name__
-        if name in _ERROR_BY_CLASS:
-            return _ERROR_BY_CLASS[name]
-        if name in ("APIConnectionError", "ConnectionError"):
-            return "network", "无法连接到模型服务，请检查 Base URL 和网络"
-        if name in ("APITimeoutError", "TimeoutError"):
-            return "timeout", "连接超时，请检查接口地址或网络"
-        node = node.__cause__ or node.__context__
-    # 回退到字符串匹配，覆盖非 SDK 或文本透传的错误。
-    text = str(exc).lower()
-    if "no model api key" in text or "api key configured" in text:
-        return "missing_api_key", "尚未配置 API Key"
-    if "无法解密" in text or "eventide_secret_key" in text:
-        return "decrypt_error", "已保存的 API Key 无法解密，请重新输入或恢复主密钥"
-    if any(token in text for token in ("401", "unauthorized", "authentication", "invalid api key")):
-        return "authentication", "鉴权失败，请检查 API Key"
-    if any(token in text for token in ("model_not_found", "model not found", "does not exist")):
-        return "model_not_found", "模型不存在或当前账号无权访问"
-    if "529" in text or "overloaded" in text:
-        return "overloaded", "模型服务过载，请稍后重试"
-    if "429" in text or "rate limit" in text:
-        return "rate_limit", "请求受到限流，请稍后重试"
-    if "timeout" in text or "timed out" in text:
-        return "timeout", "连接超时，请检查接口地址或网络"
-    if any(
-        token in text
-        for token in (
-            "connection",
-            "connect error",
-            "dns",
-            "name resolution",
-            "ssl",
-            "certificate",
-            "tls",
-        )
-    ):
-        return "network", "无法连接到模型服务，请检查 Base URL 和网络"
-    if "unsupported provider" in text:
-        return "provider_error", "不支持的 Provider，请检查选择"
-    return "provider_error", "模型服务返回错误，请检查 Provider、模型名称和接口地址"
-
-
-class ApprovalBroker:
-    def __init__(self) -> None:
-        self.pending: dict[str, asyncio.Future[bool]] = {}
-
-    async def request(self, approval_id: str, _call: ToolCall, _reason: str) -> bool:
-        future = asyncio.get_running_loop().create_future()
-        self.pending[approval_id] = future
-        try:
-            return await future
-        finally:
-            self.pending.pop(approval_id, None)
-
-    def resolve(self, approval_id: str, approved: bool) -> bool:
-        future = self.pending.get(approval_id)
-        if not future or future.done():
-            return False
-        future.set_result(approved)
-        return True
+    return config.probe_error(exc)
 
 
 def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
-    agent_runtime = runtime or RuntimeHost(Settings.from_env())
-    broker = ApprovalBroker()
-    tasks: set[asyncio.Task[Any]] = set()
-    reserved: set[str] = set()
+    context = ApiContext(runtime or RuntimeHost(Settings.from_env()))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        await agent_runtime.initialize()
-        yield
-        for task in list(tasks):
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        await agent_runtime.close()
+        await context.runtime.initialize()
+        try:
+            yield
+        finally:
+            for task in list(context.tasks):
+                task.cancel()
+            if context.tasks:
+                await asyncio.gather(*context.tasks, return_exceptions=True)
+            await context.runtime.close()
 
     app = FastAPI(
         title="Eventide Runtime",
         version="0.4.0",
         description="Traceable, policy-aware execution for tool-using agents.",
         lifespan=lifespan,
+        responses=ERROR_RESPONSES,
     )
-    app.state.runtime = agent_runtime
-    app.state.approvals = broker
+    app.state.runtime = context.runtime
+    app.state.approvals = context.approvals
+    app.state.api_context = context
+    register_error_handlers(app)
 
     @app.middleware("http")
     async def same_origin_mutations(request: Request, call_next: Any) -> Response:
         try:
             check_mutation_origin(request)
         except (HTTPException, ValueError) as exc:
-            return JSONResponse(
-                {"detail": exc.detail if isinstance(exc, HTTPException) else "Invalid origin",
-                 "code": "invalid_origin"}, status_code=403,
+            return error_response(
+                403,
+                exc.detail if isinstance(exc, HTTPException) else "Invalid origin",
+                code="invalid_origin",
             )
         return await call_next(request)
+
     app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 
     @app.get("/", response_class=HTMLResponse)
@@ -214,536 +99,6 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok", "runtime": "eventide"}
 
-    @app.post("/api/sessions", status_code=status.HTTP_201_CREATED)
-    async def create_session(body: SessionBody | None = None) -> dict[str, str]:
-        try:
-            return {
-                "session_id": agent_runtime.create_session(
-                    workspace_id=body.workspace_id if body else None,
-                    working_directory=body.working_directory if body else None,
-                )
-            }
-        except (ValueError, OSError) as exc:
-            code = 404 if str(exc).startswith("Workspace not found") else 422
-            raise HTTPException(status_code=code, detail=str(exc)) from exc
-
-    @app.post("/api/workspaces", status_code=201)
-    async def register_workspace(body: WorkspaceBody, request: Request) -> dict[str, Any]:
-        _require_local_request(request)
-        try:
-            workspace = agent_runtime.resolve_or_register_workspace(body.path)
-            return agent_runtime.workspace_status(workspace.workspace_id)
-        except (ValueError, OSError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    @app.get("/api/workspaces")
-    async def list_workspaces() -> list[dict[str, Any]]:
-        return [
-            agent_runtime.workspace_status(w.workspace_id)
-            for w in agent_runtime.store.list_workspaces()
-        ]
-
-    @app.get("/api/workspaces/{workspace_id}")
-    async def get_workspace(workspace_id: str) -> dict[str, Any]:
-        try:
-            return agent_runtime.workspace_status(workspace_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.get("/api/workspaces/{workspace_id}/capabilities")
-    async def get_workspace_capabilities(workspace_id: str) -> dict[str, Any]:
-        try:
-            return agent_runtime.workspace_capabilities(workspace_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.get("/api/runtime/settings")
-    async def get_runtime_settings() -> dict[str, Any]:
-        settings = agent_runtime.settings
-        return {
-            "context_limit": settings.context_limit,
-            "approval_timeout": settings.approval_timeout,
-            "max_steps": settings.max_steps,
-            "task_max_steps": settings.task_max_steps,
-            "run_token_limit": settings.run_token_limit,
-        }
-
-    @app.delete("/api/workspaces/{workspace_id}")
-    async def remove_workspace(workspace_id: str, request: Request) -> dict[str, str]:
-        _require_local_request(request)
-        await get_workspace(workspace_id)
-        try:
-            agent_runtime.store.remove_workspace(workspace_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"removed": workspace_id}
-
-    @app.get("/api/workspaces/{workspace_id}/sessions")
-    async def list_sessions(
-        workspace_id: str, include_archived: bool = False
-    ) -> list[dict[str, Any]]:
-        await get_workspace(workspace_id)
-        return [
-            agent_runtime.session_status(s["id"])
-            for s in agent_runtime.store.list_sessions(
-                workspace_id,
-                include_archived=include_archived,
-            )
-        ]
-
-    @app.get("/api/sessions/{session_id}")
-    async def get_session(session_id: str) -> dict[str, Any]:
-        try:
-            return agent_runtime.session_status(session_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.patch("/api/sessions/{session_id}")
-    async def update_session(
-        session_id: str, body: SessionUpdateBody, request: Request
-    ) -> dict[str, Any]:
-        _require_local_request(request)
-        await get_session(session_id)
-        try:
-            agent_runtime.store.update_session(
-                session_id,
-                title=body.title,
-                archived=body.archived,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return agent_runtime.session_status(session_id)
-
-    @app.delete("/api/sessions/{session_id}")
-    async def delete_session(session_id: str, request: Request) -> dict[str, str]:
-        _require_local_request(request)
-        await get_session(session_id)
-        try:
-            agent_runtime.store.delete_session(session_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"deleted": session_id}
-
-    @app.get("/api/sessions/{session_id}/messages")
-    async def get_messages(session_id: str) -> list[dict[str, Any]]:
-        await get_session(session_id)
-        try:
-            return agent_runtime.store.load_messages(session_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.get("/api/sessions/{session_id}/usage")
-    async def session_usage(session_id: str, include_children: bool = True) -> dict[str, Any]:
-        await get_session(session_id)
-        return build_usage_ledger(agent_runtime.store.usage_events(
-            session_id=session_id, include_children=include_children,
-        ))
-
-    @app.get("/api/runs/{run_id}/usage")
-    async def run_usage(run_id: str, include_children: bool = True) -> dict[str, Any]:
-        try:
-            return build_usage_ledger(agent_runtime.store.usage_events(
-                run_id=run_id, include_children=include_children,
-            ))
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @app.get("/api/sessions/{session_id}/runs")
-    async def list_runs(
-        session_id: str,
-        limit: int = 100,
-        before: str | None = None,
-    ) -> list[dict[str, Any]]:
-        await get_session(session_id)
-        if not 1 <= limit <= 200:
-            raise HTTPException(status_code=422, detail="limit must be between 1 and 200")
-        return agent_runtime.session_runs(session_id, limit=limit, before=before)
-
-    @app.post(
-        "/api/sessions/{session_id}/continue",
-        status_code=status.HTTP_202_ACCEPTED,
-    )
-    async def continue_session(session_id: str, request: Request) -> dict[str, str]:
-        # Continue validation is part of admission; a rejected request returns 409,
-        # without creating a run that could hide the parked source run.
-        record = await get_session(session_id)
-        receipt = run_receipt(agent_runtime, request, session_id, "continue", {})
-        if receipt.existing:
-            return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
-        workspace_id = record["workspace_id"]
-        if workspace_id in reserved or agent_runtime.workspace_busy(workspace_id):
-            raise HTTPException(status_code=409, detail="Workspace is busy")
-        reserved.add(workspace_id)
-        run_id = receipt.run_id
-        try:
-            await agent_runtime.admit_continue(
-                session_id, run_id,
-                **({"request_fingerprint": receipt.fingerprint} if receipt.fingerprint else {}),
-            )
-        except ValueError as exc:
-            reserved.discard(workspace_id)
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except BaseException:
-            reserved.discard(workspace_id)
-            raise
-
-        task = agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
-        tasks.add(task)
-
-        def done(finished: asyncio.Task[Any]) -> None:
-            tasks.discard(finished)
-            reserved.discard(workspace_id)
-
-        task.add_done_callback(done)
-        return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
-
-    @app.post("/api/sessions/{session_id}/abandon")
-    async def abandon_interruption(session_id: str) -> dict[str, Any]:
-        record = await get_session(session_id)
-        workspace_id = record["workspace_id"]
-        if workspace_id in reserved or agent_runtime.workspace_busy(workspace_id):
-            raise HTTPException(status_code=409, detail="Workspace is busy")
-        reserved.add(workspace_id)
-        try:
-            return asdict(await agent_runtime.abandon_interruption(session_id))
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        finally:
-            reserved.discard(workspace_id)
-
-    @app.get("/api/config/provider")
-    async def get_provider_config() -> dict[str, Any]:
-        return agent_runtime.provider_config_status()
-
-    @app.get("/api/generation/defaults")
-    async def generation_defaults(model: str | None = None) -> dict[str, Any]:
-        return agent_runtime.generation_settings(model or agent_runtime.settings.model)
-
-    @app.put("/api/generation/defaults")
-    async def update_generation_defaults(body: GenerationBody, request: Request) -> dict[str, Any]:
-        _require_local_request(request)
-        try:
-            declared = body.capabilities
-            if declared:
-                declared = declared.model_copy(update={"source": "declared"})
-            return agent_runtime.configure_generation(
-                body.model, body.generation.patch(), declared=declared,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    @app.get("/api/sessions/{session_id}/generation")
-    async def session_generation(session_id: str, model: str | None = None) -> dict[str, Any]:
-        await get_session(session_id)
-        return agent_runtime.generation_settings(model or agent_runtime.settings.model, session_id)
-
-    @app.put("/api/sessions/{session_id}/generation")
-    async def update_session_generation(
-        session_id: str, body: GenerationBody, request: Request,
-    ) -> dict[str, Any]:
-        _require_local_request(request)
-        await get_session(session_id)
-        if body.capabilities:
-            raise HTTPException(status_code=422, detail="Declare capabilities in model defaults")
-        try:
-            return agent_runtime.configure_generation(
-                body.model, body.generation.patch(), session_id=session_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    @app.put("/api/config/provider")
-    async def set_provider_config(body: ProviderConfigBody, request: Request) -> dict[str, Any]:
-        _require_local_request(request)
-        if any(not task.done() for task in tasks):
-            raise HTTPException(
-                status_code=409,
-                detail="Wait for active runs to finish before changing provider configuration",
-            )
-        key = body.api_key.get_secret_value() if body.api_key else None
-        try:
-            await agent_runtime.configure_provider(
-                provider=body.provider,
-                api_key=key,
-                base_url=body.base_url,
-                model=body.model,
-                persist=True,
-                clear_api_key=body.clear_api_key,
-            )
-        except (ValueError, SecretKeyError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return agent_runtime.provider_config_status()
-
-    @app.delete("/api/config/provider")
-    async def reset_provider_config(request: Request) -> dict[str, Any]:
-        _require_local_request(request)
-        if any(not task.done() for task in tasks):
-            raise HTTPException(
-                status_code=409,
-                detail="请等待当前任务结束后再恢复启动配置",
-            )
-        await agent_runtime.reset_provider_configuration()
-        return agent_runtime.provider_config_status()
-
-    @app.post("/api/config/provider/test")
-    async def test_provider_config(body: ProviderConfigBody, request: Request) -> dict[str, Any]:
-        _require_local_request(request)
-        key = body.api_key.get_secret_value() if body.api_key else None
-        started = time.perf_counter()
-        checked_at = datetime.now(timezone.utc).isoformat()
-        try:
-            await asyncio.wait_for(
-                agent_runtime.probe_provider(
-                    provider=body.provider,
-                    api_key=key,
-                    base_url=body.base_url,
-                    model=body.model,
-                ),
-                timeout=30,
-            )
-        except Exception as exc:
-            error_type, message = _probe_error(exc)
-            return {
-                "success": False,
-                "provider": normalize_provider(body.provider),
-                "model": body.model,
-                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
-                "checked_at": checked_at,
-                "message": message,
-                "error_type": error_type,
-                "detail": normalize(redact(str(exc)), (key or "",)),
-            }
-        return {
-            "success": True,
-            "provider": normalize_provider(body.provider),
-            "model": body.model,
-            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
-            "checked_at": checked_at,
-            "message": "连接成功",
-            "error_type": None,
-        }
-
-    @app.get("/api/models")
-    async def list_models() -> dict[str, Any]:
-        return await agent_runtime.available_models()
-
-    @app.post(
-        "/api/sessions/{session_id}/attachments",
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def upload_attachment(session_id: str, body: AttachmentBody) -> dict[str, Any]:
-        # Uploads never auto-create a session: an unknown session is a 404.
-        await get_session(session_id)
-        if agent_runtime.is_worker_session(session_id):
-            raise HTTPException(status_code=409, detail="Worker sessions do not accept attachments")
-        try:
-            return attachments.save_attachment(
-                agent_runtime.settings.state_dir,
-                session_id,
-                attachments.new_attachment_id(),
-                body.name,
-                body.content_base64,
-                body.media_type,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    @app.get("/api/sessions/{session_id}/attachments")
-    async def list_session_attachments(
-        session_id: str, include_used: bool = False
-    ) -> list[dict[str, Any]]:
-        await get_session(session_id)
-        try:
-            records = attachments.list_attachments(
-                agent_runtime.settings.state_dir, session_id, include_used=True
-            )
-            referenced = agent_runtime.store.referenced_attachments(session_id)
-            for record in records:
-                record["used"] = record["used"] or record["attachment_id"] in referenced
-            return records if include_used else [record for record in records if not record["used"]]
-
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    @app.get("/api/sessions/{session_id}/attachments/{attachment_id}")
-    async def download_attachment(session_id: str, attachment_id: str) -> Response:
-        await get_session(session_id)
-        try:
-            record = attachments.load_attachment(
-                agent_runtime.settings.state_dir, session_id, attachment_id
-            )
-            content = attachments.attachment_bytes(record)
-        except ValueError as exc:
-            code = 404 if str(exc).startswith("附件不存在") else 422
-            raise HTTPException(status_code=code, detail=str(exc)) from exc
-        filename = quote(str(record["name"]), safe="")
-        return Response(
-            content=content,
-            media_type=str(record["media_type"]),
-            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
-        )
-
-    @app.delete("/api/sessions/{session_id}/attachments/{attachment_id}")
-    async def delete_session_attachment(
-        session_id: str, attachment_id: str, request: Request
-    ) -> dict[str, Any]:
-        _require_local_request(request)
-        await get_session(session_id)
-        try:
-            if attachment_id in agent_runtime.store.referenced_attachments(session_id):
-                raise ValueError("附件已用于工作记录，不能删除")
-            deleted = attachments.delete_attachment(
-                agent_runtime.settings.state_dir, session_id, attachment_id
-            )
-        except ValueError as exc:
-            message = str(exc)
-            if message.startswith("附件不存在"):
-                code = 404
-            else:
-                code = 409 if "不能删除" in message else 422
-            raise HTTPException(status_code=code, detail=message) from exc
-        return {"deleted": deleted["attachment_id"]}
-
-    @app.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
-    async def create_run(session_id: str, body: RunBody, request: Request) -> dict[str, str]:
-        # Keep custom Session identities while making transport acceptance durable.
-        agent_runtime.create_session(session_id)
-        record = agent_runtime.session_status(session_id)
-        payload = {**body.model_dump(), "generation": body.generation.patch()}
-        receipt = run_receipt(agent_runtime, request, session_id, "run", payload)
-        if receipt.existing:
-            return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
-        workspace_id = record["workspace_id"]
-        if workspace_id in reserved or agent_runtime.workspace_busy(workspace_id):
-            raise HTTPException(status_code=409, detail="Workspace is busy")
-        if record["status"] == "parked":
-            raise HTTPException(status_code=409, detail="Session is parked")
-        reserved.add(workspace_id)
-        run_id = receipt.run_id
-        try:
-            await agent_runtime.admit_run(
-                RunRequest(
-                    body.prompt,
-                    session_id,
-                    run_id,
-                    mode=body.mode,
-                    attachment_ids=list(body.attachment_ids),
-                    model=body.model,
-                    generation=body.generation.patch(),
-                    request_fingerprint=receipt.fingerprint,
-                )
-            )
-            task = agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
-        except (ValueError, OSError) as exc:
-            reserved.discard(workspace_id)
-            code = (
-                409
-                if any(word in str(exc) for word in ("busy", "parked", "configuration"))
-                else 422
-            )
-            raise HTTPException(status_code=code, detail=str(exc)) from exc
-        except BaseException:
-            reserved.discard(workspace_id)
-            raise
-        tasks.add(task)
-
-        def done(finished: asyncio.Task[Any]) -> None:
-            tasks.discard(finished)
-            reserved.discard(workspace_id)
-
-        task.add_done_callback(done)
-        return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
-
-    @app.get("/api/runs/{run_id}")
-    async def get_run(run_id: str) -> dict[str, Any]:
-        record = agent_runtime.store.get_run(run_id)
-        if not record:
-            raise HTTPException(status_code=404, detail="Run not found")
-        return record
-
-    @app.post("/api/runs/{run_id}/cancel")
-    async def cancel_run(run_id: str) -> dict[str, Any]:
-        if not agent_runtime.store.get_run(run_id):
-            raise HTTPException(status_code=404, detail="Run not found")
-        try:
-            return await agent_runtime.cancel_run(run_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.get("/api/runs/{run_id}/export")
-    async def export_run(run_id: str) -> StreamingResponse:
-        if not agent_runtime.store.get_run_identity(run_id):
-            raise HTTPException(status_code=404, detail="Run not found")
-        safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", run_id)[:96] or "run"
-
-        async def stream() -> AsyncIterator[str]:
-            cursor = 0
-            while True:
-                events = agent_runtime.store.run_events(run_id, after=cursor, limit=100)
-                if not events:
-                    break
-                for event in events:
-                    cursor = event["session_seq"]
-                    yield json.dumps(event, ensure_ascii=False) + "\n"
-                await asyncio.sleep(0)
-
-        return StreamingResponse(
-            stream(),
-            media_type="application/x-ndjson",
-            headers={"Content-Disposition": f'attachment; filename="eventide-{safe_id}.jsonl"'},
-        )
-
-    @app.get("/api/runs/{run_id}/events")
-    async def run_events(
-        run_id: str, request: Request, after: int = 0, include_preview: bool = False,
-    ) -> StreamingResponse:
-        if not agent_runtime.store.get_run_identity(run_id):
-            raise HTTPException(status_code=404, detail="Run not found")
-
-        async def stream() -> AsyncIterator[str]:
-            cursor = max(after, 0)
-            idle_ticks = 0
-            preview_revision = 0
-            preview_active = False
-            while not await request.is_disconnected():
-                events = agent_runtime.store.get_events(run_id, cursor)
-                for event in events:
-                    cursor = event["seq"]
-                    encoded = json.dumps(event, ensure_ascii=False)
-                    yield f"id: {cursor}\nevent: {event['type']}\ndata: {encoded}\n\n"
-                if include_preview:
-                    preview = agent_runtime.previews.get(run_id)
-                    if preview and preview["revision"] != preview_revision:
-                        preview_revision = preview["revision"]
-                        preview_active = True
-                        encoded = json.dumps(preview, ensure_ascii=False)
-                        yield f"event: model.preview\ndata: {encoded}\n\n"
-                    elif preview_active and preview is None:
-                        preview_active = False
-                        cleared = {"type": "model.preview", "run_id": run_id,
-                                   "active": False, "ephemeral": True, "text": ""}
-                        yield f"event: model.preview\ndata: {json.dumps(cleared)}\n\n"
-                if agent_runtime.store.run_is_terminal(run_id) and not events:
-                    break
-                if not events:
-                    idle_ticks += 1
-                    if idle_ticks % 20 == 0:
-                        yield ": keepalive\n\n"
-                else:
-                    idle_ticks = 0
-                await asyncio.sleep(0.25)
-
-        return StreamingResponse(stream(), media_type="text/event-stream")
-
-    @app.post("/api/runs/{run_id}/approvals/{approval_id}")
-    async def resolve_approval(run_id: str, approval_id: str, body: ApprovalBody) -> dict[str, Any]:
-        record = agent_runtime.store.get_run(run_id)
-        if not record:
-            raise HTTPException(status_code=404, detail="Run not found")
-        if approval_id not in record["pending_approvals"]:
-            raise HTTPException(status_code=404, detail="Approval does not belong to this run")
-        if not broker.resolve(approval_id, body.approved):
-            raise HTTPException(status_code=404, detail="Approval is no longer pending")
-        return {"approval_id": approval_id, "approved": body.approved}
-
+    for domain in (workspaces, sessions, runs, models, config, attachments, streams):
+        app.include_router(domain.create_router(context))
     return app
