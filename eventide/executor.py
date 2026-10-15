@@ -112,6 +112,26 @@ class LocalCommandExecutor:
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
             )
+        return await self._finish_process(process, started)
+
+    async def execute_argv(
+        self, arguments: list[str], cwd: Path, *, extra_env: dict[str, str] | None = None,
+    ) -> CommandResult:
+        """Run a packaged script without passing its arguments through a shell."""
+        started = time.monotonic()
+        options: dict[str, Any] = (
+            {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+            if os.name == "nt" else {"start_new_session": True}
+        )
+        process = await asyncio.create_subprocess_exec(
+            *arguments, cwd=cwd, env={**os.environ, **(extra_env or {})},
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, **options,
+        )
+        return await self._finish_process(process, started)
+
+    async def _finish_process(
+        self, process: asyncio.subprocess.Process, started: float,
+    ) -> CommandResult:
         stdout = _BoundedOutput(self.output_limit)
         stderr = _BoundedOutput(self.output_limit)
         collection = asyncio.create_task(self._collect(process, stdout, stderr))

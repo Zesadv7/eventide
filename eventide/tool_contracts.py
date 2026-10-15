@@ -86,6 +86,17 @@ class LoadSkillArguments(_Arguments):
     name: NonemptyText
 
 
+class ReadSkillResourceArguments(LoadSkillArguments):
+    path: NonemptyText
+    offset: Annotated[int, Field(ge=0)] = 0
+    limit: Annotated[int, Field(ge=1, le=12_000)] = 12_000
+
+
+class RunSkillScriptArguments(LoadSkillArguments):
+    path: NonemptyText
+    args: Annotated[list[Annotated[str, Field(max_length=4096)]], Field(max_length=32)] = []
+
+
 class SearchKnowledgeArguments(_Arguments):
     query: NonemptyText
     k: Annotated[int, Field(ge=1, le=10)] = 5
@@ -110,6 +121,8 @@ BUILTIN_ARGUMENTS: dict[str, type[BaseModel]] = {
     "read_tool_result": ReadToolResultArguments,
     "todo_write": TodoWriteArguments,
     "load_skill": LoadSkillArguments,
+    "read_skill_resource": ReadSkillResourceArguments,
+    "run_skill_script": RunSkillScriptArguments,
     "search_knowledge": SearchKnowledgeArguments,
     "delegate_readonly": DelegateReadonlyArguments,
 }
@@ -146,7 +159,7 @@ def production_tool_catalog(tools: list[dict[str, Any]]) -> list[dict[str, Any]]
         if name not in BUILTIN_ARGUMENTS:
             continue
         schema = builtin_schema(name)
-        if name == "load_skill":
+        if name in {"load_skill", "read_skill_resource", "run_skill_script"}:
             names = tool.get("input_schema", {}).get("properties", {}).get("name", {}).get("enum")
             if isinstance(names, list):
                 schema["properties"]["name"]["enum"] = list(names)

@@ -240,6 +240,12 @@ Host的全部实际目录已接入严格工具契约，包括MCP、Skills、RAG�
 
 快照对象持有不可变 `bytes`，`snapshot()` 只返回资源清单与摘要，`resource_bytes`／`read_resource` 从同一组冻结字节读取。将这些字节持久化并绑定 admission、恢复时取回固定资源、注册读取工具和受控脚本执行器属于 Host 集成责任，本模块不替代 ToolExecutor／PolicyEngine。`allowed-tools` 元数据只是声明，不能授予权限、模型配置或预算。
 
+### Skills 主链接线
+
+SkillRuntime 从 skill.installed 和 skills.configured 唯一事实派生用户安装和项目启用；磁盘有内容不能替代授权。接收 Run 时将冻结资源物化到内容寻址产物，admission 只存版本、资源清单、作用域和选择。Python 直接运行也保存 skills.snapshot；Continue 和重启从相同产物重验 hash，不重新采用当前项目包。skill.loaded 单独记录实际加载和正文字符数，不将字符当作 Token 或费用归因。用户版本可以查看差异并重新固定旧版；项目导入只创建新包，更新由 Git 管理，不自动覆盖源码。
+
+加载正文后才可分页读取资源或执行脚本。仅有相应资源时才增加工具目录；run_skill_script 要求精确 scope:name、包内 scripts/*.py 或 *.sh 及有界参数，经过严格契约、Policy ASK 和所选 CommandExecutor。Plan 不开放脚本。本地 Python 脚本使用 argv 和当前 Python；Shell 脚本要求 POSIX 或容器后端，不自动装依赖。执行前暂存冻结字节，执行器完成清理后删除，容器结果未知保留资源并沿原规则阻止继续。导入和快照线程登记 Host 所有权，关闭须等其收尾再关闭 Store。
+
 ## 真实模型基线（2026-10-16）
 
 使用已保存的DeepSeek Responses连接、deepseek-flash及reasoning_effort=none，在独立临时项目与数据库中执行普通响应、只读文件工具和三个工程fixture，各两次。每次12步、20,000已观测Token软限、300秒总等待；输出上限4,096，单响应允许越过Token软限。10次中7次完整完成，3次因Token预算停驻仍独立验收通过，六次修复的固定测试均通过且未改动。累计48次模型请求，131,359输入/7,630输出Token，逐请求usage完整、未知0；父子/终态不另加账。报告与失败产物在忽略的.task_outputs和临时目录保留，不提交源码/数据库原文；这是小样本接入基线，不是成熟成功率或成本优化效果证明。

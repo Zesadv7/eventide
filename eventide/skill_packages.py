@@ -484,6 +484,13 @@ class SkillPackageService:
     ) -> SkillPackageVersion:
         return self._import(self.preview_zip(source), record)
 
+    def freeze_resources(self, resources: tuple[SkillResource, ...]) -> SkillPackageVersion:
+        """Persist already-frozen project bytes without rereading mutable source."""
+        for resource in resources:
+            if resource_path(resource.path) != resource.path or type(resource.content) is not bytes:
+                raise SkillPackageError("Invalid frozen Skill resource")
+        return self._import(_preview(list(resources), "run snapshot", self.limits), None)
+
     def _path(self, name: str, version: str) -> Path:
         validate_name(name)
         if not isinstance(version, str) or not VERSION_PATTERN.fullmatch(version):

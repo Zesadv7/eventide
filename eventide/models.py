@@ -61,6 +61,7 @@ class RunRequest:
     model: str | None = None
     generation: dict[str, Any] = field(default_factory=dict)
     request_fingerprint: str | None = None
+    selected_skills: list[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)

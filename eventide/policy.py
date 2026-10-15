@@ -68,6 +68,10 @@ class PolicyEngine:
                     PolicyDecision.ASK, "Command may delete or irreversibly alter data"
                 )
             return PolicyResult(PolicyDecision.ALLOW, "Command passed local policy")
+        if tool_name == "run_skill_script":
+            return PolicyResult(
+                PolicyDecision.ASK, "Skill scripts execute code with the selected backend"
+            )
         if tool_name in _SAFE_READ_TOOLS:
             return PolicyResult(PolicyDecision.ALLOW, "Read-only Runtime tool")
         if tool_name in _SAFE_FILE_TOOLS | _WRITE_FILE_TOOLS:

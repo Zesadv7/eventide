@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import shutil
+import tempfile
 import time
 import uuid
 from collections import defaultdict
@@ -53,6 +55,8 @@ from eventide.rag.tool import SEARCH_KNOWLEDGE_TOOL
 from eventide.rag.tool import handler as knowledge_search_handler
 from eventide.rag.tool import index_available as knowledge_index_available
 from eventide.secrets import SecretBox, SecretKeyError
+from eventide.skill_packages import SkillPackageError
+from eventide.skill_runtime import SkillRuntime, execute_skill_script, script_tool
 from eventide.skills import SkillCatalog
 from eventide.store import RuntimeStore
 from eventide.task_plan import TOOL as TODO_WRITE_TOOL
@@ -195,6 +199,7 @@ class RuntimeHost:
         self._config_path: Path | None = None
         self._enable_mcp = enable_mcp
         self.previews = PreviewStore()
+        self.skills = SkillRuntime(self.store, self.state_dir)
 
     @property
     def state_dir(self) -> Path:
@@ -951,8 +956,10 @@ class RuntimeHost:
 
     def is_control_session(self, session_id: str) -> bool:
         return any(
-            e["type"] == "run.started"
-            and e["payload"].get("source") in {"delivery", "verification"}
+            e["type"] == "control.session" or (
+                e["type"] == "run.started"
+                and e["payload"].get("source") in {"delivery", "verification"}
+            )
             for e in self.store.session_events(session_id)
         )
 
@@ -987,6 +994,95 @@ class RuntimeHost:
             (e["payload"] for e in self.store.run_events(run_id) if e["type"] == "run.admitted"),
             None,
         )
+
+    def _skill_owner(self, workspace_id: str) -> str:
+        owner = f"skills_control_{workspace_id}"
+        if self.store.get_session(owner) is None:
+            self.create_session(owner, workspace_id=workspace_id)
+            self.store.update_session(owner, archived=True)
+            self.store.append_fact(owner, "control.session", {"kind": "skills"})
+        return owner
+
+    def skill_status(self, workspace_id: str) -> dict[str, Any]:
+        workspace = self.store.get_workspace(workspace_id)
+        return self.skills.status(workspace_id, Path(workspace.path))
+
+    def configure_skills(
+        self, workspace_id: str, *, enabled_user: dict[str, str],
+        disabled_project: list[str], selected: list[str],
+    ) -> dict[str, Any]:
+        if self._closed:
+            raise ValueError("RuntimeHost is closed")
+        workspace = self.store.get_workspace(workspace_id)
+        return self.skills.configure(
+            self._skill_owner(workspace_id), workspace_id, Path(workspace.path),
+            enabled_user=enabled_user, disabled_project=disabled_project, selected=selected,
+        )
+
+    async def preview_skill(self, source: Path | bytes, *, zipped: bool) -> dict[str, Any]:
+        if zipped:
+            preview = await asyncio.to_thread(self.skills.packages.preview_zip, source)
+        else:
+            if not isinstance(source, Path):
+                raise SkillPackageError("Directory imports require a local path")
+            preview = await asyncio.to_thread(self.skills.packages.preview_directory, source)
+        return preview.as_dict()
+
+    async def import_skill(
+        self, workspace_id: str, source: Path | bytes, *, zipped: bool, scope: str = "user",
+    ) -> dict[str, Any]:
+        if self._closed:
+            raise ValueError("RuntimeHost is closed")
+        workspace = self.store.get_workspace(workspace_id)
+        owner = self._skill_owner(workspace_id)
+        if scope == "user":
+            # Keep ownership until bounded disk IO has really finished on cancellation.
+            return dict(await self._admission_check(
+                lambda: self.skills.import_user(owner, source, zipped=zipped)
+            ))
+        if scope != "project":
+            raise ValueError("Skill scope must be project or user")
+        if self.workspace_busy(workspace_id):
+            raise ValueError("Workspace is busy")
+        async with self._workspace_execution(workspace_id):
+            def install_project() -> dict[str, Any]:
+                if zipped:
+                    preview = self.skills.packages.preview_zip(source)
+                else:
+                    if not isinstance(source, Path):
+                        raise SkillPackageError("Directory imports require a local path")
+                    preview = self.skills.packages.preview_directory(source)
+                if not preview.valid or not preview.name:
+                    raise SkillPackageError("; ".join(d.message for d in preview.diagnostics))
+                root = Path(workspace.path) / "skills"
+                if root.is_symlink():
+                    raise SkillPackageError("Project skills directory cannot be a symlink")
+                root.mkdir(exist_ok=True)
+                target = root / preview.name
+                if target.exists() or target.is_symlink():
+                    raise SkillPackageError("Project Skill already exists; manage updates with Git")
+                temporary = Path(tempfile.mkdtemp(prefix=".import-", dir=root))
+                try:
+                    for resource in preview.resources:
+                        path = temporary / resource.path
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(resource.content)
+                    temporary.rename(target)
+                finally:
+                    if temporary.exists():
+                        shutil.rmtree(temporary)
+                payload = {**preview.as_dict(), "workspace_id": workspace_id}
+                self.store.append_fact(owner, "skill.project_imported", payload, author="user")
+                return payload
+            return dict(await self._admission_check(install_project))
+
+    async def _freeze_skills(
+        self, workspace: WorkspaceRecord, request: RunRequest | None,
+    ) -> dict[str, Any]:
+        return dict(await self._admission_check(lambda: self.skills.freeze(self.skills.catalog(
+            workspace.workspace_id, Path(workspace.path),
+            selected=request.selected_skills if request else None,
+        ))))
 
     def generation_settings(self, model: str, session_id: str | None = None) -> dict[str, Any]:
         identity = digest([self.settings.provider, self.settings.base_url, model])
@@ -1048,6 +1144,7 @@ class RuntimeHost:
         model = model or self.settings.model
         execution_config: dict[str, Any] = {}
         generation: dict[str, Any] | None = None
+        skill_snapshot: dict[str, Any] | None = None
         if source_id:
             prior: dict[str, Any] = next(
                 (
@@ -1065,6 +1162,11 @@ class RuntimeHost:
                 model = prior.get("model") or model
                 generation = prior.get("generation")
             execution_config = prior.get("execution_config") or {}
+            old_intent = self._admitted_intent(source_id) or {}
+            skill_snapshot = old_intent.get("skill_snapshot") or next((
+                e["payload"] for e in self.store.run_events(source_id)
+                if e["type"] == "skills.snapshot"
+            ), None)
         if not isinstance(model, str) or len(model) > 256:
             raise ValueError("Model name cannot exceed 256 characters")
         state = self.generation_settings(
@@ -1085,6 +1187,7 @@ class RuntimeHost:
             "provider": self.settings.provider,
             "endpoint_hash": digest(self.settings.base_url),
             "generation": generation,
+            **({"skill_snapshot": skill_snapshot} if skill_snapshot is not None else {}),
             **({"execution_config": execution_config} if execution_config else {}),
         }
 
@@ -1103,17 +1206,27 @@ class RuntimeHost:
 
     async def _admission_check(self, function: Any, *args: Any) -> Any:
         """Retain the Store/Workspace owner until a threaded check has finished."""
-        operation = asyncio.create_task(asyncio.to_thread(function, *args))
-        cancelled = False
-        while not operation.done():
-            try:
-                await asyncio.shield(operation)
-            except asyncio.CancelledError:
-                cancelled = True
-        result = operation.result()
-        if cancelled:
-            raise asyncio.CancelledError
-        return result
+        task = asyncio.current_task()
+        assert task is not None
+        already_active = task in self._active_tasks
+        if self._closed and not already_active:
+            raise RuntimeError("Host is closed")
+        self._active_tasks.add(task)
+        try:
+            operation = asyncio.create_task(asyncio.to_thread(function, *args))
+            cancelled = False
+            while not operation.done():
+                try:
+                    await asyncio.shield(operation)
+                except asyncio.CancelledError:
+                    cancelled = True
+            result = operation.result()
+            if cancelled:
+                raise asyncio.CancelledError
+            return result
+        finally:
+            if not already_active:
+                self._active_tasks.discard(task)
 
     async def _reserve_run(
         self,
@@ -1159,6 +1272,8 @@ class RuntimeHost:
                         raise ValueError("Session is parked; use Continue")
                     source_id = previous["id"] if request is None and previous else None
                     intent = self._run_intent(request, source_id, session_id)
+                    if "skill_snapshot" not in intent:
+                        intent["skill_snapshot"] = await self._freeze_skills(workspace, request)
                     if execution_config:
                         intent["execution_config"] = execution_config
                     elif "execution_config" not in intent:
@@ -1723,7 +1838,44 @@ class RuntimeHost:
                 },
                 sink,
             )
-            skills = SkillCatalog.discover(workspace_root)
+            if readonly_profile:
+                skills = SkillCatalog(workspace_root, ())
+            else:
+                frozen_skills = intent.get("skill_snapshot")
+                if frozen_skills is None:
+                    frozen_skills = await self._freeze_skills(workspace, request)
+                skills = self.skills.restore(workspace_root, frozen_skills)
+                await self._emit(run_id, "skills.snapshot", frozen_skills, sink)
+            loaded_skills: set[str] = set()
+
+            async def load_skill(name: str) -> str:
+                content = skills.load(name)
+                if not content.startswith("Error:"):
+                    skill = skills._resolve(name)
+                    loaded_skills.add(skill.skill_id)
+                    await self._emit(run_id, "skill.loaded", {
+                        "skill_id": skill.skill_id, "version": skill.version,
+                        "characters": len(content),
+                    }, sink)
+                return content
+
+            async def read_skill_resource(
+                name: str, path: str, offset: int = 0, limit: int = 12_000,
+            ) -> str:
+                skill = skills._resolve(name)
+                if skill.skill_id not in loaded_skills:
+                    raise SkillPackageError("Load Skill instructions before reading resources")
+                return skills.read_resource(name, path, offset, limit)
+
+            async def run_skill_script(
+                name: str, path: str, args: list[str] | None = None,
+            ) -> Any:
+                skill = skills._resolve(name)
+                if skill.skill_id not in loaded_skills:
+                    raise SkillPackageError("Load Skill instructions before running scripts")
+                return await execute_skill_script(
+                    skills, name, path, args or [], working_root, command_executor,
+                )
             if (
                 self._enable_mcp
                 and not readonly_profile
@@ -1745,8 +1897,10 @@ class RuntimeHost:
                         self._clean(failure),
                         sink,
                     )
-            if skills and any(tool.get("name") == "load_skill" for tool in self.tools):
-                raise ValueError("load_skill is reserved for Workspace Skill loading")
+            if skills and any(tool.get("name") in {
+                "load_skill", "read_skill_resource", "run_skill_script",
+            } for tool in self.tools):
+                raise ValueError("Skill tools are reserved for Runtime Skill loading")
             if any(tool.get("name") == "read_tool_result" for tool in self.tools):
                 raise ValueError("read_tool_result is reserved for Runtime tool-result paging")
             if any(tool.get("name") == "todo_write" for tool in self.tools):
@@ -1756,6 +1910,10 @@ class RuntimeHost:
             if any(tool.get("name") == "delegate_readonly" for tool in self.tools):
                 raise ValueError("delegate_readonly is reserved for Runtime workers")
             skill_tools = [skills.tool()] if skills else []
+            if any(r.path != "SKILL.md" for s in skills.skills for r in s.resources):
+                skill_tools.append(skills.resource_tool())
+            if any(r.path.startswith("scripts/") for s in skills.skills for r in s.resources):
+                skill_tools.append(script_tool(skills))
             rag_tools: list[dict[str, Any]] = []
             rag_handlers: dict[str, Any] = {}
             if (workspace_root / INDEX_RELATIVE_PATH).is_file():
@@ -1980,7 +2138,8 @@ class RuntimeHost:
                 **self.handlers,
                 "read_tool_result": tool_result_reader(self.store, session_id),
                 "todo_write": write_task_plan,
-                **({"load_skill": skills.load} if skills else {}),
+                **({"load_skill": load_skill, "read_skill_resource": read_skill_resource,
+                    "run_skill_script": run_skill_script} if skills else {}),
                 **rag_handlers,
                 **manager.handlers,
                 **({"delegate_readonly": delegate_readonly} if worker_tools else {}),
@@ -2011,7 +2170,7 @@ class RuntimeHost:
                     *({"delegate_readonly"} if worker_tools else set()),
                     *({"search_knowledge"} if rag_tools else set()),
                     *manager.readonly_tools,
-                    *({"load_skill"} if skills else set()),
+                    *({"load_skill", "read_skill_resource"} if skills else set()),
                 },
                 command_executor,
                 tools=tools,
@@ -2020,7 +2179,7 @@ class RuntimeHost:
             if worker_tools:
                 runtime_readonly_tools.add("delegate_readonly")
             if skills:
-                runtime_readonly_tools.add("load_skill")
+                runtime_readonly_tools.update({"load_skill", "read_skill_resource"})
             instructions = self._clean(ContextBuilder.instructions(workspace_root))
             skill_prompt = skills.prompt()
             mode_note = run_policy.mode_system_note(mode)
