@@ -99,6 +99,34 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
     /\d(?:[.,]\d+)? ms/,
   );
   await expect(page.locator(".call-details")).toContainText("end_turn");
+  await expect(page.locator(".usage-ranking tbody tr")).toHaveCount(1);
+  const ranking = await page
+    .locator(".usage-ranking tbody td")
+    .allTextContents();
+  await page.reload();
+  await expect(page.locator(".usage-ranking tbody td")).toHaveText(ranking);
+  const composition = page.locator(".input-composition").first();
+  await expect(composition.getByText(/输入组成 · [\d,]+ 字符/)).toBeVisible();
+  await composition.locator("summary").click();
+  await expect(
+    composition.getByText("工具目录", { exact: true }),
+  ).toBeVisible();
+  await expect(composition).toContainText("非 Token 数");
+  await page.screenshot({
+    path: "test-results/input-composition-desktop.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".sidebar")).not.toBeInViewport();
+  await composition.locator("summary").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: "test-results/input-composition-mobile.png",
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(second);
   await input.fill("停止场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();

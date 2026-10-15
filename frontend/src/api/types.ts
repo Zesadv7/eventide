@@ -97,6 +97,20 @@ export interface GenerationState {
     thinking: boolean;
   };
 }
+export interface InputComposition {
+  method: "serialized_unicode_characters_v1";
+  unit: "characters";
+  total_characters: number;
+  components: {
+    instructions: number;
+    history: number;
+    tool_catalog: number;
+    skills: number;
+    retrieval: number;
+    tool_results: number;
+    envelope: number;
+  };
+}
 export interface UsageCall {
   run_id: string;
   request_id: string | null;
@@ -106,6 +120,7 @@ export interface UsageCall {
   provider?: string | null;
   duration_ms?: number | null;
   stop_reason?: string | null;
+  input_composition?: InputComposition | null;
   status: string;
   started_at: number;
   finished_at: number | null;

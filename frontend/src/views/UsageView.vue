@@ -6,6 +6,8 @@ import { useWorkbench } from "../stores/workbench";
 import BudgetPanel from "../components/BudgetPanel.vue";
 import CostSummary from "../components/CostSummary.vue";
 import PriceEditor from "../components/PriceEditor.vue";
+import InputComposition from "../components/InputComposition.vue";
+import UsageInsights from "../components/UsageInsights.vue";
 const store = useWorkbench(),
   scope = ref<"session" | "run" | "project" | "day">("session"),
   day = ref(new Date().toISOString().slice(0, 10)),
@@ -171,8 +173,7 @@ const grouped = computed(() => {
       <CostSummary v-if="costs" :costs="costs" />
       <BudgetPanel
         v-if="selectedScope && scope !== 'session'"
-        :scope="selectedScope"
-      />
+        :scope="selectedScope" />
       <p v-else class="muted">
         会话统计包含 Continue
         与子任务。共享预算可在“当前项目全部对话”、“最近运行”或“每日”范围管理。
@@ -224,6 +225,7 @@ const grouped = computed(() => {
           Token 必然减少。
         </p>
       </section>
+      <UsageInsights :ledger="ledger" />
       <section class="panel">
         <h2>请求明细</h2>
         <p class="muted">
@@ -243,41 +245,47 @@ const grouped = computed(() => {
               </tr>
             </thead>
             <tbody>
-              <tr
+              <template
                 v-for="call in ledger.calls"
                 :key="`${call.run_id}:${call.attempt_id}`"
               >
-                <td>
-                  {{ when(call.started_at)
-                  }}<small class="mono">{{ call.attempt_id }}</small>
-                </td>
-                <td>
-                  {{ call.kind
-                  }}<small>{{ call.provider || "未记录供应商" }}</small
-                  ><small>{{ call.model || "未记录模型" }}</small>
-                </td>
-                <td>
-                  {{ call.status
-                  }}<small>{{ call.stop_reason || "未记录结束原因" }}</small>
-                </td>
-                <td>{{ duration(call.duration_ms) }}</td>
-                <td>{{ tokens(call.usage.input_tokens) }}</td>
-                <td>{{ tokens(call.usage.output_tokens) }}</td>
-                <td>
-                  {{
-                    call.usage_source === "reported"
-                      ? "供应商报告"
-                      : call.usage_source === "estimated"
-                        ? "本地估算"
-                        : "未知"
-                  }}<small v-if="!call.usage_complete">不完整</small>
-                </td>
-              </tr>
+                <tr>
+                  <td>
+                    {{ when(call.started_at)
+                    }}<small class="mono">{{ call.attempt_id }}</small>
+                  </td>
+                  <td>
+                    {{ call.kind
+                    }}<small>{{ call.provider || "未记录供应商" }}</small
+                    ><small>{{ call.model || "未记录模型" }}</small>
+                  </td>
+                  <td>
+                    {{ call.status
+                    }}<small>{{ call.stop_reason || "未记录结束原因" }}</small>
+                  </td>
+                  <td>{{ duration(call.duration_ms) }}</td>
+                  <td>{{ tokens(call.usage.input_tokens) }}</td>
+                  <td>{{ tokens(call.usage.output_tokens) }}</td>
+                  <td>
+                    {{
+                      call.usage_source === "reported"
+                        ? "供应商报告"
+                        : call.usage_source === "estimated"
+                          ? "本地估算"
+                          : "未知"
+                    }}<small v-if="!call.usage_complete">不完整</small>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan="7">
+                    <InputComposition :value="call.input_composition" />
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
-        </div>
-      </section></template
-    >
+        </div></section
+    ></template>
     <PriceEditor />
   </section>
 </template>

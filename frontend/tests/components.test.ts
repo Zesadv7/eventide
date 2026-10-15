@@ -126,6 +126,47 @@ describe("content and generation controls", () => {
     expect(wrapper.text()).toContain("未记录供应商");
     expect(wrapper.text()).toContain("未记录结束原因");
     expect(wrapper.text()).not.toContain("0 ms");
+    expect(wrapper.text()).toContain("输入组成未记录");
+    expect(wrapper.find(".input-composition").exists()).toBe(false);
+    wrapper.unmount();
+  });
+  it("keeps input character composition separate from unknown provider tokens", async () => {
+    vi.spyOn(budgetsApi, "costs").mockResolvedValue({
+      ...costs,
+      usage: {
+        ...costs.usage,
+        calls: [
+          {
+            ...costs.usage.calls[0]!,
+            input_composition: {
+              method: "serialized_unicode_characters_v1",
+              unit: "characters",
+              total_characters: 1234,
+              components: {
+                instructions: 100,
+                history: 800,
+                tool_catalog: 200,
+                skills: 30,
+                retrieval: 0,
+                tool_results: 50,
+                envelope: 54,
+              },
+            },
+          },
+        ],
+      },
+    });
+    vi.spyOn(budgetsApi, "prices").mockResolvedValue({ prices: [] });
+    useWorkbench().selectedSession = "session-1";
+    const wrapper = mount(UsageView);
+    await flushPromises();
+    const composition = wrapper.get(".input-composition");
+    expect(composition.get("summary").text()).toBe("输入组成 · 1,234 字符");
+    expect(composition.text()).toContain("0 字符");
+    expect(composition.text()).toContain("非 Token 数");
+    expect(composition.text()).toContain("已压缩的摘要计入对话历史");
+    expect(wrapper.get(".call-details").text()).toContain("未报告");
+    expect(wrapper.get(".stat-grid").text()).toContain("统计不完整");
     wrapper.unmount();
   });
 });
