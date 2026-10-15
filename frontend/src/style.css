@@ -955,3 +955,30 @@ td small {
     color: #647e5d;
   }
 }
+
+.status-dot.queued {
+  background: var(--muted);
+}
+.badge.queued {
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.queue-notice {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+.queue-page td small {
+  display: block;
+  margin-top: 0.25rem;
+  overflow-wrap: anywhere;
+}
+.queue-page td {
+  vertical-align: top;
+}
+.queue-page table {
+  min-width: 720px;
+}
+.queue-page .page-heading > button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}

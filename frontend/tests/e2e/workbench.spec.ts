@@ -339,3 +339,98 @@ test("real worktree API: concurrent edits, source preservation and stable sessio
   );
   await monitor.close();
 });
+
+test("real queue API: six conversations, shared limits, precise cancellation and dispatch", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  const runs: string[] = [];
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("./#/chat");
+  try {
+    for (let i = 0; i < 6; i++) {
+      await newConversation(page);
+      await page.getByLabel("运行模式").selectOption("plan");
+      await page.getByLabel("执行位置").selectOption("snapshot");
+      await page
+        .getByRole("textbox", { name: "任务输入" })
+        .fill(`队列并发场景 ${i}`);
+      const accepted = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          response.url().endsWith("/runs"),
+      );
+      await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
+      const response = await accepted;
+      expect(response.status()).toBe(202);
+      runs.push((await response.json()).run_id);
+    }
+    await expect(page.locator(".badge")).toHaveText("排队中");
+    await expect(
+      page.getByRole("button", { name: "取消排队", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "≋ 任务队列", exact: true }).click();
+    const counter = (title: string) =>
+      page
+        .locator(".stat-grid article")
+        .filter({ has: page.getByText(title, { exact: true }) })
+        .locator("strong");
+    await expect(counter("执行任务")).toHaveText("4 / 4");
+    await expect(counter("等待任务")).toHaveText("2 / 20");
+    await expect(counter("模型请求")).toHaveText("2 / 2");
+    const queue = await (await page.request.get("/api/queue")).json();
+    expect(
+      queue.queued.map((entry: { run_id: string }) => entry.run_id),
+    ).toEqual(runs.slice(4));
+    expect(queue.counts.waiting_models).toBe(2);
+    await page.reload();
+    await expect(counter("等待任务")).toHaveText("2 / 20");
+    const canceled = runs[5]!;
+    await page
+      .locator("tbody tr")
+      .filter({ hasText: canceled })
+      .getByRole("button", { name: "取消排队", exact: true })
+      .click();
+    await expect(counter("等待任务")).toHaveText("1 / 20");
+    const cancelledRun = await (
+      await page.request.get(`/api/runs/${canceled}`)
+    ).json();
+    expect(cancelledRun.status).toBe("interrupted");
+    const usage = await (
+      await page.request.get(`/api/runs/${canceled}/usage`)
+    ).json();
+    expect(usage.attempt_count).toBe(0);
+    const budgets = await (
+      await page.request.get(`/api/budgets/run/${canceled}`)
+    ).json();
+    expect(budgets.reservations).toEqual([]);
+    await page
+      .locator("tbody tr")
+      .filter({ hasText: runs[0]! })
+      .getByRole("button", { name: "停止任务", exact: true })
+      .click();
+    await expect(counter("等待任务")).toHaveText("0 / 20");
+    await expect(counter("执行任务")).toHaveText("4 / 4");
+    const promoted = await (
+      await page.request.get(`/api/runs/${runs[4]}`)
+    ).json();
+    expect(promoted.status).toBe("running");
+    await page.screenshot({
+      path: "test-results/task-queue.png",
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator(".sidebar")).not.toBeInViewport();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({
+      path: "test-results/task-queue-mobile.png",
+      fullPage: true,
+    });
+    expect(errors).toEqual([]);
+  } finally {
+    await Promise.all(
+      runs.map((run) => page.request.post(`/api/runs/${run}/cancel`)),
+    );
+  }
+});

@@ -114,7 +114,9 @@ async function add() {
         >
           <span class="status-dot" :class="s.status"></span
           ><span>{{ s.title === "New session" ? "新对话" : s.title }}</span
-          ><small v-if="store.active(s.status)">运行中</small>
+          ><small v-if="store.active(s.status)">{{
+            s.status === "queued" ? "排队中" : "运行中"
+          }}</small>
         </button>
         <p v-if="!store.currentSessions.length" class="muted">
           项目对话会显示在这里。
@@ -122,6 +124,7 @@ async function add() {
       </nav>
       <nav class="product-nav" aria-label="工作台导航">
         <RouterLink to="/chat">◌ 对话</RouterLink
+        ><RouterLink to="/queue">≋ 任务队列</RouterLink
         ><RouterLink to="/skills">◇ Skills</RouterLink
         ><RouterLink to="/knowledge">⌕ 知识索引</RouterLink
         ><RouterLink to="/evaluations">✓ 评测</RouterLink

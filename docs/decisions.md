@@ -699,3 +699,5 @@ Vue集成验证：35项前端回归、typecheck/build/format与4条真实FastAPI
 为避免把半成品源当基线，忙源直接拒绝；等待的source没有可信Git checkpoint则接收前拒绝。source/worktree在执行锁内重验，未started重启不补写当前checkpoint。非Git即时源执行保留原限制。每次模型attempt在拿到全局2槽后才做U2预留，backoff/工具/子任务等待释放槽；Delivery控制Run和readonly子Run不重复占根。配置守卫同时覆盖未start队列和准备ticket，不只看活跃Task。模型连接探测共享槽但仍未纳入Run账本。
 
 **接线验证：** 200项接收/快照/写副本/交付/worker/预算/HTTP回归及最终38项调度专项通过；scheduler与run_dispatch均100%覆盖，Ruff/Mypy81模块、help和smoke12/12通过。专项包含真实进程退出保留接收checkpoint、24接收/25拒绝、精确取消/无消费、Continue漂移、控制锁唤醒、启动失败释放、同步写重复取消、4父+8worker及5交付writer容量。前端与整包全量由集成任务单列，未调用真实模型。
+
+Vue/分发集成补充（ADR-065）：42项前端回归、6条真实API静态旅程、typecheck/build/format和wheel通过；队列读取/取消/刷新/自动补位经实际6对话验证。新Docker镜像的静态资源、非root/无需Node、管理来源及重启后数据与队列额度通过。全量后端集成另发现内部状态文件影响源码checkpoint及旧断言未适配，P3保留进行中直到修复和全量验收。

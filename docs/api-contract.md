@@ -257,3 +257,5 @@ Vue已生成source/snapshot/worktree类型；读取Session execution恢复绑定
 Run和Continue仍在输入、参数、Skills、执行位置、checkpoint及身份持久接收后返回202，原accepted响应形状和幂等重放不变。4根加20等待满额时返回429，不创建Run/消息；同Session忙或源正在直接运行返回409。源忙时不能准备新快照/worktree。直接源等待任务若无可信Git checkpoint在接收前422拒绝；Python入口遵循同一约束，不后台无身份等待，调用成功仍await最终RunResult。
 
 GET Run/Session/list-runs中的queued不是终态；SSE持续观察到真实终态，run.admitted是已接收证据。停止沿用`POST /api/runs/{id}/cancel`；queued取消写interrupted、保留目标、没有模型attempt/Token预留。停止活跃任务必须等副作用收尾才释放根名额。重启将queued/started停驻，不自动执行；恢复Continue使用新身份并复核旧checkpoint，不能用恢复时的源码替换接收基线。队列等待和模型槽等待均阻止Provider配置变更，原来源与幂等保护继续生效。
+
+Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入口。6个真实API对话验证4根/2模型/2等待，取消等待后的usage.attempt_count=0且预算预留为空；停止根任务后自动认领下一项。

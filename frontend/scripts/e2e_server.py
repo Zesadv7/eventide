@@ -28,7 +28,11 @@ def main() -> None:
             prompt = self._prompt(request)
             step = self.counts[prompt] = self.counts.get(prompt, 0) + 1
             usage = {"input_tokens": 100 + step, "output_tokens": 20}
-            if "停止场景" in prompt:
+            if "队列并发场景" in prompt:
+                yield ModelStreamEvent("text_delta", text="正在执行队列隔离验证。" * 50)
+                await asyncio.sleep(60)
+                response = ModelResponse(text="队列验证结束", usage=usage)
+            elif "停止场景" in prompt:
                 yield ModelStreamEvent("text_delta", text="正在等待工具准备。" * 50)
                 await asyncio.sleep(30)
                 response = ModelResponse(text="不应完成", usage=usage)

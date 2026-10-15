@@ -356,3 +356,5 @@ Python run/continue、HTTP和Delivery writer共用admission与start_admitted_run
 模型信号量在每次实际attempt及U2原子预留之前获得；等待名额被取消不产生尝试或消费记录。主调用、摘要、worker共用2槽，连接探测也遵守请求上限，但尚不纳入Run用量账本。Provider返回/异常结算后释放模型槽，重试backoff、工具/审批和worker等待均在槽外。worker继承父预算，不另抢根槽，四个根等待子任务时仍可推进。
 
 GET /api/queue只读查询上述事实与所有权；project_id只过滤列表，容量和counts始终是全局。dispatch_state区分queued/starting/running/finishing；Run status继续使用canonical投影，审批等待或终态清理不会伪装为新执行。排队取消复用精确Run取消并保留输入，关闭等待准备线程/执行清理后停驻全部已接收工作。重启不自动派发；尚未started的admission保留原checkpoint，不调用crash-gap补新基线，实际开始过的旧运行继续保守恢复。所有未知Token预留保持原状。前端生成类型、队列页面和整包门禁由集成阶段验证。
+
+Vue队列控制面只读取Host队列快照，不维护浏览器调度器；全局counts/limits与带精确Run/Session/副本身份的列表分开。queued被视为同Session活跃工作，但不作为源Workspace执行锁；UI取消只发送该Run身份。每次单一在途轮询、卸载后停止回填，后台任务继续由Host拥有；狭窄屏幕横向滚动任务表。

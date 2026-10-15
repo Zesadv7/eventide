@@ -83,9 +83,11 @@ def verify(image: str) -> dict[str, object]:
         else:
             raise AssertionError("Expected local management request to be rejected")
 
-    docker("volume", "create", state)
-    docker("volume", "create", project)
+    created_volumes: list[str] = []
     try:
+        for volume in (state, project):
+            docker("volume", "create", volume)
+            created_volumes.append(volume)
         boot()
         # Learn the socket peer only for this disposable test. Real deployment
         # must explicitly configure its own publishing peer; no runtime detection.
@@ -121,6 +123,10 @@ def verify(image: str) -> dict[str, object]:
         manifest = json.loads(request("/workbench/manifest.json"))
         for path, checksum in manifest["files"].items():
             assert hashlib.sha256(request("/workbench/" + path)).hexdigest() == checksum, path
+        queue = json.loads(request("/api/queue"))
+        assert queue["limits"] == {"active_roots": 4, "waiting_roots": 20, "model_requests": 2}
+        assert not queue["queued"] and not queue["active"]
+        assert all(value == 0 for value in queue["counts"].values())
         workspaces = json.loads(request("/api/workspaces"))
         assert {workspace["path"] for workspace in workspaces} == {"/workspaces/demo"}
         workspace = json.loads(
@@ -161,6 +167,7 @@ def verify(image: str) -> dict[str, object]:
         assert provider["model"] == "verification-only"
         assert provider["api_key_configured"]
         assert docker("exec", name, "cat", "writable-check") == "retained"
+        assert json.loads(request("/api/queue")) == queue
         return {
             "image": image,
             "peer": peer,
@@ -170,10 +177,13 @@ def verify(image: str) -> dict[str, object]:
             "management_origin_checks": "passed",
             "restart_persistence": "passed",
             "model_requests": 0,
+            "queue_limits": queue["limits"],
+            "queue_after_restart": "idle",
         }
     finally:
         docker("rm", "--force", name, check=False)
-        docker("volume", "rm", state, project)
+        if created_volumes:
+            docker("volume", "rm", *created_volumes)
 
 
 if __name__ == "__main__":

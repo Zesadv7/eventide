@@ -4,6 +4,7 @@ import SettingsView from "./views/SettingsView.vue";
 import UsageView from "./views/UsageView.vue";
 import CapabilitiesView from "./views/CapabilitiesView.vue";
 import SkillsView from "./views/SkillsView.vue";
+import QueueView from "./views/QueueView.vue";
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
@@ -12,6 +13,7 @@ export const router = createRouter({
     { path: "/settings", component: SettingsView },
     { path: "/usage", component: UsageView },
     { path: "/skills", component: SkillsView },
+    { path: "/queue", component: QueueView },
     {
       path: "/knowledge",
       component: CapabilitiesView,

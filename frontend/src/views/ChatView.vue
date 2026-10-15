@@ -191,17 +191,19 @@ async function abandon() {
         </p>
       </div>
       <span v-if="run" class="badge" :class="run.status">{{
-        run.status === "running"
-          ? "运行中"
-          : run.status === "waiting_for_user"
-            ? "等待审批"
-            : run.status === "completed"
-              ? "已完成"
-              : run.status === "interrupted"
-                ? "已停驻"
-                : run.status === "failed"
-                  ? "失败"
-                  : run.status
+        run.status === "queued"
+          ? "排队中"
+          : run.status === "running"
+            ? "运行中"
+            : run.status === "waiting_for_user"
+              ? "等待审批"
+              : run.status === "completed"
+                ? "已完成"
+                : run.status === "interrupted"
+                  ? "已停驻"
+                  : run.status === "failed"
+                    ? "失败"
+                    : run.status
       }}</span>
     </header>
     <div v-if="!session" class="empty-state">
@@ -217,7 +219,12 @@ async function abandon() {
       </button>
     </div>
     <template v-else
-      ><div class="conversation" aria-label="对话记录">
+      ><p v-if="run?.status === 'queued'" class="queue-notice">
+        任务已持久接收，正在等待执行额度。<RouterLink to="/queue"
+          >查看任务队列</RouterLink
+        >
+      </p>
+      <div class="conversation" aria-label="对话记录">
         <template
           v-for="(message, index) in store.messages[store.selectedSession] ||
           []"
@@ -392,7 +399,7 @@ async function abandon() {
             type="button"
             @click="store.cancel().catch(store.fail)"
           >
-            ■ 停止</button
+            {{ run?.status === "queued" ? "取消排队" : "■ 停止" }}</button
           ><button
             v-else
             class="primary"

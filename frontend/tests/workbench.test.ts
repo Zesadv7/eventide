@@ -54,6 +54,8 @@ describe("request identity and UI isolation", () => {
       execution: { kind: "source" },
     });
     expect(store.workspaceBusy).toBe(true);
+    store.sessions[session.workspace_id]!.at(-1)!.status = "queued";
+    expect(store.workspaceBusy).toBe(false);
   });
   it("keeps the same idempotency key after an ambiguous network failure", async () => {
     const submit = vi

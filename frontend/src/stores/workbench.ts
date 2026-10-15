@@ -65,7 +65,7 @@ export const useWorkbench = defineStore("workbench", () => {
   const workspaceBusy = computed(() =>
     currentSessions.value.some(
       (s) =>
-        active(s.status) &&
+        ["running", "waiting_for_user"].includes(s.status) &&
         !["snapshot", "worktree"].includes(
           (s.execution || s.latest_run?.execution)?.kind || "source",
         ),
