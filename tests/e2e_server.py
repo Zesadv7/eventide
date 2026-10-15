@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     _sweep_stale_roots()
-    temp_root = Path(tempfile.mkdtemp(prefix=STATE_ROOT_PREFIX))
+    temp_root = Path(tempfile.mkdtemp(prefix=STATE_ROOT_PREFIX)).resolve()
     atexit.register(_remove_tree, temp_root)
     original_cwd = Path.cwd()
     # Keep python-dotenv discovery and any relative writes inside the sandbox.

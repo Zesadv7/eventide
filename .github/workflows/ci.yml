@@ -35,6 +35,33 @@ jobs:
       - run: uv run ruff check eventide tests examples
       - run: uv run mypy eventide
 
+  optional-extensions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --all-extras
+      - run: uv run --all-extras pytest -q tests/test_code_structure.py tests/test_telemetry.py tests/test_delivery_runtime.py tests/test_delivery_lifecycle.py
+      - run: uv run --all-extras eventide eval evals/engineering.yaml
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - run: docker info
+      - run: docker pull python:3.12-slim
+      - run: uv run pytest -q tests/test_container_executor.py
+        env:
+          EVENTIDE_TEST_CONTAINER_IMAGE: python:3.12-slim
+
   web:
     runs-on: ubuntu-latest
     steps:
@@ -42,4 +69,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --extra dev
       - run: node --test tests/web.test.mjs
+      - run: npm install --prefix .task_outputs/browser-tools --no-audit --no-fund playwright@1.62.1
+      - run: node .task_outputs/browser-tools/node_modules/playwright/cli.js install chromium --only-shell --with-deps
+      - run: node tests/web_browser.cjs
+        env:
+          EVENTIDE_PLAYWRIGHT_MODULE: ${{ github.workspace }}/.task_outputs/browser-tools/node_modules/playwright
+      - run: node tests/web_e2e.cjs
+        env:
+          EVENTIDE_E2E_STRICT_V2: "1"
+          EVENTIDE_PLAYWRIGHT_MODULE: ${{ github.workspace }}/.task_outputs/browser-tools/node_modules/playwright
+          EVENTIDE_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python

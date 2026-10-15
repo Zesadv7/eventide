@@ -553,7 +553,7 @@ function loadPlaywright() {
 async function phase2() {
   log("\n=== 阶段 2：UI 旅程（Playwright） ===");
   const loaded = loadPlaywright();
-  if (!loaded) return 0;
+  if (!loaded) return process.env.EVENTIDE_E2E_STRICT_V2 === "1" ? 1 : 0;
   let browser;
   try {
     browser = await loaded.pw.chromium.launch({
@@ -564,7 +564,7 @@ async function phase2() {
     });
   } catch (err) {
     log(`SKIP: playwright chromium 启动失败（${String(err.message).split("\n")[0]}）`);
-    return 0;
+    return process.env.EVENTIDE_E2E_STRICT_V2 === "1" ? 1 : 0;
   }
 
   const page = await browser.newPage();
