@@ -139,8 +139,8 @@ uv run eventide eval evals/smoke.yaml
 | X2 | 待开始 | 删除用户命令行产品和旧前端/专属死代码，不留转发空壳。 |
 | X3 | 待开始 | 打包/Docker/示例/CI/文档同步；help/eval门禁改服务冒烟/Python接口，不降低范围。 |
 | U1 | 进行中 | Host尝试身份/SDK禁隐式重试、provider归一化、去重账本、Run/Session全历史及子Run查询已接线；70项相关集成通过，未知/取消/父子/重启回归通过。流式终态已随A6接入，embedding接线待C；README/architecture/api-contract/ADR-049同步。 |
-| U2 | 进行中 | 2026-10-16：原子预留/结算和价格快照已接Host主Agent、摘要、worker的每次请求尝试；P1权威项目/交付归属、未知保留、Continue共享桶、80%事件及Python配置查询可用。21项新增派发验收、102项定向回归、完整868通过/1跳过且覆盖93.61%、Ruff/Mypy74模块及smoke12/12通过；README/architecture/api-contract/ADR-062同步。预算HTTP/UI和P调度仍待接；连接探测与API embedding尚未纳入，未标整体完成。 |
-| U3 | 进行中 | Vue已消费去重请求账本，未知不记零、父子按服务端口径汇总；18项前端回归及真实API用量页面旅程通过。成本/共享预算/项目与每日/内容组成尚未完成。 |
+| U2 | 进行中 | 2026-10-16：原子预留/结算和价格快照已接Host主Agent、摘要、worker每次尝试；权威项目/交付归属、Continue共享桶与80%事件可用。新增预算/价格/未知处理HTTP控制面，严格本机同源、持久幂等与配置冲突保护；人工核对保留未知或补记总量，不修改Provider用量。41项HTTP专项、完整909通过/1跳过且覆盖93.70%、Ruff/Mypy76模块及smoke12/12通过；README/architecture/api-contract/ADR-059/062/064同步。Vue及P调度仍待完成；连接探测与API embedding尚未纳入，不标整体完成。 |
+| U3 | 进行中 | 2026-10-16：Vue已有去重请求账本；新增费用API按精确Run/Session/Project/Delivery/UTC日及日期范围全历史汇总，父子不双计、币种/估算来源分开，历史未预留费用明确未知。41项HTTP专项含105个历史Run、真实Git副本、父子Continue及跨午夜去重，完整909通过/1跳过；README/architecture/api-contract/ADR-064同步。预算/费用Vue、输入组成仍待完成，未用后端测试替代页面验收。 |
 | U4 | 待开始 | 随S/C/D：渐进加载/分页/去重/片段预算、摘要阈值间隔、减少重复委派、无进展停止、稳定缓存前缀，参数实验。 |
 | U5 | 待开始 | 随B/R：冻结集单项及组合消融，成功计数/总Token及费用/延迟p50/p95/分类额外开销/缓存覆盖/失败与未知；总费用÷成功数，无成功不可算。 |
 | R1 | 待开始 | 后端完整门禁≥85%覆盖，默认离线无密钥/网络。 |

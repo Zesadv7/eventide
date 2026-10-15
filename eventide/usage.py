@@ -6,7 +6,7 @@ reported zero, and aggregate/terminal events are never billing evidence.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 TOKEN_FIELDS = (
@@ -103,7 +103,10 @@ def usage_snapshot(usage: Any, source: Any = None) -> dict[str, Any]:
     }
 
 
-def build_usage_ledger(events: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+def build_usage_ledger(
+    events: Iterable[Mapping[str, Any]], *,
+    call_filter: Callable[[dict[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
     """Rebuild exclusive usage from unique attempt facts, with explicit legacy fallback.
 
     The caller chooses Runs/Sessions by supplying canonical events. Child totals
@@ -147,6 +150,8 @@ def build_usage_ledger(events: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             legacy.setdefault((run, event_id), event)
     calls = [_attempt_row(key, record) for key, record in attempts.items()]
     calls.extend(_legacy_row(event) for event in legacy.values())
+    if call_filter is not None:
+        calls = [call for call in calls if call_filter(call)]
     calls.sort(key=lambda row: (row["started_at"], row["run_id"], row["attempt_id"]))
     reported: dict[str, int] = {}
     estimated: dict[str, int] = {}

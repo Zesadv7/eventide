@@ -30,7 +30,7 @@ Run与Continue接受可选`Idempotency-Key`（1–128个可见ASCII字符）。�
 - `POST /api/sessions/{id}/runs` 新增 `generation`：temperature、top_p、max_output_tokens、reasoning_effort、thinking。省略继承，null恢复默认，0有效；额外字段/非有限值/范围错误422。
 - 写配置仅本机来源；支持情况未知时拒绝显式采样参数。接收时冻结，Continue相同接入继承；已有调用不受后续设置影响。尚无自动运行探测或按任务预设。
 
-### 请求用量账本 —— 后端及 Vue 已实现，费用与预算待U2/U3
+### 请求用量账本 —— 后端及 Vue 已实现，费用控制面见 U2/U3
 
 `GET /api/runs/{id}/usage`、`GET /api/sessions/{id}/usage` 返回独立模型尝试的 `calls/reported_totals/estimated_totals/unknown_attempts/incomplete_attempts/complete`。默认包含持久parent_run_id关联的子Run；`include_children=false`只取所选自身。Session汇总覆盖全部历史，不受Run列表分页限制；每个真实调用只计一次，不重复加入终态或worker汇总。
 
@@ -204,4 +204,28 @@ PackageBody 严格接受 directory、archive_base64、bundled 三选一，以及
 
 Run的SSE/export新增budget.reserved、budget.settled、budget.warning、budget.blocked。预留和尝试开始、结算和尝试结束分别原子提交，各使用正常持久session_seq；临时模型预览口径不变。budget.blocked含request_id和violations，不产生虚假的model.attempt_started，也不派发请求；Run以interrupted结束且reason=token_budget。budget.warning含attempt_id及达到80%的作用域摘要。预留中的input_estimate/output_estimate和estimate_method都是估算，不能作为已报告用量。
 
-Run/Session现有usage接口仍只按model.attempt事实计费，不累加budget.settled。worker主调用的kind为worker，摘要仍为context_summary；当前未新增预算/费用管理HTTP路由，配置和查询仅由Host Python接口提供。
+Run/Session现有usage接口仍只按model.attempt事实计费，不累加budget.settled。worker主调用的kind为worker，摘要仍为context_summary；预算/费用HTTP控制面如下，Vue接入另行验收。
+
+## 预算、价格和费用控制面（U2/U3 后端已接入）
+
+以下写接口均要求本机同源和`Idempotency-Key`（1–128可见ASCII字符）。正文严格校验，不把字符串、布尔或小数转换成整数。相同操作/键同内容返回原结果，同键不同内容409；重启继续识别原键，结果未知的mutation返回409要求检查状态，不自动重做。错误沿用统一code/message/detail结构。
+
+| 方法与路径 | 结构与语义 |
+|---|---|
+| `GET /api/budgets` | 全部已配置预算及全部预留明细；未配置不代表消费为零。 |
+| `GET /api/budgets/{kind}/{identity}` | kind为run/project/delivery/day；返回指定预算，即使尚未配置。day是UTC的YYYY-MM-DD，其他身份必须存在。 |
+| `PUT /api/budgets/{kind}/{identity}` | `{token_limit:int|null,expected_configuration_hash?:string}`；额度0阻止新请求，null关闭；可选hash来自GET，只随配置改变，过期409。 |
+| `GET /api/prices?provider=&model=&currency=` | `{prices:[...]}`，参数为可选精确过滤，全部版本保留。 |
+| `POST /api/prices` | `{version_id,provider,model,category,currency,price_per_million,effective_at}`；返回登记的价格；版本身份内容冲突或同类别/币种/生效时间重复409。 |
+| `GET /api/costs` | 全历史费用和用量，筛选参数见下文。 |
+| `POST /api/budgets/attempts/{attempt_id}/resolve` | `{action,actual_tokens?,reason}`；返回`{action,attempt}`，精确预留不存在404，在途或已结算409。 |
+
+预算响应为`{timezone:"UTC",budgets:[],reservations:[]}`。预算项包含kind/identity、token_limit、actual_tokens、reserved_tokens、committed_tokens、unsettled_attempts、remaining_tokens、warning、blocked、configuration_hash。预留项包含attempt_id/run_id/session_id、status、reserved_tokens、actual_tokens、usage_source、buckets、warnings、context（project_id/root_run_id/delivery_id）、input_estimate/output_estimate/estimate_method/reserved_at及audit。预留项reserved_tokens是原始请求估算；部分已报告量超过估算时，各bucket保留更大的额度。actual_tokens未知为null，不能呈现为真实零；status区分unsettled/settled/manually_resolved。
+
+价格category限定input_tokens/output_tokens/cache_read_input_tokens/cache_creation_input_tokens/reasoning_tokens；currency为3位大写代码，price_per_million是非负有限十进制字符串，effective_at必须含时区并归一UTC。新增价格不重写旧费用；HTTP未开放重估操作。
+
+费用查询支持成对的`scope_kind=run|session|project|delivery|day`与`scope_id`，另有`include_children=true`（只影响Run/Session）、可选`date_from`/`date_to`，均为包含端点的UTC日期。新调用使用预留UTC日，跨午夜结果仍归原日；历史未预留调用按调用开始UTC日。Run默认含持久子Run，Session包含全部历史Run和子Run，Continue不会隐藏历史消费。Project包含全部执行副本，Delivery使用实际固定交付身份，不按页面选择猜测归属。
+
+返回known_costs与estimated_usage_costs（各币种→十进制字符串）、unknown_attempts、estimated_attempts、unpriced_attempt_ids、complete、latest、history、usage（现有独立调用账本）、attempt_count、historical_unreserved_attempt_ids、scope、timezone:"UTC"、date_bounds:"inclusive"。历史无预留调用保持用量但费用未知；既没有费用也没有价格时返回空映射，不能显示为免费。latest每尝试仅一份最新估价，history保留全部版本，不重复累计；缺失用量或价格时complete=false，币种不可直接相加。
+
+未知处理action必须显式选择：keep_unknown禁止携带actual_tokens，仅追加已核对审计并保留原额度；record_known必须给出非负整数actual_tokens且不低于已报告部分用量。reason必须为非空1–256字符，已知密钥脱敏后审计。处理需要调用结束或Run终态证据，不能干扰在途结算。人工总量只进入预算，Provider usage及旧费用仍保持原精度；未知处理没有释放成零的默认动作。

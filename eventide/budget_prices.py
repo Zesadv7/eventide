@@ -205,43 +205,50 @@ class CostLedger:
 
     def snapshot(self) -> dict[str, Any]:
         """Latest estimate per attempt; currencies and incomplete calls stay separate."""
-        latest: dict[str, dict[str, Any]] = {}
-        history = []
-        attempts = set()
-        for event in self.store.facts_by_type(("cost.estimated", "budget.reserved")):
-            if event["type"] == "budget.reserved":
-                attempts.add(event["payload"]["attempt_id"])
-                continue
-            estimate = event["payload"]
-            history.append(estimate)
-            latest[estimate["attempt_id"]] = estimate
-        totals: dict[str, Decimal] = {}
-        estimated_totals: dict[str, Decimal] = {}
-        for estimate in latest.values():
-            target = estimated_totals if estimate["usage_source"] == "estimated" else totals
-            for currency, value in estimate["estimates"].items():
-                if value["known_amount"] is not None:
-                    with localcontext() as context:
-                        context.prec = 50
-                        target[currency] = (
-                            target.get(currency, Decimal(0)) + Decimal(value["known_amount"])
-                        )
-        unpriced = sorted(attempts - set(latest))
-        return {
-            "known_costs": {currency: str(value) for currency, value in totals.items()},
-            "estimated_usage_costs": {
-                currency: str(value) for currency, value in estimated_totals.items()
-            },
-            "estimated_attempts": sum(
-                item["usage_source"] == "estimated" for item in latest.values()
-            ),
-            "unknown_attempts": len(unpriced) + sum(
-                not item["complete"] for item in latest.values()
-            ),
-            "unpriced_attempt_ids": unpriced,
-            "complete": bool(latest) and not unpriced and all(
-                item["complete"] and item["usage_source"] == "reported"
-                for item in latest.values()
-            ),
-            "latest": list(latest.values()), "history": history,
-        }
+        return summarize_cost_events(
+            self.store.facts_by_type(("cost.estimated", "budget.reserved"))
+        )
+
+
+def summarize_cost_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Rebuild a scoped snapshot from caller-selected canonical attempt facts."""
+    latest: dict[str, dict[str, Any]] = {}
+    history = []
+    attempts = set()
+    for event in events:
+        if event["type"] == "budget.reserved":
+            attempts.add(event["payload"]["attempt_id"])
+            continue
+        estimate = event["payload"]
+        history.append(estimate)
+        latest[estimate["attempt_id"]] = estimate
+    totals: dict[str, Decimal] = {}
+    estimated_totals: dict[str, Decimal] = {}
+    for estimate in latest.values():
+        target = estimated_totals if estimate["usage_source"] == "estimated" else totals
+        for currency, value in estimate["estimates"].items():
+            if value["known_amount"] is not None:
+                with localcontext() as context:
+                    context.prec = 50
+                    target[currency] = (
+                        target.get(currency, Decimal(0)) + Decimal(value["known_amount"])
+                    )
+    unpriced = sorted(attempts - set(latest))
+    return {
+        "known_costs": {currency: str(value) for currency, value in totals.items()},
+        "estimated_usage_costs": {
+            currency: str(value) for currency, value in estimated_totals.items()
+        },
+        "estimated_attempts": sum(
+            item["usage_source"] == "estimated" for item in latest.values()
+        ),
+        "unknown_attempts": len(unpriced) + sum(
+            not item["complete"] for item in latest.values()
+        ),
+        "unpriced_attempt_ids": unpriced,
+        "complete": bool(latest) and not unpriced and all(
+            item["complete"] and item["usage_source"] == "reported"
+            for item in latest.values()
+        ),
+        "latest": list(latest.values()), "history": history,
+    }

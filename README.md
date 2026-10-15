@@ -486,6 +486,10 @@ Dockerfile 使用Node构建阶段和Python运行阶段，运行镜像不需要No
 
 RuntimeHost 的主Agent、摘要和只读worker请求现已共用预留/结算，重试每次独立计费；流式断流、取消和缺usage都保持未结算。项目身份来自P1持久绑定，交付及Continue沿用所属交付，子任务计入真实根Run，不重复累计。预算拒绝会在发出新请求前停驻，80%提示记录在事件中；实际响应可以超出估算，因此仍不是供应商账单硬上限。
 
-首版通过Python开发接口显式配置：`host.configure_budget(BudgetScope("project", project_id), token_limit=100000, request_id="change-1")`，`BudgetScope` 从 `eventide.budgets` 导入；Run、delivery、day也使用各自精确身份。`host.budget_status()`、`host.register_price(PriceVersion(...))` 和 `host.cost_status()`提供查询及价格配置。`None`关闭额度、`0`阻止派发，不沿用旧环境软限中0代表关闭的约定。未配置额度仍记录消费但不阻止请求，原`EVENTIDE_RUN_TOKEN_LIMIT`软限仍独立保留。
+预算控制已提供HTTP接口：`GET/PUT /api/budgets/{kind}/{identity}`支持run、project、delivery和day，day明确使用UTC的YYYY-MM-DD；`GET /api/budgets`返回全部已配置额度及预留明细。PUT需要持久`Idempotency-Key`，正文`token_limit:null`关闭额度、`0`阻止派发；页面可带`expected_configuration_hash`拒绝旧标签覆盖。未配置额度仍记录消费但不阻止请求，原`EVENTIDE_RUN_TOKEN_LIMIT`软限的0关闭约定继续独立保留。Python的`host.configure_budget`、`budget_status`、`register_price`和`cost_status`仍供开发与CI共用。
 
-当前没有精确tokenizer，输入采用`serialized_utf8_bytes_v1`序列化UTF-8字节数估算、输出预留完整请求上限；图片等内联数据可能明显高估，不能视为实际Token或计费保证。估算只写数值和方法，不写提示正文或附件。预算HTTP/UI及P调度仍待接入；模型连接探测与API embedding尚未纳入此Run派发控制，embedding按C阶段补齐。旧调用不补造预留/费用。
+`GET/POST /api/prices`查询或登记固定价格版本，价格使用十进制字符串及明确时区的生效时间。`GET /api/costs`按精确Run、Session、Project、Delivery或UTC日查询，支持包含子任务和首尾均包含的UTC日期范围，累计覆盖全部历史。费用按币种分别展示，缺价格、历史未预留调用和未知用量均显式保留；修改价格不会覆盖旧费用快照，HTTP暂不提供批量重估。
+
+未知预留可通过`POST /api/budgets/attempts/{attempt_id}/resolve`显式处理：`keep_unknown`仅记录已核对及理由并保留额度；`record_known`需要用户补记总Token及理由，不能小于已经报告的部分用量。正在派发中的请求禁止人工处理，成功补记也不会伪造Provider的输入/输出或重写旧费用。所有控制写请求限制本机同源，要求幂等键；相同键不同内容返回409，崩溃后结果未知的操作不会自动重做。详细结构见`docs/api-contract.md`。
+
+当前没有精确tokenizer，输入采用`serialized_utf8_bytes_v1`序列化UTF-8字节数估算、输出预留完整请求上限；图片等内联数据可能明显高估，不能视为实际Token或计费保证。估算只写数值和方法，不写提示正文或附件。预算Vue控制面及P调度仍待接入；模型连接探测与API embedding尚未纳入此Run派发控制，embedding按C阶段补齐。旧调用不补造预留/费用。
