@@ -222,9 +222,9 @@ CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optiona
 
 无尝试事实的历史 Run 仅回退已观察到的 model.response/context.summary_generated，标记历史证据不完整，不补造请求、重试或费用。JSON/OTel trace 对新 Run 直接派生尝试 span，仍只输出固定类别、哈希身份和数字，不导出请求参数或模型正文。Host与用量API已接线，流式供应商及embedding等后续验收仍见U1清单。
 
-## 临时流式预览（A6进行中）
+## 临时流式预览（A6/A7）
 
-Host对具有stream方法的主调用消费text_delta/response_completed，完整响应之前不派发工具；辅助摘要保持complete。预览每Run最多16,000字符、最多64个活跃条目，完成/失败/取消删除，不写Event Log。已知凭据保留足够跨片lookahead后脱敏，过长密钥禁预览而非泄漏。完整内容与usage仍由持久响应/attempt事实承担。SSE显式include_preview才发送无id临时帧；持久游标不被改变。流式失败/超时不自动重新请求或降级complete，未知消费保留；SDK适配和Vue显示仍在后续步骤。
+Host对具有stream方法的主调用消费text_delta/response_completed，完整响应之前不派发工具；辅助摘要保持complete。预览每Run最多16,000字符、最多64个活跃条目，完成/失败/取消删除，不写Event Log。已知凭据保留足够跨片lookahead后脱敏，过长密钥禁预览而非泄漏。完整内容与usage仍由持久响应/attempt事实承担。SSE显式include_preview才发送无id临时帧；持久游标不被改变。流式失败/超时不自动重新请求或降级complete，未知消费保留；三类官方SDK适配已集成；Vue显示按F阶段承接。
 
 Host的全部实际目录已接入严格工具契约，包括MCP、Skills、RAG及只读Worker过滤后的目录。每Run仅允许一次参数错误后的修正轮次，再次出现参数错误即在保存全部已知结果后失败；不重新执行先前副作用。截断响应中的完整JSON也不执行，未派发调用写tool.abandoned补齐消息配对。严格schema使基础目录实测从约2,738增加至3,283字符；上下文测试固定成本相应更新，保留独立目录上限检测，不能把新增校验成本当作Token优化收益。
 
@@ -237,3 +237,7 @@ Host的全部实际目录已接入严格工具契约，包括MCP、Skills、RAG�
 `SkillCatalog.discover` 默认扫描项目 `skills/`，可显式接收已经检查的用户包、启用身份及用户选择。不存在隐式同名覆盖；同作用域冲突的项目包均不可用，不同作用域要求精确身份。普通唯一名称仍保留 `load_skill` 兼容。目录最多 64 个入口、10 MB 冻结资源；单包超限和元数据错误通过 `diagnostics` 返回，既有项目文件不会自动重写。
 
 快照对象持有不可变 `bytes`，`snapshot()` 只返回资源清单与摘要，`resource_bytes`／`read_resource` 从同一组冻结字节读取。将这些字节持久化并绑定 admission、恢复时取回固定资源、注册读取工具和受控脚本执行器属于 Host 集成责任，本模块不替代 ToolExecutor／PolicyEngine。`allowed-tools` 元数据只是声明，不能授予权限、模型配置或预算。
+
+## 真实模型基线（2026-10-16）
+
+使用已保存的DeepSeek Responses连接、deepseek-flash及reasoning_effort=none，在独立临时项目与数据库中执行普通响应、只读文件工具和三个工程fixture，各两次。每次12步、20,000已观测Token软限、300秒总等待；输出上限4,096，单响应允许越过Token软限。10次中7次完整完成，3次因Token预算停驻仍独立验收通过，六次修复的固定测试均通过且未改动。累计48次模型请求，131,359输入/7,630输出Token，逐请求usage完整、未知0；父子/终态不另加账。报告与失败产物在忽略的.task_outputs和临时目录保留，不提交源码/数据库原文；这是小样本接入基线，不是成熟成功率或成本优化效果证明。

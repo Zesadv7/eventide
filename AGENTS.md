@@ -96,14 +96,14 @@ uv run eventide eval evals/smoke.yaml
 | 0.1 | 已完成 | 2026-10-15：本计划和逐步状态制度已写入本文件；README 过时 Subagent 表述已修正，架构/ADR 区分目标与现状；文档检查和 git diff --check。 |
 | 0.2 | 已完成 | 2026-10-15：Host/live 共用配置优先级；live 只读解析已提交 WAL 配置、隔离前解密且不创建 Host/密钥，错误不回退。88 项定向回归、Ruff、Mypy 50 模块通过；README/architecture/ADR-051 已同步。真实调用另属 0.4。 |
 | 0.3 | 已完成 | 2026-10-15：全部用例独立临时 Git 项目/数据库，live/offline 均关闭 MCP；失败产物保留，报告可逐例定位，凭据不写产物、用户源码/状态不变。88 项回归及 smoke12/tasks14/engineering3/workers1 全通过；README/architecture/ADR-051 同步。 |
-| 0.4 | 进行中 | 普通真实DeepSeek Responses响应已验证（14输入/1输出Token，密钥未输出、用户状态未改）；只读调用和3fixture各两次待执行。默认12步/20,000已观测Token/5分钟，失败保留。 |
+| 0.4 | 已完成 | 2026-10-16：真实DeepSeek Responses非思考模式，普通/只读工具及3工程fixture各2次，共10次、7次完整完成；3次Token软限停驻且固定测试仍通过，6次修复独立验收均通过。累计131,359输入/7,630输出Token、48次请求、未知0；失败全保留，未改用户状态。README/architecture有摘要，不能外推成功率。 |
 | A1 | 待开始 | 模块化项目/会话/运行/模型/Skills/索引/评测/交付路由；统一错误，长任务持久身份、查询与停止。 |
 | A2 | 进行中 | Run/Continue持久幂等接收、重启重试、内容冲突及同源/DNS-rebinding防护已实现；43项HTTP/接收/API回归、Ruff/mypy52模块通过。api-contract/architecture同步；Skills/Delivery等新写控制面按后续步骤接入。 |
 | A3 | 已完成 | 生产Host全部实际目录/动态MCP/Worker接入严格契约，首次参数错误允许一次修正轮次，再次错误停机且不重放副作用；截断调用不派发。97项core及81项主链回归、Ruff/mypy55模块通过。README/architecture/api-contract/ADR-052同步；真实Docker单列未验证。 |
 | A4 | 已完成 | generation严格配置/能力声明/模型与会话API和三adapter映射；17项生成参数测试及59项相关回归通过，Ruff/mypy50模块通过。README/architecture/api-contract/ADR-050同步；页面在F迁移。 |
 | A5 | 已完成 | admission冻结、零/null/最大输出/继承、Continue及并发工作区隔离验证通过；最大输出日志字段保留数值；辅助调用不继承采样覆盖。见test_generation及ADR-050。 |
-| A6 | 进行中 | Host流式主链、有界脱敏预览SSE、三SDK适配和截断调用补丁均已集成；adapter94项与Host28项分别通过，待整体回归。Vue在F，见architecture/ADR-053。 |
-| A7 | 待开始 | 跨片密钥脱敏、未知能力显式提示，不静默删参数；取消/断流/重连无重复工具。 |
+| A6 | 已完成 | 2026-10-16：Host流式主链/有界脱敏预览SSE及3类官方SDK适配完成，完整终态前不派发工具；104项集成回归通过，真实DeepSeek普通/工具调用10次基线完成。预览不落库/不推进游标；页面在F。README/architecture/api-contract/ADR-053同步。 |
+| A7 | 已完成 | 2026-10-16：跨分片密钥lookahead脱敏、超长密钥禁预览，取消/断流/超时不重发或执行半成品；未知能力接收前明确拒绝采样参数。104项相关集成覆盖，详见test_stream_runtime/test_provider_streaming/test_generation；最终页面验收在F/R。 |
 | P1 | 待开始 | 项目聚合/执行副本关联，保留 Session 稳定身份，不运行中重新绑定。 |
 | P2 | 待开始 | 同 Session 串行，只读固定快照并发、写入各 worktree、直接源/采纳独占；快照检测漂移。 |
 | P3 | 待开始 | 默认活跃根 Run 4/模型请求 2/等待 20；持久队列可查可取消，重启不自动重放写任务。 |

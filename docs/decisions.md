@@ -528,7 +528,7 @@
 
 ## ADR-052：工具契约验证先于权限与执行
 
-**状态：Accepted（执行器基础）**。Host 目录接线和有限参数修正按 AGENTS.md 的 A3 继续验收，不将基础完成等同全阶段完成。
+**状态：Accepted**。A3已接入生产目录与一次参数修正边界；对应测试证据见AGENTS.md。
 
 **背景：** 手写目录 schema 与 Python handler 可逐渐分歧，依赖 handler 报错难以区分模型输入问题和真实执行失败；MCP 模型参数还不能有机会覆盖 transport 的绑定值。
 
@@ -538,7 +538,7 @@
 
 ## ADR-053：流式适配器只在终态交付完整工具调用
 
-**状态：Accepted（Provider 协议）**。Host 预览、SSE、脱敏和最终产品能力仍按 A6/A7 集成验收。
+**状态：Accepted**。Provider协议、Host预览/SSE和跨片脱敏已通过A6/A7集成验收；Vue页面按F阶段继续。
 
 **决策：** 保留 complete，三类官方 SDK adapter 增加 stream。文本增量只供临时展示，完整 ModelResponse 是工具调用及 usage 的唯一出口；Chat 工具按 index 收齐 JSON，Anthropic 检查内容块生命周期，Responses 使用官方终态对象。私有推理作为专属 Provider 状态回传，不混入可见文本或其他 Provider。最终对象之前的断流、缺终态或超限不能产生可执行响应。
 
