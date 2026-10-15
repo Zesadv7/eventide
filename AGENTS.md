@@ -106,7 +106,7 @@ uv run eventide eval evals/smoke.yaml
 | A7 | 已完成 | 2026-10-16：跨分片密钥lookahead脱敏、超长密钥禁预览，取消/断流/超时不重发或执行半成品；未知能力接收前明确拒绝采样参数。104项相关集成覆盖，详见test_stream_runtime/test_provider_streaming/test_generation；最终页面验收在F/R。 |
 | P1 | 已完成 | 2026-10-16：schema v4稳定Project/源Workspace/执行副本关联及只读聚合API，迁移保留旧身份与事件原文；接收/直接运行/Continue/Worker/交付固定项目归属。15项身份专项、82项主链相关回归、23项前端测试、build/typecheck、Ruff/Mypy73模块和smoke12/12通过；容器fixture启动期限修复后集成全量880通过/5个显式Docker跳过、覆盖93.78%。README/architecture/api-contract/ADR-060同步；项目身份已完成，并发进展见P2/P3。 |
 | P2 | 进行中 | 2026-10-16：显式Plan持久快照及精确Run/Session所有权已接Host/HTTP，同项目只读Run重叠执行、源修改不改变输入、停止互不影响、Continue/崩溃恢复和Skill/cwd固定、漂移/篡改/未知结果隔离已验证。19项快照专项、130项主链回归、全量885通过/1跳过覆盖93.51%、Ruff/Mypy75模块及smoke12/12通过；README/architecture/api-contract/ADR-063同步，OpenAPI/Vue已接入，4条真实API旅程含并发快照与独立停止通过。写Session稳定worktree及共享Git/采纳短期协调仍待下一切片，不标整体完成。 |
-| P3 | 待开始 | 默认活跃根 Run 4/模型请求 2/等待 20；持久队列可查可取消，重启不自动重放写任务。 |
+| P3 | 进行中 | 2026-10-16：独立scheduler底座按既有admitted/started/终态重建队列，4根/20等待容量ticket与2模型槽分开；19项新专项及预算回归共66项通过，模块100%覆盖、Ruff/Mypy77模块通过，architecture/ADR-065同步。本切片不改Host/HTTP，尚未主链接入，不代表生产已限流。持久队列查询/取消、queued主投影及重启停驻仍待集成。 |
 | P4 | 待开始 | 精确审批/取消/用量身份；共享 Git 元数据协调；父子等待无额度死锁。 |
 | P5 | 待开始 | 接入 U2 原子预留结算，多窗口不超额派发。 |
 | S1 | 已完成 | 2026-10-16：严格元数据、资源布局和依赖诊断已接入Host/API及Vue；损坏固定版本可诊断并禁用，执行仍拒绝。70项Skills定向回归、完整782通过/1跳过且覆盖93.36%、Ruff/Mypy70模块、smoke12/12、23项前端回归及2条真实API浏览器旅程通过；README/architecture/api-contract/ADR-057同步。 |
