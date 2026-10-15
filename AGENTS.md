@@ -102,7 +102,7 @@ uv run eventide eval evals/smoke.yaml
 | A3 | 已完成 | 生产Host全部实际目录/动态MCP/Worker接入严格契约，首次参数错误允许一次修正轮次，再次错误停机且不重放副作用；截断调用不派发。97项core及81项主链回归、Ruff/mypy55模块通过。README/architecture/api-contract/ADR-052同步；真实Docker单列未验证。 |
 | A4 | 已完成 | generation严格配置/能力声明/模型与会话API和三adapter映射；17项生成参数测试及59项相关回归通过，Ruff/mypy50模块通过。README/architecture/api-contract/ADR-050同步；页面在F迁移。 |
 | A5 | 已完成 | admission冻结、零/null/最大输出/继承、Continue及并发工作区隔离验证通过；最大输出日志字段保留数值；辅助调用不继承采样覆盖。见test_generation及ADR-050。 |
-| A6 | 进行中 | Host流式主链/有界脱敏预览SSE和三SDK适配均已集成；adapter84项、Host28项回归分别通过；待截断安全补丁及整体验收。Vue在F，见architecture/ADR-053。 |
+| A6 | 进行中 | Host流式主链、有界脱敏预览SSE、三SDK适配和截断调用补丁均已集成；adapter94项与Host28项分别通过，待整体回归。Vue在F，见architecture/ADR-053。 |
 | A7 | 待开始 | 跨片密钥脱敏、未知能力显式提示，不静默删参数；取消/断流/重连无重复工具。 |
 | P1 | 待开始 | 项目聚合/执行副本关联，保留 Session 稳定身份，不运行中重新绑定。 |
 | P2 | 待开始 | 同 Session 串行，只读固定快照并发、写入各 worktree、直接源/采纳独占；快照检测漂移。 |

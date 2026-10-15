@@ -194,6 +194,7 @@ def parse_response(response: Any) -> ModelResponse:
     """Normalize both complete and terminal streaming Responses objects."""
     calls: list[ToolCall] = []
     provider_items: list[dict[str, Any]] = []
+    incomplete_call = False
     output = field(response, "output", []) or []
     if len(output) > MAX_STREAM_ITEMS:
         raise ProviderError("Model response exceeded the output item limit")
@@ -202,16 +203,28 @@ def parse_response(response: Any) -> ModelResponse:
         if kind == "reasoning":
             provider_items.append(to_dict(item))
         elif kind == "function_call":
+            if field(item, "status") not in {None, "completed"}:
+                incomplete_call = True
             if not field(item, "call_id") or not field(item, "name"):
-                raise ProviderError("Model response returned an incomplete tool identity")
+                # Keep final usage reportable, but never manufacture an identity
+                # for an incomplete tool call or let the Host dispatch it.
+                incomplete_call = True
+                continue
+            arguments = parse_arguments(str(field(item, "arguments", "{}") or "{}"))
+            if "_invalid_json" in arguments:
+                incomplete_call = True
             calls.append(ToolCall(
                 str(field(item, "call_id", "")), str(field(item, "name", "")),
-                parse_arguments(str(field(item, "arguments", "{}") or "{}")),
+                arguments,
             ))
     usage = normalize_provider_usage("openai_responses", field(response, "usage"))
     status = str(field(response, "status", "completed") or "completed")
     if status == "incomplete":
         status = str(field(field(response, "incomplete_details"), "reason", "") or "incomplete")
+    elif incomplete_call:
+        status = "incomplete"
+    elif calls and status == "completed":
+        status = "tool_use"
     text = field(response, "output_text")
     if text is None:
         text = "".join(
@@ -221,6 +234,6 @@ def parse_response(response: Any) -> ModelResponse:
             if field(part, "type") == "output_text"
         )
     return ModelResponse(
-        str(text or ""), tuple(calls), "tool_use" if calls else status,
+        str(text or ""), tuple(calls), status,
         usage, tuple(provider_items),
     )

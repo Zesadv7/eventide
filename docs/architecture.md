@@ -97,6 +97,8 @@ SDK内部重试显式关闭，Host统一重试，因此每条attempt对应一次
 
 SDK stream 在终态返回前关闭；异常、取消和消费者 aclose 同样释放连接。SDK 请求创建成功后任何断流均为不可重试错误，不能因预览失败回退为 complete 重发。适配器限制保留内容/参数/推理合计 8 MiB、128 个输出项及 65,536 个事件；超限与缺终态均不返回完整响应。这些是响应组装边界，不是请求费用上限或操作系统隔离。适配器协议已通过内存 SSE 与官方 SDK 验证，Host 的临时预览、SSE 及尝试账本集成仍按 A6/A7 单独验收。
 
+Responses 终态为 incomplete 时，即使带有格式正确的 function_call，也保留 max_output_tokens 等原始截断原因，不能改写成 tool_use。外层 completed 但工具项仍为 in_progress/incomplete、缺少调用身份或 JSON 无效时，同样标记 incomplete；缺身份的项不制造伪调用，带身份的 JSON 错误保留审计占位。完整 ModelResponse 继续携带最终 usage，使 Host 可先记账，再终止并标记未派发的调用，不能因工具不完整而丢失已知消费。
+
 `RuntimeStore.usage_events`在一个递归查询中选取指定Run/Session及可选持久子Run的调用事实；`usage.build_usage_ledger`纯派生去重、已报告/估算/未知及完整性，HTTP用量接口不依赖列表分页。终态/worker汇总不再次收费，历史只做不完整响应回退。价格、共享预算、输入组成估算与Vue视图仍按U2/U3实施。
 
 `RuntimeHost.run(RunRequest)`、create_session、Provider 配置和 RunResult 原字段保持当前契约；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。

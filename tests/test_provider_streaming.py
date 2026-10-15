@@ -10,7 +10,11 @@ from eventide.models import ModelRequest
 from eventide.providers.anthropic import AnthropicProvider, _without_provider_state
 from eventide.providers.base import ProviderError
 from eventide.providers.openai_compatible import OpenAICompatibleProvider, convert_messages
-from eventide.providers.openai_responses import OpenAIResponsesProvider, convert_response_input
+from eventide.providers.openai_responses import (
+    OpenAIResponsesProvider,
+    convert_response_input,
+    parse_response,
+)
 from eventide.streaming import ModelStreamEvent
 
 
@@ -447,4 +451,53 @@ async def test_empty_event_flood_is_bounded(monkeypatch):
     instance, stream, _ = provider("chat", [chat_chunk() for _ in range(3)])
     with pytest.raises(ProviderError, match="event count limit"):
         _ = [event async for event in instance.stream(request())]
+    assert stream.closed
+
+
+@pytest.mark.parametrize("item_status", ["completed", "in_progress", "incomplete"])
+@pytest.mark.parametrize("response_status", ["completed", "incomplete"])
+async def test_responses_preserves_truncation_before_tool_dispatch(item_status, response_status):
+    terminal = response_final(
+        status=response_status,
+        incomplete_details=(
+            {"reason": "max_output_tokens"} if response_status == "incomplete" else None
+        ),
+        output=[{
+            "type": "function_call", "status": item_status, "call_id": "c1",
+            "name": "read_file", "arguments": '{"path":"a.py"}',
+        }],
+    )
+    terminal["type"] = f"response.{response_status}"
+    expected = (
+        "max_output_tokens" if response_status == "incomplete"
+        else "tool_use" if item_status == "completed" else "incomplete"
+    )
+    instance, stream, _ = provider("responses", [terminal])
+    events = [event async for event in instance.stream(request())]
+    result = events[-1].response
+    assert result.stop_reason == expected
+    assert result.tool_calls[0].arguments == {"path": "a.py"}
+    assert result.usage == {"input_tokens": 10, "output_tokens": 3}
+    assert parse_response(terminal["response"]) == result
+    assert stream.closed
+
+
+@pytest.mark.parametrize("call", [
+    {"call_id": "c1", "name": "read_file", "arguments": '{"path":'},
+    {"call_id": "c1", "name": "read_file", "arguments": '[]'},
+    {"call_id": "", "name": "read_file", "arguments": '{}'},
+    {"call_id": "c1", "name": "", "arguments": '{}'},
+])
+async def test_responses_malformed_terminal_calls_retain_usage_without_dispatch(call):
+    instance, stream, _ = provider("responses", [response_final(output=[{
+        "type": "function_call", "status": "completed", **call,
+    }])])
+    events = [event async for event in instance.stream(request())]
+    result = events[-1].response
+    assert result.stop_reason == "incomplete"
+    assert result.usage == {"input_tokens": 10, "output_tokens": 3}
+    if not call["call_id"] or not call["name"]:
+        assert not result.tool_calls
+    else:
+        assert "_invalid_json" in result.tool_calls[0].arguments
     assert stream.closed
