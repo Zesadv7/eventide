@@ -202,6 +202,7 @@ async def _run_owned_probe(
         category, message = probe_error(error) if isinstance(error, Exception) else (
             "cancelled", "连接检查已取消，未确认用量保留预留"
         )
+        category, message = clean(category), clean(message)
         terminal = "interrupted" if isinstance(error, (asyncio.CancelledError, BudgetExceeded)) \
             else "failed" if error else "completed"
         host.store.append_event(identity, f"run.{terminal}", {
@@ -214,7 +215,7 @@ async def _run_owned_probe(
     if isinstance(error, Exception):
         category, message = probe_error(error)
         # No raw SDK cause/context is exposed to HTTP or Python traceback output.
-        raise ProbeError(category, message) from None
+        raise ProbeError(clean(category), clean(message)) from None
     if error is not None:
         raise error
     assert response is not None

@@ -101,6 +101,7 @@ def create_router(context: ApiContext) -> APIRouter:
             )
         except Exception as exc:
             error_type, message = probe_error(exc)
+            secrets = (key or "", agent_runtime.settings.api_key or "")
             return {
                 **accounting(),
                 "success": False,
@@ -108,9 +109,9 @@ def create_router(context: ApiContext) -> APIRouter:
                 "model": safe_model,
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
                 "checked_at": checked_at,
-                "message": message,
-                "error_type": error_type,
-                "detail": normalize(redact(str(exc)), (key or "",)),
+                "message": normalize(redact(message), secrets),
+                "error_type": normalize(redact(error_type), secrets),
+                "detail": normalize(redact(str(exc)), secrets),
             }
         return {
             **accounting(),

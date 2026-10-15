@@ -371,3 +371,25 @@ async def test_host_close_waits_for_probe_and_preserves_unknown(isolated_workspa
         assert restored.budget_status()["reservations"][0]["status"] == "unsettled"
     finally:
         await restored.close()
+
+
+@pytest.mark.parametrize("source", ["provider", "factory"])
+async def test_custom_probe_error_is_redacted_everywhere(isolated_workspace, monkeypatch, source):
+    import traceback
+
+    error = ProbeError("candidate-secret-kind", "candidate-secret host-secret")
+    provider = ProbeProvider(error=error)
+    host = make_host(isolated_workspace, monkeypatch, provider, api_key="host-secret")
+    if source == "factory":
+        def fail_factory(_settings):
+            raise error
+        monkeypatch.setattr("eventide.host.build_provider", fail_factory)
+    try:
+        with pytest.raises(ProbeError) as caught:
+            await call(host, run_id="custom-error")
+        evidence = json.dumps(host.store.run_events("custom-error"))
+        evidence += "".join(traceback.format_exception(caught.value)) + caught.value.category
+        assert "candidate-secret" not in evidence
+        assert "host-secret" not in evidence
+    finally:
+        await host.close()
