@@ -1,7 +1,8 @@
 """Explicit deployment check using disposable Docker containers and named volumes.
 
 Run after building the image: python tests/container_smoke.py --image eventide:validation
-No user state, project directory, model credentials, or provider requests are used.
+No user state, project directory, model credentials, or network provider requests
+are used. The frozen development suite runs through the real offline HTTP path.
 """
 
 from __future__ import annotations
@@ -160,6 +161,55 @@ def verify(image: str) -> dict[str, object]:
         if not ipaddress.ip_address(peer).is_loopback:
             reject("/api/workspaces", {"path": "/workspaces/demo"})
         reject("/api/workspaces", {"path": "/workspaces/demo"}, Origin="https://invalid.example")
+        source_listing = docker("exec", name, "python", "-c", (
+            "from pathlib import Path; "
+            "print(sorted(p.as_posix() for p in Path('.').rglob('*')))"
+        ))
+        suites = json.loads(request("/api/evaluations/suites"))
+        suite = next(item for item in suites if item["id"] == "engineering-v1")
+        evaluation_body = {
+            "suite_id": suite["id"],
+            "suite_sha256": suite["suite_sha256"],
+            "split": "development",
+            "mode": "offline",
+        }
+        evaluation_path = f"/api/projects/{workspace['project_id']}/evaluations"
+        evaluation_headers = {**origin, "Idempotency-Key": name + "-evaluation"}
+        accepted = json.loads(request(
+            evaluation_path, evaluation_body, "POST", **evaluation_headers,
+        ))
+        replayed = json.loads(request(
+            evaluation_path, evaluation_body, "POST", **evaluation_headers,
+        ))
+        assert accepted == replayed, "An identical retry created another evaluation"
+        assert accepted["evaluation_id"] == accepted["run_id"]
+        evaluation_id = accepted["evaluation_id"]
+        detail_path = f"/api/evaluations/{evaluation_id}"
+        deadline = time.monotonic() + 180
+        while True:
+            evaluation = json.loads(request(detail_path))
+            if evaluation["status"] not in {"queued", "running"}:
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError("Container offline evaluation did not finish")
+            time.sleep(0.3)
+        assert evaluation["status"] == "completed", evaluation
+        assert evaluation["measurement_kind"] == "scripted_mechanism_validation"
+        assert evaluation["billing_applicable"] is False
+        assert evaluation["total"] == evaluation["attempted"] == evaluation["passed"] == 12
+        assert evaluation["failed"] == evaluation["remaining"] == 0
+        assert evaluation["report_available"] is True
+        report_path = f"{detail_path}/report"
+        report = request(report_path)
+        report_data = json.loads(report)
+        assert report_data["total"] == report_data["attempted"] == report_data["passed"] == 12
+        assert len(report_data["results"]) == 12
+        assert b"unused-verification-value" not in report
+        assert docker("exec", name, "cat", "writable-check") == "retained"
+        assert docker("exec", name, "python", "-c", (
+            "from pathlib import Path; "
+            "print(sorted(p.as_posix() for p in Path('.').rglob('*')))"
+        )) == source_listing, "Evaluation wrote into the selected project"
         docker("rm", "--force", name)
         boot(peer)
         assert json.loads(request("/api/sessions/" + session))["session_id"] == session
@@ -168,6 +218,10 @@ def verify(image: str) -> dict[str, object]:
         assert provider["api_key_configured"]
         assert docker("exec", name, "cat", "writable-check") == "retained"
         assert json.loads(request("/api/queue")) == queue
+        recovered = json.loads(request(detail_path))
+        assert recovered["status"] == "completed"
+        assert recovered["passed"] == 12
+        assert request(report_path) == report, "Persisted evaluation report changed on restart"
         return {
             "image": image,
             "peer": peer,
@@ -176,9 +230,17 @@ def verify(image: str) -> dict[str, object]:
             "node_required": False,
             "management_origin_checks": "passed",
             "restart_persistence": "passed",
-            "model_requests": 0,
+            "external_model_requests": 0,
             "queue_limits": queue["limits"],
             "queue_after_restart": "idle",
+            "offline_evaluation": {
+                "cases": 12,
+                "passed": 12,
+                "idempotent_admission": "passed",
+                "report_after_restart": "unchanged",
+                "selected_project": "unchanged",
+                "measurement_kind": "scripted_mechanism_validation",
+            },
         }
     finally:
         docker("rm", "--force", name, check=False)

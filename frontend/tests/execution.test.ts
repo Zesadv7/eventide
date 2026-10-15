@@ -23,7 +23,13 @@ async function setup(bound = true) {
   ];
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: "/", component: ChatView }],
+    routes: [
+      { path: "/", component: ChatView },
+      {
+        path: "/evaluations",
+        component: { template: "<div>evaluations</div>" },
+      },
+    ],
   });
   await router.push("/");
   await router.isReady();
@@ -116,4 +122,24 @@ describe("session execution copy controls", () => {
     expect(wrapper.find('option[value="snapshot"]').exists()).toBe(false);
     wrapper.unmount();
   });
+  it.each(["running", "interrupted"])(
+    "routes a visible %s evaluation record to its page without Agent controls",
+    async (status) => {
+      const { store, wrapper } = await setup(false);
+      store.sessions[session.workspace_id]![0] = {
+        ...session,
+        status,
+        execution: { kind: "evaluation", evaluation_id: "evaluation-run" },
+        latest_run: { run_id: "evaluation-run", status },
+      };
+      await flushPromises();
+      expect(wrapper.find("form.composer").exists()).toBe(false);
+      expect(wrapper.text()).not.toContain("检查并继续");
+      expect(wrapper.get('a[href*="evaluation="]').attributes("href")).toBe(
+        "/evaluations?evaluation=evaluation-run",
+      );
+      expect(store.workspaceBusy).toBe(false);
+      wrapper.unmount();
+    },
+  );
 });

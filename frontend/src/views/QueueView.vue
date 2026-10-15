@@ -58,6 +58,13 @@ async function open(entry: QueueEntry) {
   try {
     if (store.selectedWorkspace !== entry.workspace_id)
       await store.selectWorkspace(entry.workspace_id);
+    if (entry.execution.kind === "evaluation") {
+      await router.push({
+        path: "/evaluations",
+        query: { evaluation: entry.execution.evaluation_id || entry.run_id },
+      });
+      return;
+    }
     await store.selectSession(entry.session_id);
     await router.push(`/chat/${encodeURIComponent(entry.session_id)}`);
   } catch (e) {
@@ -73,6 +80,7 @@ function project(entry: QueueEntry) {
   );
 }
 function target(entry: QueueEntry) {
+  if (entry.execution.kind === "evaluation") return "离线评测临时项目";
   return entry.execution.kind === "snapshot"
     ? "固定只读快照"
     : entry.execution.kind === "worktree"
@@ -169,7 +177,12 @@ function target(entry: QueueEntry) {
                 </td>
                 <td>
                   <div class="button-row">
-                    <button @click="open(entry)">打开对话</button
+                    <button @click="open(entry)">
+                      {{
+                        entry.execution.kind === "evaluation"
+                          ? "打开评测"
+                          : "打开对话"
+                      }}</button
                     ><button
                       :disabled="
                         stopping[entry.run_id] ||
@@ -191,7 +204,7 @@ function target(entry: QueueEntry) {
         </div>
       </section>
       <p class="muted">
-        正在直接使用源目录时，新副本需要等源目录空闲后再创建。同一对话保持串行；停止会等待工具收尾。服务重启后未完成任务停驻，需进入原对话检查后继续。
+        正在直接使用源目录时，新副本需要等源目录空闲后再创建。同一对话保持串行；停止会等待工具收尾。服务重启后未完成对话任务停驻，需进入原对话检查后继续。评测不会自动重跑，需在评测页面检查已保留的结果。
       </p>
     </template>
     <p v-else class="empty-state">正在读取任务队列…</p>

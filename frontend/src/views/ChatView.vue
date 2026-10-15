@@ -24,6 +24,11 @@ const session = computed(() => store.currentSession),
 const boundWorktree = computed(
   () => session.value?.execution?.kind === "worktree",
 );
+const evaluationRun = computed(() =>
+  session.value?.execution?.kind === "evaluation"
+    ? session.value.execution.evaluation_id || run.value?.run_id
+    : undefined,
+);
 const busyOther = computed(
     () => store.workspaceBusy && !isActive.value && !boundWorktree.value,
   ),
@@ -66,7 +71,9 @@ watch(
 watch(
   [() => store.selectedSession, () => session.value?.execution?.kind],
   () => {
-    executionTarget.value = session.value?.execution?.kind || "source";
+    const kind = session.value?.execution?.kind;
+    executionTarget.value =
+      kind === "worktree" || kind === "snapshot" ? kind : "source";
     if (executionTarget.value === "snapshot") mode.value = "plan";
   },
   { immediate: true },
@@ -99,7 +106,7 @@ function content(message: Message) {
     .join("\n");
 }
 async function submit() {
-  if (!draft.value.trim()) return;
+  if (!draft.value.trim() || evaluationRun.value) return;
   try {
     await store.submit({
       prompt: draft.value,
@@ -218,6 +225,14 @@ async function abandon() {
         新建对话
       </button>
     </div>
+    <section v-else-if="evaluationRun" class="panel">
+      <h2>评测记录</h2>
+      <p>在评测页面查看逐题结果、停止任务或发起新的批次。</p>
+      <RouterLink
+        :to="{ path: '/evaluations', query: { evaluation: evaluationRun } }"
+        >打开评测</RouterLink
+      >
+    </section>
     <template v-else
       ><p v-if="run?.status === 'queued'" class="queue-notice">
         任务已持久接收，正在等待执行额度。<RouterLink to="/queue"

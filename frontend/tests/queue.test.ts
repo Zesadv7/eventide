@@ -42,6 +42,10 @@ async function render() {
     routes: [
       { path: "/", component: QueueView },
       { path: "/chat/:id", component: { template: "<div>conversation</div>" } },
+      {
+        path: "/evaluations",
+        component: { template: "<div>evaluations</div>" },
+      },
     ],
   });
   await router.push("/");
@@ -109,5 +113,41 @@ describe("global persistent task queue", () => {
     wrapper.unmount();
     await vi.advanceTimersByTimeAsync(10000);
     expect(status).toHaveBeenCalledTimes(2);
+  });
+  it("opens an evaluation without selecting its internal control Session", async () => {
+    vi.spyOn(queueApi, "status").mockResolvedValue({
+      ...snapshot,
+      queued: [
+        {
+          ...snapshot.queued[0]!,
+          execution: {
+            kind: "evaluation",
+            workspace_id: "source-workspace",
+            evaluation_id: "evaluation-run",
+          },
+        },
+      ],
+    });
+    const store = useWorkbench();
+    store.selectedWorkspace = "another-project";
+    const workspace = vi
+      .spyOn(store, "selectWorkspace")
+      .mockResolvedValue(undefined);
+    const session = vi
+      .spyOn(store, "selectSession")
+      .mockResolvedValue(undefined);
+    const { wrapper, router } = await render();
+    await flushPromises();
+    expect(wrapper.text()).toContain("离线评测临时项目");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "打开评测")!
+      .trigger("click");
+    await flushPromises();
+    expect(workspace).toHaveBeenCalledWith("source-workspace");
+    expect(session).not.toHaveBeenCalled();
+    expect(router.currentRoute.value.path).toBe("/evaluations");
+    expect(router.currentRoute.value.query.evaluation).toBe("evaluation-run");
+    wrapper.unmount();
   });
 });

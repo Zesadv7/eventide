@@ -1,80 +1,13 @@
 import { ApiError, request } from "./client";
 import { durableMutation } from "./mutations";
+import type { components, paths } from "./schema";
 
-export type EvaluationSplit = "development" | "holdout" | "all";
-export interface EvaluationInput {
-  suite_id: "engineering-v1";
-  suite_sha256: string;
-  split: EvaluationSplit;
-  mode: "offline";
-}
-export interface EvaluationSuite {
-  id: "engineering-v1";
-  benchmark_id: string;
-  version: number;
-  description: string;
-  manifest_sha256: string;
-  suite_sha256: string;
-  inputs_sha256: string;
-  split: null;
-  total: number;
-  splits: { development: number; holdout: number };
-  supported_modes: ["offline"];
-  measurement_kind: "scripted_mechanism_validation";
-  billing_applicable: false;
-}
-export interface EvaluationReceipt {
-  evaluation_id: string;
-  run_id: string;
-  session_id: string;
-  project_id: string;
-  status: "accepted";
-  status_url: string;
-  events_url: string;
-}
-export interface EvaluationCase {
-  id: string;
-  category: string;
-  split: string;
-  status:
-    | "pending"
-    | "running"
-    | "completed"
-    | "failed"
-    | "timed_out"
-    | "unknown"
-    | "interrupted";
-  passed: boolean | null;
-  reasons: string[];
-  duration_ms: number | null;
-}
-export interface EvaluationDetail {
-  evaluation_id: string;
-  run_id: string;
-  session_id: string;
-  project_id: string;
-  suite_id: string;
-  suite_version: number;
-  suite_sha256: string;
-  split: EvaluationSplit;
-  mode: "offline";
-  measurement_kind: "scripted_mechanism_validation";
-  billing_applicable: false;
-  status: "queued" | "running" | "completed" | "failed" | "interrupted";
-  dispatch_state: "queued" | "starting" | "running" | "finishing" | null;
-  queue_position: number | null;
-  total: number;
-  attempted: number;
-  passed: number;
-  failed: number;
-  remaining: number;
-  current_case: string | null;
-  cases: EvaluationCase[];
-  report_available: boolean;
-  report_url: string;
-  events_url: string;
-  error: string | null;
-}
+export type EvaluationInput = components["schemas"]["EvaluationBody"];
+export type EvaluationSplit = EvaluationInput["split"];
+export type EvaluationSuite = components["schemas"]["EvaluationSuite"];
+export type EvaluationReceipt = components["schemas"]["EvaluationReceipt"];
+export type EvaluationCase = components["schemas"]["EvaluationCase"];
+export type EvaluationDetail = components["schemas"]["EvaluationDetail"];
 export interface EvaluationReport {
   schema_version: number;
   status: string;
@@ -127,8 +60,9 @@ function changed() {
   for (const listener of listeners) listener();
 }
 
+const suitesPath: keyof paths = "/api/evaluations/suites";
 export const evaluationsApi = {
-  suites: () => request<EvaluationSuite[]>("/api/evaluations/suites"),
+  suites: () => request<EvaluationSuite[]>(suitesPath),
   list: (project: string, before?: string) =>
     request<EvaluationDetail[]>(
       `/api/projects/${encodeURIComponent(project)}/evaluations?limit=20${before ? `&before=${encodeURIComponent(before)}` : ""}`,
