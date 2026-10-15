@@ -15,6 +15,8 @@ from eventide.workspace import digest
 if TYPE_CHECKING:
     from eventide.host import RuntimeHost
 
+MUTATION_OUTCOME_HEADER = "X-Eventide-Mutation-Outcome"
+
 
 def check_mutation_origin(request: Request, *, require_origin: bool = False) -> None:
     """Non-browser local clients may omit Origin; browser mutations must be same-origin."""
@@ -122,7 +124,11 @@ def begin_mutation(
         if terminal["type"] == "http.mutation_completed":
             return MutationReceipt(identity, owner, terminal["payload"]["result"])
         if terminal["type"] == "http.mutation_failed":
-            raise HTTPException(terminal["payload"]["status_code"], terminal["payload"]["message"])
+            rejected = terminal["payload"].get("outcome") == "rejected"
+            raise HTTPException(
+                terminal["payload"]["status_code"], terminal["payload"]["message"],
+                headers={MUTATION_OUTCOME_HEADER: "rejected"} if rejected else None,
+            )
         raise HTTPException(
             409, "Mutation is running or its outcome is unknown; inspect current state"
         )
@@ -161,7 +167,14 @@ def fail_mutation(
     receipt: MutationReceipt,
     message: str,
     status_code: int = 422,
+    *,
+    rejected: bool = False,
 ) -> None:
+    """Record failure; opt in to rejection only when the operation had no effect.
+
+    A failure alone does not prove rollback. Existing callers and ambiguous
+    filesystem/network failures must retain their unknown-outcome semantics.
+    """
     runtime.store.append_fact(
         receipt.owner,
         "http.mutation_failed",
@@ -169,6 +182,7 @@ def fail_mutation(
             "identity": receipt.identity,
             "message": message,
             "status_code": status_code,
+            **({"outcome": "rejected"} if rejected else {}),
         },
         author="user",
     )

@@ -500,4 +500,6 @@ RuntimeHost 的主Agent、摘要和只读worker请求现已共用预留/结算�
 
 未知预留可通过`POST /api/budgets/attempts/{attempt_id}/resolve`显式处理：`keep_unknown`仅记录已核对及理由并保留额度；`record_known`需要用户补记总Token及理由，不能小于已经报告的部分用量。正在派发中的请求禁止人工处理，成功补记也不会伪造Provider的输入/输出或重写旧费用。所有控制写请求限制本机同源，要求幂等键；相同键不同内容返回409，崩溃后结果未知的操作不会自动重做。详细结构见`docs/api-contract.md`。
 
+预算控制写入若确定尚未生效，错误响应携带`X-Eventide-Mutation-Outcome: rejected`，同键重放也保留标记；客户端可以在条件满足后换新键重试。例如正在生成时不能核对未知用量，生成结束后应使用新键。没有此标记的失败或409仍需保留原键并检查当前状态，不能据此推断操作没有发生。
+
 当前没有精确tokenizer，输入采用`serialized_utf8_bytes_v1`序列化UTF-8字节数估算、输出预留完整请求上限；图片等内联数据可能明显高估，不能视为实际Token或计费保证。估算只写数值和方法，不写提示正文或附件。预算Vue控制面及P调度仍待接入；模型连接探测与API embedding尚未纳入此Run派发控制，embedding按C阶段补齐。旧调用不补造预留/费用。

@@ -18,7 +18,13 @@ from eventide.budget_views import (
 )
 from eventide.budgets import BUDGET_FACTS, BudgetScope, ScopeKind
 from eventide.http_api.context import ApiContext, require_local_request
-from eventide.http_control import begin_mutation, fail_mutation, finish_mutation
+from eventide.http_control import (
+    MUTATION_OUTCOME_HEADER,
+    MutationReceipt,
+    begin_mutation,
+    fail_mutation,
+    finish_mutation,
+)
 
 
 class BudgetBody(BaseModel):
@@ -79,6 +85,11 @@ def create_router(context: ApiContext) -> APIRouter:
     router = APIRouter(tags=["budgets"])
     host = context.runtime
 
+    def rejected(receipt: MutationReceipt, message: str, code: int) -> HTTPException:
+        # Call only for a precondition refusal or a rolled-back ledger transaction.
+        fail_mutation(host, receipt, message, code, rejected=True)
+        return HTTPException(code, message, headers={MUTATION_OUTCOME_HEADER: "rejected"})
+
     def check_owner(kind: ViewKind, identity: str) -> None:
         try:
             validate_owner(host, kind, identity)
@@ -133,13 +144,11 @@ def create_router(context: ApiContext) -> APIRouter:
             body.expected_configuration_hash != current["configuration_hash"]
         ):
             message = "Budget configuration changed; refresh before saving"
-            fail_mutation(host, receipt, message, 409)
-            raise HTTPException(409, message)
+            raise rejected(receipt, message, 409)
         try:
             host.configure_budget(scope, token_limit=body.token_limit, request_id=receipt.identity)
         except ValueError as exc:
-            fail_mutation(host, receipt, str(exc), 409)
-            raise HTTPException(409, str(exc)) from exc
+            raise rejected(receipt, str(exc), 409) from exc
         return finish_mutation(host, receipt, budget_view(host, scope))
 
     @router.get("/api/prices")
@@ -163,8 +172,7 @@ def create_router(context: ApiContext) -> APIRouter:
         try:
             result = host.register_price(body.price())
         except ValueError as exc:
-            fail_mutation(host, receipt, str(exc), 409)
-            raise HTTPException(409, str(exc)) from exc
+            raise rejected(receipt, str(exc), 409) from exc
         return finish_mutation(host, receipt, result)
 
     @router.get("/api/costs")
@@ -225,8 +233,7 @@ def create_router(context: ApiContext) -> APIRouter:
         except (HTTPException, ValueError) as exc:
             code = exc.status_code if isinstance(exc, HTTPException) else 409
             message = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
-            fail_mutation(host, receipt, message, code)
-            raise HTTPException(code, message) from exc
+            raise rejected(receipt, message, code) from exc
         return finish_mutation(host, receipt, {
             "action": body.action, "attempt": attempt_view(attempt_id),
         })

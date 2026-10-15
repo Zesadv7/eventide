@@ -12,6 +12,7 @@ from eventide.budget_prices import PriceVersion
 from eventide.budget_views import control_owner
 from eventide.budgets import BudgetContext
 from eventide.host import RuntimeHost
+from eventide.http_control import MutationReceipt, fail_mutation
 from eventide.providers import ScriptedProvider
 from eventide.workspace import digest
 from tests.test_delivery_runtime import delivery_host
@@ -19,6 +20,7 @@ from tests.test_projects import linked_repo
 from tests.test_runtime import settings_for
 
 NOW = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
+OUTCOME_HEADER = "X-Eventide-Mutation-Outcome"
 
 
 def headers(key="change", **other):
@@ -128,9 +130,12 @@ def test_budget_config_zero_disable_hash_and_durable_replay(runtime):
         body = {"token_limit": 0, "expected_configuration_hash": original_hash}
         first = client.put(scope, json=body, headers=headers()).json()
         assert first["budgets"][0]["blocked"] is True
-        assert client.put(scope, json={"token_limit": 100}, headers=headers()).status_code == 409
+        conflict = client.put(scope, json={"token_limit": 100}, headers=headers())
+        assert conflict.status_code == 409
+        assert OUTCOME_HEADER not in conflict.headers
         stale = client.put(scope, json=body, headers=headers("stale"))
         assert stale.status_code == 409
+        assert stale.headers[OUTCOME_HEADER] == "rejected"
         assert "changed" in stale.json()["message"]
         disabled = client.put(scope, json={"token_limit": None}, headers=headers("disable"))
         assert disabled.status_code == 200
@@ -252,6 +257,7 @@ def test_ambiguous_config_mutation_never_reexecutes(runtime):
         )
         assert result.status_code == 409
         assert "unknown" in result.json()["message"]
+        assert OUTCOME_HEADER not in result.headers
         assert runtime.store.facts_by_type(("budget.configured",)) == []
 
 
@@ -560,9 +566,79 @@ def test_active_attempt_reconciliation_requires_terminal_evidence(runtime):
     with TestClient(create_app(runtime)) as client:
         url = "/api/budgets/attempts/attempt/resolve"
         body = {"action": "record_known", "actual_tokens": 0, "reason": "Checked provider"}
-        assert client.post(url, json=body, headers=headers()).status_code == 409
+        denied = client.post(url, json=body, headers=headers())
+        assert denied.status_code == 409
+        assert denied.headers[OUTCOME_HEADER] == "rejected"
+        failure = runtime.store.facts_by_type(("http.mutation_failed",))[0]
+        assert failure["payload"]["outcome"] == "rejected"
         runtime.store.append_event("run", "run.interrupted", {"reason": "cancelled"})
+        replay = client.post(url, json=body, headers=headers())
+        assert replay.status_code == 409
+        assert replay.headers[OUTCOME_HEADER] == "rejected"
+        assert runtime.store.facts_by_type(("budget.resolved",)) == []
         assert client.post(url, json=body, headers=headers("after-stop")).status_code == 200
+
+
+def test_rejected_failure_header_survives_restart(isolated_workspace):
+    settings = settings_for(isolated_workspace)
+    host = RuntimeHost(settings, ScriptedProvider([]))
+    record(host, finish=False)
+    url = "/api/budgets/attempts/attempt/resolve"
+    body = {"action": "keep_unknown", "reason": "Checked provider"}
+    with TestClient(create_app(host)) as client:
+        assert client.post(url, json=body, headers=headers()).headers[OUTCOME_HEADER] == "rejected"
+    restored = RuntimeHost(settings, ScriptedProvider([]))
+    with TestClient(create_app(restored)) as client:
+        replay = client.post(url, json=body, headers=headers())
+        assert replay.status_code == 409
+        assert replay.headers[OUTCOME_HEADER] == "rejected"
+        assert client.post(url, json=body, headers=headers("after-restart")).status_code == 200
+
+
+def test_failure_is_not_classified_as_rejected_without_opt_in(runtime):
+    owner = control_owner(runtime)
+    identity = "mutation_" + digest([owner, "budget.configure", "change"])
+    payload = {
+        "kind": "day",
+        "identity": "2026-10-16",
+        "token_limit": 1,
+        "expected_configuration_hash": None,
+    }
+    runtime.store.append_fact(
+        owner,
+        "http.mutation_started",
+        {
+            "identity": identity,
+            "operation": "budget.configure",
+            "fingerprint": digest(payload),
+        },
+    )
+    fail_mutation(runtime, MutationReceipt(identity, owner), "Previous operation failed", 409)
+    assert "outcome" not in runtime.store.facts_by_type(("http.mutation_failed",))[0]["payload"]
+    with TestClient(create_app(runtime)) as client:
+        response = client.put(
+            "/api/budgets/day/2026-10-16", json={"token_limit": 1}, headers=headers()
+        )
+        assert response.status_code == 409
+        assert OUTCOME_HEADER not in response.headers
+
+
+def test_unexpected_budget_write_failure_retains_unknown_outcome(runtime, monkeypatch):
+    def unknown_failure(*_args, **_kwargs):
+        raise OSError("simulated persistence failure")
+
+    monkeypatch.setattr(runtime, "configure_budget", unknown_failure)
+    with TestClient(create_app(runtime), raise_server_exceptions=False) as client:
+        first = client.put(
+            "/api/budgets/day/2026-10-16", json={"token_limit": 1}, headers=headers()
+        )
+        assert first.status_code == 500
+        assert OUTCOME_HEADER not in first.headers
+        repeated = client.put(
+            "/api/budgets/day/2026-10-16", json={"token_limit": 1}, headers=headers()
+        )
+        assert repeated.status_code == 409
+        assert OUTCOME_HEADER not in repeated.headers
 
 
 def test_partial_reported_lower_bound_cannot_be_erased(runtime):
