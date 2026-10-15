@@ -360,7 +360,7 @@ uv run eventide rag eval evals/retrieval.yaml --json
 
 计划项可带 `depends_on`，引用同一清单的稳定任务 id（例如 `"depends_on": ["t1"]`）；初次提交可按清单顺序引用当次分配的 id。引用必须存在且不得重复、自引用或成环；某项进入 `in_progress` / `completed` 时，依赖项必须在该次快照中为 `completed`。重复更新省略该字段会保留原依赖，显式 `[]` 才清空。校验失败不写计划事件，历史无该字段时按无依赖投影。
 
-依赖约束只校验计划快照，不会自动启动任务或拦截无关的文件/Shell 调用；完成仍是模型声明。Subagent 与持久后台调度尚未实现。
+依赖约束只校验计划快照，不会自动启动任务或拦截无关的文件/Shell 调用；完成仍是模型声明。已提供显式开启的有界只读 Researcher/Reviewer，见上文；依赖计划自动调度和持久后台队列尚未实现。
 
 ## 使用 Skills
 
