@@ -227,3 +227,13 @@ CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optiona
 Host对具有stream方法的主调用消费text_delta/response_completed，完整响应之前不派发工具；辅助摘要保持complete。预览每Run最多16,000字符、最多64个活跃条目，完成/失败/取消删除，不写Event Log。已知凭据保留足够跨片lookahead后脱敏，过长密钥禁预览而非泄漏。完整内容与usage仍由持久响应/attempt事实承担。SSE显式include_preview才发送无id临时帧；持久游标不被改变。流式失败/超时不自动重新请求或降级complete，未知消费保留；SDK适配和Vue显示仍在后续步骤。
 
 Host的全部实际目录已接入严格工具契约，包括MCP、Skills、RAG及只读Worker过滤后的目录。每Run仅允许一次参数错误后的修正轮次，再次出现参数错误即在保存全部已知结果后失败；不重新执行先前副作用。截断响应中的完整JSON也不执行，未派发调用写tool.abandoned补齐消息配对。严格schema使基础目录实测从约2,738增加至3,283字符；上下文测试固定成本相应更新，保留独立目录上限检测，不能把新增校验成本当作Token优化收益。
+
+## Skills 包、作用域和资源快照（S 基础）
+
+`skill_packages.py` 仅处理有界包字节，不拥有安装启停状态。目录和 ZIP 先预检再形成 `SkillPackagePreview`；内容清单按路径、大小和 SHA-256 派生版本。`SkillPackageService` 把包物化到状态根的 `skill-packages/<name>/<content-hash>/`，临时目录完整写入后原子重命名。版本没有可变启用 JSON；可选导入回调只向调用方报告内容事实，Host 必须把启用、回退和选中写入唯一 Event Log。回调或事件提交失败可以留下未启用的内容产物，不能从“磁盘有目录”推断授权。
+
+每次 `inspect_version` 和服务级资源读取重新计算清单与完整版本摘要，文件被替换、删除或篡改时拒绝读取。只读权限位减少误修改，不被描述为 OS 不可变保证。资源包不允许任意目录、符号链接、特殊文件、遍历路径或 ZIP 重复项，声明体积与实际读取均受限；预检不执行脚本或联网装依赖。
+
+`SkillCatalog.discover` 默认扫描项目 `skills/`，可显式接收已经检查的用户包、启用身份及用户选择。不存在隐式同名覆盖；同作用域冲突的项目包均不可用，不同作用域要求精确身份。普通唯一名称仍保留 `load_skill` 兼容。目录最多 64 个入口、10 MB 冻结资源；单包超限和元数据错误通过 `diagnostics` 返回，既有项目文件不会自动重写。
+
+快照对象持有不可变 `bytes`，`snapshot()` 只返回资源清单与摘要，`resource_bytes`／`read_resource` 从同一组冻结字节读取。将这些字节持久化并绑定 admission、恢复时取回固定资源、注册读取工具和受控脚本执行器属于 Host 集成责任，本模块不替代 ToolExecutor／PolicyEngine。`allowed-tools` 元数据只是声明，不能授予权限、模型配置或预算。

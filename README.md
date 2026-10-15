@@ -410,3 +410,11 @@ description: Review code for correctness, security and maintainability.
 ## License
 
 本项目采用 MIT License，详见 [LICENSE](LICENSE)。
+
+## Skills 包基础（S 阶段进行中）
+
+`SkillPackageService` 已提供本地目录／ZIP 的只读预检、内容寻址导入、版本完整性检查和资源分页。包以 `SKILL.md` 为入口，资源放在 `references/`、`scripts/`、`assets/`；名称使用 1–64 个小写英文字母、数字和单连字符，描述不超过 1,024 字符。缺失元数据、重复 YAML 键、未知字段、损坏文本和名称冲突会产生诊断，不再静默替换为目录名。可选 `metadata.requires` 用逗号分隔可执行程序名；只做存在性检查，缺失是警告，不自动安装或运行。
+
+单包默认最多 256 文件、每文件 1 MB、合计 5 MB，ZIP 压缩体最多 8 MB，入口最多 64 KB。拒绝路径穿越、链接、特殊文件、大小写碰撞和非标准资源位置；所有预检通过后才写不可变内容版本。导入不会启用包，更不会执行安装脚本。`SkillCatalog` 接收明确的用户级启用版本，与项目包发生同名时必须使用 `project:name`／`user:name`；选择一个包不能把未启用包变成已启用。
+
+运行目录快照已经冻结正文及资源字节，加载后的源文件变更不会改变该对象。文本引用可分页读取，脚本原始字节可供执行器使用；**本提交不直接执行脚本**。用户级启停、控制面事件、Web 页面、运行恢复及受控脚本入口还需 Host 集成验收，不代表这些用户能力已经完成。首批审查、故障定位、测试修复包位于 `eventide/bundled_skills/`，仅供显式导入，不自动为项目启用。

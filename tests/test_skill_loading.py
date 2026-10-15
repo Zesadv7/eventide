@@ -42,8 +42,8 @@ def test_catalog_is_optional_and_bounds_prompt_metadata(isolated_workspace):
     assert not SkillCatalog.discover(isolated_workspace)
     add_skill(isolated_workspace, description="word " * DESCRIPTION_LIMIT)
     catalog = SkillCatalog.discover(isolated_workspace)
-    assert len(catalog.skills[0].description) == DESCRIPTION_LIMIT
-    assert catalog.skills[0].description.endswith("…")
+    assert not catalog.skills
+    assert catalog.diagnostics[0].code == "invalid_package"
     assert catalog.load("missing").startswith("Error: Skill not found")
 
 

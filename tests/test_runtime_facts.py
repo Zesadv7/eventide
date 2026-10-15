@@ -53,8 +53,8 @@ async def test_capabilities_skip_broken_skills_and_survive_bad_mcp_json(
         )
         (isolated_workspace / "mcp.json").write_text("{not json", encoding="utf-8")
         caps = runtime.workspace_capabilities(workspace_id)
-        # Invalid frontmatter degrades to the directory name instead of failing.
-        assert [skill["name"] for skill in caps["skills"]] == ["wobbly"]
+        # Invalid metadata is unavailable instead of silently becoming an executable skill.
+        assert caps["skills"] == []
         assert caps["mcp"] == []
         assert len(caps["notes"]) == 1
         assert "解析失败" in caps["notes"][0]
