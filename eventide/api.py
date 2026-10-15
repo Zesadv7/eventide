@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 from eventide import attachments
 from eventide.config import Settings, normalize_provider
+from eventide.generation import GenerationCapabilities, GenerationPatch
 from eventide.host import RuntimeHost
 from eventide.models import RunRequest, ToolCall
 from eventide.normalization import normalize, redact
@@ -36,6 +37,13 @@ class RunBody(BaseModel):
     mode: str = "auto"
     attachment_ids: list[str] = Field(default_factory=list)
     model: str | None = Field(default=None, max_length=256)
+    generation: GenerationPatch = Field(default_factory=GenerationPatch)
+
+
+class GenerationBody(BaseModel):
+    model: str = Field(min_length=1, max_length=256)
+    generation: GenerationPatch = Field(default_factory=GenerationPatch)
+    capabilities: GenerationCapabilities | None = None
 
 
 class AttachmentBody(BaseModel):
@@ -373,6 +381,43 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
     async def get_provider_config() -> dict[str, Any]:
         return agent_runtime.provider_config_status()
 
+    @app.get("/api/generation/defaults")
+    async def generation_defaults(model: str | None = None) -> dict[str, Any]:
+        return agent_runtime.generation_settings(model or agent_runtime.settings.model)
+
+    @app.put("/api/generation/defaults")
+    async def update_generation_defaults(body: GenerationBody, request: Request) -> dict[str, Any]:
+        _require_local_request(request)
+        try:
+            declared = body.capabilities
+            if declared:
+                declared = declared.model_copy(update={"source": "declared"})
+            return agent_runtime.configure_generation(
+                body.model, body.generation.patch(), declared=declared,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/sessions/{session_id}/generation")
+    async def session_generation(session_id: str, model: str | None = None) -> dict[str, Any]:
+        await get_session(session_id)
+        return agent_runtime.generation_settings(model or agent_runtime.settings.model, session_id)
+
+    @app.put("/api/sessions/{session_id}/generation")
+    async def update_session_generation(
+        session_id: str, body: GenerationBody, request: Request,
+    ) -> dict[str, Any]:
+        _require_local_request(request)
+        await get_session(session_id)
+        if body.capabilities:
+            raise HTTPException(status_code=422, detail="Declare capabilities in model defaults")
+        try:
+            return agent_runtime.configure_generation(
+                body.model, body.generation.patch(), session_id=session_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.put("/api/config/provider")
     async def set_provider_config(body: ProviderConfigBody, request: Request) -> dict[str, Any]:
         _require_local_request(request)
@@ -546,6 +591,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
                     mode=body.mode,
                     attachment_ids=list(body.attachment_ids),
                     model=body.model,
+                    generation=body.generation.patch(),
                 )
             )
             task = agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)

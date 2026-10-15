@@ -24,6 +24,12 @@ from eventide.executor import (
     ToolContext,
     ToolExecutor,
 )
+from eventide.generation import (
+    GenerationCapabilities,
+    GenerationPatch,
+    capabilities,
+    resolve_generation,
+)
 from eventide.mcp.client import MCPManager
 from eventide.models import (
     ContinuationRequest,
@@ -698,48 +704,49 @@ class RuntimeHost:
         *,
         kind: str = "agent",
     ) -> ModelResponse:
-        last_error: Exception | None = None
-        for attempt in range(3):
+        request_id = f"request_{uuid.uuid4().hex}"
+        for attempt in range(1, 4):
+            attempt_id = f"attempt_{uuid.uuid4().hex}"
+            started = time.perf_counter()
+            identity = {
+                "request_id": request_id, "attempt_id": attempt_id, "attempt": attempt,
+                "kind": kind, "model": request.model, "generation": request.generation,
+            }
+            await self._emit(run_id, "model.attempt_started", identity, sink)
             try:
-                return await asyncio.wait_for(
-                    self._provider().complete(request),
-                    timeout=self.settings.model_timeout,
+                response = await asyncio.wait_for(
+                    self._provider().complete(request), timeout=self.settings.model_timeout,
                 )
-            except asyncio.TimeoutError as exc:
-                last_error = exc
-                await self._emit(
-                    run_id,
-                    "model.retry",
-                    {
-                        "attempt": attempt + 1,
-                        "kind": kind,
-                        "retryable": attempt < 2,
-                        "error": f"Model request timed out ({self.settings.model_timeout:g}s)",
-                    },
-                    sink,
-                )
-                if attempt == 2:
-                    raise RuntimeError(
-                        f"Model request timed out ({self.settings.model_timeout:g}s)"
-                    ) from exc
-                continue
-            except ProviderError as exc:
-                last_error = exc
-                await self._emit(
-                    run_id,
-                    "model.retry",
-                    {
-                        "attempt": attempt + 1,
-                        "kind": kind,
-                        "retryable": exc.retryable,
-                        "error": self._clean(str(exc)),
-                    },
-                    sink,
-                )
-                if not exc.retryable or attempt == 2:
+            except BaseException as exc:
+                await self._emit(run_id, "model.attempt_finished", {
+                    **identity, "status": "cancelled" if isinstance(exc, asyncio.CancelledError)
+                    else "failed", "usage_source": "unknown",
+                    "duration_ms": (time.perf_counter() - started) * 1000,
+                }, None)
+                if not isinstance(exc, (asyncio.TimeoutError, ProviderError)):
                     raise
-                await asyncio.sleep(0.25 * (2**attempt))
-        raise RuntimeError(str(last_error))
+                retryable = isinstance(exc, asyncio.TimeoutError) or exc.retryable
+                message = (
+                    f"Model request timed out ({self.settings.model_timeout:g}s)"
+                    if isinstance(exc, asyncio.TimeoutError) else self._clean(str(exc))
+                )
+                await self._emit(run_id, "model.retry", {
+                    **identity, "kind": kind, "retryable": retryable and attempt < 3,
+                    "error": message,
+                }, sink)
+                if not retryable or attempt == 3:
+                    if isinstance(exc, asyncio.TimeoutError):
+                        raise RuntimeError(message) from exc
+                    raise
+                await asyncio.sleep(0.25 * (2 ** (attempt - 1)))
+            else:
+                await self._emit(run_id, "model.attempt_finished", {
+                    **identity, "status": "completed", "usage": response.usage,
+                    "usage_source": "reported" if response.usage else "unknown",
+                    "duration_ms": (time.perf_counter() - started) * 1000,
+                }, sink)
+                return response
+        raise RuntimeError("Model attempts exhausted")
 
     async def cancel_run(self, run_id: str) -> dict[str, Any]:
         """Cancel one active run and wait until its interrupted fact is durable."""
@@ -948,13 +955,64 @@ class RuntimeHost:
             None,
         )
 
+    def generation_settings(self, model: str, session_id: str | None = None) -> dict[str, Any]:
+        identity = digest([self.settings.provider, self.settings.base_url, model])
+        saved = self.store.generation_config("model", identity)
+        declared = saved.get("capabilities")
+        supported = (
+            GenerationCapabilities.model_validate(declared) if declared
+            else capabilities(self.settings.provider, self.settings.base_url, model)
+        )
+        session = self.store.generation_config("session", session_id) if session_id else {}
+        # Session overrides are endpoint/model scoped; changing models does not carry them over.
+        overrides = (
+            session.get("generation", {}) if session.get("model_identity") == identity else {}
+        )
+        return {
+            "model": model, "model_identity": identity,
+            "defaults": saved.get("generation", {}), "session": overrides,
+            "capabilities": supported.model_dump(),
+        }
+
+    def configure_generation(
+        self, model: str, generation: dict[str, Any], *, session_id: str | None = None,
+        declared: GenerationCapabilities | None = None,
+    ) -> dict[str, Any]:
+        if self._closed:
+            raise ValueError("RuntimeHost is closed")
+        if session_id:
+            self.sessions.workspace(session_id)
+            if self.is_worker_session(session_id) or self.is_control_session(session_id):
+                raise ValueError("Internal sessions cannot configure generation")
+        state = self.generation_settings(model, session_id)
+        patch = GenerationPatch.model_validate(generation).patch()
+        supported = declared or GenerationCapabilities.model_validate(state["capabilities"])
+        resolve_generation(
+            [state["defaults"] if session_id else {}, patch],
+            provider=self.settings.provider, base_url=self.settings.base_url, model=model,
+            declared=supported,
+        )
+        owner = session_id or self.create_session()
+        if not session_id:
+            self.store.update_session(owner, archived=True)
+        self.store.append_fact(owner, "generation.configured", {
+            "scope": "session" if session_id else "model",
+            "identity": session_id or state["model_identity"],
+            "model_identity": state["model_identity"],
+            "generation": patch,
+            "capabilities": supported.model_dump() if not session_id else None,
+        }, author="user")
+        return self.generation_settings(model, session_id)
+
     def _run_intent(
-        self, request: RunRequest | None, source_id: str | None = None
+        self, request: RunRequest | None, source_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         mode = run_policy.normalize_mode(request.mode) if request else "auto"
         model = request.model.strip() if request and request.model else self.settings.model
         model = model or self.settings.model
         execution_config: dict[str, Any] = {}
+        generation: dict[str, Any] | None = None
         if source_id:
             prior: dict[str, Any] = next(
                 (
@@ -970,14 +1028,27 @@ class RuntimeHost:
             )
             if prior.get("provider") == self.settings.provider and same_endpoint:
                 model = prior.get("model") or model
+                generation = prior.get("generation")
             execution_config = prior.get("execution_config") or {}
         if not isinstance(model, str) or len(model) > 256:
             raise ValueError("Model name cannot exceed 256 characters")
+        state = self.generation_settings(
+            model, session_id or (request.session_id if request else None)
+        )
+        if generation is None:
+            layers = [state["defaults"], state["session"], request.generation if request else {}]
+        else:
+            layers = [generation]
+        generation = resolve_generation(
+            layers, provider=self.settings.provider, base_url=self.settings.base_url, model=model,
+            declared=GenerationCapabilities.model_validate(state["capabilities"]),
+        )
         return {
             "mode": mode,
             "model": model,
             "provider": self.settings.provider,
             "endpoint_hash": digest(self.settings.base_url),
+            "generation": generation,
             **({"execution_config": execution_config} if execution_config else {}),
         }
 
@@ -1046,7 +1117,7 @@ class RuntimeHost:
                     elif previous and previous["status"] == "interrupted":
                         raise ValueError("Session is parked; use Continue")
                     source_id = previous["id"] if request is None and previous else None
-                    intent = self._run_intent(request, source_id)
+                    intent = self._run_intent(request, source_id, session_id)
                     if execution_config:
                         intent["execution_config"] = execution_config
                     elif "execution_config" not in intent:
@@ -1515,7 +1586,7 @@ class RuntimeHost:
         park_kind: str | None = None
         park_message: str | None = None
         try:
-            intent = admitted_intent or self._run_intent(request, continuation_of)
+            intent = admitted_intent or self._run_intent(request, continuation_of, session_id)
             execution_config = (
                 {}
                 if readonly_profile
@@ -1536,6 +1607,8 @@ class RuntimeHost:
                     read_only=False,
                 )
             mode, selected_model = intent["mode"], intent["model"]
+            generation = {} if readonly_profile else intent.get("generation", {})
+            max_tokens = generation.get("max_output_tokens", max_tokens)
             if readonly_profile:
                 mode = "plan"
             if len(selected_model) > 256:
@@ -1554,6 +1627,7 @@ class RuntimeHost:
                     "model": selected_model,
                     "mode": mode,
                     "endpoint_hash": intent["endpoint_hash"],
+                    "generation": generation,
                     "continuation_of": continuation_of,
                     "resumed_task_id": resumed_task_id,
                     **({"execution_config": execution_config} if execution_config else {}),
@@ -2108,6 +2182,7 @@ class RuntimeHost:
                         tools,
                         selected_model,
                         max_tokens,
+                        dict(generation),
                     ),
                     run_id,
                     sink,

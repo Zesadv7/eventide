@@ -23,6 +23,7 @@ class ModelRequest:
     tools: list[dict[str, Any]]
     model: str
     max_tokens: int = 8_000
+    generation: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +58,7 @@ class RunRequest:
     mode: str = "auto"
     attachment_ids: list[str] = field(default_factory=list)
     model: str | None = None
+    generation: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

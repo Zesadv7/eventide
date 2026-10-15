@@ -6,6 +6,7 @@ import json
 from typing import Any, cast
 
 from eventide.config import Settings
+from eventide.generation import wire_parameters
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
 
@@ -117,6 +118,7 @@ class OpenAIResponsesProvider:
                 "store": False,
                 "include": ["reasoning.encrypted_content"],
             }
+            params.update(wire_parameters("openai_responses", request.generation))
             if request.tools:
                 params["tools"] = cast(Any, convert_response_tools(request.tools))
             response = await cast(Any, self._client).responses.create(**params)

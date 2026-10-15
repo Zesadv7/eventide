@@ -250,6 +250,8 @@ Web 运行不依赖 Node 或前端构建。测试分三层：Python 单元测试
 
 ## 配置真实模型
 
+生成参数已提供后端契约（界面迁移在 AGENTS.md 的 F 阶段）：`GET/PUT /api/generation/defaults` 管理当前 Provider/endpoint/model 的默认值，`GET/PUT /api/sessions/{id}/generation` 管理会话覆盖，运行请求可传 `generation`。支持 `temperature`、`top_p`、`max_output_tokens`、`reasoning_effort`、`thinking`；具体可用项取决于模型/API。省略字段继承，显式 `null` 恢复默认，温度 `0` 不会丢失。未知模型能力默认不发送采样参数，需在模型默认配置中显式声明支持范围；声明不是供应商验证。DeepSeek 思考模式下温度无效，因此显式设置会被拒绝。参数接收时冻结，Continue 在相同接入下继承原值；改设置不会影响已经接收的运行。
+
 可以通过 Web 控制台保存配置，也可以复制环境变量模板：
 
 ```bash

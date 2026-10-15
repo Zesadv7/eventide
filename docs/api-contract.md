@@ -4,6 +4,14 @@
 
 ## 现有接口（前端已依赖）
 
+### 模型生成参数 —— 后端已实现，Vue 展示待迁移
+
+- `GET /api/generation/defaults?model=...` 返回 `model_identity/defaults/session/capabilities`，身份绑定Provider、endpoint和模型。
+- `PUT /api/generation/defaults` 接受 `{model, generation, capabilities?}`；显式能力声明标为declared，不冒充已验证。
+- `GET/PUT /api/sessions/{id}/generation` 读取/替换该模型下的会话覆盖，PUT不允许重新声明模型能力。
+- `POST /api/sessions/{id}/runs` 新增 `generation`：temperature、top_p、max_output_tokens、reasoning_effort、thinking。省略继承，null恢复默认，0有效；额外字段/非有限值/范围错误422。
+- 写配置仅本机来源；支持情况未知时拒绝显式采样参数。接收时冻结，Continue相同接入继承；已有调用不受后续设置影响。尚无自动运行探测或按任务预设。
+
 | 方法与路径 | 用途 |
 |---|---|
 | `GET /api/workspaces` | 工作区列表 |

@@ -85,6 +85,10 @@ Continue 从来源 `run.admitted` / `run.started` 继承 Plan 的只读限制与
 
 ## 入口、模型与 MCP
 
+生成参数使用 `generation.py` 严格校验和能力描述。模型默认/会话覆盖保存在 `generation.configured` 追加事实中，通过 Provider、endpoint、model 的哈希隔离；模型默认管理使用归档 Session，不新增独立可变配置表。省略继承、null清除、0有效，`run.admitted/started.generation` 保存有效请求快照。Continue在原接入下继承并重验，切换接入则重新解析；摘要/只读子Run不隐式继承用户采样覆盖。`ModelRequest.generation` 由adapter映射到SDK参数，最大输出仍受现有请求字段约束。
+
+每次模型调用记录 `model.attempt_started/finished`，同重试组共享request_id，每次真实尝试有独立attempt_id。成功保存报告usage，失败/取消无usage记unknown；事件不记录请求正文。原model.response和summary事件继续提供上下文事实，后续用量账本只以attempt事实计算，避免重复计数。
+
 `RuntimeHost.run(RunRequest)`、create_session、Provider 配置和 RunResult 原字段保持当前契约；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。
 
 CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/list/show/remove、continue、abandon、export 和 plan show。`plan show <session_id>` 读取 session_status 中已有的计划事实，默认人类可读输出，`--json` 返回与 HTTP 同构的 `task_plan`、`active_task_id` 和 `task_state`；CLI 不重算投影，也不提供任何计划写入口。无指定 Workspace 时使用启动 cwd；Git 子目录可作为 Session cwd，同时 Workspace 身份仍归一到仓库根。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon、按 run_id 取消和 canonical JSONL export。Session POST 可传 working_directory，PATCH 可设置标题或归档；列表默认隐藏归档记录；DELETE 只允许没有运行历史的空 Session。普通 Run 与 Continue 都返回 202；Continue 在响应前完成安全校验并持久化 continuation Run 身份，执行结果通过 Run 查询与 SSE 获取。Export 按 session_seq 分页读取 canonical Event 并以 NDJSON 流响应，不使用 SSE 兼容别名；CLI 写文件默认不覆盖。轻量事实接口包括：`GET /api/workspaces/{id}/capabilities` 用纯文件解析返回 Workspace 的 Skill 名称/简介、MCP 服务名/transport 与配置路径提示，不连接 MCP 服务，也不返回 command/env/密钥，坏配置写入 `notes` 而非 500；`GET /api/runtime/settings` 透出 `context_limit`、`approval_timeout`、`max_steps`、`task_max_steps`、`run_token_limit`；Run 摘要（`list_runs` 与 latest run summary）随状态字段透出 RuntimeStateProjection 已派生的 `usage`（input/output tokens）。这些只是字段透出，不新增事实源。模型列表辅助位于 `model_catalog.py`，`GET /api/models` 探测当前 Provider 的列表端点，失败返回空列表与说明而不抛错。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。HTTP 同 Workspace 已有请求时返回 409；Python Host 的请求按 Workspace 锁排队。

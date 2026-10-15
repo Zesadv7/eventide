@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from eventide.config import Settings
+from eventide.generation import wire_parameters
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
 
@@ -74,6 +75,7 @@ class AnthropicProvider:
                 "messages": cast(Any, _without_provider_state(request.messages)),
                 "max_tokens": request.max_tokens,
             }
+            params.update(wire_parameters("anthropic", request.generation))
             if request.tools:
                 params["tools"] = cast(Any, request.tools)
             response = await cast(Any, self._client).messages.create(**params)

@@ -6,6 +6,7 @@ import json
 from typing import Any, cast
 
 from eventide.config import Settings
+from eventide.generation import wire_parameters
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
 
@@ -113,6 +114,7 @@ class OpenAICompatibleProvider:
                 "messages": cast(Any, convert_messages(request.messages, request.system)),
                 "max_tokens": request.max_tokens,
             }
+            params.update(wire_parameters("openai_compatible", request.generation))
             if request.tools:
                 params["tools"] = cast(Any, convert_tools(request.tools))
             response = await cast(Any, self._client).chat.completions.create(**params)

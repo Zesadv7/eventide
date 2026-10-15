@@ -366,6 +366,20 @@ class RuntimeStore:
                 ).fetchone()[0]
             )
 
+    def generation_config(
+        self, scope: str, identity: str
+    ) -> dict[str, Any]:
+        """Latest immutable configuration event; no independent mutable fact table."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json FROM runtime_events WHERE partial=0 "
+                "AND type='generation.configured' "
+                "AND json_extract(payload_json,'$.scope')=? "
+                "AND json_extract(payload_json,'$.identity')=? ORDER BY rowid DESC LIMIT 1",
+                (scope, identity),
+            ).fetchone()
+        return json.loads(row[0]) if row else {}
+
     def workspace_execution_config(self, workspace_id: str) -> dict[str, Any]:
         """A delivery's explicit execution choice survives later runs and restarts."""
         with self._lock:
