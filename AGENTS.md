@@ -96,10 +96,10 @@ uv run eventide eval evals/smoke.yaml
 | 0.1 | 已完成 | 2026-10-15：本计划和逐步状态制度已写入本文件；README 过时 Subagent 表述已修正，架构/ADR 区分目标与现状；文档检查和 git diff --check。 |
 | 0.2 | 已完成 | 2026-10-15：Host/live 共用配置优先级；live 只读解析已提交 WAL 配置、隔离前解密且不创建 Host/密钥，错误不回退。88 项定向回归、Ruff、Mypy 50 模块通过；README/architecture/ADR-051 已同步。真实调用另属 0.4。 |
 | 0.3 | 已完成 | 2026-10-15：全部用例独立临时 Git 项目/数据库，live/offline 均关闭 MCP；失败产物保留，报告可逐例定位，凭据不写产物、用户源码/状态不变。88 项回归及 smoke12/tasks14/engineering3/workers1 全通过；README/architecture/ADR-051 同步。 |
-| 0.4 | 待开始 | 普通响应/只读调用及三个工程 fixture 各两次；默认每次 12 步/20,000 已观测 Token/5 分钟，失败保留。 |
+| 0.4 | 进行中 | 普通真实DeepSeek Responses响应已验证（14输入/1输出Token，密钥未输出、用户状态未改）；只读调用和3fixture各两次待执行。默认12步/20,000已观测Token/5分钟，失败保留。 |
 | A1 | 待开始 | 模块化项目/会话/运行/模型/Skills/索引/评测/交付路由；统一错误，长任务持久身份、查询与停止。 |
 | A2 | 进行中 | Run/Continue持久幂等接收、重启重试、内容冲突及同源/DNS-rebinding防护已实现；43项HTTP/接收/API回归、Ruff/mypy52模块通过。api-contract/architecture同步；Skills/Delivery等新写控制面按后续步骤接入。 |
-| A3 | 进行中 | 2026-10-15：严格内置契约、动态 schema 本地解析、执行前校验及结构化错误已实现；97 项工具/执行器/本地 MCP 回归通过，1 项真实 Docker 跳过，Ruff/Mypy4模块通过，uv lock离线刷新。见 README「工具参数契约」、architecture 同名节及 ADR-052；Host 动态目录接线、一次参数修正限制和完整门禁仍待集成。 |
+| A3 | 已完成 | 生产Host全部实际目录/动态MCP/Worker接入严格契约，首次参数错误允许一次修正轮次，再次错误停机且不重放副作用；截断调用不派发。97项core及81项主链回归、Ruff/mypy55模块通过。README/architecture/api-contract/ADR-052同步；真实Docker单列未验证。 |
 | A4 | 已完成 | generation严格配置/能力声明/模型与会话API和三adapter映射；17项生成参数测试及59项相关回归通过，Ruff/mypy50模块通过。README/architecture/api-contract/ADR-050同步；页面在F迁移。 |
 | A5 | 已完成 | admission冻结、零/null/最大输出/继承、Continue及并发工作区隔离验证通过；最大输出日志字段保留数值；辅助调用不继承采样覆盖。见test_generation及ADR-050。 |
 | A6 | 进行中 | Host流消费/完整响应后执行、无持久id预览SSE、有界内存和跨片已知凭据脱敏已接线；流超时/断流不重试，测试覆盖。三SDK适配器在独立worktree实现，集成后验收；Vue在F。 |

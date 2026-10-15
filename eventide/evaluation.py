@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from eventide.config import Settings
+from eventide.generation import GenerationPatch
 from eventide.host import RuntimeHost
 from eventide.models import RunRequest, RunResult
 from eventide.provider_config import resolve_provider_configuration
@@ -135,7 +136,10 @@ async def _run_case(
     sandbox: Path | None,
     session_id: str,
 ) -> tuple[RunResult, dict[str, Any], tuple[str, ...]]:
-    request = RunRequest(prompt=str(case["prompt"]), session_id=session_id)
+    request = RunRequest(
+        prompt=str(case["prompt"]), session_id=session_id,
+        generation=GenerationPatch.model_validate(case.get("generation", {})).patch(),
+    )
     if case.get("acceptance_tests") is not True:
         return await runtime.run(request), {}, ()
     if sandbox is None:

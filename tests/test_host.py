@@ -20,8 +20,10 @@ from tests.test_runtime import COMPACTION_BUDGET, settings_for
 # conversation exists. This is a decision, not a measurement: a new tool or a longer
 # description has to be paid for here, deliberately, instead of quietly widening the
 # budget-sensitive tests that depend on REQUEST_FLOOR_CHARS. Raised 2_700 -> 2_800 when
-# todo_write gained prerequisite IDs (measured 2_738).
-TOOL_CATALOG_BUDGET = 2_800
+# todo_write gained prerequisite IDs (measured 2_738). Strict generated contracts
+# add object closure, ranges and nullable plan fields (measured 3_283); this is an
+# explicit correctness/context tradeoff, guarded independently from compaction.
+TOOL_CATALOG_BUDGET = 3_350
 
 
 def make_repo(path: Path) -> Path:

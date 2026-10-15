@@ -60,6 +60,7 @@ from eventide.task_plan import active_id as task_plan_active
 from eventide.task_plan import plan_update
 from eventide.task_plan import prompt as task_plan_prompt
 from eventide.task_plan import summary as plan_summary
+from eventide.tool_contracts import production_tool_catalog
 from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
 from eventide.tool_results import reader as tool_result_reader
 from eventide.tools.runtime_catalog import HANDLERS, TOOLS
@@ -176,12 +177,13 @@ class RuntimeHost:
             self._lease.close()
             raise
         self.provider = provider
-        self.tools = list(TOOLS if tools is None else tools)
+        self.tools = production_tool_catalog(list(TOOLS if tools is None else tools))
         self.handlers = dict(HANDLERS if handlers is None else handlers)
         self.policy = PolicyEngine()
         self.executor = ToolExecutor(
             self.handlers,
             command_executor=LocalCommandExecutor(self.settings.command_timeout),
+            tools=self.tools,
         )
         self._workspace_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._admissions: dict[str, str] = {}
@@ -2000,6 +2002,7 @@ class RuntimeHost:
                 # visible names instead of trusting the model to comply.
                 visible = {tool.get("name") for tool in tools}
                 handlers = {name: handler for name, handler in handlers.items() if name in visible}
+            tools = production_tool_catalog(tools)
             executor = ToolExecutor(
                 handlers,
                 {
@@ -2011,6 +2014,7 @@ class RuntimeHost:
                     *({"load_skill"} if skills else set()),
                 },
                 command_executor,
+                tools=tools,
             )
             runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)
             if worker_tools:
@@ -2132,6 +2136,7 @@ class RuntimeHost:
             task_park: str | None = None
             active_task_id: str | None = None
             active_since_step = 1
+            parameter_repair_used = False
 
             async def record_unknown(call: ToolCall, content: str) -> None:
                 await self._emit(
@@ -2262,16 +2267,23 @@ class RuntimeHost:
                     role="assistant",
                     author="model",
                 )
+                if response.stop_reason in TRUNCATION_REASONS:
+                    # Even syntactically complete arguments in a truncated response
+                    # are not a dispatch authorization. Pair them as unexecuted errors.
+                    for call in calls:
+                        await self._emit(run_id, "tool.abandoned", {
+                            "call_id": call.id, "name": call.name, "is_error": True,
+                            "content": "Tool not dispatched: model response was incomplete",
+                            "reason": "response_truncated", "dispatched": False,
+                        }, sink)
+                    raise RuntimeError(
+                        f"Model output truncated ({response.stop_reason}); raise "
+                        f"max_output_tokens / EVENTIDE_MAX_TOKENS (currently {max_tokens})"
+                    )
                 if not calls:
-                    if response.stop_reason in TRUNCATION_REASONS:
-                        # A truncated final answer is not a finished task; fail loudly
-                        # instead of reporting success with half the output.
-                        raise RuntimeError(
-                            f"Model output truncated ({response.stop_reason}); raise "
-                            f"EVENTIDE_MAX_TOKENS (currently {self.settings.max_tokens})"
-                        )
                     output = self._semantic(response.text)
                     break
+                invalid_arguments = False
                 for call in calls:
                     tool_count += 1
                     # MCP and unknown/custom tools are always conservative recovery boundaries.
@@ -2326,6 +2338,8 @@ class RuntimeHost:
                     if result.metadata.get("outcome_unknown"):
                         await record_unknown(call, result.content)
                         raise _UnknownToolOutcome(result.content)
+                    if result.metadata.get("code") == "invalid_arguments":
+                        invalid_arguments = True
                     await self._emit(
                         run_id,
                         "tool.completed",
@@ -2351,6 +2365,12 @@ class RuntimeHost:
                             },
                             sink,
                         )
+                if invalid_arguments:
+                    if parameter_repair_used:
+                        raise RuntimeError(
+                            "Tool argument repair failed; no further automatic repair"
+                        )
+                    parameter_repair_used = True
             else:
                 step_budget_exhausted = True
             if step_budget_exhausted:

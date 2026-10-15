@@ -149,7 +149,7 @@ def test_conflicting_attempts_reject_silent_bill_changes_and_partial_facts_skip(
 def test_only_numeric_public_token_fields_bypass_secret_redaction():
     assert redact({"max_output_tokens": 512, "max_tokens": 32, "reasoning_tokens": 0,
                    "cache_miss_input_tokens": 1}) == {
-        "max_output_tokens": 512, "max_tokens": 32, "reasoning_tokens": 0,
+        "max_output_tokens": 512, "max_tokens": "[REDACTED]", "reasoning_tokens": 0,
         "cache_miss_input_tokens": 1}
     for invalid in ("private", True, -1, {"nested": "private"}):
         assert redact({"input_tokens": invalid}) == {"input_tokens": "[REDACTED]"}

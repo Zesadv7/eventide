@@ -29,7 +29,9 @@ def settings_for(path, **changes):
 # Raised for dependency metadata and headroom for different checkout path lengths.
 # "test_tool_catalog_stays_within_its_budget" guards the catalog side of the number; raise
 # this constant on purpose rather than widening the tests that depend on it.
-REQUEST_FLOOR_CHARS = 3_200
+# Strict generated schemas measure 3_283 characters, with fixed system text and
+# checkout identity bringing the full floor to about 3_631 on the primary host.
+REQUEST_FLOOR_CHARS = 3_800
 # Operating budget for the compaction tests: the floor plus room for the compacted tail and
 # for path-length drift, so catalog growth trips the sentinel instead of these tests.
 COMPACTION_BUDGET = REQUEST_FLOOR_CHARS + 400

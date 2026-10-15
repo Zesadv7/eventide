@@ -17,7 +17,6 @@ _USAGE_KEYS = {
     "uncached_input_tokens",
     "reasoning_tokens",
     "max_output_tokens",
-    "max_tokens",
 }
 
 

@@ -145,3 +145,45 @@ def test_preview_sse_has_no_persistent_id_and_is_not_written_to_log(isolated_wor
         assert all(not frame.startswith("id:") for frame in previews)
         assert not any(e["type"] == "model.preview" for e in host.store.run_events(run))
         assert client.get(f"/api/runs/{run}").json()["status"] == "completed"
+
+
+async def test_truncated_response_never_dispatches_valid_looking_write(isolated_workspace):
+    from eventide.providers import ScriptedProvider
+
+    host = RuntimeHost(
+        settings_for(isolated_workspace),
+        ScriptedProvider(
+            [
+                {
+                    "stop_reason": "max_output_tokens",
+                    "tool_calls": [
+                        {
+                            "id": "truncated",
+                            "name": "write_file",
+                            "arguments": {
+                                "path": "must-not-exist",
+                                "content": "looks complete",
+                            },
+                        }
+                    ],
+                    "usage": {"input_tokens": 7, "output_tokens": 100},
+                }
+            ]
+        ),
+    )
+    try:
+        result = await host.run(RunRequest("work", mode="agent"))
+        assert result.status == "failed"
+        assert not (isolated_workspace / "must-not-exist").exists()
+        events = host.store.run_events(result.run_id)
+        assert not any(event["type"] == "tool.prepared" for event in events)
+        assert any(event["type"] == "tool.abandoned" for event in events)
+        assert host.store.load_messages(result.session_id)
+        assert build_usage_ledger(host.store.usage_events(run_id=result.run_id))[
+            "reported_totals"
+        ] == {
+            "input_tokens": 7,
+            "output_tokens": 100,
+        }
+    finally:
+        await host.close()
