@@ -44,6 +44,7 @@ export const generation: GenerationState = {
     temperature_max: 2,
     top_p: true,
     reasoning_efforts: ["none", "low", "high"],
+    response_formats: [],
     thinking: false,
   },
 };

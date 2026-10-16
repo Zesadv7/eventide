@@ -427,46 +427,57 @@ it("labels a controlled live history as model evidence and links its sole usage 
   wrapper.unmount();
 });
 
-it("requires a fresh quote and explicit live confirmation without automatic calls", async () => {
-  mockReads([]);
-  const quote = vi.spyOn(evaluationsApi, "quote").mockResolvedValue({
-    quote_hash: "d".repeat(64),
-    project_id: project,
-    suite_sha256: suite.suite_sha256,
-    split: "development",
-    case_count: 12,
-    provider: "fixture",
-    model: "fixture",
-    planning_tokens: { input_tokens: 216000, output_tokens: 24000 },
-    estimates: {},
-    complete: false,
-    assumptions: "规划估算不是账单上限",
-  });
-  const create = vi
-    .spyOn(evaluationsApi, "create")
-    .mockResolvedValue(receipt());
-  const { wrapper } = await render();
-  await wrapper.get("#evaluation-mode").setValue("live");
-  expect(quote).not.toHaveBeenCalled();
-  const start = () =>
-    wrapper
+it.each([
+  ["json_object", "JSON 对象"],
+  [null, "模型默认（未启用 JSON 约束）"],
+] as const)(
+  "shows fact format %s and requires fresh explicit confirmation without automatic calls",
+  async (format, label) => {
+    mockReads([]);
+    const quote = vi.spyOn(evaluationsApi, "quote").mockResolvedValue({
+      quote_hash: "d".repeat(64),
+      project_id: project,
+      suite_sha256: suite.suite_sha256,
+      split: "development",
+      case_count: 12,
+      provider: "fixture",
+      model: "fixture",
+      fact_response_format: format,
+      planning_tokens: { input_tokens: 216000, output_tokens: 24000 },
+      estimates: {},
+      complete: false,
+      assumptions: "规划估算不是账单上限",
+    });
+    const create = vi
+      .spyOn(evaluationsApi, "create")
+      .mockResolvedValue(receipt());
+    const { wrapper } = await render();
+    await wrapper.get("#evaluation-mode").setValue("live");
+    expect(quote).not.toHaveBeenCalled();
+    const start = () =>
+      wrapper
+        .findAll("button")
+        .find((button) => button.text() === "运行一次真实模型实验")!;
+    expect(start().attributes("disabled")).toBeDefined();
+    await wrapper
       .findAll("button")
-      .find((button) => button.text() === "运行一次真实模型实验")!;
-  expect(start().attributes("disabled")).toBeDefined();
-  await wrapper
-    .findAll("button")
-    .find((button) => button.text() === "读取模型与费用估算")!
-    .trigger("click");
-  await flushPromises();
-  expect(wrapper.text()).toContain("费用估算不完整或未知");
-  expect(start().attributes("disabled")).toBeDefined();
-  await wrapper.get('input[type="checkbox"]').setValue(true);
-  expect(start().attributes("disabled")).toBeUndefined();
-  await wrapper.get("#evaluation-split").setValue("holdout");
-  expect(start().attributes("disabled")).toBeDefined();
-  expect(create).not.toHaveBeenCalled();
-  wrapper.unmount();
-});
+      .find((button) => button.text() === "读取模型与费用估算")!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("费用估算不完整或未知");
+    expect(wrapper.text()).toContain(`事实题输出格式：${label}`);
+    expect(wrapper.text()).toContain(
+      "JSON 只约束格式，不保证事实正确；修复任务保持原输出设置",
+    );
+    expect(start().attributes("disabled")).toBeDefined();
+    await wrapper.get('input[type="checkbox"]').setValue(true);
+    expect(start().attributes("disabled")).toBeUndefined();
+    await wrapper.get("#evaluation-split").setValue("holdout");
+    expect(start().attributes("disabled")).toBeDefined();
+    expect(create).not.toHaveBeenCalled();
+    wrapper.unmount();
+  },
+);
 
 it("invalidates a confirmed quote when the Skill preset changes and ignores late old profiles", async () => {
   mockReads([]);
@@ -478,6 +489,7 @@ it("invalidates a confirmed quote when the Skill preset changes and ignores late
     case_count: 12,
     provider: "fixture",
     model: "fixture",
+    fact_response_format: null,
     planning_tokens: { input_tokens: 216000, output_tokens: 24000 },
     estimates: {},
     complete: false,

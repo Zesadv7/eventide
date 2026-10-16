@@ -32,6 +32,7 @@ const keys = [
   "max_output_tokens",
   "reasoning_effort",
   "thinking",
+  "response_format",
 ] as const;
 const scope = computed(() => props.scope || "run");
 const mutationSession = computed(() =>
@@ -143,7 +144,9 @@ function supported(key: string) {
       ? c.top_p
       : key === "reasoning_effort"
         ? c.reasoning_efforts.length > 0
-        : c.thinking;
+        : key === "response_format"
+          ? c.response_formats.length > 0
+          : c.thinking;
 }
 function patch(): Generation {
   const result: Record<string, unknown> = {};
@@ -202,6 +205,7 @@ const labels: Record<string, string> = {
   max_output_tokens: "最大输出 Token",
   reasoning_effort: "推理强度",
   thinking: "思考模式",
+  response_format: "输出格式",
 };
 </script>
 <template>
@@ -284,6 +288,20 @@ const labels: Record<string, string> = {
           </option>
         </select>
         <select
+          v-if="modes[key] === 'value' && key === 'response_format'"
+          v-model="values[key]"
+          aria-label="输出格式值"
+          @change="changed"
+        >
+          <option
+            v-for="format in state?.capabilities.response_formats"
+            :key="format"
+            :value="format"
+          >
+            {{ format === "json_object" ? "JSON 对象" : "文本" }}
+          </option>
+        </select>
+        <select
           v-if="modes[key] === 'value' && key === 'thinking'"
           v-model="values[key]"
           aria-label="思考模式值"
@@ -310,7 +328,8 @@ const labels: Record<string, string> = {
     </p>
     <p class="muted">
       思考模式与采样参数的组合由后端校验；温度 0
-      不保证完全确定性。输出上限不等于任务总预算。
+      不保证完全确定性。输出上限不等于任务总预算。JSON
+      模式只保证输出格式，不保证事实正确。
     </p>
     <p v-if="status.pending && scope !== 'run'" class="alert" role="status">
       上次生成配置请求尚未确认。请恢复原参数后重试；刷新只读取当前值，不清除原请求身份或原配置版本。

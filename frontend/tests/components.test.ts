@@ -35,6 +35,7 @@ describe("content and generation controls", () => {
         temperature_max: 1,
         top_p: true,
         reasoning_efforts: ["low", "high", "max"],
+        response_formats: [],
         thinking: true,
         thinking_modes: ["enabled"],
         top_p_min: 0.01,
@@ -82,6 +83,72 @@ describe("content and generation controls", () => {
       temperature: null,
     });
   });
+  it("emits declared text or JSON format and preserves inherit and explicit default", async () => {
+    vi.spyOn(api, "generation").mockResolvedValue({
+      ...generation,
+      capabilities: {
+        ...generation.capabilities,
+        response_formats: ["text", "json_object"],
+      },
+    });
+    const wrapper = mount(GenerationEditor, {
+      props: { model: "fixture-model" },
+    });
+    await flushPromises();
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toEqual({});
+    await wrapper.find("#mode-run-response_format").setValue("value");
+    const choices = wrapper.find('select[aria-label="输出格式值"]');
+    expect(
+      choices.findAll("option").map((option) => option.attributes("value")),
+    ).toEqual(["text", "json_object"]);
+    await choices.setValue("json_object");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toEqual({
+      response_format: "json_object",
+    });
+    await choices.setValue("text");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toEqual({
+      response_format: "text",
+    });
+    await wrapper.find("#mode-run-response_format").setValue("default");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toEqual({
+      response_format: null,
+    });
+    await wrapper.find("#mode-run-response_format").setValue("inherit");
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toEqual({});
+    expect(wrapper.text()).toContain("JSON 模式只保证输出格式，不保证事实正确");
+    wrapper.unmount();
+  });
+  it.each([
+    ["model", "json_object", "value"],
+    ["session", null, "default"],
+  ] as const)(
+    "loads %s format overrides without changing their semantics",
+    async (scope, value, mode) => {
+      vi.spyOn(api, "generation").mockResolvedValue({
+        ...generation,
+        defaults: { response_format: "json_object" },
+        session: { response_format: null },
+        capabilities: {
+          ...generation.capabilities,
+          response_formats: ["text", "json_object"],
+        },
+      });
+      const wrapper = mount(GenerationEditor, {
+        props: { model: "fixture-model", session: "session-1", scope },
+      });
+      await flushPromises();
+      expect(
+        (
+          wrapper.find(`#mode-${scope}-response_format`)
+            .element as HTMLSelectElement
+        ).value,
+      ).toBe(mode);
+      expect(wrapper.emitted("change")?.at(-1)?.[0]).toEqual({
+        response_format: value,
+      });
+      wrapper.unmount();
+    },
+  );
   it("disables unsupported custom fields instead of pretending they work", async () => {
     vi.spyOn(api, "generation").mockResolvedValue({
       ...generation,
@@ -90,6 +157,7 @@ describe("content and generation controls", () => {
         temperature_max: null,
         top_p: false,
         reasoning_efforts: [],
+        response_formats: [],
         thinking: false,
       },
     });
@@ -105,6 +173,14 @@ describe("content and generation controls", () => {
         .find('#mode-run-max_output_tokens option[value="value"]')
         .attributes("disabled"),
     ).toBeUndefined();
+    expect(
+      wrapper
+        .find('#mode-run-response_format option[value="value"]')
+        .attributes("disabled"),
+    ).toBeDefined();
+    expect(wrapper.find('select[aria-label="输出格式值"]').exists()).toBe(
+      false,
+    );
   });
   it("never persists the API key and clears it after saving", async () => {
     vi.spyOn(api, "provider").mockResolvedValue(provider);

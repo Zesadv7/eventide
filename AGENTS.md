@@ -156,7 +156,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
 | 编号 | 状态 | 完成标准 / 当前证据 |
 |---|---|---|
-| Q1 | 进行中 | 从失败原始轨迹定位读取、事实和引用问题，仅修复生产链路中可复现的原因；工具边界与离线回归通过，冻结任务及判分保持不变。旧留出已被分析，后续结果作为回归，新增未见任务独立验证。glob切片已完成：共用文件工具补recursive=True，修复**/漏掉根目录及深层文件；9项新增回归先8失败后全通过，连同原工具/快照/worker共56项通过、Ruff通过。标准隐藏文件规则、目录结果及固定manifest边界已验收，architecture同步；未跑live，不推断模型效果，其余Q1由集成继续验收。 |
+| Q1 | 进行中 | 从失败原始轨迹定位读取、事实和引用问题，仅修复生产链路中可复现的原因；工具边界与离线回归通过，冻结任务及判分保持不变。旧留出已被分析，后续结果作为回归，新增未见任务独立验证。glob切片已完成：共用文件工具补recursive=True，修复**/漏掉根目录及深层文件；9项新增回归先8失败后全通过，连同原工具/快照/worker共56项通过、Ruff通过。标准隐藏文件规则、目录结果及固定manifest边界已验收，architecture同步；未跑live，不推断模型效果，其余Q1由集成继续验收。  JSON输出UI切片已完成：生成设置按声明response_formats选择text/json_object，省略继承和null默认不变；live规划展示固定fact_response_format及格式不保证事实、修复保持原设置。27项定向及全前端125项通过、Prettier/diff检查通过；当前旧生成schema缺response_format导致4处类型错误，待后端集成后统一生成OpenAPI/typecheck/build，不手写生成文件；未跑live，Q1总体仍进行中。 |
 | Q2 | 进行中 | 2026-10-16：Writer开轮用户JSON固定checks/轮次/原36次、60k、900秒额度，Host每步从同一权威账本刷新当前步与剩余额度；未完成Writer仍零验收、不自动采纳。真实回放首轮两题仍零候选（19请求、unknown0、原预算停驻），全部保留；轨迹显示首次修改在第7/9步，开轮快照未刷新，98/183行源码被拆页。新增动态反馈与10k字符读取页后，27项交付/限额/工具回归通过、1项Docker显式跳过，含跨轮四次请求额度准确扣减；此前62项关联通过，Ruff/Mypy通过。README/architecture同步；下一真实回放待验证，不能标交付成功。 |
 | Q3 | 进行中 | 2026-10-16：独立8题只读质量集准备完成（4理解/4诊断，每题2条事实），输入hash 328a5bd450acd5b00abd4ef0e451e86af06914eaa2a0afa4ba50098383104e54；保留根/嵌套调用链、边界/状态、CRLF/空行/Unicode，复用原BenchmarkTask和grade_facts。17项离线严格标注/可执行前提及原benchmark关联共51项通过，Ruff及git diff --check通过，未调用模型；architecture已说明范围。整体离线门禁、真实模型回归、新任务和真实交付仍待主线程验收，Token/费用收益实验暂缓，不作为本轮成功标准。 |
 

@@ -113,6 +113,7 @@ export interface GenerationState {
     temperature_max: number | null;
     top_p: boolean;
     reasoning_efforts: string[];
+    response_formats: string[];
     thinking: boolean;
     thinking_modes?: string[];
     top_p_min?: number;

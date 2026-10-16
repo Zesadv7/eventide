@@ -30,6 +30,7 @@ export interface EvaluationQuote {
   case_count: number;
   provider: string;
   model: string;
+  fact_response_format: "json_object" | null;
   complete: boolean;
   planning_tokens: { input_tokens: number; output_tokens: number };
   assumptions: string;

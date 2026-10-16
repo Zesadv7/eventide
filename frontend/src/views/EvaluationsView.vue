@@ -503,6 +503,13 @@ function downloadReport() {
             {{ quote.provider }} / {{ quote.model }} · {{ quote.case_count }} 题
           </p>
           <p>
+            事实题输出格式：{{
+              quote.fact_response_format === "json_object"
+                ? "JSON 对象"
+                : "模型默认（未启用 JSON 约束）"
+            }}。JSON 只约束格式，不保证事实正确；修复任务保持原输出设置。
+          </p>
+          <p>
             Skills：{{
               quote.profile?.preset === "engineering"
                 ? "三项内置工程 Skills"
