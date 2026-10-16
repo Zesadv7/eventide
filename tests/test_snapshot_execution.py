@@ -174,7 +174,9 @@ def test_snapshot_http_contract_and_legacy_source_default(isolated_workspace):
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
         invalid = client.post(
-            f"/api/sessions/{session}/runs", json={"prompt": "x", "execution_target": "snapshot"}
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "x", "execution_target": "snapshot"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert invalid.status_code == 422
         assert host.store.list_runs(session) == []
@@ -185,6 +187,7 @@ def test_snapshot_http_contract_and_legacy_source_default(isolated_workspace):
                 "mode": "plan",
                 "execution_target": "snapshot",
             },
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert accepted.status_code == 202
         result = wait_for_run(client, accepted.json()["run_id"])
@@ -194,7 +197,11 @@ def test_snapshot_http_contract_and_legacy_source_default(isolated_workspace):
         source_session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
-        direct = client.post(f"/api/sessions/{source_session}/runs", json={"prompt": "hello"})
+        direct = client.post(
+            f"/api/sessions/{source_session}/runs",
+            json={"prompt": "hello"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         assert wait_for_run(client, direct.json()["run_id"])["execution"] == {"kind": "source"}
 
 
@@ -433,9 +440,15 @@ async def test_http_snapshot_acceptance_concurrency_and_idempotency(isolated_wor
                 headers={"Idempotency-Key": "snapshot-intent"},
             )
             assert conflict.status_code == 409
-            busy = await client.post(f"/api/sessions/{sessions[0]}/runs", json=body)
+            busy = await client.post(
+                f"/api/sessions/{sessions[0]}/runs",
+                json=body,
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            )
             assert busy.status_code == 409
-            cancelled = await client.post(f"/api/runs/{first}/cancel")
+            cancelled = await client.post(
+                f"/api/runs/{first}/cancel", headers={"Idempotency-Key": uuid.uuid4().hex}
+            )
             assert cancelled.status_code == 200
             second = responses[1].json()["run_id"]
             assert host.store.get_run(second)["status"] == "running"

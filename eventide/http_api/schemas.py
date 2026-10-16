@@ -56,7 +56,13 @@ class WorkspaceBody(BaseModel):
 
 
 class ApprovalBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     approved: bool
+
+
+class AbandonBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_run_id: str = Field(min_length=1, max_length=256)
 
 
 class ProviderConfigBody(BaseModel):

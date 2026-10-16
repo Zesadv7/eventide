@@ -228,6 +228,7 @@ def test_generation_api_declares_capability_and_rejects_unsupported_values(isola
                     "prompt": "work",
                     "generation": {"temperature": 1.5},
                 },
+                headers={"Idempotency-Key": uuid.uuid4().hex},
             ).status_code
             == 422
         )

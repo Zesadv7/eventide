@@ -1,6 +1,7 @@
 """Worktree management uses one durable control Run and protects existing copies."""
 
 import asyncio
+import uuid
 from pathlib import Path
 
 import pytest
@@ -103,32 +104,61 @@ def test_http_receipts_conflicts_and_exact_catalog(tmp_path):
     path = f"/api/projects/{project}/worktrees"
     with TestClient(create_app(host)) as client:
         catalog = client.get(path).json()
-        body = {"action": "create", "name": "http",
-                "expected_catalog_hash": catalog["catalog_hash"]}
+        body = {
+            "action": "create",
+            "name": "http",
+            "expected_catalog_hash": catalog["catalog_hash"],
+        }
         assert client.post(path, json=body).status_code == 422
-        assert client.post(path, json=body, headers={
-            "Idempotency-Key": "create", "Origin": "https://foreign.invalid",
-        }).status_code == 403
+        assert (
+            client.post(
+                path,
+                json=body,
+                headers={
+                    "Idempotency-Key": "create",
+                    "Origin": "https://foreign.invalid",
+                },
+            ).status_code
+            == 403
+        )
         response = client.post(path, json=body, headers={"Idempotency-Key": "create"})
         assert response.status_code == 202, response.text
         receipt = response.json()
+
         async def wait():
             task = host._run_tasks.get(receipt["run_id"])
             if task:
                 await task
+
         client.portal.call(wait)
         detail = client.get(receipt["status_url"]).json()
         assert detail["status"] == "completed", detail
         assert client.post(path, json=body, headers={"Idempotency-Key": "create"}).json() == receipt
         changed = {**body, "name": "other"}
-        assert client.post(
-            path, json=changed, headers={"Idempotency-Key": "create"},
-        ).status_code == 409
-        assert client.post(
-            path, json=changed, headers={"Idempotency-Key": "stale"},
-        ).status_code == 409
+        assert (
+            client.post(
+                path,
+                json=changed,
+                headers={"Idempotency-Key": "create"},
+            ).status_code
+            == 409
+        )
+        assert (
+            client.post(
+                path,
+                json=changed,
+                headers={"Idempotency-Key": "stale"},
+            ).status_code
+            == 409
+        )
         assert len(client.get(path).json()["worktrees"]) == 1
-        assert client.post(f'/api/sessions/{detail["session_id"]}/continue').status_code == 409
+        assert (
+            client.post(
+                f"/api/sessions/{detail['session_id']}/continue",
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ).status_code
+            == 409
+        )
 
 
 async def test_admission_freezes_commit_and_rechecks_catalog(tmp_path):

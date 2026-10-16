@@ -3239,6 +3239,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbandonBody"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -13478,6 +13488,20 @@
   },
   "components": {
     "schemas": {
+      "AbandonBody": {
+        "properties": {
+          "expected_run_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Expected Run Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["expected_run_id"],
+        "title": "AbandonBody"
+      },
       "ApprovalBody": {
         "properties": {
           "approved": {
@@ -13485,6 +13509,7 @@
             "title": "Approved"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": ["approved"],
         "title": "ApprovalBody"

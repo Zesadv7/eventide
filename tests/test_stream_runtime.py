@@ -139,7 +139,11 @@ def test_preview_sse_has_no_persistent_id_and_is_not_written_to_log(isolated_wor
         sid = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
             "session_id"
         ]
-        run = client.post(f"/api/sessions/{sid}/runs", json={"prompt": "work"}).json()["run_id"]
+        run = client.post(
+            f"/api/sessions/{sid}/runs",
+            json={"prompt": "work"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        ).json()["run_id"]
         response = client.get(f"/api/runs/{run}/events?include_preview=true")
         assert response.status_code == 200
         frames = response.text.split("\n\n")

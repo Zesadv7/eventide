@@ -7,9 +7,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from eventide.http_api.context import ApiContext
-from eventide.http_api.schemas import ApprovalBody, RunBody
-from eventide.http_control import run_receipt
+from eventide.http_api.context import ApiContext, require_local_request
+from eventide.http_api.run_mutations import mutate_run_action
+from eventide.http_api.schemas import AbandonBody, ApprovalBody, RunBody
+from eventide.http_control import mutation_key, run_receipt
 from eventide.models import RunRequest
 from eventide.scheduler import QueueFull
 from eventide.usage import build_usage_ledger
@@ -36,6 +37,8 @@ def create_router(context: ApiContext) -> APIRouter:
         status_code=status.HTTP_202_ACCEPTED,
     )
     async def continue_session(session_id: str, request: Request) -> dict[str, str]:
+        require_local_request(request)
+        mutation_key(request)
         # Continue validation is part of admission; a rejected request returns 409,
         # without creating a run that could hide the parked source run.
         await get_session(session_id)
@@ -57,20 +60,35 @@ def create_router(context: ApiContext) -> APIRouter:
         return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
 
     @router.post("/api/sessions/{session_id}/abandon")
-    async def abandon_interruption(session_id: str) -> dict[str, Any]:
-        record = await get_session(session_id)
-        if agent_runtime.session_busy(session_id) or (
-            agent_runtime.session_execution_target(session_id) == "source"
-            and agent_runtime.workspace_busy(record["workspace_id"])
-        ):
-            raise HTTPException(status_code=409, detail="Session or Workspace is busy")
-        try:
-            return asdict(await agent_runtime.abandon_interruption(session_id))
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    async def abandon_interruption(
+        session_id: str, body: AbandonBody, request: Request,
+    ) -> dict[str, Any]:
+        require_local_request(request)
+        mutation_key(request)
+        async def execute() -> dict[str, Any]:
+            record = await get_session(session_id)
+            if agent_runtime.session_busy(session_id) or (
+                agent_runtime.session_execution_target(session_id) == "source"
+                and agent_runtime.workspace_busy(record["workspace_id"])
+            ):
+                raise HTTPException(409, "Session or Workspace is busy")
+            previous = agent_runtime.store.latest_run(session_id)
+            if not previous or previous["id"] != body.expected_run_id:
+                raise HTTPException(409, "Interrupted Run changed; refresh before abandoning")
+            if previous["status"] != "interrupted" or agent_runtime.is_control_session(session_id):
+                raise HTTPException(409, "Only an interrupted user Session can be abandoned")
+            return asdict(await agent_runtime.abandon_interruption(
+                session_id, expected_run_id=body.expected_run_id,
+            ))
+        return await mutate_run_action(
+            agent_runtime, request, "run_abandon", {"session_id": session_id, **body.model_dump()},
+            execute,
+        )
 
     @router.post("/api/sessions/{session_id}/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(session_id: str, body: RunBody, request: Request) -> dict[str, str]:
+        require_local_request(request)
+        mutation_key(request)
         # Keep custom Session identities while making transport acceptance durable.
         agent_runtime.create_session(session_id)
         record = agent_runtime.session_status(session_id)
@@ -116,24 +134,39 @@ def create_router(context: ApiContext) -> APIRouter:
         return {**record, "execution": agent_runtime.run_execution(run_id)}
 
     @router.post("/api/runs/{run_id}/cancel")
-    async def cancel_run(run_id: str) -> dict[str, Any]:
-        if not agent_runtime.store.get_run(run_id):
-            raise HTTPException(status_code=404, detail="Run not found")
-        try:
-            return await agent_runtime.cancel_run(run_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    async def cancel_run(run_id: str, request: Request) -> dict[str, Any]:
+        require_local_request(request)
+        mutation_key(request)
+        async def execute() -> dict[str, Any]:
+            if not agent_runtime.store.get_run(run_id):
+                raise HTTPException(404, "Run not found")
+            try:
+                return await agent_runtime.cancel_run(run_id)
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+        return await mutate_run_action(
+            agent_runtime, request, "run_cancel", {"run_id": run_id}, execute,
+        )
 
     @router.post("/api/runs/{run_id}/approvals/{approval_id}")
-    async def resolve_approval(run_id: str, approval_id: str, body: ApprovalBody) -> dict[str, Any]:
-        record = agent_runtime.store.get_run(run_id)
-        if not record:
-            raise HTTPException(status_code=404, detail="Run not found")
-        if approval_id not in record["pending_approvals"]:
-            raise HTTPException(status_code=404, detail="Approval does not belong to this run")
-        if not broker.resolve(approval_id, body.approved):
-            raise HTTPException(status_code=404, detail="Approval is no longer pending")
-        return {"approval_id": approval_id, "approved": body.approved}
+    async def resolve_approval(
+        run_id: str, approval_id: str, body: ApprovalBody, request: Request,
+    ) -> dict[str, Any]:
+        require_local_request(request)
+        mutation_key(request)
+        async def execute() -> dict[str, Any]:
+            record = agent_runtime.store.get_run(run_id)
+            if not record:
+                raise HTTPException(404, "Run not found")
+            if approval_id not in record["pending_approvals"]:
+                raise HTTPException(404, "Approval does not belong to this run")
+            if not broker.resolve(approval_id, body.approved):
+                raise HTTPException(404, "Approval is no longer pending")
+            return {"approval_id": approval_id, "approved": body.approved}
+        return await mutate_run_action(
+            agent_runtime, request, "run_approval",
+            {"run_id": run_id, "approval_id": approval_id, **body.model_dump()}, execute,
+        )
 
     @router.get("/api/runs/{run_id}/usage")
     async def run_usage(run_id: str, include_children: bool = True) -> dict[str, Any]:

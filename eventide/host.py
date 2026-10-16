@@ -2033,6 +2033,7 @@ class RuntimeHost:
         self,
         session_id: str,
         sink: EventSink | None = None,
+        *, expected_run_id: str | None = None,
     ) -> RunResult:
         """Close unresolved protocol history without claiming unknown tools succeeded."""
         await self.initialize()
@@ -2052,6 +2053,8 @@ class RuntimeHost:
                     previous = self.store.latest_run(session_id)
                     if not previous or previous["status"] != "interrupted":
                         raise ValueError("Only an interrupted, parked session can be abandoned")
+                    if expected_run_id is not None and previous["id"] != expected_run_id:
+                        raise ValueError("Interrupted Run changed; refresh before abandoning")
                     started = time.perf_counter()
                     run_id = f"run_{uuid.uuid4().hex[:16]}"
                     turn_id = self.store.create_run(

@@ -463,7 +463,11 @@ test("real queue API: six conversations, shared limits, precise cancellation and
     expect(errors).toEqual([]);
   } finally {
     await Promise.all(
-      runs.map((run) => page.request.post(`/api/runs/${run}/cancel`)),
+      runs.map((run) =>
+        page.request.post(`/api/runs/${run}/cancel`, {
+          headers: { "Idempotency-Key": crypto.randomUUID() },
+        }),
+      ),
     );
   }
 });

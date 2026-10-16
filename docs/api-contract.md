@@ -30,7 +30,7 @@ Vue设置页通过`durableMutation('probe', ...)`调用此接口，结果独立�
 
 下文“仅回环／仅本机”的管理权限默认仍只接受回环连接。容器部署可通过启动配置 `EVENTIDE_LOCAL_PROXY_PEERS` 显式追加精确 IP；这些额外连接必须同时携带匹配服务端回环 Host 的 Origin，缺失／不匹配返回403，不能利用伪造转发头获得权限。配置在应用创建时固定，不属于模型或运行配置 API。即使未来只读管理路由使用此守卫，额外连接也需满足同样来源检查；现有普通GET契约不变。宿主仅发布回环端口，服务入口禁用代理头解析，不提供公网认证。
 
-Run与Continue接受可选`Idempotency-Key`（1–128个可见ASCII字符）。同Session/操作/键确定一个持久Run身份，内容hash写入admission。重试相同内容返回原202接收凭据，不新增消息、调用或turn；相同键不同内容409。接收尚未持久化的竞争请求可返回busy，客户端保留相同键稍后重试。幂等接收不等于自动重放工具，未知结果仍停驻。Skills 导入和配置的幂等契约见下文；Delivery 随对应控制面接入。
+Run与Continue要求`Idempotency-Key`（1–128个可见ASCII字符）。同Session/操作/键确定一个持久Run身份，内容hash写入admission。重试相同内容返回原202接收凭据，不新增消息、调用或turn；相同键不同内容409。接收尚未持久化的竞争请求可返回busy，客户端保留相同键稍后重试。幂等接收不等于自动重放工具，未知结果仍停驻。Skills 导入和配置的幂等契约见下文；Delivery 随对应控制面接入。
 
 ### 模型生成参数 —— 后端及 Vue 已实现
 
@@ -455,3 +455,9 @@ Vue显式读取估算并确认后才可发起live；未知结果保留原确认�
 ### 附件写入请求身份
 
 `POST /api/sessions/{id}/attachments`与`DELETE /api/sessions/{id}/attachments/{attachment_id}`要求本机来源及Idempotency-Key。无键422；同操作/键不同内容409，同键成功回放原公开结果；回放上传不会复活已删除附件。上传输入校验在文件操作前，错误422。文件发布/删除或回执失败503且不标rejected，原键重试409未知，须检查列表，不自动重做。已引用附件删除409 rejected。Worker及控制Session不能上传。正文仅作摘要绑定，不落入事件原文。
+
+### 运行决定的持久请求身份
+
+Run、Continue、cancel、approvals、abandon全部要求本机来源和Idempotency-Key，无键422且不创建Session/Run。Run及Continue继续通过admission回放原接收；停止/审批/放弃恢复使用控制Session的持久回执，成功回放在检查当前终态之前进行。同键不同目标或审批决定409，操作或回执结果未知503并保留原键，不能通过自动换键重做。
+
+`POST /api/sessions/{id}/abandon`严格正文为`{expected_run_id: <页面看到的中断Run>}`；接收前及Host执行锁内再次检查，过期身份409，不处理后来产生的中断任务。审批approved必须为JSON布尔值，拒绝字符串/数值；审批结果仅针对指定Run/approval。重复成功回放只确认原决定，不表示最新Run仍处于原状态，应再次查询。

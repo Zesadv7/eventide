@@ -46,7 +46,11 @@ def test_api_run_and_console(isolated_workspace):
         session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
-        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "hello"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         assert accepted.status_code == 202
         run = wait_for_run(client, accepted.json()["run_id"])
         assert run["output"] == "api done"
@@ -60,7 +64,11 @@ def test_api_rejects_empty_prompt(isolated_workspace):
         session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
-        response = client.post(f"/api/sessions/{session}/runs", json={"prompt": ""})
+        response = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": ""},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         assert response.status_code == 422
 
 
@@ -72,7 +80,11 @@ def test_api_sse_and_missing_resources(isolated_workspace):
         session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
-        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "hello"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         run_id = accepted.json()["run_id"]
         wait_for_run(client, run_id)
         events = client.get(f"/api/runs/{run_id}/events")
@@ -89,7 +101,9 @@ def test_api_sse_and_missing_resources(isolated_workspace):
         assert client.get("/api/runs/missing/export").status_code == 404
         assert (
             client.post(
-                f"/api/runs/{run_id}/approvals/missing", json={"approved": False}
+                f"/api/runs/{run_id}/approvals/missing",
+                json={"approved": False},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
             ).status_code
             == 404
         )
@@ -107,7 +121,11 @@ def test_api_resolves_pending_approval(isolated_workspace):
         session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
-        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "delete"})
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "delete"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         run_id = accepted.json()["run_id"]
         approval_id = None
         for _ in range(100):
@@ -119,7 +137,9 @@ def test_api_resolves_pending_approval(isolated_workspace):
             time.sleep(0.01)
         assert approval_id
         response = client.post(
-            f"/api/runs/{run_id}/approvals/{approval_id}", json={"approved": False}
+            f"/api/runs/{run_id}/approvals/{approval_id}",
+            json={"approved": False},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert response.status_code == 200
         assert wait_for_run(client, run_id)["output"] == "denial handled"
@@ -273,7 +293,11 @@ def test_provider_save_waits_for_active_run(isolated_workspace):
         session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
-        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "wait"})
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "wait"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         response = put_configuration(
             client,
             "/api/config/provider",
@@ -295,17 +319,28 @@ def test_api_cancels_active_run(isolated_workspace):
         session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
-        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "wait"})
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "wait"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         run_id = accepted.json()["run_id"]
         for _ in range(100):
             record = client.get(f"/api/runs/{run_id}")
             if record.status_code == 200:
                 break
             time.sleep(0.01)
-        cancelled = client.post(f"/api/runs/{run_id}/cancel")
+        cancelled = client.post(
+            f"/api/runs/{run_id}/cancel", headers={"Idempotency-Key": uuid.uuid4().hex}
+        )
         assert cancelled.status_code == 200
         assert cancelled.json()["status"] == "interrupted"
-        assert client.post(f"/api/runs/{run_id}/cancel").status_code == 409
+        assert (
+            client.post(
+                f"/api/runs/{run_id}/cancel", headers={"Idempotency-Key": uuid.uuid4().hex}
+            ).status_code
+            == 409
+        )
 
 
 def test_api_session_status_exposes_task_plan(isolated_workspace):
@@ -332,7 +367,11 @@ def test_api_session_status_exposes_task_plan(isolated_workspace):
         session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
-        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "plan"})
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "plan"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         wait_for_run(client, accepted.json()["run_id"])
         record = client.get(f"/api/sessions/{session}").json()
         assert record["active_task_id"] == "t2"
@@ -538,6 +577,7 @@ def test_api_run_with_attachments_inlines_and_truncates(isolated_workspace):
                 "prompt": "summarize",
                 "attachment_ids": [small["attachment_id"], big["attachment_id"]],
             },
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert accepted.status_code == 202
         run = wait_for_run(client, accepted.json()["run_id"])
@@ -577,6 +617,7 @@ def test_api_image_attachment_is_hydrated_only_for_provider(isolated_workspace):
         accepted = client.post(
             f"/api/sessions/{session}/runs",
             json={"prompt": "look", "attachment_ids": [image["attachment_id"]]},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert accepted.status_code == 202
         run = wait_for_run(client, accepted.json()["run_id"])
@@ -619,11 +660,13 @@ def test_api_run_rejects_unknown_and_foreign_attachments(isolated_workspace):
         missing = client.post(
             f"/api/sessions/{session}/runs",
             json={"prompt": "p", "attachment_ids": ["att_ffffffffffff"]},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert missing.status_code == 422
         foreign = client.post(
             f"/api/sessions/{other}/runs",
             json={"prompt": "p", "attachment_ids": [uploaded["attachment_id"]]},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert foreign.status_code == 422
         # A rejected attachment list must not leave a run behind.
@@ -639,7 +682,11 @@ def test_api_run_summary_includes_usage(isolated_workspace):
         session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
-        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "hello"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         run = wait_for_run(client, accepted.json()["run_id"])
         expected = {"input_tokens": 11, "output_tokens": 7}
         listed = client.get(f"/api/sessions/{session}/runs").json()
@@ -659,6 +706,7 @@ def test_api_run_accepts_per_message_model(isolated_workspace):
         accepted = client.post(
             f"/api/sessions/{session}/runs",
             json={"prompt": "hello", "model": "one-off-model"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert accepted.status_code == 202
         wait_for_run(client, accepted.json()["run_id"])
@@ -686,7 +734,9 @@ def test_api_run_plan_mode_blocks_write_tool(isolated_workspace):
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
         accepted = client.post(
-            f"/api/sessions/{session}/runs", json={"prompt": "plan it", "mode": "plan"}
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "plan it", "mode": "plan"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert accepted.status_code == 202
         run = wait_for_run(client, accepted.json()["run_id"])
@@ -709,7 +759,9 @@ def test_api_run_agent_mode_auto_approves(isolated_workspace):
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]
         accepted = client.post(
-            f"/api/sessions/{session}/runs", json={"prompt": "clean", "mode": "agent"}
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "clean", "mode": "agent"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         run = wait_for_run(client, accepted.json()["run_id"])
         assert run["status"] == "completed"

@@ -1267,6 +1267,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** AbandonBody */
+    AbandonBody: {
+      /** Expected Run Id */
+      expected_run_id: string;
+    };
     /** ApprovalBody */
     ApprovalBody: {
       /** Approved */
@@ -4967,7 +4972,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AbandonBody"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {

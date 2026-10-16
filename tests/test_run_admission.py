@@ -238,7 +238,9 @@ def test_http_202_has_durable_history_and_immediate_stop(isolated_workspace, mon
                 "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
             ).json()["session_id"]
             accepted = client.post(
-                f"/api/sessions/{session}/runs", json={"prompt": "HTTP durable goal"}
+                f"/api/sessions/{session}/runs",
+                json={"prompt": "HTTP durable goal"},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
             )
             assert accepted.status_code == 202
             run_id = accepted.json()["run_id"]
@@ -246,10 +248,16 @@ def test_http_202_has_durable_history_and_immediate_stop(isolated_workspace, mon
             messages = client.get(f"/api/sessions/{session}/messages").json()
             assert messages == [{"role": "user", "content": "HTTP durable goal"}]
             assert (
-                client.post(f"/api/sessions/{session}/runs", json={"prompt": "busy"}).status_code
+                client.post(
+                    f"/api/sessions/{session}/runs",
+                    json={"prompt": "busy"},
+                    headers={"Idempotency-Key": uuid.uuid4().hex},
+                ).status_code
                 == 409
             )
-            stopped = client.post(f"/api/runs/{run_id}/cancel")
+            stopped = client.post(
+                f"/api/runs/{run_id}/cancel", headers={"Idempotency-Key": uuid.uuid4().hex}
+            )
             assert stopped.status_code == 200
             assert stopped.json()["status"] == "interrupted"
             assert client.get(f"/api/runs/{run_id}/export").text.count('"run.admitted"') == 1
@@ -282,12 +290,16 @@ def test_event_references_protect_attachments_when_used_cache_is_missing(
                 "prompt": "read notes",
                 "attachment_ids": [aid],
             },
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert accepted.status_code == 202
         assert client.get(f"/api/sessions/{session}/attachments").json() == []
         used = client.get(f"/api/sessions/{session}/attachments?include_used=true").json()
         assert used[0]["used"] is True
-        assert client.delete(
-            f"/api/sessions/{session}/attachments/{aid}",
-            headers={"Idempotency-Key": uuid.uuid4().hex},
-        ).status_code == 409
+        assert (
+            client.delete(
+                f"/api/sessions/{session}/attachments/{aid}",
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ).status_code
+            == 409
+        )

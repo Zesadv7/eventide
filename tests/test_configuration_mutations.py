@@ -123,7 +123,14 @@ def test_transport_close_failure_keeps_config_and_blocks_reuse(isolated_workspac
         sid = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
             "session_id"
         ]
-        assert client.post(f"/api/sessions/{sid}/runs", json={"prompt": "wait"}).status_code == 409
+        assert (
+            client.post(
+                f"/api/sessions/{sid}/runs",
+                json={"prompt": "wait"},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ).status_code
+            == 409
+        )
         recovered = write(client, URL, provider_body(client), "explicit-recovery")
         assert recovered.status_code == 200 and transport.calls == 2
         assert host.provider is None
@@ -219,7 +226,11 @@ def test_generation_receipts_preserve_unset_null_and_empty_session_deletion(isol
         host.create_session(sid)
         assert host.generation_settings("test-model", sid)["session"] == {}
         assert write(client, path, body).status_code == 409
-        run = client.post("/api/sessions/configuration_control/runs", json={"prompt": "no"})
+        run = client.post(
+            "/api/sessions/configuration_control/runs",
+            json={"prompt": "no"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         assert run.status_code == 422
 
 

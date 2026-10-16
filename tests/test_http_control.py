@@ -67,7 +67,11 @@ def test_continue_key_does_not_create_another_turn(isolated_workspace):
         sid = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
             "session_id"
         ]
-        initial = client.post(f"/api/sessions/{sid}/runs", json={"prompt": "work"}).json()
+        initial = client.post(
+            f"/api/sessions/{sid}/runs",
+            json={"prompt": "work"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        ).json()
         assert wait(client, initial["run_id"])["status"] == "interrupted"
         path = f"/api/sessions/{sid}/continue"
         header = {"Idempotency-Key": "continue-once"}

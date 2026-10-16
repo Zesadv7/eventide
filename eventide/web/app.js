@@ -524,7 +524,7 @@ async function resolveApproval(owner, id, approvalId, approved) {
   try {
     const run = await request(`/api/runs/${id}`);
     if (terminal(run) || !run.pending_approvals?.[approvalId]) throw new Error("此审批已结束，请查看更新后的工作状态。");
-    await request(`/api/runs/${id}/approvals/${approvalId}`, {method: "POST", body: JSON.stringify({approved})});
+    await mutateWorkspace(`/api/runs/${id}/approvals/${approvalId}`, "POST", {approved});
     state.errors.delete(owner);
   } catch (error) { toastError(error, () => void resolveApproval(owner, id, approvalId, approved)); }
   finally { await refreshSession(owner).catch(() => {}); state.approvals.delete(approvalId); scheduleRender(); }
@@ -1199,7 +1199,7 @@ async function abandonInterruption() {
   if (!confirm("放弃本次恢复吗？历史会保留，结果未知的操作不会被当作成功或重新执行。")) return;
   state.busy.add(owner); state.errors.delete(owner); render();
   try {
-    await request(`/api/sessions/${owner}/abandon`, {method: "POST"});
+    await mutateWorkspace(`/api/sessions/${owner}/abandon`, "POST", {expected_run_id: runId(sessionRecord(owner).latest_run)});
     state.notices.set(owner, "已放弃本次恢复；历史仍然保留，现在可以提交新的工作。");
     await refreshSession(owner);
   } catch (error) { toastError(error, () => void abandonInterruption()); }
@@ -1213,7 +1213,7 @@ async function cancelCurrentRun() {
   const lock = `cancel:${runId(run)}`;
   state.busy.add(lock); state.errors.delete(owner); render();
   try {
-    await request(`/api/runs/${runId(run)}/cancel`, {method: "POST"});
+    await mutateWorkspace(`/api/runs/${runId(run)}/cancel`, "POST", {});
     state.notices.set(owner, "执行已停止，工作记录已停驻。");
     await refreshSession(owner);
   } catch (error) { toastError(error, () => void cancelCurrentRun()); }

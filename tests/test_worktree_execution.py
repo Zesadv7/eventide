@@ -2,6 +2,7 @@
 
 import asyncio
 import subprocess
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -446,16 +447,19 @@ async def test_http_worktree_binding_replayed_and_source_switch_rejected(isolate
     body = {"prompt": "edit", "execution_target": "worktree"}
     try:
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=create_app(host)), base_url="http://localhost",
+            transport=httpx.ASGITransport(app=create_app(host)),
+            base_url="http://localhost",
         ) as client:
             first = await client.post(
-                f"/api/sessions/{session}/runs", json=body,
+                f"/api/sessions/{session}/runs",
+                json=body,
                 headers={"Idempotency-Key": "writer-first"},
             )
             assert first.status_code == 202
             await asyncio.gather(*list(host._run_tasks.values()))
             repeated = await client.post(
-                f"/api/sessions/{session}/runs", json=body,
+                f"/api/sessions/{session}/runs",
+                json=body,
                 headers={"Idempotency-Key": "writer-first"},
             )
             assert repeated.json()["run_id"] == first.json()["run_id"]
@@ -465,10 +469,16 @@ async def test_http_worktree_binding_replayed_and_source_switch_rejected(isolate
             assert run["execution"]["kind"] == "worktree"
             assert status["workspace_id"] == host.default_workspace.workspace_id
             rejected = await client.post(
-                f"/api/sessions/{session}/runs", json={"prompt": "source by default"},
+                f"/api/sessions/{session}/runs",
+                json={"prompt": "source by default"},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
             )
             assert rejected.status_code == 422
-            followup = await client.post(f"/api/sessions/{session}/runs", json=body)
+            followup = await client.post(
+                f"/api/sessions/{session}/runs",
+                json=body,
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            )
             assert followup.status_code == 202
             await asyncio.gather(*list(host._run_tasks.values()))
             assert host.run_execution(followup.json()["run_id"]) == run["execution"]

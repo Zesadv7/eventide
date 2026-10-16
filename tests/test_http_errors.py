@@ -139,6 +139,7 @@ def test_two_apps_keep_runs_reservations_and_provider_mutations_independent(isol
         left_run = first.post(
             f"/api/sessions/{left_session}/runs",
             json={"prompt": "wait"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         ).json()["run_id"]
         right_session = second.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
@@ -146,6 +147,7 @@ def test_two_apps_keep_runs_reservations_and_provider_mutations_independent(isol
         right_run = second.post(
             f"/api/sessions/{right_session}/runs",
             json={"prompt": "finish"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         ).json()["run_id"]
         assert wait_for_run(second, right_run)["output"] == "right finished"
         saved = put_configuration(
@@ -160,5 +162,10 @@ def test_two_apps_keep_runs_reservations_and_provider_mutations_independent(isol
         assert saved.status_code == 200
         assert first.get(f"/api/runs/{right_run}").status_code == 404
         assert second.get(f"/api/runs/{left_run}").status_code == 404
-        assert first.post(f"/api/runs/{left_run}/cancel").status_code == 200
+        assert (
+            first.post(
+                f"/api/runs/{left_run}/cancel", headers={"Idempotency-Key": uuid.uuid4().hex}
+            ).status_code
+            == 200
+        )
         assert wait_for_run(first, left_run)["status"] == "interrupted"

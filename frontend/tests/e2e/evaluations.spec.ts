@@ -175,7 +175,11 @@ test("real evaluation scheduler: queued zero-case cancellation and running clean
         .attempt_count,
     ).toBe(0);
     await Promise.all(
-      roots.map((run) => page.request.post(`/api/runs/${run}/cancel`)),
+      roots.map((run) =>
+        page.request.post(`/api/runs/${run}/cancel`, {
+          headers: { "Idempotency-Key": crypto.randomUUID() },
+        }),
+      ),
     );
     roots.length = 0;
     await expect
@@ -232,7 +236,11 @@ test("real evaluation scheduler: queued zero-case cancellation and running clean
       ),
     );
     await Promise.all(
-      roots.map((run) => page.request.post(`/api/runs/${run}/cancel`)),
+      roots.map((run) =>
+        page.request.post(`/api/runs/${run}/cancel`, {
+          headers: { "Idempotency-Key": crypto.randomUUID() },
+        }),
+      ),
     );
   }
 });

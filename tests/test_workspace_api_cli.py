@@ -40,7 +40,11 @@ def test_workspace_http_catalog_and_session_binding(isolated_workspace):
             headers={"Idempotency-Key": uuid.uuid4().hex},
             json={"workspace_id": workspace_id},
         ).json()["session_id"]
-        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "hello"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         run_id = accepted.json()["run_id"]
         assert wait_for_run(client, run_id)["status"] == "completed"
         assert client.get(f"/api/sessions/{session}/messages").json()[0]["content"] == "hello"
@@ -78,7 +82,12 @@ def test_workspace_http_catalog_and_session_binding(isolated_workspace):
             ).status_code
             == 422
         )
-        assert client.post(f"/api/sessions/{session}/continue").status_code == 409
+        assert (
+            client.post(
+                f"/api/sessions/{session}/continue", headers={"Idempotency-Key": uuid.uuid4().hex}
+            ).status_code
+            == 409
+        )
 
 
 def test_http_continue_and_reject_parked_normal_run(isolated_workspace):
@@ -86,9 +95,16 @@ def test_http_continue_and_reject_parked_normal_run(isolated_workspace):
     with TestClient(create_app(host)) as client:
         assert client.get(f"/api/sessions/{session}").json()["status"] == "parked"
         assert (
-            client.post(f"/api/sessions/{session}/runs", json={"prompt": "oops"}).status_code == 409
+            client.post(
+                f"/api/sessions/{session}/runs",
+                json={"prompt": "oops"},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ).status_code
+            == 409
         )
-        result = client.post(f"/api/sessions/{session}/continue")
+        result = client.post(
+            f"/api/sessions/{session}/continue", headers={"Idempotency-Key": uuid.uuid4().hex}
+        )
         assert result.status_code == 202
         assert result.json()["status"] == "accepted"
         continued = wait_for_run(client, result.json()["run_id"])
@@ -104,7 +120,9 @@ def test_http_continue_returns_before_provider_finishes(isolated_workspace):
     host, session, _ = asyncio.run(interrupted_host(isolated_workspace))
     host.provider = WaitingProvider()
     with TestClient(create_app(host)) as client:
-        accepted = client.post(f"/api/sessions/{session}/continue")
+        accepted = client.post(
+            f"/api/sessions/{session}/continue", headers={"Idempotency-Key": uuid.uuid4().hex}
+        )
         assert accepted.status_code == 202
         run_id = accepted.json()["run_id"]
         assert client.get(f"/api/runs/{run_id}").status_code == 200
@@ -112,14 +130,28 @@ def test_http_continue_returns_before_provider_finishes(isolated_workspace):
             if host.store.run_events(run_id):
                 break
             time.sleep(0.01)
-        assert client.post(f"/api/runs/{run_id}/cancel").status_code == 200
+        assert (
+            client.post(
+                f"/api/runs/{run_id}/cancel", headers={"Idempotency-Key": uuid.uuid4().hex}
+            ).status_code
+            == 200
+        )
 
 
 def test_http_abandon_unlocks_parked_session(isolated_workspace):
     host, session, _ = asyncio.run(interrupted_host(isolated_workspace, "bash"))
     with TestClient(create_app(host)) as client:
-        assert client.post(f"/api/sessions/{session}/continue").status_code == 409
-        abandoned = client.post(f"/api/sessions/{session}/abandon")
+        assert (
+            client.post(
+                f"/api/sessions/{session}/continue", headers={"Idempotency-Key": uuid.uuid4().hex}
+            ).status_code
+            == 409
+        )
+        abandoned = client.post(
+            f"/api/sessions/{session}/abandon",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+            json={"expected_run_id": "crashed"},
+        )
         assert abandoned.status_code == 200
         assert abandoned.json()["continuation_of"] == "crashed"
         assert client.get(f"/api/sessions/{session}").json()["status"] == "completed"
@@ -181,7 +213,11 @@ def test_http_session_metadata_archive_and_delete(isolated_workspace):
             headers={"Idempotency-Key": uuid.uuid4().hex},
             json={"workspace_id": workspace_id},
         ).json()["session_id"]
-        accepted = client.post(f"/api/sessions/{history}/runs", json={"prompt": "work"})
+        accepted = client.post(
+            f"/api/sessions/{history}/runs",
+            json={"prompt": "work"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         wait_for_run(client, accepted.json()["run_id"])
         assert (
             client.request(
@@ -227,7 +263,11 @@ def test_http_session_working_directory_scopes_execution(isolated_workspace):
         assert created.status_code == 201
         session = created.json()["session_id"]
         assert client.get(f"/api/sessions/{session}").json()["working_directory"] == str(package)
-        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "read marker"})
+        accepted = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "read marker"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         run_id = accepted.json()["run_id"]
         assert wait_for_run(client, run_id)["status"] == "completed"
         result = next(

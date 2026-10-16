@@ -164,7 +164,9 @@ async function removeAttachment(id: string) {
 async function abandon() {
   if (!confirm("放弃本轮恢复？历史将保留，未确认副作用仍需人工检查。")) return;
   try {
-    await api.abandon(store.selectedSession);
+    const target = store.currentRun;
+    if (!target) return;
+    await api.abandon(store.selectedSession, target.run_id);
     await store.refreshSession(store.selectedSession);
   } catch (e) {
     store.fail(e);

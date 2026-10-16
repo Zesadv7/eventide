@@ -118,13 +118,29 @@ export const api = {
     post<Receipt>(`/api/sessions/${id(session)}/runs`, body, key),
   continue: (session: string, key: string) =>
     post<Receipt>(`/api/sessions/${id(session)}/continue`, undefined, key),
-  abandon: (session: string) =>
-    post<Run>(`/api/sessions/${id(session)}/abandon`),
-  cancel: (run: string) => post<unknown>(`/api/runs/${id(run)}/cancel`),
+  abandon: (session: string, run: string) =>
+    durableMutation<Run>(
+      "run-abandon",
+      `/api/sessions/${id(session)}/abandon`,
+      "POST",
+      { expected_run_id: run },
+    ),
+  cancel: (run: string) =>
+    durableMutation<unknown>(
+      "run-cancel",
+      `/api/runs/${id(run)}/cancel`,
+      "POST",
+      {},
+    ),
   approve: (run: string, approval: string, approved: boolean) =>
-    post<unknown>(`/api/runs/${id(run)}/approvals/${id(approval)}`, {
-      approved,
-    }),
+    durableMutation<unknown>(
+      "run-approval",
+      `/api/runs/${id(run)}/approvals/${id(approval)}`,
+      "POST",
+      {
+        approved,
+      },
+    ),
   provider: () => request<ProviderStatus>("/api/config/provider"),
   saveProvider: (body: ProviderInput, expected: string) =>
     configurationMutation<ProviderStatus>(

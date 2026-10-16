@@ -149,7 +149,9 @@ test("real run history: archived evidence, exact JSONL and reload without replac
         JSON.parse(sessionStorage.getItem("eventide.session")!),
       ),
     ).toBe(active.session_id);
-    await page.request.post(`/api/runs/${activeRun}/cancel`);
+    await page.request.post(`/api/runs/${activeRun}/cancel`, {
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    });
     activeRun = "";
     await page.goto(`./#/history?session=${session}&run=${oldRun}`);
     await expect(detail).toContainText(oldRun);
@@ -170,6 +172,9 @@ test("real run history: archived evidence, exact JSONL and reload without replac
     await page.screenshot({ path: "test-results/history-mobile-detail.png" });
     expect(errors).toEqual([]);
   } finally {
-    if (activeRun) await page.request.post(`/api/runs/${activeRun}/cancel`);
+    if (activeRun)
+      await page.request.post(`/api/runs/${activeRun}/cancel`, {
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+      });
   }
 });

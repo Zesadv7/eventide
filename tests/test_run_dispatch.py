@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import threading
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -66,7 +67,8 @@ async def test_default_limits_http_capacity_idempotency_and_exact_cancel(isolate
     provider = BlockingProvider()
     host = make_host(isolated_workspace, provider)
     client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(host)), base_url="http://localhost",
+        transport=httpx.ASGITransport(app=create_app(host)),
+        base_url="http://localhost",
     )
     sessions = [host.create_session() for _ in range(25)]
     body = {"prompt": "inspect", "mode": "plan", "execution_target": "snapshot"}
@@ -74,7 +76,8 @@ async def test_default_limits_http_capacity_idempotency_and_exact_cancel(isolate
         accepted = []
         for index, session in enumerate(sessions[:24]):
             response = await client.post(
-                f"/api/sessions/{session}/runs", json=body,
+                f"/api/sessions/{session}/runs",
+                json=body,
                 headers={"Idempotency-Key": f"job-{index}"},
             )
             assert response.status_code == 202, response.text
@@ -83,41 +86,59 @@ async def test_default_limits_http_capacity_idempotency_and_exact_cancel(isolate
         queue = (await client.get("/api/queue")).json()
         assert queue["limits"] == {"active_roots": 4, "model_requests": 2, "waiting_roots": 20}
         assert queue["counts"] == {
-            "active_roots": 4, "waiting_roots": 20, "preparing_admissions": 0,
-            "active_models": 2, "waiting_models": 2,
+            "active_roots": 4,
+            "waiting_roots": 20,
+            "preparing_admissions": 0,
+            "active_models": 2,
+            "waiting_models": 2,
         }
         assert [row["run_id"] for row in queue["queued"]] == accepted[4:]
         assert [row["position"] for row in queue["queued"]] == list(range(1, 21))
-        assert all(row["status"] == row["dispatch_state"] == "queued"
-                   for row in queue["queued"])
-        assert all(row["project_id"] == host.default_workspace.project_id
-                   for row in queue["active"] + queue["queued"])
+        assert all(row["status"] == row["dispatch_state"] == "queued" for row in queue["queued"])
+        assert all(
+            row["project_id"] == host.default_workspace.project_id
+            for row in queue["active"] + queue["queued"]
+        )
         assert host.session_status(sessions[-2])["status"] == "queued"
         assert not host.workspace_busy(host.default_workspace.workspace_id)
         duplicate = await client.post(
-            f"/api/sessions/{sessions[4]}/runs", json=body,
+            f"/api/sessions/{sessions[4]}/runs",
+            json=body,
             headers={"Idempotency-Key": "job-4"},
         )
         assert duplicate.status_code == 202 and duplicate.json()["run_id"] == accepted[4]
-        rejected = await client.post(f"/api/sessions/{sessions[-1]}/runs", json=body)
+        rejected = await client.post(
+            f"/api/sessions/{sessions[-1]}/runs",
+            json=body,
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         assert rejected.status_code == 429
         assert host.store.load_messages(sessions[-1]) == []
         assert host.store.list_runs(sessions[-1]) == []
         config = await client.request(
-            "DELETE", "/api/config/provider",
-            json={"expected_config_hash": (await client.get(
-                "/api/config/provider"
-            )).json()["config_hash"]},
+            "DELETE",
+            "/api/config/provider",
+            json={
+                "expected_config_hash": (await client.get("/api/config/provider")).json()[
+                    "config_hash"
+                ]
+            },
             headers={"Idempotency-Key": "busy-reset"},
         )
         assert config.status_code == 409
-        stopped = await client.post(f"/api/runs/{accepted[4]}/cancel")
+        stopped = await client.post(
+            f"/api/runs/{accepted[4]}/cancel", headers={"Idempotency-Key": uuid.uuid4().hex}
+        )
         assert stopped.status_code == 200 and stopped.json()["status"] == "interrupted"
         assert not host.session_busy(sessions[4])
         assert host.store.load_messages(sessions[4])[0]["content"] == "inspect"
         assert not host.store.usage_events(run_id=accepted[4])
         assert len(provider.requests) == 2
-        replacement = await client.post(f"/api/sessions/{sessions[-1]}/runs", json=body)
+        replacement = await client.post(
+            f"/api/sessions/{sessions[-1]}/runs",
+            json=body,
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         assert replacement.status_code == 202
         queue = (await client.get("/api/queue")).json()
         assert queue["queued"][-1]["run_id"] == replacement.json()["run_id"]
@@ -233,7 +254,8 @@ async def test_unverifiable_source_is_rejected_before_queue_acceptance(isolated_
 async def test_same_session_preparation_ticket_is_http_conflict(isolated_workspace, monkeypatch):
     host = make_host(isolated_workspace, ScriptedProvider([{"text": "done"}]))
     client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app(host)), base_url="http://localhost",
+        transport=httpx.ASGITransport(app=create_app(host)),
+        base_url="http://localhost",
     )
     session = host.create_session()
     preparing, release = asyncio.Event(), asyncio.Event()
@@ -245,16 +267,24 @@ async def test_same_session_preparation_ticket_is_http_conflict(isolated_workspa
         return await original(*args, **kwargs)
 
     monkeypatch.setattr(host, "_prepare_run", slow_prepare)
-    first = asyncio.create_task(client.post(
-        f"/api/sessions/{session}/runs", json={"prompt": "first"},
-    ))
+    first = asyncio.create_task(
+        client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "first"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+    )
     try:
         await asyncio.wait_for(preparing.wait(), 5)
         queue = (await client.get("/api/queue")).json()
         assert queue["counts"]["preparing_admissions"] == 1
         assert queue["counts"]["active_roots"] == 1
         assert not queue["queued"] and not queue["active"]
-        second = await client.post(f"/api/sessions/{session}/runs", json={"prompt": "second"})
+        second = await client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "second"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
         assert second.status_code == 409
         assert not host.store.load_messages(session)
         release.set()
