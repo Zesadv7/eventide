@@ -90,6 +90,8 @@ SSE/get_events 为旧客户端把 prepared/completed 映射成 tool.request/tool
 
 ## 三类投影与上下文
 
+`read_file` 在生产源目录、执行副本和只读快照中统一展示一基绝对源码行号，保留空行及分页后的原始坐标；默认页预算包含显示前缀，`offset` 仍为零基。原文件、编辑匹配和旧事件不改写。Host明确要求保持用户指定的输出格式、字段和标识，引用实际读取的源码；Plan只限制执行权限，不再额外要求事实问答必须产出计划。模型不遵守格式或给出错误事实时仍由原独立判分拒绝，不剥围栏改判，不自动追加请求纠错。
+
 MessagesProjection 只消费已提交消息和工具事实，保留工具配对、次序及 Responses 私有状态。未配对历史拒绝发送给模型；其他 Provider 按 adapter 契约忽略不适用的私有状态。
 
 RuntimeStateProjection 从事件得到 running、waiting_for_user、completed、failed、interrupted、usage、步骤、工具、停驻原因和待审批状态。SessionManager 将最新 interrupted run 展示为 parked；pending approval 保留历史证据，审批提交还必须匹配该 run 与当前进程的 pending future。

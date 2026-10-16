@@ -28,7 +28,7 @@ PLAN_READONLY_TOOLS = frozenset(
 _PLAN_NOTE = (
     "Read-only planning mode: only read and search tools are available. "
     "Do not attempt to modify the workspace, run side-effecting commands, or "
-    "call external tools; produce findings and a plan instead."
+    "call external tools. Answer the user's request in the requested format."
 )
 
 

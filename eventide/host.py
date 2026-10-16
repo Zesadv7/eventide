@@ -3112,6 +3112,9 @@ class RuntimeHost:
             base_system = (
                 "You are Eventide. Use tools to finish work, respect permissions, and never "
                 "claim success without evidence.\n"
+                "Honor the user's exact output format and identifiers; JSON-only means no "
+                "prose or fences. Ground claims in inspected files and cite the source line "
+                "numbers shown by read_file.\n"
                 f"Workspace: {workspace_root}\nWorking directory: {working_root}\n"
                 f"Project instructions:\n{instructions}"
                 + (f"\n\n{skill_prompt}" if skill_prompt else "")

@@ -18,8 +18,8 @@ TOOLS = [
     _tool("bash", "Run a command on the local host (not a sandbox)."),
     _tool(
         "read_file",
-        "Read a workspace text file. Long files are paged; the header reports the "
-        "total line count and the next offset.",
+        "Read text with one-based source line numbers (display only, not file content). "
+        "Offset is zero-based. Long files report total lines and next offset.",
     ),
     _tool(
         "write_file",

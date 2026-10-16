@@ -24,9 +24,9 @@ def run_read(path: str, limit: int | None = None, offset: int = 0, cwd: Path | N
     """Read a text file, paging long files and reporting the file's full extent.
 
     offset/limit are line-based. Without an explicit limit the page is cut so the
-    whole reply stays under the runtime's 4,000-character text cap, and the header
-    (kept at the front, so it survives any later clipping) reports the total line
-    count and the next offset. Small files are returned verbatim.
+    numbered reply stays within the page budget. Line numbers are one-based
+    source coordinates, including when offset is nonzero; they are not file text.
+    The header reports the total line count and the next zero-based offset.
     """
     try:
         base = (cwd or Path.cwd()).resolve()
@@ -36,7 +36,7 @@ def run_read(path: str, limit: int | None = None, offset: int = 0, cwd: Path | N
         start = max(int(offset or 0), 0)
         if total and start >= total:
             return f"[{path} — {total} lines total; offset {start} is past the end]"
-        remaining = lines[start:]
+        remaining = [f"{number}: {line}" for number, line in enumerate(lines[start:], start + 1)]
         page = remaining[: int(limit)] if limit is not None else _page(remaining, READ_PAGE_CHARS)
         cut = len(remaining) - len(page)
         body = "\n".join(page)
