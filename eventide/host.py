@@ -11,7 +11,7 @@ import tempfile
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import aclosing, asynccontextmanager, contextmanager, suppress
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -1123,7 +1123,9 @@ class RuntimeHost:
         binding = intent.get("execution_binding", {})
         if binding.get("kind") == "delivery":
             return f"delivery_operation:{binding['delivery_id']}"
-        if binding.get("kind") in {"evaluation", "index", "worktree_control", "history_import"}:
+        if binding.get("kind") in {
+            "evaluation", "index", "worktree_control", "history_import", "python_experiment",
+        }:
             return f"{binding['kind']}_run:{run_id}"
         if binding.get("kind") == "snapshot":
             return f"snapshot_run:{run_id}"
@@ -1150,6 +1152,8 @@ class RuntimeHost:
         if not binding:
             return {"kind": "source"}
         if binding["kind"] == "delivery":
+            return dict(binding)
+        if binding["kind"] == "python_experiment":
             return dict(binding)
         if binding["kind"] in {"evaluation", "index", "worktree_control", "history_import"}:
             identifier = {"evaluation": "evaluation_id", "index": "index_run_id",
@@ -1318,6 +1322,152 @@ class RuntimeHost:
 
     def is_control_session(self, session_id: str) -> bool:
         return self.store.session_is_control(session_id)
+
+    def _is_python_experiment_run(self, run_id: str) -> bool:
+        identity = self.store.get_run_identity(run_id)
+        intent = self._admitted_intent(run_id) or {}
+        if (not identity or intent.get("source") != "python_experiment"
+                or intent.get("mode") != "python_experiment"):
+            return False
+        session = self.store.get_session(identity["session_id"])
+        if session is None or not session["archived"]:
+            return False
+        workspace = self.store.get_workspace(session["workspace_id"])
+        return (
+            intent.get("project_id") == workspace.project_id
+            and intent.get("execution_binding") == {
+                "kind": "python_experiment", "purpose": "retrieval_benchmark",
+                "operation_id": run_id, "workspace_id": workspace.workspace_id,
+            }
+            and any(e["type"] == "control.session" and e["payload"] == {
+                "kind": "python_experiment", "purpose": "retrieval_benchmark",
+                "project_id": workspace.project_id,
+            } for e in self.store.session_events(identity["session_id"]))
+        )
+
+    async def run_control_operation(
+        self, *, kind: str, project_id: str, run_id: str, accepted: dict[str, Any],
+        execute: Callable[[str], Awaitable[None]],
+    ) -> RunResult:
+        """Internal Python experiments, with canonical control ownership and no replay.
+
+        This is not an HTTP extension or an Agent tool-dispatch entry. The first
+        supported purpose is the frozen retrieval benchmark; its callback runs
+        the existing typed retrieval and model-request implementation.
+        """
+        if kind != "retrieval_benchmark":
+            raise ValueError("Unsupported Python control purpose")
+        if (not isinstance(run_id, str) or not 1 <= len(run_id) <= 128
+                or not run_id.isascii() or any(not (c.isalnum() or c in "_-") for c in run_id)):
+            raise ValueError("Invalid control Run identity")
+        await self.initialize()
+        if (self._closed or self._configuring or self._provider_cleanup_required
+                or self._configuration_uncertain):
+            raise ValueError("Runtime configuration is unavailable")
+        if self._evaluation_bridge is not None:
+            raise ValueError("Python experiments require the owning model-call Host")
+        if self.store.get_run_identity(run_id) is not None:
+            raise ValueError("Run identity already used; Python experiments cannot replay")
+        frozen = json.loads(json.dumps(accepted, allow_nan=False))
+        project = self.store.get_project(project_id)
+        workspace = self.store.get_workspace(project.source_workspace_id)
+        owner = f"python_{kind}_{project_id}"
+        marker = {"kind": "python_experiment", "purpose": kind, "project_id": project_id}
+        session = self.store.get_session(owner)
+        if session is None:
+            self.create_session(owner, workspace_id=workspace.workspace_id)
+            self.store.append_fact(owner, "control.session", marker)
+            self.store.update_session(owner, title="Python retrieval experiment", archived=True)
+        elif (session["workspace_id"] != workspace.workspace_id or not session["archived"]
+              or not any(
+            e["type"] == "control.session" and e["payload"] == marker
+            for e in self.store.session_events(owner)
+        )):
+            raise ValueError("Python control Session identity conflict")
+        if self.session_busy(owner):
+            raise ValueError("Python experiment Session is busy")
+        intent = {
+            **self._run_intent(None),
+            "mode": "python_experiment", "source": "python_experiment",
+            "project_id": project_id, "workspace_id": workspace.workspace_id,
+            "execution_binding": {"kind": "python_experiment", "purpose": kind,
+                                  "operation_id": run_id, "workspace_id": workspace.workspace_id},
+        }
+        ticket = self.dispatch.scheduler.reserve_admission(run_id, owner, startable=True)
+        try:
+            self.store.admit_run(run_id, owner, [
+                ("run.admitted", intent, "system", "runtime"),
+                ("control.operation_accepted", {"purpose": kind, "configuration": frozen},
+                 "system", "runtime"),
+            ])
+            self._admission_done[run_id] = _Admission(owner, asyncio.Event())
+            self._admissions[self._execution_key(run_id, intent)] = run_id
+            self.dispatch.admitted(ticket)
+        except BaseException as exc:
+            self._finish_admitted(run_id, exc)
+            self._release_admission(run_id)
+            self.dispatch.scheduler.release_ticket(ticket)
+            raise
+        finally:
+            self.dispatch.dispatch()
+
+        async def owned() -> RunResult:
+            async with self._session_execution(owner, run_id):
+                if (not self._is_python_experiment_run(run_id)
+                        or self._run_tasks.get(run_id) is not asyncio.current_task()
+                        or run_id not in self.dispatch._leases):
+                    raise ValueError("Python control Run is not owned by this Host")
+                started = time.perf_counter()
+                self.store.append_event(run_id, "run.started", intent)
+                try:
+                    operation = asyncio.ensure_future(execute(run_id))
+                    try:
+                        await asyncio.shield(operation)
+                    except asyncio.CancelledError:
+                        operation.cancel()
+                        while not operation.done():
+                            with suppress(asyncio.CancelledError, Exception):
+                                await asyncio.shield(operation)
+                        if not operation.cancelled():
+                            operation.exception()
+                        raise
+                    duration = (time.perf_counter() - started) * 1000
+                    output = "Python retrieval experiment completed"
+                    self.store.append_event(run_id, "run.completed", {
+                        "output": output, "steps": 0, "tool_calls": 0,
+                        "usage": {}, "duration_ms": duration,
+                    })
+                    identity = self.store.get_run_identity(run_id)
+                    assert identity is not None
+                    return RunResult(run_id, owner, "completed", output, 0, 0, duration,
+                                     turn_id=identity["turn_id"])
+                except BaseException as exc:
+                    interrupted = isinstance(exc, (asyncio.CancelledError, BudgetExceeded))
+                    self.store.append_event(
+                        run_id, "run.interrupted" if interrupted else "run.failed",
+                        {"reason": "cancelled" if isinstance(exc, asyncio.CancelledError)
+                         else "budget_blocked" if isinstance(exc, BudgetExceeded)
+                         else "python_experiment_failed", "error": self._clean(str(exc))},
+                    )
+                    raise
+        try:
+            task = self.dispatch.start(run_id, owned)
+        except BaseException as exc:
+            self._finish_admitted(run_id, exc)
+            self._release_admission(run_id)
+            self.dispatch.finished(run_id)
+            raise
+        self._track_run_task(run_id, task)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            task.cancel()
+            while not task.done():
+                with suppress(asyncio.CancelledError, Exception):
+                    await asyncio.shield(task)
+            if not task.cancelled():
+                task.exception()
+            raise
 
     @asynccontextmanager
     async def _workspace_execution(
@@ -2248,6 +2398,7 @@ class RuntimeHost:
             # Replacing it with the current filesystem would hide queue-time drift.
             queued = not started and self._admitted_intent(run_id) is not None
             evidence = (None if queued or is_service_probe_run(self.store, run_id)
+                        or self._is_python_experiment_run(run_id)
                         or is_evaluation_run(self.store, run_id) or is_index_run(self.store, run_id)
                         or is_delivery_control_run(self.store, run_id)
                         or is_worktree_control_run(self.store, run_id)

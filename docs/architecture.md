@@ -589,10 +589,16 @@ scripted 与未跑完的批次保留统计，不产生真实优化通过结论�
 
 三类官方SDK客户端显式使用Settings.model_timeout作为连接、读取、写入和连接池等待上限，避免隐含的5秒连接默认值先于配置截止；Host仍限制整个请求生命周期并保持原取消/断流不重放规则。SDK重试保持0，发生未知消费时不释放预留。此修正由真实项目重放中的早期超时暴露，但不能据此断言该次供应商超时的底层原因。
 
-C4机制补充：`query_rewrite_outcome` 返回真实 `RetrievalOutcome`，原 `with_query_rewrite` 只负责相同结果的文本格式化，ToolExecutor/PolicyEngine边界未变。`rag.benchmark.run_benchmark` 的协作停止保留已完成排名和未尝试数量，不把未派发查询算失败，不完整对照禁止晋升。受控改写实验的Host生命周期适配仍在实现。
 
 
 wheel分发检查同时要求workbench实际文件集合与manifest完全相等，拒绝已退役cli.py/web目录及重复ZIP路径。setuptools增量build缓存可能包含已删除源码或旧哈希资源；发布采用确认可丢弃后的干净构建，并以安装包隔离验证决定通过，不能把源码树的干净状态当作包内容证据。
 
 
 实验稳定身份排除交付随机writer_delivery_id，仅该定位字段不参与对照；本地/容器执行配置等实际条件仍严格比较，原始交付身份完整保留在逐题报告与事件中。重复运行不能因为新建交付UUID被判为改变实验条件。
+
+C4机制补充：`query_rewrite_outcome` 返回真实 `RetrievalOutcome`，原 `with_query_rewrite` 只负责相同结果的文本格式化，ToolExecutor/PolicyEngine边界未变。`rag.benchmark.run_benchmark` 的协作停止保留已完成排名和未尝试数量，不把未派发查询算失败，不完整对照禁止晋升。受控改写实验的Host生命周期适配已接入，真实效果另行验收。
+
+
+C4受控Python接口复用 `RuntimeHost.run_control_operation`，仅接受 `retrieval_benchmark` 用途。控制Session绑定源项目并归档，接收事实冻结任务和模型配置，执行身份为 `python_experiment`；不借用普通Plan身份、评测控制器或工具展示文本。每条查询/重复独立占原根队列名额，原模型链路持有2槽及项目/日预算。原语料在临时Git目录索引，不修改用户源码；本地索引和排名不产生虚构Token事实。生产工具入口的ToolExecutor/PolicyEngine边界不变。
+
+`retrieval.benchmark_result` 与唯一模型尝试写同一Store，包含原结果和结构化融合结果；导出只派生统计，不再写另一份用量。无效/不变/截断改写保留原排名并标degraded，不视为成功改写；认证、网络或协议故障造成的rewrite_failed、索引漂移、预算及取消停止扩批。队列取消时不伪造已尝试查询，原检索失败则记录已尝试失败。重复取消等待实际请求和本地线程收尾后释放根和模型槽；重启停驻，无自动重放或普通Agent/Continue入口。报告拆分纯检索、Provider及总延迟，返回字符不冒充供应商Token；缺下游证据始终禁止默认晋升。

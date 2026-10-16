@@ -481,3 +481,6 @@ Run／Continue接收补充：已经存在canonical接收身份时，后续附件
 Executor捕获真实异常时，metadata可带`exception_type`类名。新窗口只接受实际异常、timeout或非零exit_code依据；仅有字符串`Error:`前缀的旧execution_failed不纳入，保留原is_error呈现和步数控制。
 
 同批剩余调用以`tool.abandoned(reason=repeated_tool_failure,dispatched=false)`补齐，不产生`tool.prepared`或执行。Continue仍须通过现有恢复检查和显式请求，保留原失败窗口；若再次同样失败，可立即再次停驻。没有可验证源码checkpoint时不生成此停驻理由，沿用原步数上限。预算拒绝、未知结果、参数纠错和取消不改变为该理由。
+
+
+受控Python检索实验没有新增HTTP写入口。已有Run/Session/队列只读投影可显示 `execution={kind:"python_experiment",purpose:"retrieval_benchmark",operation_id,workspace_id}`；Session为managed且归档。普通Run、Continue和abandon拒绝此身份，停止仍使用精确Run停止接口并等待实际清理。事件包含control.operation_accepted、retrieval.benchmark_result和原Run/模型尝试事实；重启停驻且不能通过HTTP自动重放实验。

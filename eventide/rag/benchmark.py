@@ -8,7 +8,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -24,6 +24,9 @@ from eventide.rag.search import (
     retrieve,
     sparse_search,
 )
+
+if TYPE_CHECKING:
+    from eventide.host import RuntimeHost
 
 DATASET_SHA256 = "b484aa273ab80de18d945d75237a473a6a833e6cddfd9558306a8b6ad24136b3"
 
@@ -200,3 +203,219 @@ def run_benchmark(
                             "timings include inference and index/model integrity checks",
                             "returned characters are not provider input Tokens"],
         }
+
+
+async def run_query_rewrite_benchmark(
+    host: RuntimeHost, *, project_id: str, embedder: EmbeddingProvider,
+    profile: EmbeddingProfile, confirmed: bool = False,
+    split: Literal["development", "holdout", "all"] = "development", repeats: int = 3,
+    reranker: Reranker | None = None, reranker_identity: str | None = None,
+    output_path: Path | None = None,
+) -> dict[str, Any]:
+    """Controlled Python experiment, using one Host-owned root and claim per query.
+
+    Confirmation permits real rewrite requests through the supplied Host. Local
+    indexing/ranking never fabricates provider usage. JSON is a discardable export
+    of that Host's accepted inputs, typed results and exclusive attempt evidence.
+    """
+    import asyncio
+    import uuid
+    from dataclasses import asdict
+
+    from eventide.budget_prices import summarize_cost_events
+    from eventide.budgets import BudgetExceeded
+    from eventide.eval_evidence import atomic_json
+    from eventide.retrieval_rewrite import query_rewrite_outcome
+    from eventide.usage import build_usage_ledger
+    from eventide.utils import owned_local_work
+
+    if confirmed is not True:
+        raise ValueError("Query rewrite benchmark requires explicit confirmation")
+    if (type(repeats) is not int or not 1 <= repeats <= 10
+            or split not in {"development", "holdout", "all"}):
+        raise ValueError("Invalid retrieval experiment split or repeats")
+    if profile.provider == "openai_compatible":
+        raise ValueError("Retrieval experiments require a fixed local index model")
+    if reranker is not None and not reranker_identity:
+        raise ValueError("Reranker identity required for reproducible comparison")
+    await host.initialize()
+    host.store.get_project(project_id)
+    frozen = load_dataset()
+    selected = [(case, repetition) for case in frozen.cases
+                if split == "all" or case.split == split for repetition in range(repeats)]
+    configuration = host._run_intent(None)
+    identity = {
+        "experiment_id": f"retrieval_{uuid.uuid4().hex}", "split": split, "repeats": repeats,
+        "dataset_version": frozen.version, "dataset_sha256": _digest(frozen.model_dump()),
+        "corpus_sha256": _digest(frozen.documents), "runtime": runtime_revision(),
+        "embedding_fingerprint": profile.fingerprint(), "reranker_identity": reranker_identity,
+        "model_configuration": configuration,
+    }
+    originals: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
+    events: dict[str, list[dict[str, Any]]] = {}
+    controls: list[str] = []
+    report: dict[str, Any] = {
+        "schema_version": 1, **identity, "status": "running",
+        "limitations": [
+            "ranking quality includes fallback candidates; execution failures are separate",
+            "local retrieval time is separate from total rewrite and provider request time",
+            "returned characters are not provider input Tokens",
+            "downstream task quality and complete cost evidence are required before promotion",
+        ],
+    }
+
+    def save(status: str) -> None:
+        observed = [event for snapshot in events.values() for event in snapshot]
+        comparisons = {}
+        for name, rows in (("original", originals), ("query_rewrite", candidates)):
+            summary = _summarize(rows) if rows else {
+                "passed": 0, "total": 0, "recall_at_5": None, "mrr": None,
+                "latency_p50_ms": None, "latency_p95_ms": None, "results": [],
+            }
+            comparisons[name] = {**summary, "expected": len(selected),
+                                 "failed": sum(r["status"] == "failed" for r in rows),
+                                 "interrupted": sum(r["status"] == "interrupted" for r in rows),
+                                 "degraded": sum(r["status"] == "degraded" for r in rows),
+                                 "invalid_outputs": sum(
+                                     "rewrite_invalid_or_unchanged" in r.get("diagnostics", [])
+                                     for r in rows),
+                                 "successful_rewrites": sum(
+                                     r.get("rewrite_succeeded") is True for r in rows
+                                 ) if name == "query_rewrite" else None,
+                                 "unattempted": len(selected) - len(rows)}
+        attempted = {(row["id"], row["repetition"]) for row in candidates}
+        report.update(
+            status=status, comparisons=comparisons,
+            remaining=[{"id": c.id, "split": c.split, "repetition": r}
+                       for c, r in selected if (c.id, r) not in attempted],
+            evidence={"source": "eventide.event_log", "database": str(host.store.path),
+                      "run_ids": list(controls), "usage": build_usage_ledger(observed),
+                      "costs": summarize_cost_events([e for e in observed if e["type"] in {
+                          "budget.reserved", "cost.estimated",
+                      }])},
+            # Downstream task evidence and all-attempt cost comparisons are separate.
+            promotion={"promote": False, "reason": "downstream_evidence_missing"
+                       if status == "completed" else "incomplete_comparison"},
+        )
+        if output_path is not None:
+            atomic_json(output_path, report)
+
+    save("running")
+    try:
+        with tempfile.TemporaryDirectory(prefix="eventide-retrieval-rewrite-") as directory:
+            workspace = Path(directory)
+            for name, body in frozen.documents.items():
+                target = workspace / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(body, encoding="utf-8")
+            await owned_local_work(_init_git_workspace, workspace)
+            build_started = time.perf_counter()
+            stats = await owned_local_work(IndexStore(workspace).build,
+                                           embedder=embedder, profile=profile)
+            report.update(indexed_files=stats.files, indexed_chunks=stats.chunks,
+                          chunking_fingerprint=stats.chunking_fingerprint,
+                          build_duration_ms=(time.perf_counter() - build_started) * 1000)
+            for case, repetition in selected:
+                if host._run_intent(None) != configuration:
+                    raise ValueError("Model configuration changed during the experiment")
+                run_id = f"run_{uuid.uuid4().hex}"
+                controls.append(run_id)
+
+                async def execute(
+                    owned: str, case: QueryCase = case, repetition: int = repetition,
+                ) -> None:
+                    original: RetrievalOutcome | None = None
+                    outcome: RetrievalOutcome | None = None
+                    retrieval_ms = original_ms = 0.0
+                    started = time.perf_counter()
+                    status = "completed"
+
+                    async def search(query: str, k: int) -> RetrievalOutcome:
+                        nonlocal original, retrieval_ms, original_ms
+                        search_started = time.perf_counter()
+                        try:
+                            found = await owned_local_work(
+                                retrieve, workspace, query, embedder=embedder, profile=profile,
+                                reranker=reranker, k=k,
+                            )
+                        finally:
+                            elapsed = (time.perf_counter() - search_started) * 1000
+                            retrieval_ms += elapsed
+                        if original is None:
+                            original, original_ms = found, elapsed
+                        return found
+
+                    try:
+                        outcome = await query_rewrite_outcome(
+                            host, owned, workspace, search, case.query,
+                        )
+                        if any(d in {"rewrite_failed", "rewrite_index_changed"}
+                               for d in outcome.diagnostics):
+                            raise RuntimeError("Query rewrite did not complete; batch stopped")
+                        if any(d.startswith("rewrite_") for d in outcome.diagnostics):
+                            status = "degraded"
+                    except BaseException as exc:
+                        status = "interrupted" if isinstance(
+                            exc, (asyncio.CancelledError, BudgetExceeded),
+                        ) else "failed"
+                        raise
+                    finally:
+                        available = original is not None
+                        original = original or RetrievalOutcome((), "unavailable")
+                        elapsed = (time.perf_counter() - started) * 1000
+                        result = outcome or original
+                        base = {**_grade_hits(case.model_dump(), list(original.results)),
+                                "status": "completed" if available else status,
+                                "duration_ms": original_ms if available else retrieval_ms,
+                                "retrieval_duration_ms": original_ms if available else retrieval_ms,
+                                "model_duration_ms": 0.0,
+                                "returned_characters": sum(len(h.chunk.text)
+                                                           for h in original.results),
+                                "diagnostics": list(original.diagnostics),
+                                "ranking": asdict(original), "repetition": repetition,
+                                "split": case.split, "run_id": owned}
+                        calls = build_usage_ledger(host.model_usage_events(owned))["calls"]
+                        model_ms = sum(c["duration_ms"] for c in calls
+                                       if c["duration_ms"] is not None)
+                        candidate = {
+                            **_grade_hits(case.model_dump(), list(result.results)),
+                            "status": status, "duration_ms": elapsed,
+                            "retrieval_duration_ms": retrieval_ms,
+                            "model_duration_ms": model_ms,
+                            "rewrite_succeeded": status == "completed"
+                            and result.mode == "query-rrf",
+                            "returned_characters": sum(len(h.chunk.text) for h in result.results),
+                            "diagnostics": list(result.diagnostics),
+                            "ranking": asdict(result), "repetition": repetition,
+                            "split": case.split, "run_id": owned,
+                        }
+                        host.store.append_event(owned, "retrieval.benchmark_result", {
+                            "original": base, "query_rewrite": candidate,
+                        })
+                        originals.append(base)
+                        candidates.append(candidate)
+                        events[owned] = host.store.run_events(owned)
+                        save("running" if status in {"completed", "degraded"} else "aborted")
+
+                try:
+                    await host.run_control_operation(
+                        kind="retrieval_benchmark", project_id=project_id, run_id=run_id,
+                        accepted={**identity, "case": case.model_dump(), "repetition": repetition},
+                        execute=execute,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    if host.store.get_run_identity(run_id) is None:
+                        controls.remove(run_id)
+                        raise
+                    report["stop_reason"] = type(exc).__name__
+                    save("aborted")
+                    return report
+        save("completed")
+        return report
+    except BaseException as exc:
+        report["stop_reason"] = type(exc).__name__
+        save("aborted")
+        raise
