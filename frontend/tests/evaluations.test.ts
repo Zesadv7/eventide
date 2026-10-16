@@ -57,6 +57,8 @@ const detail = (
   split: "development",
   mode: "offline",
   measurement_kind: "scripted_mechanism_validation",
+  preset: "none",
+  profile: { preset: "none", sha256: "f".repeat(64), skills: [] },
   billing_applicable: false,
   status: "completed",
   dispatch_state: null,

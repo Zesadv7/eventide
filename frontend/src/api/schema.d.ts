@@ -1467,6 +1467,12 @@ export interface components {
        * @enum {string}
        */
       mode: "offline" | "live";
+      /**
+       * Preset
+       * @default none
+       * @enum {string}
+       */
+      preset: "none" | "engineering";
       /** Quote Hash */
       quote_hash?: string | null;
       /**
@@ -1531,6 +1537,16 @@ export interface components {
        * @enum {string}
        */
       mode: "offline" | "live";
+      /**
+       * Preset
+       * @default none
+       * @enum {string}
+       */
+      preset: "none" | "engineering";
+      /** Profile */
+      profile?: {
+        [key: string]: unknown;
+      };
       /**
        * Measurement Kind
        * @enum {string}
@@ -9577,6 +9593,7 @@ export interface operations {
     parameters: {
       query?: {
         split?: "development" | "holdout" | "all";
+        preset?: "none" | "engineering";
       };
       header?: never;
       path: {

@@ -4,16 +4,18 @@ import type { components, paths } from "./schema";
 
 export type EvaluationInput = Omit<
   components["schemas"]["EvaluationBody"],
-  "confirmed"
+  "confirmed" | "preset"
 > & { confirmed?: boolean; preset?: EvaluationPreset };
 export type EvaluationPreset = "none" | "engineering";
 export type EvaluationSplit = EvaluationInput["split"];
 export type EvaluationSuite = components["schemas"]["EvaluationSuite"];
 export type EvaluationReceipt = components["schemas"]["EvaluationReceipt"];
 export type EvaluationCase = components["schemas"]["EvaluationCase"];
-export type EvaluationDetail = components["schemas"]["EvaluationDetail"] & {
-  preset?: EvaluationPreset;
-  profile?: EvaluationProfile;
+export type EvaluationDetail = Omit<
+  components["schemas"]["EvaluationDetail"],
+  "profile"
+> & {
+  profile: EvaluationProfile;
 };
 export interface EvaluationProfile {
   preset: EvaluationPreset;

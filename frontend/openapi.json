@@ -8794,6 +8794,17 @@
               "default": "development",
               "title": "Split"
             }
+          },
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": ["none", "engineering"],
+              "type": "string",
+              "default": "none",
+              "title": "Preset"
+            }
           }
         ],
         "responses": {
@@ -13904,6 +13915,12 @@
             "title": "Mode",
             "default": "offline"
           },
+          "preset": {
+            "type": "string",
+            "enum": ["none", "engineering"],
+            "title": "Preset",
+            "default": "none"
+          },
           "quote_hash": {
             "anyOf": [
               {
@@ -14036,6 +14053,17 @@
             "type": "string",
             "enum": ["offline", "live"],
             "title": "Mode"
+          },
+          "preset": {
+            "type": "string",
+            "enum": ["none", "engineering"],
+            "title": "Preset",
+            "default": "none"
+          },
+          "profile": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Profile"
           },
           "measurement_kind": {
             "type": "string",
