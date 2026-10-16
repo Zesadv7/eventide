@@ -108,6 +108,13 @@ async def test_controller_frozen_development_cases_share_service_ledger(tmp_path
         assert ledger["attempt_count"] == len(host.provider.requests) > 12
         assert all(request.max_tokens != 15 for request in host.provider.requests)
         assert report["usage"]["source"] == "exclusive_model_authorities"
+        delivery = [case for case in report["results"]
+                    if case["benchmark"]["category"] == "recovery_delivery"]
+        assert len(delivery) == 1
+        assert delivery[0]["verification"]["repair_by"] == "main_runtime_provider_tools"
+        from eventide.evaluation_metrics import summarize_experiment
+
+        assert summarize_experiment([report])["attempts"]["total"] == ledger["attempt_count"]
         assert host._workspace_checkpoint(Path(host.default_workspace.path)) == before
         assert controller.detail("controlled")["mode"] == "live"
         assert controller.detail("controlled")["billing_applicable"] is True

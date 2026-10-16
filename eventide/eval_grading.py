@@ -179,6 +179,11 @@ async def _delivery_case(
         writer["worker_run_id"], writer["worker_session_id"], writer["status"], writer["output"],
         row["steps"], row["tool_calls"], row["duration_ms"], writer["usage"], identity["turn_id"],
     )
+    repair_by = (
+        "main_runtime_provider_tools" if host._evaluation_bridge is not None
+        else "scripted_provider_tools" if isinstance(host.provider, ScriptedProvider)
+        else "configured_provider_tools"
+    )
     settings, store = host.settings, host.store
     await host.close()
     reopened = RuntimeHost(settings, ScriptedProvider([]), store=store, enable_mcp=False)
@@ -207,7 +212,7 @@ async def _delivery_case(
             "test_manifest": test_manifest, "frozen_tests": str(frozen),
             "candidate": str(candidate), "source_unchanged_before_adoption": source_unchanged,
             "patch_sha256": checked.get("patch_sha256"),
-            "control_actions_by": "evaluation_harness", "repair_by": "scripted_provider_tools",
+            "control_actions_by": "evaluation_harness", "repair_by": repair_by,
         }
         if not reasons and case["grade"]["scenario"] == "restart_then_adopt":
             adopted = await reopened.manage_delivery("apply", delivery_id=delivery_id)

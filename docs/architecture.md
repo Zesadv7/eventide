@@ -549,3 +549,34 @@ B5提示注入专项把攻击内容分别置于文件、已固定Skill和真实H
 交付用量页面通过delivery身份查询cost_view及budget_view，包含旧手动writer、有界修复各轮及其摘要/worker；不以最新控制Run代替整个交付范围。Vue路由保存精确delivery身份，切换身份丢弃迟到响应，刷新重查全历史并替换投影，不在浏览器累加。119项前端及真实API有界交付、采纳、相同费用查询与页面刷新验证通过。
 
 生产retrieval_from_vector所有模式均钳制到最多5个候选结果；format_results单片800、合计4,000源字符，保留每个片段路径/行号/原分数并明确标记截断，展示可回读提示。源文本字符预算不包含引用及格式说明，实际请求仍由input_composition按完整序列化字符统计、供应商usage记账。新边界未改变RRF或分数，缺模型降级说明保持；94项关联及49项补充回归通过（显式本地ML各跳过1项），Ruff/Mypy113通过。
+
+
+### 只读实验投影与比较身份
+
+`evaluation_metrics.py` 从 schema v2 的逐 case `evidence.usage.calls` 和
+`evidence.costs.latest` 派生统计，不消费顶层/父 Run 的聚合用量，不打开或导入执行库。
+真实调用按 `(run_id, attempt_id)` 唯一计数，重复报告和冲突证据拒绝；缺少 case
+证据继续展示已知部分，但禁止给出完整 Token 或费用结论。reported、estimated、
+unknown 独立，input-only embedding 没有虚构输出，cache/reasoning 不重复相加。
+币种分开，费用来自当时的固定价格快照；完整费用除全部成功任务数，失败消费仍在
+分子内。缺价格、未知消费或零成功使该比值不可计算。
+
+延迟采用所有已观测任务/请求样本的算术平均及 nearest-rank p50/p95，同时给覆盖数量；
+没有样本返回 null。缓存比率只在 reported 且同时提供 input/cache-read 的
+input-output 请求内计算，返回覆盖请求数和对应输入量，不能外推到所有请求。
+尝试失败/未完成、截断、重试、用量未知分别计数并注明分母；不能将没有采集到的
+字段当成供应商真实零。
+
+比较身份排除执行 UUID 和产物路径，保留冻结任务版本/hash、输入/hash、实际Python代码hash和Python版本、
+有效配置、根Run及每种调用用途的实际生成参数、工具与 Skill 指纹。commit/dirty仍在原报告
+溯源，但文档或前端提交在代码hash不变时不使对照失效。相同 variant 的重复报告身份必须一致。
+优化差异只能由调用前保存的 `ExperimentVariant` 逐路径明确前后值，Unix 声明时间
+复核到最早模型请求；此时间检查是本机证据一致性，不是防篡改的远程预注册服务。
+冻结任务、模型、生成参数和样本次数不能豁免。逐题通过数不降以及完整 Token 或
+同币种/同价格版本完整费用下降是收益声明的必要条件，延迟增量始终同时输出。
+scripted 与未跑完的批次保留统计，不产生真实优化通过结论。
+
+恢复交付 grader 的控制动作继续标注 `evaluation_harness`，修复来源分别记录
+`scripted_provider_tools`、`configured_provider_tools` 或 `main_runtime_provider_tools`。
+重启后的空 scripted Provider 仅服务 verify/apply 控制动作，不反写此前 Writer 的来源；
+固定测试、源码保护、留出判分和人工采纳边界保持原契约。
