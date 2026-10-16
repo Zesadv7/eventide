@@ -638,3 +638,5 @@ C5可选配对层位于rag.answer_evaluation，不创建Agent、工具目录、�
 retrieval.answer_result将回答、判分、字符统计、独立attempt及历史费用快照归属相同控制Run。导出从canonical结果事实重建；候选pipeline用量/价格包含query_rewrite及候选回答，原pipeline只包含原回答，总账仍是同一批唯一attempt。ranking_result追加或回执失败时，控制Run收尾重新读取模型事实和终态；缺排名单列result_missing，未知权威覆盖不能成为完整0。Host关闭时保留已取得的事实快照并标记任何读取不完整。无效回答继续，不完整usage/网络/预算/取消停止；没有精确价格不构造免费结果。None维度的本地embedding先完成索引构建，再用已解析profile固定报告与接收指纹，派发前不会猜维度。
 
 C5补充：每臂模型请求前检查同根reported输入/输出软限，改写或第一臂已达限即持久budget.blocked并停驻，不派发新attempt。判分使用原始响应，完整结果行经既有敏感串清洗后才保存，不能只清洗预览。严格JSON拒绝重复键和非有限常量。cost.estimated为Session级事实，必须按对应attempt从唯一Store读取；读取价格失败仍保留已经成功读取的模型事实，未知覆盖时主/两臂汇总都不用0冒充未知。
+
+最终集成机制复验覆盖1,742项后端测试及54项真实Docker执行专项；前端121项、24条浏览器检查通过。最终镜像和wheel都以构建后的资源/入口/冻结任务清单验收，实际运行不依赖Node；镜像持久化、同源管理、索引/交付控制重启回放和12题离线报告一致性通过，分发自检不调用真实Provider。覆盖率和模型效果继续各自保留独立证据。
