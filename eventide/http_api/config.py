@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 
+from eventide.http_api.configuration import mutate_configuration
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.probe import connection_probe
-from eventide.http_api.schemas import ProviderConfigBody
+from eventide.http_api.schemas import ProviderConfigBody, ProviderResetBody, ProviderSaveBody
 from eventide.provider_probe import probe_error as probe_error
-from eventide.secrets import SecretKeyError
 
 
 def create_router(context: ApiContext) -> APIRouter:
@@ -34,37 +34,30 @@ def create_router(context: ApiContext) -> APIRouter:
         return agent_runtime.provider_config_status()
 
     @router.put("/api/config/provider")
-    async def set_provider_config(body: ProviderConfigBody, request: Request) -> dict[str, Any]:
+    async def set_provider_config(body: ProviderSaveBody, request: Request) -> dict[str, Any]:
         require_local_request(request)
-        if agent_runtime.runtime_busy():
-            raise HTTPException(
-                status_code=409,
-                detail="Wait for active runs to finish before changing provider configuration",
-            )
         key = body.api_key.get_secret_value() if body.api_key else None
-        try:
-            await agent_runtime.configure_provider(
-                provider=body.provider,
-                api_key=key,
-                base_url=body.base_url,
-                model=body.model,
-                persist=True,
-                clear_api_key=body.clear_api_key,
+        payload = {**body.model_dump(), "api_key": key}
+        async def execute(identity: str) -> dict[str, Any]:
+            return await agent_runtime.configure_provider(
+                provider=body.provider, api_key=key, base_url=body.base_url, model=body.model,
+                persist=True, clear_api_key=body.clear_api_key,
+                expected_config_hash=body.expected_config_hash, mutation_id=identity,
             )
-        except (ValueError, SecretKeyError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return agent_runtime.provider_config_status()
+        return await mutate_configuration(
+            agent_runtime, request, "provider.save", payload, execute,
+        )
 
     @router.delete("/api/config/provider")
-    async def reset_provider_config(request: Request) -> dict[str, Any]:
+    async def reset_provider_config(body: ProviderResetBody, request: Request) -> dict[str, Any]:
         require_local_request(request)
-        if agent_runtime.runtime_busy():
-            raise HTTPException(
-                status_code=409,
-                detail="请等待当前任务结束后再恢复启动配置",
+        async def execute(identity: str) -> dict[str, Any]:
+            return await agent_runtime.reset_provider_configuration(
+                expected_config_hash=body.expected_config_hash, mutation_id=identity,
             )
-        await agent_runtime.reset_provider_configuration()
-        return agent_runtime.provider_config_status()
+        return await mutate_configuration(
+            agent_runtime, request, "provider.reset", body.model_dump(), execute,
+        )
 
     @router.post("/api/config/provider/test")
     async def test_provider_config(body: ProviderConfigBody, request: Request) -> dict[str, Any]:

@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
+import {
+  configurationStatus,
+  generationScope,
+  observeConfiguration,
+  rejectedConfiguration,
+} from "../api/configuration";
 import { api } from "../api/client";
 import type { Generation, GenerationState } from "../api/types";
 const props = defineProps<{
@@ -11,10 +17,15 @@ const emit = defineEmits<{ change: [generation: Generation] }>();
 const state = ref<GenerationState | null>(null),
   error = ref(""),
   saved = ref(""),
-  saving = ref(false);
+  saving = ref(false),
+  loading = ref(false),
+  refreshRequired = ref(false),
+  statusVersion = ref(0);
 const modes = ref<Record<string, string>>({}),
   values = ref<Record<string, string>>({});
-let revision = 0;
+let revision = 0,
+  readRevision = 0,
+  mounted = true;
 const keys = [
   "temperature",
   "top_p",
@@ -23,41 +34,102 @@ const keys = [
   "thinking",
 ] as const;
 const scope = computed(() => props.scope || "run");
+const mutationSession = computed(() =>
+  scope.value === "session" ? props.session : undefined,
+);
+const identity = computed(() =>
+  generationScope(props.model, mutationSession.value),
+);
+const status = computed(() => {
+  void statusVersion.value;
+  return configurationStatus(identity.value);
+});
+const busy = computed(
+  () => loading.value || saving.value || status.value.active,
+);
+let previousScope = identity.value,
+  wasActive = status.value.active;
+const stopObserving = observeConfiguration(() => {
+  const next = configurationStatus(identity.value);
+  if (
+    previousScope === identity.value &&
+    wasActive &&
+    !next.active &&
+    !saving.value
+  )
+    refreshRequired.value = true;
+  previousScope = identity.value;
+  wasActive = next.active;
+  statusVersion.value++;
+});
+onUnmounted(() => {
+  mounted = false;
+  revision++;
+  readRevision++;
+  stopObserving();
+});
+function usePatch(result: GenerationState) {
+  const value =
+    scope.value === "model"
+      ? result.defaults
+      : scope.value === "session"
+        ? result.session
+        : {};
+  modes.value = {};
+  values.value = {};
+  for (const key of keys) {
+    modes.value[key] = "inherit";
+    if (Object.prototype.hasOwnProperty.call(value, key)) {
+      modes.value[key] = value[key] === null ? "default" : "value";
+      values.value[key] = String(value[key] ?? "");
+    }
+  }
+  emit("change", patch());
+}
+async function refresh(initial = false) {
+  if (!props.model || status.value.active) return false;
+  const version = revision,
+    read = ++readRevision;
+  loading.value = true;
+  try {
+    const result = await api.generation(
+      props.model,
+      scope.value === "model" ? undefined : props.session,
+    );
+    if (!mounted || version !== revision || read !== readRevision) return false;
+    state.value = result;
+    if (initial || !status.value.pending) usePatch(result);
+    error.value = "";
+    refreshRequired.value = false;
+    return true;
+  } catch (e) {
+    if (mounted && version === revision && read === readRevision) {
+      error.value = e instanceof Error ? e.message : "无法读取生成配置";
+      refreshRequired.value = true;
+    }
+    return false;
+  } finally {
+    if (mounted && version === revision && read === readRevision)
+      loading.value = false;
+  }
+}
 watch(
   () => [props.model, props.session, scope.value],
-  async () => {
-    const version = ++revision;
+  () => {
+    revision++;
+    readRevision++;
+    state.value = null;
     error.value = "";
     saved.value = "";
     modes.value = {};
     values.value = {};
+    saving.value = false;
+    loading.value = false;
+    refreshRequired.value = status.value.active;
+    previousScope = identity.value;
+    wasActive = status.value.active;
     emit("change", {});
-    if (!props.model) {
-      state.value = null;
-      return;
-    }
-    try {
-      const result = await api.generation(props.model, props.session);
-      if (version !== revision) return;
-      state.value = result;
-      const patch =
-        scope.value === "model"
-          ? result.defaults
-          : scope.value === "session"
-            ? result.session
-            : {};
-      for (const key of keys) {
-        modes.value[key] = "inherit";
-        if (Object.prototype.hasOwnProperty.call(patch, key)) {
-          const value = patch[key];
-          modes.value[key] = value === null ? "default" : "value";
-          values.value[key] = String(value ?? "");
-        }
-      }
-    } catch (e) {
-      if (version === revision)
-        error.value = e instanceof Error ? e.message : "无法加载模型能力";
-    }
+    void refresh(true);
   },
   { immediate: true },
 );
@@ -94,19 +166,34 @@ function changed() {
   emit("change", patch());
 }
 async function save() {
+  if (
+    busy.value ||
+    scope.value === "run" ||
+    !state.value ||
+    !props.model ||
+    (scope.value === "session" && !props.session) ||
+    (refreshRequired.value && !status.value.pending)
+  )
+    return;
+  const version = revision,
+    model = props.model,
+    session = mutationSession.value;
   saving.value = true;
   error.value = "";
+  saved.value = "";
   try {
-    state.value = await api.saveGeneration(
-      props.model,
-      patch(),
-      scope.value === "session" ? props.session : undefined,
-    );
-    saved.value = "设置已保存，新运行生效。";
+    await api.saveGeneration(model, patch(), state.value.config_hash, session);
+    if (!mounted || version !== revision) return;
+    const fresh = await refresh();
+    saved.value = fresh
+      ? "保存已确认，已读取当前生成设置；新运行生效。"
+      : "保存已确认；当前生成设置读取失败，请刷新后再编辑。";
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "保存失败";
+    if (!mounted || version !== revision) return;
+    if (rejectedConfiguration(e)) refreshRequired.value = true;
+    error.value = e instanceof Error ? e.message : "保存结果未确认";
   } finally {
-    saving.value = false;
+    if (mounted && version === revision) saving.value = false;
   }
 }
 const labels: Record<string, string> = {
@@ -136,63 +223,65 @@ const labels: Record<string, string> = {
             : "能力尚未确认"
       }}。运行接收后参数固定。
     </p>
-    <div v-for="key in keys" :key="key" class="generation-row">
-      <label :for="`mode-${scope}-${key}`">{{ labels[key] }}</label
-      ><select
-        :id="`mode-${scope}-${key}`"
-        v-model="modes[key]"
-        @change="changed"
-      >
-        <option value="" disabled>请选择</option>
-        <option value="inherit">跟随上层</option>
-        <option value="default">服务端默认</option>
-        <option value="value" :disabled="!supported(key)">
-          自定义{{ !supported(key) ? "（能力未确认）" : "" }}
-        </option>
-      </select>
-      <input
-        v-if="
-          (modes[key] || 'inherit') === 'value' &&
-          ['temperature', 'top_p', 'max_output_tokens'].includes(key)
-        "
-        v-model="values[key]"
-        :aria-label="labels[key]"
-        type="number"
-        :step="key === 'max_output_tokens' ? 1 : 0.05"
-        :min="key === 'temperature' ? 0 : key === 'top_p' ? 0.00001 : 1"
-        :max="
-          key === 'temperature'
-            ? (state?.capabilities.temperature_max ?? 2)
-            : key === 'top_p'
-              ? 1
-              : 1000000
-        "
-        @input="changed"
-      />
-      <select
-        v-if="modes[key] === 'value' && key === 'reasoning_effort'"
-        v-model="values[key]"
-        aria-label="推理强度值"
-        @change="changed"
-      >
-        <option
-          v-for="effort in state?.capabilities.reasoning_efforts"
-          :key="effort"
-          :value="effort"
+    <fieldset :disabled="busy" class="generation-fields">
+      <div v-for="key in keys" :key="key" class="generation-row">
+        <label :for="`mode-${scope}-${key}`">{{ labels[key] }}</label
+        ><select
+          :id="`mode-${scope}-${key}`"
+          v-model="modes[key]"
+          @change="changed"
         >
-          {{ effort }}
-        </option>
-      </select>
-      <select
-        v-if="modes[key] === 'value' && key === 'thinking'"
-        v-model="values[key]"
-        aria-label="思考模式值"
-        @change="changed"
-      >
-        <option value="enabled">开启</option>
-        <option value="disabled">关闭</option>
-      </select>
-    </div>
+          <option value="" disabled>请选择</option>
+          <option value="inherit">跟随上层</option>
+          <option value="default">服务端默认</option>
+          <option value="value" :disabled="!supported(key)">
+            自定义{{ !supported(key) ? "（能力未确认）" : "" }}
+          </option>
+        </select>
+        <input
+          v-if="
+            (modes[key] || 'inherit') === 'value' &&
+            ['temperature', 'top_p', 'max_output_tokens'].includes(key)
+          "
+          v-model="values[key]"
+          :aria-label="labels[key]"
+          type="number"
+          :step="key === 'max_output_tokens' ? 1 : 0.05"
+          :min="key === 'temperature' ? 0 : key === 'top_p' ? 0.00001 : 1"
+          :max="
+            key === 'temperature'
+              ? (state?.capabilities.temperature_max ?? 2)
+              : key === 'top_p'
+                ? 1
+                : 1000000
+          "
+          @input="changed"
+        />
+        <select
+          v-if="modes[key] === 'value' && key === 'reasoning_effort'"
+          v-model="values[key]"
+          aria-label="推理强度值"
+          @change="changed"
+        >
+          <option
+            v-for="effort in state?.capabilities.reasoning_efforts"
+            :key="effort"
+            :value="effort"
+          >
+            {{ effort }}
+          </option>
+        </select>
+        <select
+          v-if="modes[key] === 'value' && key === 'thinking'"
+          v-model="values[key]"
+          aria-label="思考模式值"
+          @change="changed"
+        >
+          <option value="enabled">开启</option>
+          <option value="disabled">关闭</option>
+        </select>
+      </div>
+    </fieldset>
     <p v-if="state" class="muted">
       模型默认 {{ JSON.stringify(state.defaults)
       }}<template v-if="props.session">
@@ -203,14 +292,40 @@ const labels: Record<string, string> = {
       思考模式与采样参数的组合由后端校验；温度 0
       不保证完全确定性。输出上限不等于任务总预算。
     </p>
+    <p v-if="status.pending && scope !== 'run'" class="alert" role="status">
+      上次生成配置请求尚未确认。请恢复原参数后重试；刷新只读取当前值，不清除原请求身份或原配置版本。
+    </p>
+    <p
+      v-if="refreshRequired && scope !== 'run'"
+      class="inline-error"
+      role="alert"
+    >
+      请显式刷新生成设置后再编辑，不覆盖其他标签页的更新。
+    </p>
     <p v-if="error" role="alert" class="inline-error">{{ error }}</p>
     <p v-if="saved" role="status">{{ saved }}</p>
     <button
       v-if="scope !== 'run'"
-      :disabled="saving || !props.model"
+      :disabled="
+        busy || !state || !props.model || (refreshRequired && !status.pending)
+      "
       @click="save"
     >
-      {{ saving ? "保存中…" : "保存生成设置" }}
+      {{
+        saving ? "保存中…" : status.pending ? "重试原生成请求" : "保存生成设置"
+      }}
+    </button>
+    <button v-if="scope !== 'run'" :disabled="busy" @click="refresh()">
+      刷新生成设置
     </button>
   </div>
 </template>
+
+<style scoped>
+.generation-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+</style>

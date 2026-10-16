@@ -154,9 +154,10 @@ def verify(image: str) -> dict[str, object]:
                 "model": "verification-only",
                 "base_url": "http://127.0.0.1:1/v1",
                 "api_key": "unused-verification-value",
+                "expected_config_hash": json.loads(request("/api/config/provider"))["config_hash"],
             },
             "PUT",
-            **origin,
+            **{**origin, "Idempotency-Key": "container-configuration"},
         )
         if not ipaddress.ip_address(peer).is_loopback:
             reject("/api/workspaces", {"path": "/workspaces/demo"})

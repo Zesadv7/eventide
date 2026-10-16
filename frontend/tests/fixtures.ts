@@ -7,6 +7,7 @@ import type {
 } from "../src/api/types";
 import type { BudgetStatus, Costs } from "../src/api/budgets";
 export const provider: ProviderStatus = {
+  config_hash: "a".repeat(64),
   provider: "openai_responses",
   model: "fixture-model",
   base_url: null,
@@ -33,6 +34,7 @@ export const session: Session = {
   latest_run: run,
 };
 export const generation: GenerationState = {
+  config_hash: "b".repeat(64),
   model: "fixture-model",
   model_identity: "fixture",
   defaults: {},

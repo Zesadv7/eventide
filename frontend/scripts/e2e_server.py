@@ -38,8 +38,6 @@ def main() -> None:
 
     import eventide.host as host_module
 
-    host_module.build_provider = lambda _settings: ConnectionProbeProvider()
-
     class JourneyProvider(FakeProvider):
         async def stream(self, request):
             prompt = self._prompt(request)
@@ -104,6 +102,15 @@ def main() -> None:
         provider = JourneyProvider(max_steps=6)
         runtime = RuntimeHost(settings, provider)
         provider.attach(runtime)
+
+        def build_offline_provider(candidate):
+            if candidate.model.startswith("vue-probe-"):
+                return ConnectionProbeProvider()
+            replacement = JourneyProvider(max_steps=6)
+            replacement.attach(runtime)
+            return replacement
+
+        host_module.build_provider = build_offline_provider
         app = create_app(runtime)
         server = E2EUvicornServer(
             uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")

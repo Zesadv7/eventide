@@ -12,6 +12,7 @@ from eventide.config import Settings
 from eventide.host import RuntimeHost
 from eventide.http_api.context import require_local_request
 from eventide.providers import ScriptedProvider
+from tests.configuration_requests import put_configuration
 from tests.test_runtime import settings_for
 
 PEER = "192.168.65.1"
@@ -36,7 +37,7 @@ def client_for(path, peer, peers=()):
 @pytest.mark.parametrize("peers,peer", [((), PEER), ((PEER,), "192.168.65.2")])
 def test_only_an_explicit_exact_peer_can_manage(isolated_workspace, peers, peer):
     with client_for(isolated_workspace, peer, peers) as client:
-        response = client.put(
+        response = put_configuration(client,
             "/api/config/provider", json=PROVIDER, headers={"Origin": ORIGIN}
         )
         assert response.status_code == 403
@@ -46,7 +47,7 @@ def test_only_an_explicit_exact_peer_can_manage(isolated_workspace, peers, peer)
 @pytest.mark.parametrize("peer", [PEER, "fd00::1"])
 def test_configured_peer_with_local_same_origin_can_manage(isolated_workspace, peer):
     with client_for(isolated_workspace, peer, (peer,)) as client:
-        response = client.put(
+        response = put_configuration(client,
             "/api/config/provider", json=PROVIDER, headers={"Origin": ORIGIN}
         )
         assert response.status_code == 200
@@ -72,7 +73,7 @@ def test_extra_peer_requires_local_same_origin_even_for_privileged_reads(
 ):
     with client_for(isolated_workspace, PEER, (PEER,)) as client:
         assert client.get("/_test/local", headers=headers).status_code == 403
-        assert client.put(
+        assert put_configuration(client,
             "/api/config/provider", json=PROVIDER, headers=headers
         ).status_code == 403
 
@@ -85,14 +86,14 @@ def test_forwarding_headers_do_not_grant_peer_access(isolated_workspace):
                 "X-Forwarded-For": forwarded,
                 "Forwarded": f"for={forwarded};host=127.0.0.1:8000;proto=http",
             }
-            assert client.put(
+            assert put_configuration(client,
                 "/api/config/provider", json=PROVIDER, headers=headers
             ).status_code == 403
 
 
 def test_loopback_clients_keep_the_existing_no_origin_contract(isolated_workspace):
     with client_for(isolated_workspace, "127.0.0.1") as client:
-        assert client.put("/api/config/provider", json=PROVIDER).status_code == 200
+        assert put_configuration(client,"/api/config/provider", json=PROVIDER).status_code == 200
         assert client.get("/_test/local").status_code == 200
 
 
@@ -100,7 +101,7 @@ def test_transport_peer_configuration_is_frozen_at_app_creation(isolated_workspa
     with client_for(isolated_workspace, PEER, (PEER,)) as client:
         runtime = client.app.state.runtime
         runtime.settings = replace(runtime.settings, local_proxy_peers=())
-        assert client.put(
+        assert put_configuration(client,
             "/api/config/provider", json=PROVIDER, headers={"Origin": ORIGIN}
         ).status_code == 200
 

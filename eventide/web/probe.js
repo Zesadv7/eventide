@@ -2,6 +2,7 @@ import {request} from "./transport.js?v=13";
 
 const storageKey = "eventide.pending-connection-check.v1";
 let busy = false;
+export const hasPendingConnection = () => sessionStorage.getItem(storageKey) !== null;
 
 // Persist only a random request identity and a one-way form fingerprint. The
 // password and candidate configuration stay in memory and in the request body.

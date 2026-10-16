@@ -4779,7 +4779,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProviderConfigBody"
+                "$ref": "#/components/schemas/ProviderSaveBody"
               }
             }
           },
@@ -4914,6 +4914,16 @@
         "tags": ["config"],
         "summary": "Reset Provider Config",
         "operationId": "reset_provider_config_api_config_provider_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderResetBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -9932,6 +9942,11 @@
       },
       "GenerationBody": {
         "properties": {
+          "expected_config_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expected Config Hash"
+          },
           "model": {
             "type": "string",
             "maxLength": 256,
@@ -9953,7 +9968,7 @@
           }
         },
         "type": "object",
-        "required": ["model"],
+        "required": ["expected_config_hash", "model"],
         "title": "GenerationBody"
       },
       "GenerationCapabilities": {
@@ -10256,6 +10271,76 @@
         "type": "object",
         "required": ["provider", "model"],
         "title": "ProviderConfigBody"
+      },
+      "ProviderResetBody": {
+        "properties": {
+          "expected_config_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expected Config Hash"
+          }
+        },
+        "type": "object",
+        "required": ["expected_config_hash"],
+        "title": "ProviderResetBody"
+      },
+      "ProviderSaveBody": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai_compatible",
+              "openai-compatible",
+              "openai_responses"
+            ],
+            "title": "Provider"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Model"
+          },
+          "clear_api_key": {
+            "type": "boolean",
+            "title": "Clear Api Key",
+            "default": false
+          },
+          "expected_config_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expected Config Hash"
+          }
+        },
+        "type": "object",
+        "required": ["provider", "model", "expected_config_hash"],
+        "title": "ProviderSaveBody"
       },
       "RunBody": {
         "properties": {

@@ -1093,6 +1093,8 @@ export interface components {
     };
     /** GenerationBody */
     GenerationBody: {
+      /** Expected Config Hash */
+      expected_config_hash: string;
       /** Model */
       model: string;
       generation?: components["schemas"]["GenerationPatch"];
@@ -1215,6 +1217,36 @@ export interface components {
        * @default false
        */
       clear_api_key: boolean;
+    };
+    /** ProviderResetBody */
+    ProviderResetBody: {
+      /** Expected Config Hash */
+      expected_config_hash: string;
+    };
+    /** ProviderSaveBody */
+    ProviderSaveBody: {
+      /**
+       * Provider
+       * @enum {string}
+       */
+      provider:
+        | "anthropic"
+        | "openai_compatible"
+        | "openai-compatible"
+        | "openai_responses";
+      /** Api Key */
+      api_key?: string | null;
+      /** Base Url */
+      base_url?: string | null;
+      /** Model */
+      model: string;
+      /**
+       * Clear Api Key
+       * @default false
+       */
+      clear_api_key: boolean;
+      /** Expected Config Hash */
+      expected_config_hash: string;
     };
     /** RunBody */
     RunBody: {
@@ -5380,7 +5412,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["ProviderConfigBody"];
+        "application/json": components["schemas"]["ProviderSaveBody"];
       };
     };
     responses: {
@@ -5503,7 +5535,11 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProviderResetBody"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {

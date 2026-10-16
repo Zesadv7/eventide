@@ -8,6 +8,7 @@ export async function request(url, options = {}) {
     const error = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
     error.status = response.status;
     error.runId = response.headers?.get("X-Eventide-Run-ID") || null;
+    error.mutationOutcome = response.headers?.get("X-Eventide-Mutation-Outcome") || null;
     throw error;
   }
   return response.json();

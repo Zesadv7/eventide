@@ -1,4 +1,5 @@
 import type { paths } from "./schema";
+import { configurationMutation, generationScope } from "./configuration";
 import type {
   Workspace,
   Session,
@@ -66,8 +67,6 @@ const post = <T>(path: string, body?: unknown, key?: string) =>
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     ...(key ? { headers: { "Idempotency-Key": key } } : {}),
   });
-const put = <T>(path: string, body: unknown) =>
-  request<T>(path, { method: "PUT", body: JSON.stringify(body) });
 const id = encodeURIComponent;
 // This check makes route removal fail typecheck after OpenAPI regeneration.
 const workspacePath: keyof paths = "/api/workspaces";
@@ -115,22 +114,48 @@ export const api = {
       approved,
     }),
   provider: () => request<ProviderStatus>("/api/config/provider"),
-  saveProvider: (body: ProviderInput) =>
-    put<ProviderStatus>("/api/config/provider", body),
-  resetProvider: () =>
-    request<ProviderStatus>("/api/config/provider", { method: "DELETE" }),
+  saveProvider: (body: ProviderInput, expected: string) =>
+    configurationMutation<ProviderStatus>(
+      "provider",
+      "/api/config/provider",
+      "PUT",
+      {
+        provider: body.provider,
+        model: body.model.trim(),
+        base_url: body.base_url?.trim() || null,
+        clear_api_key: body.clear_api_key ?? false,
+        ...(body.api_key?.trim() ? { api_key: body.api_key.trim() } : {}),
+      },
+      expected,
+    ),
+  resetProvider: (expected: string) =>
+    configurationMutation<ProviderStatus>(
+      "provider",
+      "/api/config/provider",
+      "DELETE",
+      {},
+      expected,
+    ),
   models: () =>
     request<{ models: string[]; error: string | null }>("/api/models"),
   generation: (model: string, session?: string) =>
     request<GenerationState>(
       `${session ? `/api/sessions/${id(session)}/generation` : "/api/generation/defaults"}?model=${id(model)}`,
     ),
-  saveGeneration: (model: string, generation: Generation, session?: string) =>
-    put<GenerationState>(
+  saveGeneration: (
+    model: string,
+    generation: Generation,
+    expected: string,
+    session?: string,
+  ) =>
+    configurationMutation<GenerationState>(
+      generationScope(model, session),
       session
         ? `/api/sessions/${id(session)}/generation`
         : "/api/generation/defaults",
+      "PUT",
       { model, generation },
+      expected,
     ),
   usage: (identity: string, scope: "runs" | "sessions") =>
     request<UsageLedger>(`/api/${scope}/${id(identity)}/usage`),

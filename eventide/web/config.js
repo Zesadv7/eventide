@@ -1,7 +1,11 @@
 import {request} from "./transport.js?v=12";
-import {testConnection} from "./probe.js?v=1";
+import {testConnection, hasPendingConnection} from "./probe.js?v=2";
+import {mutateConfiguration, configurationStatus, rejectedConfiguration} from "./configuration.js?v=1";
 const $ = (selector) => document.querySelector(selector);
 let configured = false;
+let configHash = "";
+let busy = false;
+let refreshRequired = false;
 function normalizeBaseUrl(value) {
   const trimmed = (value || "").trim();
   if (!trimmed) return null;
@@ -24,6 +28,7 @@ function setConfigMessage(text, success = false) {
 }
 
 function renderProviderStatus(config) {
+  configHash = config.config_hash;
   configured = config.api_key_configured && !config.configuration_error;
   // The v2 console dropped the old topbar status nodes; the shared dialog is the
   // only required surface now. Missing optional anchors are skipped, never fatal.
@@ -47,22 +52,38 @@ export async function loadProviderConfig() {
   return status;
 }
 
+function lockConfiguration(value) {
+  busy = value;
+  for (const node of $("#model-form").querySelectorAll("input, select, button")) node.disabled = value;
+  for (const id of ["#clear-api-key", "#reset-model-config", "#test-model-config"]) {
+    const node = $(id); if (node) node.disabled = value;
+  }
+}
+async function changeConfiguration(operation, body) {
+  if (busy || hasPendingConnection()) return;
+  if (refreshRequired && !configurationStatus().pending) {
+    await loadProviderConfig(); refreshRequired = false;
+    setConfigMessage("已刷新当前配置，请检查后重新填写并保存。"); return;
+  }
+  lockConfiguration(true);
+  try {
+    await mutateConfiguration(operation, body, configHash);
+    $("#api-key").value = "";
+    await loadProviderConfig();
+    setConfigMessage("配置操作已确认，已读取当前配置", true);
+  } catch (error) {
+    if (rejectedConfiguration(error)) refreshRequired = true;
+    setConfigMessage(error.message + (configurationStatus().pending ? "；结果未确认，请恢复原候选参数和密钥后重试同一操作。" : ""));
+  } finally { lockConfiguration(false); }
+}
 async function saveProviderConfig(event) {
   event.preventDefault();
-  $("#save-model-config").disabled = true;
-  setConfigMessage("正在保存…");
-  try {
-    const config = await request("/api/config/provider", { method: "PUT", body: JSON.stringify(providerBody()) });
-    $("#api-key").value = "";
-    renderProviderStatus(config);
-    setConfigMessage("配置已保存并生效", true);
-  } catch (error) { setConfigMessage(error.message); }
-  finally { $("#save-model-config").disabled = false; }
+  await changeConfiguration("save", providerBody());
 }
 
 async function testProviderConfig() {
-  if (!$("#model-form").reportValidity()) return;
-  $("#test-model-config").disabled = true;
+  if (busy || configurationStatus().pending || !$("#model-form").reportValidity()) return;
+  lockConfiguration(true);
   const result = $("#connection-result");
   result.hidden = false;
   result.textContent = "正在检查连接…";
@@ -77,26 +98,19 @@ async function testProviderConfig() {
     result.textContent = error.message + (error.runId ? `\n检查记录：${error.runId}` : "");
     result.className = "connection-result failure";
   }
-  finally { $("#test-model-config").disabled = false; }
+  finally { lockConfiguration(false); }
 }
 
 async function clearApiKey() {
-  if (!confirm("确定清除已保存的 API Key 吗？")) return;
-  try {
-    const body = { ...providerBody(), clear_api_key: true };
-    delete body.api_key;
-    renderProviderStatus(await request("/api/config/provider", { method: "PUT", body: JSON.stringify(body) }));
-    $("#api-key").value = "";
-    setConfigMessage("已清除数据库中的 API Key", true);
-  } catch (error) { setConfigMessage(error.message); }
+  if (!configurationStatus().pending && !confirm("确定清除已保存的 API Key 吗？")) return;
+  const body = {...providerBody(), clear_api_key: true};
+  delete body.api_key;
+  await changeConfiguration("clear", body);
 }
-
 async function resetProviderConfig() {
-  if (!confirm("确定恢复服务启动时的配置吗？")) return;
-  try { renderProviderStatus(await request("/api/config/provider", { method: "DELETE" })); $("#api-key").value = ""; setConfigMessage("已恢复启动配置", true); }
-  catch (error) { setConfigMessage(error.message); }
+  if (!configurationStatus().pending && !confirm("确定恢复服务启动时的配置吗？")) return;
+  await changeConfiguration("reset", {});
 }
-
 
 export const isConfigured = () => configured;
 export function showConfig(message = "") { $("#model-dialog").showModal(); setConfigMessage(message); }

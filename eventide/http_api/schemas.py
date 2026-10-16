@@ -20,6 +20,7 @@ class RunBody(BaseModel):
 
 
 class GenerationBody(BaseModel):
+    expected_config_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     model: str = Field(min_length=1, max_length=256)
     generation: GenerationPatch = Field(default_factory=GenerationPatch)
     capabilities: GenerationCapabilities | None = None
@@ -55,3 +56,11 @@ class ProviderConfigBody(BaseModel):
     base_url: str | None = Field(default=None, max_length=2_048)
     model: str = Field(min_length=1, max_length=256)
     clear_api_key: bool = False
+
+
+class ProviderSaveBody(ProviderConfigBody):
+    expected_config_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class ProviderResetBody(BaseModel):
+    expected_config_hash: str = Field(pattern=r"^[a-f0-9]{64}$")

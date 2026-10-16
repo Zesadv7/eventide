@@ -76,6 +76,7 @@ export interface Message {
       }>;
 }
 export interface ProviderStatus {
+  config_hash: string;
   provider: ProviderInput["provider"];
   model: string;
   base_url: string | null;
@@ -86,6 +87,7 @@ export interface ProviderStatus {
   configuration_error?: string | null;
 }
 export interface GenerationState {
+  config_hash: string;
   model: string;
   model_identity: string;
   defaults: Generation;

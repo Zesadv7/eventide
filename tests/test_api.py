@@ -11,6 +11,7 @@ from eventide.attachments import MAX_INLINE_BYTES, MAX_UPLOAD_BYTES
 from eventide.host import RuntimeHost
 from eventide.models import ModelResponse
 from eventide.providers import ScriptedProvider
+from tests.configuration_requests import put_configuration, reset_provider
 from tests.test_runtime import settings_for
 
 
@@ -121,7 +122,7 @@ def test_api_configures_provider_without_echoing_secret(isolated_workspace):
         initial = client.get("/api/config/provider").json()
         assert initial["api_key_configured"] is False
         assert "api_key" not in initial
-        response = client.put(
+        response = put_configuration(client,
             "/api/config/provider",
             json={
                 "provider": "openai_compatible",
@@ -222,12 +223,12 @@ def test_probe_error_string_fallback():
 def test_api_clear_and_reset_persisted_config(isolated_workspace):
     runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
-        saved = client.put(
+        saved = put_configuration(client,
             "/api/config/provider",
             json={"provider": "openai_responses", "model": "model", "api_key": "secret"},
         )
         assert saved.status_code == 200
-        cleared = client.put(
+        cleared = put_configuration(client,
             "/api/config/provider",
             json={
                 "provider": "openai_responses",
@@ -236,7 +237,7 @@ def test_api_clear_and_reset_persisted_config(isolated_workspace):
             },
         )
         assert cleared.json()["api_key_configured"] is False
-        reset = client.delete("/api/config/provider")
+        reset = reset_provider(client)
         assert reset.status_code == 200
         assert reset.json()["persistence"] == "environment"
 
@@ -245,9 +246,9 @@ def test_provider_mutations_are_loopback_only(isolated_workspace):
     runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime), client=("203.0.113.10", 50000)) as client:
         body = {"provider": "anthropic", "model": "model", "api_key": "secret"}
-        assert client.put("/api/config/provider", json=body).status_code == 403
+        assert put_configuration(client,"/api/config/provider", json=body).status_code == 403
         assert client.post("/api/config/provider/test", json=body).status_code == 403
-        assert client.delete("/api/config/provider").status_code == 403
+        assert reset_provider(client).status_code == 403
 
 
 def test_provider_save_waits_for_active_run(isolated_workspace):
@@ -262,7 +263,7 @@ def test_provider_save_waits_for_active_run(isolated_workspace):
     with TestClient(create_app(runtime)) as client:
         session = client.post("/api/sessions").json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "wait"})
-        response = client.put(
+        response = put_configuration(client,
             "/api/config/provider",
             json={"provider": "anthropic", "model": "model", "api_key": "secret"},
         )

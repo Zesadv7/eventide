@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api/client";
+import {
+  configurationStatus,
+  observeConfiguration,
+  rejectedConfiguration,
+} from "../api/configuration";
 import { useWorkbench } from "../stores/workbench";
 import type { ProviderInput } from "../api/types";
 import {
@@ -26,17 +31,39 @@ const store = useWorkbench(),
   message = ref(""),
   error = ref(""),
   generationScope = ref<"model" | "session">("model");
-const busy = computed(() => loading.value || saving.value || probing.value);
+const configStatus = ref(configurationStatus("provider")),
+  configHash = ref(""),
+  refreshRequired = ref(false);
+let mounted = true,
+  readRevision = 0;
+const stopObservingConfiguration = observeConfiguration(() => {
+  const next = configurationStatus("provider");
+  if (configStatus.value.active && !next.active && !saving.value)
+    refreshRequired.value = true;
+  configStatus.value = next;
+});
+const busy = computed(
+  () =>
+    loading.value || saving.value || probing.value || configStatus.value.active,
+);
 function syncProbe() {
   const status = probeStatus();
+  const wasActive = probing.value;
   probing.value = status.active;
   pendingProbe.value = status.pending;
   probeResult.value = status.result;
   if (status.active) probeError.value = "";
+  if (wasActive && !status.active && loading.value && mounted)
+    void refreshConfiguration();
 }
 const stopObservingProbe = observeProbe(syncProbe);
 syncProbe();
-onUnmounted(stopObservingProbe);
+onUnmounted(() => {
+  mounted = false;
+  readRevision++;
+  stopObservingProbe();
+  stopObservingConfiguration();
+});
 const form = computed<ProviderInput>(() => ({
   clear_api_key: false,
   provider: provider.value,
@@ -44,57 +71,106 @@ const form = computed<ProviderInput>(() => ({
   base_url: baseUrl.value.trim() || null,
   ...(apiKey.value.trim() ? { api_key: apiKey.value.trim() } : {}),
 }));
-onMounted(async () => {
+async function refreshConfiguration(replace = true) {
+  if (configStatus.value.active || probing.value) return false;
+  const revision = ++readRevision;
+  loading.value = true;
   try {
     const value = await api.provider();
+    if (!mounted || revision !== readRevision) return false;
     store.provider = value;
-    provider.value = value.provider;
-    model.value = value.model;
-    baseUrl.value = value.base_url || "";
+    configHash.value = value.config_hash;
+    refreshRequired.value = false;
+    if (replace && (!configStatus.value.pending || !model.value)) {
+      provider.value = value.provider;
+      model.value = value.model;
+      baseUrl.value = value.base_url || "";
+    }
+    error.value = "";
+    return true;
   } catch {
-    error.value = "无法读取模型配置，请检查本机服务。";
+    if (mounted && revision === readRevision) {
+      refreshRequired.value = true;
+      error.value = "无法读取当前配置，请点击刷新；未改变待确认请求身份。";
+    }
+    return false;
   } finally {
-    loading.value = false;
+    if (mounted && revision === readRevision) loading.value = false;
   }
+}
+onMounted(() => {
+  // An in-flight request survives route changes; read only after its owner settles.
+  if (configStatus.value.active) {
+    loading.value = false;
+    refreshRequired.value = true;
+  } else void refreshConfiguration();
 });
 async function save() {
-  if (busy.value || pendingProbe.value) return;
+  if (
+    busy.value ||
+    pendingProbe.value ||
+    configStatus.value.method === "DELETE" ||
+    (refreshRequired.value && !configStatus.value.pending)
+  )
+    return;
   saving.value = true;
   error.value = "";
   message.value = "";
+  const candidate = { ...form.value };
   try {
-    store.provider = await api.saveProvider(form.value);
-    message.value = "连接配置已加密保存。尚未发起模型调用。";
+    await api.saveProvider(candidate, configHash.value);
+    apiKey.value = "";
+    const fresh = await refreshConfiguration();
+    message.value = fresh
+      ? "连接配置保存已确认，已读取服务当前配置。尚未发起模型调用。"
+      : "连接配置保存已确认；当前配置读取失败，请刷新后再编辑。";
   } catch (e) {
-    const text = e instanceof Error ? e.message : "保存失败";
-    error.value = apiKey.value
-      ? text.split(apiKey.value).join("[已隐藏]")
+    if (rejectedConfiguration(e)) refreshRequired.value = true;
+    const text = e instanceof Error ? e.message : "保存结果未确认";
+    error.value = candidate.api_key
+      ? text.split(candidate.api_key).join("[已隐藏]")
       : text;
   } finally {
-    apiKey.value = "";
     saving.value = false;
   }
 }
 async function reset() {
-  if (busy.value || pendingProbe.value) return;
-  if (!confirm("恢复服务启动时的模型配置？已保存连接将被移除。")) return;
+  if (
+    busy.value ||
+    pendingProbe.value ||
+    configStatus.value.method === "PUT" ||
+    (refreshRequired.value && !configStatus.value.pending)
+  )
+    return;
+  if (
+    !configStatus.value.pending &&
+    !confirm("恢复服务启动时的模型配置？已保存连接将被移除。")
+  )
+    return;
   saving.value = true;
+  error.value = "";
+  message.value = "";
   try {
-    const value = await api.resetProvider();
-    store.provider = value;
-    provider.value = value.provider;
-    model.value = value.model;
-    baseUrl.value = value.base_url || "";
+    await api.resetProvider(configHash.value);
     apiKey.value = "";
-    message.value = "已恢复启动配置。";
+    const fresh = await refreshConfiguration();
+    message.value = fresh
+      ? "恢复启动配置已确认，已读取服务当前配置。"
+      : "恢复请求已确认；当前配置读取失败，请刷新后再编辑。";
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "恢复失败";
+    if (rejectedConfiguration(e)) refreshRequired.value = true;
+    error.value = e instanceof Error ? e.message : "恢复结果未确认";
   } finally {
     saving.value = false;
   }
 }
 async function testConnection() {
-  if (busy.value || !connectionForm.value?.reportValidity()) return;
+  if (
+    busy.value ||
+    configStatus.value.pending ||
+    !connectionForm.value?.reportValidity()
+  )
+    return;
   const candidate = { ...form.value };
   probing.value = true;
   probeError.value = "";
@@ -173,19 +249,40 @@ async function testConnection() {
         <div class="button-row">
           <button
             class="primary"
-            :disabled="busy || pendingProbe || !model.trim()"
+            :disabled="
+              busy ||
+              pendingProbe ||
+              configStatus.method === 'DELETE' ||
+              (refreshRequired && !configStatus.pending) ||
+              !model.trim()
+            "
           >
-            {{ saving ? "保存中…" : "保存连接" }}</button
+            {{
+              saving
+                ? "保存中…"
+                : configStatus.pending && configStatus.method === "PUT"
+                  ? "重试原保存请求"
+                  : "保存连接"
+            }}</button
           ><button
             type="button"
-            :disabled="busy || pendingProbe"
+            :disabled="
+              busy ||
+              pendingProbe ||
+              configStatus.method === 'PUT' ||
+              (refreshRequired && !configStatus.pending)
+            "
             @click="reset"
           >
-            恢复启动配置
+            {{
+              configStatus.pending && configStatus.method === "DELETE"
+                ? "重试原恢复请求"
+                : "恢复启动配置"
+            }}
           </button>
           <button
             type="button"
-            :disabled="busy || !model.trim()"
+            :disabled="busy || configStatus.pending || !model.trim()"
             @click="testConnection"
           >
             {{
@@ -193,6 +290,15 @@ async function testConnection() {
             }}
           </button>
         </div>
+        <button type="button" :disabled="busy" @click="refreshConfiguration()">
+          刷新当前配置
+        </button>
+        <p v-if="configStatus.pending" class="alert" role="status">
+          上次配置请求尚未确认。请保留或重新填写原候选参数和密钥，点击重试原请求；只保存请求键、版本和摘要，不保存密钥。读取当前配置不会清除这条待确认请求。
+        </p>
+        <p v-if="refreshRequired" class="inline-error" role="alert">
+          配置需要重新核对。请显式刷新当前配置后再编辑；不会强制覆盖其他标签页的更改。
+        </p>
         <p v-if="message" role="status">{{ message }}</p>
         <p v-if="error" role="alert" class="inline-error">{{ error }}</p>
       </form>

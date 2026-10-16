@@ -103,7 +103,13 @@ async def test_default_limits_http_capacity_idempotency_and_exact_cancel(isolate
         assert rejected.status_code == 429
         assert host.store.load_messages(sessions[-1]) == []
         assert host.store.list_runs(sessions[-1]) == []
-        config = await client.delete("/api/config/provider")
+        config = await client.request(
+            "DELETE", "/api/config/provider",
+            json={"expected_config_hash": (await client.get(
+                "/api/config/provider"
+            )).json()["config_hash"]},
+            headers={"Idempotency-Key": "busy-reset"},
+        )
         assert config.status_code == 409
         stopped = await client.post(f"/api/runs/{accepted[4]}/cancel")
         assert stopped.status_code == 200 and stopped.json()["status"] == "interrupted"

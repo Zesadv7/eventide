@@ -429,3 +429,38 @@ test("reconnect fills terminal gap from cursor before settling and retains owner
     assert.ok(owners.every((owner) => owner === "original-session"));
   } finally { globalThis.fetch = original; }
 });
+
+test("legacy configuration retries the original receipt without persisting secrets", async () => {
+  const {mutateConfiguration, configurationStatus} = await import("../eventide/web/configuration.js");
+  const calls = [];
+  const h = probeHarness(async (_url, options) => {
+    calls.push(options);
+    if (calls.length === 1) throw new TypeError("lost response");
+    return Response.json({config_hash: "b".repeat(64)});
+  });
+  try {
+    await assert.rejects(mutateConfiguration("save", probeBody, "a".repeat(64)), /lost response/);
+    assert.equal(configurationStatus().pending, true);
+    assert.ok(!JSON.stringify([...h.saved]).includes(probeBody.api_key));
+    await assert.rejects(mutateConfiguration("reset", {}, "a".repeat(64)), /原候选/);
+    assert.equal(calls.length, 1);
+    await mutateConfiguration("save", probeBody, "c".repeat(64));
+    assert.equal(calls[0].headers["Idempotency-Key"], calls[1].headers["Idempotency-Key"]);
+    assert.equal(calls[0].body, calls[1].body);
+    assert.equal(configurationStatus().pending, false);
+  } finally { h.restore(); }
+});
+
+test("legacy configuration preserves unknown conflicts and releases only a definite rejection", async () => {
+  const {mutateConfiguration, configurationStatus} = await import("../eventide/web/configuration.js");
+  let calls = 0;
+  const h = probeHarness(async () => Response.json({detail: "conflict"}, {
+    status: 409, headers: ++calls > 1 ? {"X-Eventide-Mutation-Outcome": "rejected"} : {},
+  }));
+  try {
+    await assert.rejects(mutateConfiguration("save", probeBody, "a".repeat(64)), /conflict/);
+    assert.equal(configurationStatus().pending, true);
+    await assert.rejects(mutateConfiguration("save", probeBody, "a".repeat(64)), /conflict/);
+    assert.equal(configurationStatus().pending, false);
+  } finally { h.restore(); }
+});

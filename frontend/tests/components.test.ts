@@ -81,6 +81,7 @@ describe("content and generation controls", () => {
     ).toBe("");
     expect(api.saveProvider).toHaveBeenCalledWith(
       expect.objectContaining({ api_key: "secret-key-fixture" }),
+      provider.config_hash,
     );
     expect(
       JSON.stringify({ ...sessionStorage, ...localStorage }),

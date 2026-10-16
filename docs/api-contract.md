@@ -34,8 +34,8 @@ Run与Continue接受可选`Idempotency-Key`（1–128个可见ASCII字符）。�
 
 ### 模型生成参数 —— 后端及 Vue 已实现
 
-- `GET /api/generation/defaults?model=...` 返回 `model_identity/defaults/session/capabilities`，身份绑定Provider、endpoint和模型。
-- `PUT /api/generation/defaults` 接受 `{model, generation, capabilities?}`；显式能力声明标为declared，不冒充已验证。
+- `GET /api/generation/defaults?model=...` 返回 `model_identity/defaults/session/capabilities/config_hash`，身份绑定Provider、endpoint和模型。
+- `PUT /api/generation/defaults` 接受 `{model, generation, capabilities?, expected_config_hash}`；显式能力声明标为declared，不冒充已验证。
 - `GET/PUT /api/sessions/{id}/generation` 读取/替换该模型下的会话覆盖，PUT不允许重新声明模型能力。
 - `POST /api/sessions/{id}/runs` 新增 `generation`：temperature、top_p、max_output_tokens、reasoning_effort、thinking。省略继承，null恢复默认，0有效；额外字段/非有限值/范围错误422。
 - 写配置仅本机来源；支持情况未知时拒绝显式采样参数。接收时冻结，Continue相同接入继承；已有调用不受后续设置影响。尚无自动运行探测或按任务预设。
@@ -309,3 +309,13 @@ Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入�
 Vue仅提交固定`engineering-v1`任务集目录返回的`suite_sha256`、development/holdout/all及`mode=offline`；接收和取消均使用随机Idempotency-Key。网络错误或未明确拒绝的409保留原身份，刷新重试也固定原指纹与划分。明确无副作用拒绝（X-Eventide-Mutation-Outcome: rejected）或403/404/422才允许新请求身份，成功202只代表持久接收，运行结果从详情和报告查询。
 
 详情的queued/running/completed/failed/interrupted与逐题passed分别展示；passed=null、duration_ms=null不显示为false或0。报告接口失败不会抹掉运行详情，下载内容保留schema v2原字段和scripted_mechanism_validation/billing_applicable=false标记。`#/evaluations?evaluation=<id>`可恢复选择，但客户端必须核对详情project_id与当前项目；切项目或选择其他评测时丢弃迟到响应。
+
+### 配置写入的版本与持久回执
+
+Provider PUT、Provider DELETE、模型默认参数 PUT、会话参数 PUT 均要求 `Idempotency-Key` 和正文 `expected_config_hash`（64位小写十六进制）。Provider DELETE 也有 JSON 正文；旧版无正文调用需升级。对应 GET 返回 `config_hash`，摘要绑定当前有效配置，模型参数摘要还绑定 Provider 与会话创建身份。
+
+同操作/键/正文重试返回原成功结果；同键不同正文或未确认请求返回409且不能换键规避。过期摘要、服务忙等明确拒绝返回409并标记 `X-Eventide-Mutation-Outcome: rejected`。未知存储故障返回脱敏503，保留原身份；明确发生在写入前的客户端关闭失败返回503并标记 rejected，刷新后可显式新建恢复操作。成功回执和配置事实同一 SQLite 事务提交；历史回执不代表最新配置，确认后应再次 GET。
+
+Provider 状态新增 `client_status=ready|cleanup_required|restart_required`。关闭旧客户端失败保留旧配置并阻止普通运行，明确发起新的恢复配置操作可重试关闭；无法核实持久配置时要求重启。配置保存不发起模型请求。会话生成配置事实由内部配置控制 Session 保存，绑定会话创建时间，删掉空会话后重建同名会话不会继承旧覆盖。
+
+Vue和旧页仅在浏览器会话存储中保存随机请求键、版本和候选摘要，不保存候选密钥。未知结果后要求重填原候选重试；确定冲突需刷新后重新编辑。连接测试和配置修改互相阻止在途覆盖。

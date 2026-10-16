@@ -15,6 +15,7 @@ from eventide.models import ModelRequest, ModelResponse, RunRequest
 from eventide.providers import ScriptedProvider
 from eventide.providers.openai_compatible import OpenAICompatibleProvider
 from eventide.providers.openai_responses import OpenAIResponsesProvider
+from tests.configuration_requests import put_configuration
 from tests.test_host import make_repo
 from tests.test_runtime import settings_for
 
@@ -183,7 +184,7 @@ def test_generation_api_declares_capability_and_rejects_unsupported_values(isola
         before = client.get("/api/generation/defaults", params={"model": model}).json()
         assert before["capabilities"]["source"] == "unknown"
         assert (
-            client.put(
+            put_configuration(client,
                 "/api/generation/defaults",
                 json={
                     "model": model,
@@ -192,7 +193,7 @@ def test_generation_api_declares_capability_and_rejects_unsupported_values(isola
             ).status_code
             == 422
         )
-        declared = client.put(
+        declared = put_configuration(client,
             "/api/generation/defaults",
             json={
                 "model": model,
@@ -204,7 +205,7 @@ def test_generation_api_declares_capability_and_rejects_unsupported_values(isola
         assert declared.json()["capabilities"]["source"] == "declared"
         sid = client.post("/api/sessions").json()["session_id"]
         assert (
-            client.put(
+            put_configuration(client,
                 f"/api/sessions/{sid}/generation",
                 json={
                     "model": model,
@@ -224,7 +225,7 @@ def test_generation_api_declares_capability_and_rejects_unsupported_values(isola
             ).status_code
             == 422
         )
-        reset = client.put(
+        reset = put_configuration(client,
             f"/api/sessions/{sid}/generation",
             json={
                 "model": model,

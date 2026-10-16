@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from eventide.api import create_app
 from eventide.host import RuntimeHost
 from eventide.providers import ScriptedProvider
+from tests.configuration_requests import put_configuration
 from tests.test_api import wait_for_run
 from tests.test_runtime import settings_for
 
@@ -139,7 +140,7 @@ def test_two_apps_keep_runs_reservations_and_provider_mutations_independent(isol
             json={"prompt": "finish"},
         ).json()["run_id"]
         assert wait_for_run(second, right_run)["output"] == "right finished"
-        saved = second.put(
+        saved = put_configuration(second,
             "/api/config/provider",
             json={
                 "provider": "openai_compatible",

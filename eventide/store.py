@@ -1013,6 +1013,37 @@ class RuntimeStore:
             row = self._connection.execute("SELECT * FROM provider_config WHERE id=1").fetchone()
         return dict(row) if row else None
 
+    def commit_configuration(
+        self, owner: str, facts: list[tuple[str, dict[str, Any]]],
+        result: Callable[[], dict[str, Any]], *, mutation_id: str | None = None,
+        provider_update: tuple[dict[str, Any] | None] | None = None,
+    ) -> dict[str, Any]:
+        """Commit a configuration and its HTTP receipt together, never plaintext keys.
+
+        The trusted result callback reads the new state in this transaction. A
+        missing provider_update leaves it alone; (None,) deletes the saved row.
+        """
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            if provider_update is not None:
+                record = provider_update[0]
+                if record is None:
+                    self._connection.execute("DELETE FROM provider_config WHERE id=1")
+                else:
+                    self._connection.execute(
+                        "INSERT OR REPLACE INTO provider_config VALUES (1, ?, ?, ?, ?, ?)",
+                        (record["provider"], record["base_url"], record["model"],
+                         record["api_key_ciphertext"], time.time()),
+                    )
+            for kind, payload in facts:
+                self._append_fact_locked(owner, kind, payload, author="user")
+            response = result()
+            if mutation_id:
+                self._append_fact_locked(owner, "http.mutation_completed", {
+                    "identity": mutation_id, "result": response,
+                }, author="user")
+            return response
+
     def save_provider_config(
         self, *, provider: str, base_url: str | None, model: str, api_key_ciphertext: str | None
     ) -> dict[str, Any]:

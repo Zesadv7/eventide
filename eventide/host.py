@@ -160,6 +160,10 @@ class SessionManager:
         return path
 
 
+class ProviderCleanupError(RuntimeError):
+    """Old transport cleanup failed before a configuration write was attempted."""
+
+
 class RuntimeHost:
     def __init__(
         self,
@@ -216,6 +220,8 @@ class RuntimeHost:
         self._run_tasks: dict[str, asyncio.Task[Any]] = {}
         self._closed = False
         self._configuring = False
+        self._provider_cleanup_required = False
+        self._configuration_uncertain = False
         self._config_path: Path | None = None
         self._enable_mcp = enable_mcp
         self.previews = PreviewStore()
@@ -268,6 +274,8 @@ class RuntimeHost:
         )
 
     def _provider(self) -> Provider:
+        if self._provider_cleanup_required or self._configuration_uncertain:
+            raise ValueError("Provider configuration requires recovery")
         if self.provider is None:
             self.provider = build_provider(self.settings)
         return self.provider
@@ -589,10 +597,16 @@ class RuntimeHost:
         closer = getattr(self.provider, "close", None)
         if closer is None:
             closer = getattr(self.provider, "aclose", None)
+        self._provider_cleanup_required = True
         if closer is not None:
-            result = closer()
-            if inspect.isawaitable(result):
-                await result
+            try:
+                result = closer()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                raise ProviderCleanupError("Provider client cleanup failed") from None
+        self.provider = None
+        self._provider_cleanup_required = False
 
     def _load_persisted_provider(self) -> None:
         resolved = apply_provider_configuration(
@@ -603,32 +617,55 @@ class RuntimeHost:
         self.settings = resolved.settings
         self._provider_secret_error = resolved.secret_error
 
+    def configuration_owner(self) -> str:
+        owner = "configuration_control"
+        if self.store.get_session(owner) is None:
+            self.create_session(owner)
+            self.store.append_fact(owner, "control.session", {"kind": "configuration"})
+            self.store.update_session(owner, title="Configuration", archived=True)
+        elif not any(e["payload"].get("kind") == "configuration"
+                     for e in self.store.facts_by_type(("control.session",))
+                     if e["session_id"] == owner):
+            raise ValueError("Configuration control identity conflict")
+        return owner
+
     def provider_config_status(self) -> dict[str, Any]:
+        return self._provider_status(self.settings, self._provider_secret_error)
+
+    def _provider_status(self, settings: Settings, secret_error: str | None) -> dict[str, Any]:
         record = self.store.get_provider_config()
         encrypted = bool(record and record.get("api_key_ciphertext"))
-        if self._provider_secret_error:
+        if secret_error:
             key_status = "decrypt_error"
             key_source = "decrypt_error"
-        elif self.settings.api_key:
+        elif settings.api_key:
             key_status = "configured"
             key_source = "sqlite_encrypted" if encrypted else "environment"
         else:
             key_status = "missing"
             key_source = "none"
-        return {
-            "provider": self.settings.provider,
-            "base_url": self.settings.base_url,
-            "model": self.settings.model,
+        state = {
+            "provider": settings.provider,
+            "base_url": settings.base_url,
+            "model": settings.model,
             "api_key_configured": key_status == "configured",
             "api_key_status": key_status,
             "api_key_source": key_source,
             "persistence": "sqlite_encrypted" if record else "environment",
             "updated_at": record.get("updated_at") if record else None,
-            "configuration_error": self._provider_secret_error,
+            "configuration_error": secret_error,
+            "client_status": ("restart_required" if self._configuration_uncertain else
+                              "cleanup_required" if self._provider_cleanup_required else "ready"),
         }
+        state["config_hash"] = digest([state, record, digest(settings.api_key or "")])
+        for field in ("model", "base_url", "configuration_error"):
+            state[field] = normalize(state[field], (settings.api_key or "",))
+        return state
 
     @contextmanager
     def _configuration_change(self) -> Iterator[None]:
+        if self._closed or self._configuration_uncertain:
+            raise ValueError("Provider configuration requires restart; Host closed or uncertain")
         if self._configuring or self.runtime_busy():
             raise ValueError("Wait for active runs or configuration changes")
         self._configuring = True
@@ -638,29 +675,26 @@ class RuntimeHost:
             self._configuring = False
 
     async def configure_provider(
-        self,
-        *,
-        provider: str,
-        api_key: str | None,
-        base_url: str | None,
-        model: str,
-        persist: bool = False,
-        clear_api_key: bool = False,
-    ) -> None:
-        """Replace live provider settings and optionally persist an encrypted credential."""
+        self, *, provider: str, api_key: str | None, base_url: str | None, model: str,
+        persist: bool = False, clear_api_key: bool = False,
+        expected_config_hash: str | None = None, mutation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate first, close the idle client, then commit settings and receipt together."""
         with self._configuration_change():
-            if self._active_tasks:
-                raise ValueError("Wait for active runs before changing provider configuration")
+            if expected_config_hash is not None and (
+                self.provider_config_status()["config_hash"] != expected_config_hash
+            ):
+                raise ValueError("Configuration changed; refresh before saving")
             normalized = normalize_provider(provider)
             if normalized not in SUPPORTED_PROVIDERS:
-                raise ValueError(f"Unsupported provider '{provider}'")
+                raise ValueError("Unsupported provider")
             if not model.strip():
                 raise ValueError("Model cannot be empty")
             normalized_url = base_url.strip() if base_url else None
             selected_key = api_key.strip() if api_key and api_key.strip() else self.settings.api_key
+            current = self.store.get_provider_config() or {}
+            encrypted = current.get("api_key_ciphertext")
             if persist:
-                current = self.store.get_provider_config() or {}
-                encrypted = current.get("api_key_ciphertext")
                 if self._provider_secret_error and encrypted and not api_key and not clear_api_key:
                     raise SecretKeyError(
                         "已保存的 API Key 无法解密；请输入新密钥覆盖，或先清除旧密钥"
@@ -670,32 +704,65 @@ class RuntimeHost:
                     selected_key = self._startup_settings.api_key
                 elif api_key and api_key.strip():
                     encrypted = self._secret_box.encrypt(api_key.strip())
-                self.store.save_provider_config(
-                    provider=normalized,
-                    base_url=normalized_url,
-                    model=model.strip(),
-                    api_key_ciphertext=encrypted,
-                )
+            candidate = replace(self.settings, provider=normalized, api_key=selected_key,
+                                base_url=normalized_url, model=model.strip())
             await self._close_provider()
-            self.settings = replace(
-                self.settings,
-                provider=normalized,
-                api_key=selected_key,
-                base_url=normalized_url,
-                model=model.strip(),
-            )
-            self._provider_secret_error = None
+            # Once closed, never reuse the old transport even if a disk commit fails.
             self.provider = None
+            if persist:
+                result = self._commit_provider_configuration(candidate, {
+                    "provider": normalized, "base_url": normalized_url,
+                    "model": model.strip(), "api_key_ciphertext": encrypted,
+                }, mutation_id, "save")
+            else:
+                result = {}
+            self.settings = candidate
+            self._provider_secret_error = None
+            return result or self.provider_config_status()
 
-    async def reset_provider_configuration(self) -> None:
+    async def reset_provider_configuration(
+        self, *, expected_config_hash: str | None = None, mutation_id: str | None = None,
+    ) -> dict[str, Any]:
         with self._configuration_change():
-            if self._active_tasks:
-                raise ValueError("Wait for active runs before changing provider configuration")
+            if expected_config_hash is not None and (
+                self.provider_config_status()["config_hash"] != expected_config_hash
+            ):
+                raise ValueError("Configuration changed; refresh before resetting")
             await self._close_provider()
-            self.store.delete_provider_config()
+            self.provider = None
+            result = self._commit_provider_configuration(
+                self._startup_settings, None, mutation_id, "reset",
+            )
             self.settings = self._startup_settings
             self._provider_secret_error = None
-            self.provider = None
+            return result
+
+    def _commit_provider_configuration(
+        self, candidate: Settings, record: dict[str, Any] | None,
+        mutation_id: str | None, action: str,
+    ) -> dict[str, Any]:
+        owner = self.configuration_owner()
+        before = self.store.get_provider_config()
+        try:
+            return self.store.commit_configuration(
+                owner, [("provider.configured", {"action": action})],
+                lambda: self._provider_status(candidate, None),
+                mutation_id=mutation_id, provider_update=(record,),
+            )
+        except BaseException:
+            # The commit itself can succeed even when its caller loses the result.
+            # Reconcile from durable evidence; never leave an old in-memory key active.
+            try:
+                completed = mutation_id is not None and any(
+                    e["type"] == "http.mutation_completed"
+                    and e["payload"].get("identity") == mutation_id
+                    for e in self.store.session_events(owner)
+                )
+                if completed or self.store.get_provider_config() != before:
+                    self._load_persisted_provider()
+            except Exception:
+                self._configuration_uncertain = True
+            raise
 
     async def probe_provider(
         self,
@@ -707,6 +774,9 @@ class RuntimeHost:
         run_id: str | None = None,
     ) -> ModelResponse:
         await self.initialize()
+        if (self._configuring or self._provider_cleanup_required
+                or self._configuration_uncertain):
+            raise ValueError("Provider configuration is changing or requires recovery")
         normalized = normalize_provider(provider)
         if normalized not in SUPPORTED_PROVIDERS:
             raise ValueError(f"Unsupported provider '{provider}'")
@@ -1312,20 +1382,33 @@ class RuntimeHost:
         session = (
             self.store.generation_config("session", session_id, identity) if session_id else {}
         )
+        record = self.store.get_session(session_id) if session_id else None
+        if session.get("session_created_at") is not None and (
+            record is None or session["session_created_at"] != record["created_at"]
+        ):
+            session = {}
         # Session overrides are endpoint/model scoped; changing models does not carry them over.
         overrides = (
             session.get("generation", {}) if session.get("model_identity") == identity else {}
         )
-        return {
+        result = {
             "model": model, "model_identity": identity,
             "defaults": saved.get("generation", {}), "session": overrides,
             "capabilities": supported.model_dump(),
         }
+        result["config_hash"] = digest([
+            result, self.provider_config_status()["config_hash"],
+            record["created_at"] if record else None,
+        ])
+        return result
 
     def configure_generation(
         self, model: str, generation: dict[str, Any], *, session_id: str | None = None,
         declared: GenerationCapabilities | None = None,
+        expected_config_hash: str | None = None, mutation_id: str | None = None,
     ) -> dict[str, Any]:
+        if self._configuring or self._configuration_uncertain:
+            raise ValueError("Provider configuration is changing or requires restart")
         if self._closed:
             raise ValueError("RuntimeHost is closed")
         if session_id:
@@ -1333,6 +1416,8 @@ class RuntimeHost:
             if self.is_worker_session(session_id) or self.is_control_session(session_id):
                 raise ValueError("Internal sessions cannot configure generation")
         state = self.generation_settings(model, session_id)
+        if expected_config_hash is not None and state["config_hash"] != expected_config_hash:
+            raise ValueError("Configuration changed; refresh before saving")
         patch = GenerationPatch.model_validate(generation).patch()
         supported = declared or GenerationCapabilities.model_validate(state["capabilities"])
         resolve_generation(
@@ -1340,17 +1425,16 @@ class RuntimeHost:
             provider=self.settings.provider, base_url=self.settings.base_url, model=model,
             declared=supported,
         )
-        owner = session_id or self.create_session()
-        if not session_id:
-            self.store.update_session(owner, archived=True)
-        self.store.append_fact(owner, "generation.configured", {
+        owner = self.configuration_owner()
+        record = self.store.get_session(session_id) if session_id else None
+        return self.store.commit_configuration(owner, [("generation.configured", {
             "scope": "session" if session_id else "model",
             "identity": session_id or state["model_identity"],
             "model_identity": state["model_identity"],
             "generation": patch,
             "capabilities": supported.model_dump() if not session_id else None,
-        }, author="user")
-        return self.generation_settings(model, session_id)
+            "session_created_at": record["created_at"] if record else None,
+        })], lambda: self.generation_settings(model, session_id), mutation_id=mutation_id)
 
     def _run_intent(
         self, request: RunRequest | None, source_id: str | None = None,
@@ -1486,8 +1570,9 @@ class RuntimeHost:
         await self.initialize()
         if self.is_worker_session(session_id) or self.is_control_session(session_id):
             raise ValueError("Worker sessions cannot accept ordinary runs or Continue")
-        if self._configuring:
-            raise ValueError("Provider configuration is changing")
+        if (self._configuring or self._provider_cleanup_required
+                or self._configuration_uncertain):
+            raise ValueError("Provider configuration is changing or requires recovery")
         workspace = self.sessions.workspace(session_id)
         if self.state_dir.resolve() == Path(workspace.path):
             raise ValueError("State directory must not be the Workspace root")
@@ -1970,8 +2055,9 @@ class RuntimeHost:
         self._active_tasks.add(task)
         try:
             await self.initialize()
-            if self._configuring:
-                raise ValueError("Provider configuration is changing")
+            if (self._configuring or self._provider_cleanup_required
+                    or self._configuration_uncertain):
+                raise ValueError("Provider configuration is changing or requires recovery")
             workspace = self.sessions.workspace(session_id)
             binding = self._execution_binding(admitted_run_id)
             if binding:
