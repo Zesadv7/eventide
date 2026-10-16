@@ -196,6 +196,8 @@ uv run --project .. npm run test:e2e
 
 Vite默认同源代理到 `http://127.0.0.1:8000`，`EVENTIDE_API_URL` 可覆盖。浏览器测试使用临时真实API/Git项目与假Provider，缺浏览器明确失败，不自动下载。`EVENTIDE_CHROMIUM` 可指定已有浏览器，`EVENTIDE_E2E_BUILT=1` 直接验证FastAPI托管产物。
 
+发布构建使用干净构建目录；setuptools可能保留旧`build/`缓存，确认其中只有可丢弃构建输出后再清理。wheel门禁拒绝已退役入口及清单以外的页面资源，不能只凭构建命令成功判断可分发。
+
 构建会更新 `eventide/workbench/` 的源码指纹和资源SHA-256；修改前端后必须一起提交新产物。`uv build --wheel --out-dir .task_outputs/dist` 后，用 `uv run python frontend/scripts/check_wheel.py .task_outputs/dist/eventide-0.4.0-py3-none-any.whl` 隔离检查资源、服务入口和旧入口退役情况。
 
 更多实现说明见 [architecture.md](docs/architecture.md)、[api-contract.md](docs/api-contract.md)、[decisions.md](docs/decisions.md) 和 [AGENTS.md](AGENTS.md)。项目采用 [MIT License](LICENSE)。

@@ -3,8 +3,12 @@
 import hashlib
 import json
 import re
+import subprocess
+import sys
+import zipfile
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 import eventide.api as api_module
@@ -12,6 +16,21 @@ from eventide.api import WORKBENCH_DIR, create_app
 from eventide.host import RuntimeHost
 from eventide.providers import ScriptedProvider
 from tests.test_runtime import settings_for
+
+
+@pytest.mark.parametrize("stale", ["eventide/cli.py", "eventide/web/app.js",
+                                  "eventide/workbench/assets/obsolete.js"])
+def test_wheel_gate_rejects_stale_build_outputs(tmp_path, stale):
+    wheel = tmp_path / "stale.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(stale, "stale")
+        archive.writestr("eventide-0.4.0.dist-info/entry_points.txt",
+                         "[console_scripts]\neventide-server = eventide.server:main\n")
+        archive.writestr("eventide/workbench/manifest.json", json.dumps({"files": {}}))
+    checker = Path(__file__).resolve().parents[1] / "frontend/scripts/check_wheel.py"
+    result = subprocess.run([sys.executable, str(checker), str(wheel)], capture_output=True)
+    assert result.returncode != 0
+    assert b"AssertionError" in result.stderr
 
 
 def test_packaged_resources_match_sources_and_content_manifest():

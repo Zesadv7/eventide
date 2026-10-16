@@ -590,3 +590,6 @@ scripted 与未跑完的批次保留统计，不产生真实优化通过结论�
 三类官方SDK客户端显式使用Settings.model_timeout作为连接、读取、写入和连接池等待上限，避免隐含的5秒连接默认值先于配置截止；Host仍限制整个请求生命周期并保持原取消/断流不重放规则。SDK重试保持0，发生未知消费时不释放预留。此修正由真实项目重放中的早期超时暴露，但不能据此断言该次供应商超时的底层原因。
 
 C4机制补充：`query_rewrite_outcome` 返回真实 `RetrievalOutcome`，原 `with_query_rewrite` 只负责相同结果的文本格式化，ToolExecutor/PolicyEngine边界未变。`rag.benchmark.run_benchmark` 的协作停止保留已完成排名和未尝试数量，不把未派发查询算失败，不完整对照禁止晋升。受控改写实验的Host生命周期适配仍在实现。
+
+
+wheel分发检查同时要求workbench实际文件集合与manifest完全相等，拒绝已退役cli.py/web目录及重复ZIP路径。setuptools增量build缓存可能包含已删除源码或旧哈希资源；发布采用确认可丢弃后的干净构建，并以安装包隔离验证决定通过，不能把源码树的干净状态当作包内容证据。

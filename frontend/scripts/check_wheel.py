@@ -13,6 +13,7 @@ def main() -> None:
     wheel = Path(sys.argv[1]).resolve()
     with zipfile.ZipFile(wheel) as archive, tempfile.TemporaryDirectory() as temporary:
         names = archive.namelist()
+        assert len(names) == len(set(names)), "Wheel contains duplicate paths"
         assert "eventide/cli.py" not in names
         assert not any(name.startswith("eventide/web/") for name in names)
         entrypoints = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
@@ -20,6 +21,11 @@ def main() -> None:
         assert "eventide-server = eventide.server:main" in scripts
         assert "\neventide =" not in scripts
         manifest = json.loads(archive.read("eventide/workbench/manifest.json"))
+        shipped = {name.removeprefix("eventide/workbench/") for name in names
+                   if name.startswith("eventide/workbench/") and not name.endswith("/")}
+        assert shipped == {*manifest["files"], "manifest.json"}, (
+            "Wheel contains stale or missing workbench assets; use a clean build directory"
+        )
         for path, expected in manifest["files"].items():
             content = archive.read("eventide/workbench/" + path)
             assert hashlib.sha256(content).hexdigest() == expected
