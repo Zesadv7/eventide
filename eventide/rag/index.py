@@ -8,7 +8,7 @@ import os
 import sqlite3
 import stat as stat_module
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -409,9 +409,12 @@ class IndexStore:
         embedder: EmbeddingProvider | None = None,
         profile: EmbeddingProfile | None = None,
         code_structure: bool = False,
+        check_cancelled: Callable[[], None] | None = None,
     ) -> BuildStats:
         """Incrementally rebuild changed files and commit the new snapshot atomically."""
         started = time.perf_counter()
+        if check_cancelled:
+            check_cancelled()
         chunking_profile = chunking_identity(code_structure=code_structure)
         chunking_digest = chunking_fingerprint(chunking_profile)
         if embedder is None:
@@ -520,8 +523,12 @@ class IndexStore:
             resolved_profile = profile.resolved(dimension)
             if self._index_identity() != index_identity:
                 raise RuntimeError("Knowledge index path changed during build; retry")
+            if check_cancelled:
+                check_cancelled()
             connection.execute("BEGIN IMMEDIATE")
             try:
+                if check_cancelled:
+                    check_cancelled()
                 if self._generation(connection) != generation:
                     raise RuntimeError("Knowledge index changed during build; retry")
                 verified = self._scan(include_chunks=False)
