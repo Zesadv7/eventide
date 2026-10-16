@@ -4,7 +4,7 @@ from pathlib import Path
 
 from eventide.policy import resolve_scoped_path
 
-READ_PAGE_CHARS = 3_600
+READ_PAGE_CHARS = 10_000
 
 
 def _page(lines: list[str], budget: int) -> list[str]:

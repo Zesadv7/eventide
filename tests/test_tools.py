@@ -27,7 +27,7 @@ def test_run_read_pages_large_files_and_reports_extent(isolated_workspace):
     assert first.startswith("[big.txt — 200 lines total; showing lines 1-")
     assert "continue with offset=" in first
     assert "more lines)" in first
-    assert len(first) < 4000
+    assert len(first) < 10_200
     offset = int(re.search(r"offset=(\d+)", first).group(1))
     second = run_read("big.txt", offset=offset, cwd=isolated_workspace)
     assert second.startswith(f"[big.txt — 200 lines total; showing lines {offset + 1}-")
@@ -43,6 +43,15 @@ def test_run_read_explicit_limit_reports_page(isolated_workspace):
     assert "l0" in out
     assert "l3" not in out
     assert "1: l0\n2: l1\n3: l2" in out
+
+
+def test_run_read_keeps_a_medium_source_file_in_one_page(isolated_workspace):
+    lines = [f"value_{index} = " + '"' + "x" * 30 + '"' for index in range(183)]
+    (isolated_workspace / "source.py").write_text("\n".join(lines))
+    out = run_read("source.py", cwd=isolated_workspace)
+    assert out.splitlines()[-1] == f"183: {lines[-1]}"
+    assert "continue with offset=" not in out
+    assert len(out) <= 10_000
 
 
 def test_run_read_preserves_source_coordinates_across_pages(isolated_workspace):

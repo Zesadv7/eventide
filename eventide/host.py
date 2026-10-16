@@ -22,6 +22,7 @@ from eventide.budget_prices import PriceVersion
 from eventide.budgets import BudgetExceeded, BudgetScope, is_service_probe_run
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
+from eventide.delivery_limits import delivery_usage
 from eventide.execution_snapshots import ExecutionSnapshots
 from eventide.execution_worktrees import ExecutionWorktrees
 from eventide.executor import (
@@ -3255,6 +3256,11 @@ class RuntimeHost:
             )
             # Bound before the loop so the task-plan handler can stamp its own step.
             steps = 0
+            delivery_id = execution_config.get("writer_delivery_id")
+            delivery_contract = next((
+                e["payload"] for e in self.store.delivery_facts(delivery_id)
+                if e["type"] == "delivery.repair_started"
+            ), None) if delivery_id else None
             for steps in range(1, max_steps + 1):
                 ensure_token_budget()
                 plan_state = self.store.task_plan_state(session_id)
@@ -3276,6 +3282,26 @@ class RuntimeHost:
                 if resume_note:
                     plan_context = f"{resume_note}\n\n{plan_context}"
                 system = base_system + (f"\n\n{plan_context}" if plan_context else "")
+                if delivery_contract:
+                    ledger = delivery_usage(self.store, delivery_contract["delivery_id"])
+                    limits = delivery_contract["limits"]
+                    used_tokens = sum(ledger["reported_totals"].get(key, 0)
+                                      for key in ("input_tokens", "output_tokens"))
+                    progress = {
+                        "run_step": steps, "run_step_limit": max_steps,
+                        "remaining_model_attempts": limits["model_attempts"] - sum(
+                            call["kind"] != "embedding" for call in ledger["calls"]
+                        ),
+                        "remaining_observed_tokens": limits["observed_tokens"] - used_tokens,
+                        "unknown_attempts": ledger["unknown_attempts"],
+                        "remaining_seconds": delivery_contract["deadline"] - time.time(),
+                    }
+                    system += (
+                        "\nCurrent delivery execution budget (reported usage only): "
+                        + json.dumps(progress, separators=(",", ":"))
+                        + "\nFinish coherent source edits and return for independent acceptance "
+                        "before these limits are reached."
+                    )
                 messages, compacted, trimmed = await self.context_builder.build(
                     session_id,
                     provider=self._provider(),

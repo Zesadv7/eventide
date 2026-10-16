@@ -104,6 +104,17 @@ async def test_second_candidate_uses_failed_checks_and_cumulative_usage(tmp_path
         assert [context["remaining"]["model_attempts"] for context in contexts] == [36, 34]
         assert [context["remaining"]["observed_tokens"] for context in contexts] == [60_000, 59_994]
         assert all(0 < context["remaining"]["seconds"] <= 900 for context in contexts)
+        current = [json.loads(request.system.split(
+            "Current delivery execution budget (reported usage only): ", 1
+        )[1].splitlines()[0]) for request in host.provider.requests]
+        assert [value["run_step"] for value in current] == [1, 2, 1, 2]
+        assert all(value["run_step_limit"] == host.settings.max_steps for value in current)
+        assert [value["remaining_model_attempts"] for value in current] == [36, 35, 34, 33]
+        assert [value["remaining_observed_tokens"] for value in current] == [
+            60_000, 59_997, 59_994, 59_991,
+        ]
+        assert all(value["unknown_attempts"] == 0 for value in current)
+        assert all(0 < value["remaining_seconds"] <= 900 for value in current)
         shown = await host.manage_delivery("show", delivery_id=prepared["delivery_id"])
         assert shown["repair"]["checks"] == [CHECK]
         with pytest.raises(ValueError, match="already started"):
