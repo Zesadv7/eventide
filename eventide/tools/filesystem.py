@@ -85,7 +85,7 @@ def run_glob(pattern: str, cwd: Path | None = None) -> str:
     try:
         base = (cwd or Path.cwd()).resolve()
         results = []
-        for match in g.glob(pattern, root_dir=base):
+        for match in g.glob(pattern, root_dir=base, recursive=True):
             if (base / match).resolve().is_relative_to(base):
                 results.append(match)
         return "\n".join(results) if results else "(no matches)"

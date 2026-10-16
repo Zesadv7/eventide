@@ -39,6 +39,8 @@ Project 查询聚合所有副本 Session，不改变原 Workspace API 的过滤�
 
 准备阶段短暂获取源 Workspace 锁，复制、冻结 Skills 后再次验证源 checkpoint；取消准备时等待复制线程完成才释放锁。运行阶段获取 Session 锁与 snapshot_run:<RunID> 所有权，不持有源锁。工具 cwd、项目指令、Skill恢复和checkpoint全部从固定副本解析，模型/工具仍走唯一 `_execute`、ToolExecutor、PolicyEngine 和 U2 请求入口。Plan禁止Shell、写工具与Skill脚本，快照不连接MCP、源索引或嵌套worker，以免读取可变源数据。
 
+源目录和快照共用标准库递归glob：`**/`匹配零层或多层目录，因此`**/*.py`包含根目录文件；目录模式保留目录结果，隐藏文件及隐藏目录仍须在对应模式段显式以`.`开头。快照只遍历已经固定的副本，排除的资源和接收后源端新增文件不会出现在结果中；原有路径边界与manifest复验保持生效。
+
 每次开始、Continue和成功终态重验资源摘要、大小、链接边界；副本损坏明确拒绝。Continue复用原admission绑定，源端漂移不影响副本，启动恢复只写停驻事实，不重放请求。快照中未知工具结果保留并阻止该次Continue，不将已知只读副本的异常扩散为源Workspace写入隔离。用户停止只影响精确Run；同Session只接受一个未完成请求，Python/HTTP共用接收与P3调度；父子任务和模型额度的分离见后文。
 
 ### 写入副本链与短期 Git 协调
