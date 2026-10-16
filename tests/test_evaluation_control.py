@@ -44,9 +44,12 @@ async def admit(controller, identity="eval_1", split="development"):
 
 
 async def spin_until(check):
-    async with asyncio.timeout(10):
-        while not check():
-            await asyncio.sleep(0.005)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 10
+    while not check():
+        if loop.time() >= deadline:
+            raise asyncio.TimeoutError("Condition not reached within 10 seconds")
+        await asyncio.sleep(0.005)
 
 
 async def test_offline_twenty_actual_cases_no_credentials_network_or_main_usage(

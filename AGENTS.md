@@ -165,6 +165,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | 编号 | 状态 | 内容与证据 |
 |---|---|---|
 | G1 | 已完成 | GitHub 发布准备：用户已授权上传现有公开仓库。README 增加 0.4.0 能力、最新验证及局限摘要，补齐克隆/运行与开发依赖步骤，历史实验仍保留。只读复核、文档本地链接、凭据模式和 git diff --check 通过，唯一模式命中为脱敏测试合成数据；沿用 Q3 工程验证，不重复全量或付费测试。只推送明确分支，不上传未跟踪目录、状态或凭据，不改写历史；实际推送与版本身份以 GitHub 提交及 Release 为准。 |
+| G2 | 已完成 | master 与 v0.4.0 已上传，GitHub Python 3.10 首次收集发现 datetime.UTC 不兼容；同时修正已有测试轮询的 asyncio.timeout。保留原判分、10 秒截止及全部生产实现；隔离 Python 3.10.22 收集 1,830 项成功，受影响检索/评测控制三文件 74 项通过，Ruff 与 git diff --check 通过。README 开发约定已同步，不重跑本地全量；重复 tag CI 取消，v0.4.0 原标签保留，兼容修正追加到 master，远程完整门禁以 GitHub Actions 为准，不以定向验证代替其结果。 |
 
 ## 用量、预算与实验细则
 

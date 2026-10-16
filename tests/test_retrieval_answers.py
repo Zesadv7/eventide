@@ -3,7 +3,7 @@
 import asyncio
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -448,7 +448,7 @@ async def test_fixed_price_pipeline_costs_include_rewrite_once_and_all_failed_an
                 category,
                 "CNY",
                 "1",
-                datetime(2020, 1, 1, tzinfo=UTC),
+                datetime(2020, 1, 1, tzinfo=timezone.utc),
             )
         )
     try:
