@@ -319,7 +319,8 @@ def test_cli_imports_v02_history_without_changing_source(
         {"role": "assistant", "content": "old answer"},
     ]
     assert store.get_run("old-run")["output"] == "old answer"
-    assert store.get_provider_config()["api_key_ciphertext"] is None
+    assert store.get_provider_config() is None
+    assert bool(store.get_session("old-session")["archived"])
     assert sum(event["type"] == "run.completed" for event in store.run_events("old-run")) == 1
     store.close()
 
