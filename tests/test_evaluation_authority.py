@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from eventide.evaluation import run_evaluations
+from eventide.evaluation_quote import evaluation_quote
 from eventide.providers import ScriptedProvider
 from eventide.usage import build_usage_ledger
 from tests.test_evaluation_calls import authority
@@ -86,7 +87,7 @@ async def test_controller_frozen_development_cases_share_service_ledger(tmp_path
     controller = EvaluationController(host)
     before = host._workspace_checkpoint(Path(host.default_workspace.path))
     try:
-        generation = host.generation_settings(host.settings.model)
+        quote = evaluation_quote(host, host.default_workspace.project_id)
         await controller.admit(
             host.default_workspace.project_id,
             "controlled",
@@ -94,7 +95,7 @@ async def test_controller_frozen_development_cases_share_service_ledger(tmp_path
             suite_sha256=suite["suite_sha256"],
             mode="live",
             confirmed=True,
-            generation_hash=generation["config_hash"],
+            quote_hash=quote["quote_hash"],
         )
         # New defaults apply to future Runs; the accepted experiment keeps its snapshot.
         host.configure_generation(host.settings.model, {"max_output_tokens": 15})
@@ -133,14 +134,14 @@ async def test_controller_requires_confirmed_current_model_and_stops_on_global_b
             await controller.admit(project, "unconfirmed", **body)
         with pytest.raises(ValueError, match="configuration changed"):
             await controller.admit(
-                project, "stale", confirmed=True, generation_hash="stale", **body
+                project, "stale", confirmed=True, quote_hash="stale", **body
             )
         host.configure_budget(BudgetScope("project", project), token_limit=0, request_id="stop")
         await controller.admit(
             project,
             "blocked",
             confirmed=True,
-            generation_hash=host.generation_settings(host.settings.model)["config_hash"],
+            quote_hash=evaluation_quote(host, host.default_workspace.project_id)["quote_hash"],
             **body,
         )
         result = await controller.start("blocked")
@@ -166,7 +167,7 @@ async def test_live_admission_restart_parks_without_reconstructing_requests(tmp_
         host.default_workspace.project_id, "pending-live", suite_id="engineering-v1",
         suite_sha256=builtin_suite_catalog()[0]["suite_sha256"],
         mode="live", confirmed=True,
-        generation_hash=host.generation_settings(host.settings.model)["config_hash"],
+        quote_hash=evaluation_quote(host, host.default_workspace.project_id)["quote_hash"],
     )
     host._closed = True
     host.store.close()

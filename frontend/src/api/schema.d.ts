@@ -816,6 +816,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/projects/{project_id}/evaluations/quote": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Quote */
+    get: operations["quote_api_projects__project_id__evaluations_quote_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/projects/{project_id}/evaluations": {
     parameters: {
       query?: never;
@@ -1459,9 +1476,16 @@ export interface components {
       /**
        * Mode
        * @default offline
-       * @constant
+       * @enum {string}
        */
-      mode: "offline";
+      mode: "offline" | "live";
+      /** Quote Hash */
+      quote_hash?: string | null;
+      /**
+       * Confirmed
+       * @default false
+       */
+      confirmed: boolean;
     };
     /** EvaluationCase */
     EvaluationCase: {
@@ -1606,22 +1630,17 @@ export interface components {
       /**
        * Supported Modes
        * @default [
-       *       "offline"
+       *       "offline",
+       *       "live"
        *     ]
        */
-      supported_modes: "offline"[];
+      supported_modes: ("offline" | "live")[];
       /**
-       * Measurement Kind
-       * @default scripted_mechanism_validation
+       * Default Mode
+       * @default offline
        * @constant
        */
-      measurement_kind: "scripted_mechanism_validation";
-      /**
-       * Billing Applicable
-       * @default false
-       * @constant
-       */
-      billing_applicable: false;
+      default_mode: "offline";
     };
     /** GenerationBody */
     GenerationBody: {
@@ -9561,6 +9580,131 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["EvaluationSuite"][];
+        };
+      };
+      /** @description bad request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description method not allowed */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description rate limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  quote_api_projects__project_id__evaluations_quote_get: {
+    parameters: {
+      query?: {
+        split?: "development" | "holdout" | "all";
+      };
+      header?: never;
+      path: {
+        project_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description bad request */

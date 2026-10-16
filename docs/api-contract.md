@@ -291,12 +291,12 @@ Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入�
 
 统计是最终Provider中立system/messages/tools对象经json.dumps(ensure_ascii=False)序列化后的Unicode字符，含转义/结构，不是供应商wire、Token或费用。instructions统计system序列化字符串，tool_catalog统计整个tools数组；message.content块按已确认配对的工具结果分别归skills/retrieval/tool_results，其他内容及message中role/content以外的扩展字段值归history，剩余角色/字段名和JSON结构归envelope。仅唯一且先出现的assistant tool_use可为user tool_result建立归属，加载Skill正文/资源和search_knowledge分别归对应项；错序/孤立/重复ID不猜来源。摘要、图片及provider_state按当前请求本身统计，不还原已压缩来源；不能把Skills字符项解释为其完整因果成本。
 
-## 离线评测
+## 工程评测
 
-仅支持内置工程冻结集和scripted机制验证。所有响应标注`measurement_kind=scripted_mechanism_validation`、`billing_applicable=false`，不代表真实模型成功率。以下POST沿用本机/同源防护，`Idempotency-Key`必填（1–128可见ASCII字符）。
+支持内置工程冻结集，默认offline的scripted机制验证标注`measurement_kind=scripted_mechanism_validation`、`billing_applicable=false`，不代表真实模型成功率。live须按下文规划确认契约显式接收。以下POST沿用本机/同源防护，`Idempotency-Key`必填（1–128可见ASCII字符）。
 
-- `GET /api/evaluations/suites` → 数组：`id,benchmark_id,version(int),description,split(null),total,splits,manifest_sha256,suite_sha256,inputs_sha256,supported_modes:[offline]`及上述机制标记。先完整验证20题再公布，损坏不能静默隐藏。
-- `POST /api/projects/{project_id}/evaluations` → 202：`evaluation_id,run_id,session_id,project_id,status=accepted,status_url,events_url`。严格请求为`{suite_id:engineering-v1,suite_sha256:<catalog hash>,split:development|holdout|all,mode:offline}`；split默认development，mode默认offline。额外字段及live均422，禁止路径、脚本、模型或凭据输入。同键同内容返回原202和身份，包括重启/终态；同键异内容409。suite过期、同项目busy为409，全局队列满429，确定未接收的拒绝带`X-Eventide-Mutation-Outcome: rejected`。不得在内容冲突或结果未知时自行换键。
+- `GET /api/evaluations/suites` → 数组：`id,benchmark_id,version(int),description,split(null),total,splits,manifest_sha256,suite_sha256,inputs_sha256,supported_modes:[offline,live],default_mode:offline`。先完整验证20题再公布，损坏不能静默隐藏。
+- `POST /api/projects/{project_id}/evaluations` → 202：`evaluation_id,run_id,session_id,project_id,status=accepted,status_url,events_url`。严格请求为`{suite_id:engineering-v1,suite_sha256:<catalog hash>,split:development|holdout|all,mode:offline}`；split默认development，mode默认offline。live额外要求quote_hash与confirmed=true；未知字段422，禁止路径、脚本、模型或凭据输入。同键同内容返回原202和身份，包括重启/终态；同键异内容409。suite过期、同项目busy为409，全局队列满429，确定未接收的拒绝带`X-Eventide-Mutation-Outcome: rejected`。不得在内容冲突或结果未知时自行换键。
 - `GET /api/projects/{project_id}/evaluations?limit=20&before=<run_id>` → 最新在前的详情数组，limit范围1–100。
 - `GET /api/evaluations/{evaluation_id}` → 身份、suite_id/suite_version/suite_sha256、split/mode、机制标记、`status`（queued/running/completed/failed/interrupted）、`dispatch_state`（queued/starting/running/finishing/null）、queue_position、total/attempted/passed/failed/remaining、current_case、cases、report_available/report_url/events_url/error。cases逐项`id,category,split,status,passed(bool|null),reasons,duration_ms`；未执行passed为null。批次completed表示全部案例执行完，失败数另计。
 - `POST /api/evaluations/{evaluation_id}/cancel` → 当前详情；排队/运行取消均等待实际收尾并变为interrupted，终态重复停止无副作用。活动取消请求按键摘要记入原Run事实；已完成终态不追加事实、不重启。通用Run取消端点亦有效。
@@ -306,7 +306,7 @@ Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入�
 
 ### Vue 离线评测请求恢复
 
-Vue仅提交固定`engineering-v1`任务集目录返回的`suite_sha256`、development/holdout/all及`mode=offline`；接收和取消均使用随机Idempotency-Key。网络错误或未明确拒绝的409保留原身份，刷新重试也固定原指纹与划分。明确无副作用拒绝（X-Eventide-Mutation-Outcome: rejected）或403/404/422才允许新请求身份，成功202只代表持久接收，运行结果从详情和报告查询。
+Vue提交固定`engineering-v1`任务集目录返回的`suite_sha256`、development/holdout/all及默认`mode=offline`，live需额外规划确认；接收和取消均使用随机Idempotency-Key。网络错误或未明确拒绝的409保留原身份，刷新重试也固定原指纹与划分。明确无副作用拒绝（X-Eventide-Mutation-Outcome: rejected）或403/404/422才允许新请求身份，成功202只代表持久接收，运行结果从详情和报告查询。
 
 详情的queued/running/completed/failed/interrupted与逐题passed分别展示；passed=null、duration_ms=null不显示为false或0。报告接口失败不会抹掉运行详情，下载内容保留schema v2原字段和scripted_mechanism_validation/billing_applicable=false标记。`#/evaluations?evaluation=<id>`可恢复选择，但客户端必须核对详情project_id与当前项目；切项目或选择其他评测时丢弃迟到响应。
 
@@ -440,6 +440,14 @@ POST /api/sessions 要求 Idempotency-Key（1–128可见ASCII），body严格�
 
 POST /api/workspaces 与 DELETE /api/workspaces/{id} 强制Idempotency-Key，缺失422，同键异内容409。注册body严格为path；注册201和移除200原结果持久回放，先检查回执再检查目标存在性，因此已移除目标仍可回放。路径重新注册得到新workspace_id，旧移除不会影响新记录。登记/关系变更与成功回执原子提交；未知503/未标记409保留键，明确拒绝带X-Eventide-Mutation-Outcome: rejected。工作区详情新增startup_workspace布尔值，启动工作区禁止移除409；已有会话/执行引用/副本/活跃操作也拒绝。磁盘目录不删除。
 
-用量投影可返回authority_references（kind=evaluation、run_id、case_id、case_index）。这是隔离评测执行日志对主服务调用账本的引用，不是一笔新消费；尚未解析引用时complete=false，不能把空calls解释为免费。现有公开服务Run仍直接展示主账本事实；评测Web仍仅接受offline，live接入另行验收。
+用量投影可返回authority_references（kind=evaluation、run_id、case_id、case_index）。这是隔离评测执行日志对主服务调用账本的引用，不是一笔新消费；尚未解析引用时complete=false，不能把空calls解释为免费。现有公开服务Run仍直接展示主账本事实；评测Web默认offline，live按下述规划确认契约接收。
 
-EvaluationDetail.mode现在为offline|live，measurement_kind为scripted_mechanism_validation|provider_experiment，billing_applicable为布尔值，供受控Python实验历史查询。POST创建body仍只允许offline；真实Web接收须待预估/确认契约完成。批次遇共享预算拒绝或模型故障时主Run interrupted、报告status=aborted；remaining仍保留，不能把批次结束等同全题通过。
+EvaluationDetail.mode现在为offline|live，measurement_kind为scripted_mechanism_validation|provider_experiment，billing_applicable为布尔值，供受控Python实验历史查询。POST默认offline；live须按规划确认契约接收。批次遇共享预算拒绝或模型故障时主Run interrupted、报告status=aborted；remaining仍保留，不能把批次结束等同全题通过。
+
+### 真实评测规划与确认
+
+`GET /api/projects/{project_id}/evaluations/quote?split=development|holdout|all`只读返回quote_hash、任务指纹/数量、provider/model/generation、planning_tokens、estimate_method、assumptions、limits和按币种分列的estimates。每币种包含known_amount、complete、unknown_categories及固定price_version的lines；缺价格返回空estimates且complete=false。规划不是实测或账单上限。
+
+创建评测支持mode=offline|live（默认offline）。live额外要求confirmed=true和64位quote_hash；模型配置、任务、有效价格或划分变化导致409 rejected。首次持久接收冻结规划；同键同正文重放在重新核对规划之前返回原身份。offline仍使用原四字段请求指纹，不因新增默认字段破坏旧请求恢复。目录用supported_modes/default_mode描述支持能力；measurement_kind/billing_applicable由具体批次决定，不能将目录解释为免费声明。
+
+Vue显式读取估算并确认后才可发起live；未知结果保留原确认和请求键，刷新不会自动发请求。live报告为provider_experiment/billing_applicable=true，失败验收保留，实际用量从主控制Run查询；本地case账本引用不重复计费。

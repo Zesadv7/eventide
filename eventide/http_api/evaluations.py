@@ -1,4 +1,4 @@
-"""Same-origin, idempotent admission of bundled offline mechanism checks."""
+"""Same-origin, idempotent admission of reviewed bundled evaluation batches."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from eventide.evaluation_control import EvaluationController
+from eventide.evaluation_quote import evaluation_quote
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_control import MUTATION_OUTCOME_HEADER, mutation_key, run_receipt
 from eventide.scheduler import QueueFull
@@ -18,7 +19,9 @@ class EvaluationBody(BaseModel):
     suite_id: Literal["engineering-v1"] = "engineering-v1"
     suite_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     split: Literal["development", "holdout", "all"] = "development"
-    mode: Literal["offline"] = "offline"
+    mode: Literal["offline", "live"] = "offline"
+    quote_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    confirmed: bool = False
 
 
 class EvaluationSuite(BaseModel):
@@ -32,9 +35,8 @@ class EvaluationSuite(BaseModel):
     manifest_sha256: str
     suite_sha256: str
     inputs_sha256: str
-    supported_modes: list[Literal["offline"]] = ["offline"]
-    measurement_kind: Literal["scripted_mechanism_validation"] = "scripted_mechanism_validation"
-    billing_applicable: Literal[False] = False
+    supported_modes: list[Literal["offline", "live"]] = ["offline", "live"]
+    default_mode: Literal["offline"] = "offline"
 
 
 class EvaluationReceipt(BaseModel):
@@ -96,6 +98,15 @@ def create_router(context: ApiContext) -> APIRouter:
 
         return builtin_suite_catalog()
 
+    @router.get("/api/projects/{project_id}/evaluations/quote")
+    async def quote(
+        project_id: str, split: Literal["development", "holdout", "all"] = "development",
+    ) -> dict[str, Any]:
+        try:
+            return evaluation_quote(context.runtime, project_id, split=split)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
     @router.post("/api/projects/{project_id}/evaluations", status_code=202,
                  response_model=EvaluationReceipt)
     async def create(project_id: str, body: EvaluationBody, request: Request) -> dict[str, Any]:
@@ -105,12 +116,18 @@ def create_router(context: ApiContext) -> APIRouter:
             owner = controller.owner(project_id, create=False)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
-        receipt = run_receipt(context.runtime, request, owner, "evaluation", body.model_dump())
+        payload = body.model_dump()
+        if body.mode == "offline":
+            # Preserve the identity of pre-live queued and retried offline requests.
+            payload.pop("quote_hash")
+            payload.pop("confirmed")
+        receipt = run_receipt(context.runtime, request, owner, "evaluation", payload)
         if not receipt.existing:
             try:
                 await controller.admit(
                     project_id, receipt.run_id, suite_id=body.suite_id,
                     suite_sha256=body.suite_sha256, split=body.split,
+                    mode=body.mode, quote_hash=body.quote_hash, confirmed=body.confirmed,
                     request_fingerprint=receipt.fingerprint,
                 )
             except ValueError as exc:

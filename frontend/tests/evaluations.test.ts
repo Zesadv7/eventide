@@ -25,9 +25,8 @@ const suite: EvaluationSuite = {
   split: null,
   total: 20,
   splits: { development: 12, holdout: 8 },
-  supported_modes: ["offline"],
-  measurement_kind: "scripted_mechanism_validation",
-  billing_applicable: false,
+  supported_modes: ["offline", "live"],
+  default_mode: "offline",
 };
 const body: EvaluationInput = {
   suite_id: "engineering-v1",
@@ -351,7 +350,9 @@ describe("offline evaluation page", () => {
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     first.wrapper.unmount();
     const second = await render();
-    expect(second.wrapper.get("select").attributes("disabled")).toBeDefined();
+    expect(
+      second.wrapper.get("#evaluation-split").attributes("disabled"),
+    ).toBeDefined();
     expect(second.wrapper.text()).toContain("正在接收");
     response.resolve(Response.json(receipt("accepted-after-navigation")));
     await vi.waitFor(() =>
@@ -376,9 +377,9 @@ describe("offline evaluation page", () => {
       .spyOn(evaluationsApi, "create")
       .mockResolvedValue(receipt());
     const { wrapper } = await render();
-    expect((wrapper.get("select").element as HTMLSelectElement).value).toBe(
-      "holdout",
-    );
+    expect(
+      (wrapper.get("#evaluation-split").element as HTMLSelectElement).value,
+    ).toBe("holdout");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(create).toHaveBeenCalledWith(project, { ...body, split: "holdout" });
@@ -402,5 +403,46 @@ it("labels a controlled live history as model evidence and links its sole usage 
     .findAll("a")
     .find((link) => link.text() === "查看实际调用用量");
   expect(usage?.attributes("href")).toContain("run=live-case");
+  wrapper.unmount();
+});
+
+it("requires a fresh quote and explicit live confirmation without automatic calls", async () => {
+  mockReads([]);
+  const quote = vi.spyOn(evaluationsApi, "quote").mockResolvedValue({
+    quote_hash: "d".repeat(64),
+    project_id: project,
+    suite_sha256: suite.suite_sha256,
+    split: "development",
+    case_count: 12,
+    provider: "fixture",
+    model: "fixture",
+    planning_tokens: { input_tokens: 216000, output_tokens: 24000 },
+    estimates: {},
+    complete: false,
+    assumptions: "规划估算不是账单上限",
+  });
+  const create = vi
+    .spyOn(evaluationsApi, "create")
+    .mockResolvedValue(receipt());
+  const { wrapper } = await render();
+  await wrapper.get("#evaluation-mode").setValue("live");
+  expect(quote).not.toHaveBeenCalled();
+  const start = () =>
+    wrapper
+      .findAll("button")
+      .find((button) => button.text() === "运行一次真实模型实验")!;
+  expect(start().attributes("disabled")).toBeDefined();
+  await wrapper
+    .findAll("button")
+    .find((button) => button.text() === "读取模型与费用估算")!
+    .trigger("click");
+  await flushPromises();
+  expect(wrapper.text()).toContain("费用估算不完整或未知");
+  expect(start().attributes("disabled")).toBeDefined();
+  await wrapper.get('input[type="checkbox"]').setValue(true);
+  expect(start().attributes("disabled")).toBeUndefined();
+  await wrapper.get("#evaluation-split").setValue("holdout");
+  expect(start().attributes("disabled")).toBeDefined();
+  expect(create).not.toHaveBeenCalled();
   wrapper.unmount();
 });

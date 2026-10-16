@@ -285,9 +285,11 @@ def test_http_contract_rejections_idempotency_report_and_sse(tmp_path, monkeypat
         path = f"/api/projects/{project}/evaluations"
         body = payload()
         headers = {"Idempotency-Key": "same-request"}
-        assert client.get("/api/evaluations/suites").json()[0]["supported_modes"] == ["offline"]
+        assert client.get("/api/evaluations/suites").json()[0]["supported_modes"] == [
+            "offline", "live",
+        ]
         assert client.post(path, json=body).status_code == 422
-        assert client.post(path, json={**body, "mode": "live"}, headers=headers).status_code == 422
+        assert client.post(path, json={**body, "mode": "live"}, headers=headers).status_code == 409
         assert (
             client.post(path, json={**body, "path": "/tmp/evil"}, headers=headers).status_code
             == 422

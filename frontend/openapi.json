@@ -8887,6 +8887,159 @@
         }
       }
     },
+    "/api/projects/{project_id}/evaluations/quote": {
+      "get": {
+        "tags": ["evaluations"],
+        "summary": "Quote",
+        "operationId": "quote_api_projects__project_id__evaluations_quote_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "split",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": ["development", "holdout", "all"],
+              "type": "string",
+              "default": "development",
+              "title": "Split"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Quote Api Projects  Project Id  Evaluations Quote Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "payload too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{project_id}/evaluations": {
       "post": {
         "tags": ["evaluations"],
@@ -13850,9 +14003,26 @@
           },
           "mode": {
             "type": "string",
-            "const": "offline",
+            "enum": ["offline", "live"],
             "title": "Mode",
             "default": "offline"
+          },
+          "quote_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Hash"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "title": "Confirmed",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -14191,23 +14361,17 @@
           "supported_modes": {
             "items": {
               "type": "string",
-              "const": "offline"
+              "enum": ["offline", "live"]
             },
             "type": "array",
             "title": "Supported Modes",
-            "default": ["offline"]
+            "default": ["offline", "live"]
           },
-          "measurement_kind": {
+          "default_mode": {
             "type": "string",
-            "const": "scripted_mechanism_validation",
-            "title": "Measurement Kind",
-            "default": "scripted_mechanism_validation"
-          },
-          "billing_applicable": {
-            "type": "boolean",
-            "const": false,
-            "title": "Billing Applicable",
-            "default": false
+            "const": "offline",
+            "title": "Default Mode",
+            "default": "offline"
           }
         },
         "type": "object",

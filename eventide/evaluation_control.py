@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from eventide.config import Settings
 from eventide.eval_evidence import atomic_json, runtime_revision
 from eventide.eval_suite import Split
+from eventide.evaluation_quote import evaluation_quote
 from eventide.models import RunResult
 
 if TYPE_CHECKING:
@@ -73,7 +74,7 @@ class EvaluationController:
     async def admit(
         self, project_id: str, run_id: str, *, suite_id: str, suite_sha256: str,
         split: str = "development", request_fingerprint: str | None = None,
-        mode: str = "offline", generation_hash: str | None = None, confirmed: bool = False,
+        mode: str = "offline", quote_hash: str | None = None, confirmed: bool = False,
     ) -> str:
         from eventide.bundled_evaluations import load_builtin_suite
         from eventide.host import _Admission
@@ -87,12 +88,14 @@ class EvaluationController:
             raise ValueError("Invalid evaluation mode")
         generation = None
         provider_config_hash = None
+        quote = None
         if mode == "live":
             if confirmed is not True:
                 raise ValueError("Live evaluation requires explicit confirmation")
-            generation = self.host.generation_settings(self.host.settings.model)
-            if generation_hash != generation["config_hash"]:
-                raise ValueError("Model configuration changed; review before starting")
+            quote = evaluation_quote(self.host, project_id, suite_id=suite_id, split=split)
+            if quote_hash != quote["quote_hash"]:
+                raise ValueError("Evaluation estimate or model configuration changed; review again")
+            generation = quote["generation"]
             provider_config_hash = self.host.provider_config_status()["config_hash"]
         selected: Split | None = ("development" if split == "development" else
                                   "holdout" if split == "holdout" else None)
@@ -117,7 +120,8 @@ class EvaluationController:
             "measurement_kind": ("provider_experiment" if mode == "live"
                                  else "scripted_mechanism_validation"),
             "billing_applicable": mode == "live",
-            **({"generation": generation, "provider_config_hash": provider_config_hash}
+            **({"generation": generation, "provider_config_hash": provider_config_hash,
+                "planning_quote": quote}
                if mode == "live" else {}),
             "limits": {"steps": 12, "observed_tokens": 20_000, "case_seconds": 300},
             "runtime": runtime_revision(),

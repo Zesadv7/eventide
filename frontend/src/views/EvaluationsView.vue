@@ -5,6 +5,7 @@ import {
   evaluationsApi,
   evaluationRequestState,
   observeEvaluations,
+  type EvaluationQuote,
   type EvaluationDetail,
   type EvaluationReport,
   type EvaluationSplit,
@@ -27,6 +28,39 @@ const projectName = computed(
 );
 const suites = ref<EvaluationSuite[]>([]),
   split = ref<EvaluationSplit>("development");
+const mode = ref<"offline" | "live">("offline"),
+  quote = ref<EvaluationQuote | null>(null),
+  quoting = ref(false),
+  confirmed = ref(false);
+let quoteRevision = 0;
+async function loadQuote() {
+  const revision = ++quoteRevision,
+    owner = project.value,
+    selection = split.value;
+  quoting.value = true;
+  quote.value = null;
+  confirmed.value = false;
+  error.value = "";
+  try {
+    const result = await evaluationsApi.quote(owner, selection);
+    if (
+      revision === quoteRevision &&
+      owner === project.value &&
+      selection === split.value
+    )
+      quote.value = result;
+  } catch (reason) {
+    if (revision === quoteRevision) error.value = String(reason);
+  } finally {
+    if (revision === quoteRevision) quoting.value = false;
+  }
+}
+watch([project, split, mode], () => {
+  quoteRevision++;
+  quote.value = null;
+  confirmed.value = false;
+  quoting.value = false;
+});
 const entries = ref<EvaluationDetail[]>([]),
   detail = ref<EvaluationDetail | null>(null),
   report = ref<EvaluationReport | null>(null);
@@ -55,7 +89,11 @@ const canStart = computed(
   () =>
     !!project.value &&
     !requestState.value.active &&
-    (!!pending.value || (!!suite.value && !busy.value)),
+    (!!pending.value ||
+      (!!suite.value &&
+        !busy.value &&
+        (mode.value === "offline" ||
+          (!!quote.value && confirmed.value && !quoting.value)))),
 );
 const activeDetail = computed(
   () => detail.value?.status === "queued" || detail.value?.status === "running",
@@ -250,6 +288,7 @@ onMounted(async () => {
 });
 onUnmounted(() => {
   mounted = false;
+  quoteRevision++;
   projectRevision++;
   detailRevision++;
   clearInterval(timer);
@@ -264,12 +303,17 @@ async function start() {
     suite_id: "engineering-v1" as const,
     suite_sha256: suite.value!.suite_sha256,
     split: split.value,
-    mode: "offline" as const,
+    mode: mode.value,
+    ...(mode.value === "live"
+      ? { quote_hash: quote.value!.quote_hash, confirmed: true }
+      : {}),
   };
   error.value = "";
   try {
     const receipt = await evaluationsApi.create(owner, body);
     if (mounted && current === projectRevision) {
+      quote.value = null;
+      confirmed.value = false;
       choose(receipt.evaluation_id);
       await loadList();
     }
@@ -346,10 +390,11 @@ function downloadReport() {
   <section class="page evaluations-page">
     <header class="page-heading">
       <div>
-        <p class="eyebrow">EVALUATIONS / OFFLINE</p>
-        <h1>离线机制自检</h1>
+        <p class="eyebrow">EVALUATIONS</p>
+        <h1>工程评测</h1>
         <p class="muted">
-          {{ projectName }} · 验证工具、隔离和独立验收，不代表真实模型成功率。
+          {{ projectName }} ·
+          离线验证机制，真实模型实验使用独立验收和共享预算。离线机制结果不代表真实模型成功率。
         </p>
       </div>
       <button :disabled="loading" @click="refresh">刷新评测</button>
@@ -364,16 +409,31 @@ function downloadReport() {
     >
       {{ message }}
     </p>
-    <section class="panel" aria-label="发起离线评测">
+    <section class="panel" aria-label="发起评测">
       <h2>冻结工程任务集</h2>
       <p>
-        每批只执行一次，使用预设响应和独立临时项目，不调用付费模型、不修改所选项目源码。任务与普通对话共用服务执行额度。
+        每批只执行一次，使用独立临时项目，不修改所选项目源码。离线使用预设响应；真实模型调用计入项目和每日预算，任务与普通对话共用服务额度。
       </p>
       <p v-if="suite" class="muted">
         {{ suite.description }} · 版本 {{ suite.version }} ·
         {{ suite.total }} 个任务
       </p>
       <form @submit.prevent="start">
+        <label for="evaluation-mode">评测模式</label>
+        <select
+          id="evaluation-mode"
+          :value="pending?.mode || mode"
+          @change="
+            mode = ($event.target as HTMLSelectElement).value as
+              'offline' | 'live'
+          "
+          :disabled="requestState.active || !!pending"
+        >
+          <option value="offline">离线机制自检</option>
+          <option v-if="suite?.supported_modes.includes('live')" value="live">
+            真实模型实验（产生费用）
+          </option>
+        </select>
         <label for="evaluation-split">任务划分</label
         ><select
           id="evaluation-split"
@@ -399,16 +459,55 @@ function downloadReport() {
               ? "正在接收…"
               : pending
                 ? "重试原评测请求"
-                : "运行一次离线自检"
+                : mode === "live"
+                  ? "运行一次真实模型实验"
+                  : "运行一次离线自检"
           }}
         </button>
       </form>
+      <section
+        v-if="mode === 'live' && !pending"
+        class="live-quote"
+        aria-label="真实评测规划估算"
+      >
+        <button
+          :disabled="quoting || requestState.active || !project"
+          @click="loadQuote"
+        >
+          {{ quoting ? "正在读取估算…" : "读取模型与费用估算" }}
+        </button>
+        <template v-if="quote">
+          <p>
+            {{ quote.provider }} / {{ quote.model }} · {{ quote.case_count }} 题
+          </p>
+          <p>
+            规划输入 {{ quote.planning_tokens.input_tokens }} Token，输出
+            {{ quote.planning_tokens.output_tokens }} Token。
+          </p>
+          <p v-for="(estimate, currency) in quote.estimates" :key="currency">
+            {{ currency }} {{ estimate.known_amount }}
+            {{ estimate.complete ? "规划估算" : "已知费用部分（不完整）" }}
+          </p>
+          <p v-if="!quote.complete">
+            费用估算不完整或未知，不表示免费。可先在用量页配置价格。
+          </p>
+          <p class="muted">{{ quote.assumptions }}</p>
+          <label
+            ><input
+              type="checkbox"
+              v-model="confirmed"
+            />我已核对本批模型、规划估算及未知费用，确认发起真实调用</label
+          >
+        </template>
+      </section>
       <p
         v-if="pending && !requestState.active"
         role="status"
         class="pending-note"
       >
-        上次评测接收尚未确认。重试会使用原任务集指纹和{{
+        上次评测接收尚未确认（{{
+          pending.mode === "live" ? "真实模型" : "离线"
+        }}）。重试会使用原确认、任务集指纹和{{
           splitLabels[pending.split]
         }}，不会另开一批。也可从历史核对后台状态。
       </p>
@@ -416,7 +515,7 @@ function downloadReport() {
         本项目已有排队或执行中的评测；结束后可发起新批次。
       </p>
       <p class="muted">
-        留出集只检查执行机制；参考真实模型留出结果调整策略后，必须更换留出题。每题最多12步、20,000已观测Token、300秒，停止会等待工具及证据保存收尾。
+        离线模式只检查执行机制；参考真实模型留出结果调整策略后，必须更换留出题。每题最多12步、20,000已观测Token、300秒，停止会等待工具及证据保存收尾。
       </p>
     </section>
     <section class="panel" aria-label="评测历史">
@@ -603,6 +702,11 @@ function downloadReport() {
 </template>
 
 <style scoped>
+.live-quote {
+  overflow-wrap: anywhere;
+  margin-top: 1rem;
+}
+
 .evaluations-page {
   overflow-wrap: anywhere;
 }

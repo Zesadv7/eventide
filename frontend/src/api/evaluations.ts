@@ -2,12 +2,29 @@ import { ApiError, request } from "./client";
 import { durableMutation } from "./mutations";
 import type { components, paths } from "./schema";
 
-export type EvaluationInput = components["schemas"]["EvaluationBody"];
+export type EvaluationInput = Omit<
+  components["schemas"]["EvaluationBody"],
+  "confirmed"
+> & { confirmed?: boolean };
 export type EvaluationSplit = EvaluationInput["split"];
 export type EvaluationSuite = components["schemas"]["EvaluationSuite"];
 export type EvaluationReceipt = components["schemas"]["EvaluationReceipt"];
 export type EvaluationCase = components["schemas"]["EvaluationCase"];
 export type EvaluationDetail = components["schemas"]["EvaluationDetail"];
+export interface EvaluationQuote {
+  quote_hash: string;
+  project_id: string;
+  suite_sha256: string;
+  split: EvaluationSplit;
+  case_count: number;
+  provider: string;
+  model: string;
+  complete: boolean;
+  planning_tokens: { input_tokens: number; output_tokens: number };
+  assumptions: string;
+  estimates: Record<string, { known_amount: string; complete: boolean }>;
+}
+
 export interface EvaluationReport {
   schema_version: number;
   status: string;
@@ -36,7 +53,11 @@ export function evaluationRequestState(project: string) {
       const value = JSON.parse(encoded) as EvaluationInput;
       if (
         value.suite_id === "engineering-v1" &&
-        value.mode === "offline" &&
+        (value.mode === "offline" ||
+          (value.mode === "live" &&
+            value.confirmed === true &&
+            typeof value.quote_hash === "string" &&
+            /^[a-f0-9]{64}$/.test(value.quote_hash))) &&
         /^[a-f0-9]{64}$/.test(value.suite_sha256) &&
         ["development", "holdout", "all"].includes(value.split)
       )
@@ -63,6 +84,13 @@ function changed() {
 const suitesPath: keyof paths = "/api/evaluations/suites";
 export const evaluationsApi = {
   suites: () => request<EvaluationSuite[]>(suitesPath),
+  quote: (project: string, split: EvaluationSplit) =>
+    request<EvaluationQuote>(
+      "/api/projects/" +
+        encodeURIComponent(project) +
+        "/evaluations/quote?split=" +
+        split,
+    ),
   list: (project: string, before?: string) =>
     request<EvaluationDetail[]>(
       `/api/projects/${encodeURIComponent(project)}/evaluations?limit=20${before ? `&before=${encodeURIComponent(before)}` : ""}`,
@@ -90,7 +118,10 @@ export const evaluationsApi = {
       suite_id: input.suite_id,
       suite_sha256: input.suite_sha256,
       split: input.split,
-      mode: "offline",
+      mode: input.mode,
+      ...(input.mode === "live"
+        ? { quote_hash: input.quote_hash, confirmed: input.confirmed }
+        : {}),
     };
     const pending = evaluationRequestState(project).pending;
     if (pending && JSON.stringify(pending) !== JSON.stringify(body))
