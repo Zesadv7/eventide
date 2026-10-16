@@ -101,6 +101,7 @@ class DeliveryController:
         image: str | None = None,
         protected_patterns: tuple[str, ...] = (),
         max_rounds: int = 3,
+        observed_token_limit: int = 60_000,
         _control_run_id: str | None = None,
     ) -> dict[str, Any]:
         host = self.host
@@ -237,7 +238,7 @@ class DeliveryController:
 
                         result = await run_repair(
                             self, run_id, delivery_id, source, checkout_ws, receipt,
-                            goal or "", checks or [], image, max_rounds,
+                            goal or "", checks or [], image, max_rounds, observed_token_limit,
                         )
                     elif action == "run":
                         if not goal or not goal.strip() or len(goal) > 20_000:

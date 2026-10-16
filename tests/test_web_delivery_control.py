@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from eventide.delivery_control import WebDeliveryController
 from tests.test_delivery_repair import done, edit
 from tests.test_delivery_runtime import CHECK, delivery_host
@@ -158,7 +160,8 @@ async def test_queued_delivery_cancel_and_restart_never_replay_writes(tmp_path):
         await restored.close()
 
 
-def test_http_delivery_round_trip_idempotency_and_reviewed_hash(tmp_path):
+@pytest.mark.parametrize("observed_token_limit", [None, 120_000])
+def test_http_delivery_round_trip_idempotency_and_reviewed_hash(tmp_path, observed_token_limit):
     import time
 
     from fastapi.testclient import TestClient
@@ -205,13 +208,42 @@ def test_http_delivery_round_trip_idempotency_and_reviewed_hash(tmp_path):
         identity = prepared["delivery_id"]
         base = f"/api/deliveries/{identity}"
         assert client.get(base + "/patch").status_code == 409
+        repair_body = {"goal": "repair", "checks": [CHECK]}
+        if observed_token_limit is not None:
+            repair_body["observed_token_limit"] = observed_token_limit
         repair = client.post(
             base + "/repair",
-            json={"goal": "repair", "checks": [CHECK]},
+            json=repair_body,
             headers={"Idempotency-Key": "repair"},
         )
         assert repair.status_code == 202, repair.text
         wait(repair.json())
+        operation = client.get(repair.json()["status_url"]).json()
+        if observed_token_limit is None:
+            assert "observed_token_limit" not in operation["accepted"]
+        else:
+            assert operation["accepted"]["observed_token_limit"] == observed_token_limit
+        from eventide.workspace import digest
+
+        old_payload = {**repair_body, "image": None, "max_rounds": 3}
+        assert host._admitted_intent(repair.json()["run_id"])["request_fingerprint"] == digest([
+            operation["session_id"], "delivery_repair", old_payload,
+        ])
+        assert client.post(
+            base + "/repair", json=repair_body, headers={"Idempotency-Key": "repair"}
+        ).json() == repair.json()
+        assert client.post(
+            base + "/repair",
+            json={**repair_body, "observed_token_limit": observed_token_limit or 60_000},
+            headers={"Idempotency-Key": "repair"},
+        ).json() == repair.json()
+        assert client.post(
+            base + "/repair", json={**repair_body, "observed_token_limit": 200_000},
+            headers={"Idempotency-Key": "repair"},
+        ).status_code == 409
+        assert client.get(base).json()["repair"]["limits"]["observed_tokens"] == (
+            observed_token_limit or 60_000
+        )
         patch = client.get(base + "/patch").json()
         assert "price * (1 - fraction)" in patch["patch"]
         rejected = client.post(
@@ -242,6 +274,60 @@ def test_http_delivery_round_trip_idempotency_and_reviewed_hash(tmp_path):
             ).json()
             == applied.json()
         )
+
+
+async def test_queued_repair_preserves_selected_limit_on_restart(tmp_path):
+    from eventide.host import RuntimeHost
+    from eventide.models import RunRequest
+    from eventide.providers import ScriptedProvider
+
+    host = delivery_host(tmp_path)
+    controller = WebDeliveryController(host)
+    project = host.default_workspace.project_id
+    settings = host.settings
+    try:
+        delivery = await controller.admit(project, "prepare", action="prepare", name="limit-queue")
+        await controller.start("prepare")
+        for _ in range(4):
+            await host.admit_run(RunRequest(
+                "read", host.create_session(), mode="plan", execution_target="snapshot",
+            ))
+        await controller.admit(
+            project, "queued-limit", action="repair", delivery_id=delivery,
+            goal="repair", checks=[CHECK], observed_token_limit=200_000,
+        )
+        controller.start("queued-limit")
+        await asyncio.sleep(0)
+        operation = controller.operation("queued-limit")
+        assert operation["status"] == "queued"
+        assert operation["accepted"]["observed_token_limit"] == 200_000
+    finally:
+        await host.close()
+    restored = RuntimeHost(settings, ScriptedProvider([]), enable_mcp=False)
+    try:
+        await restored.initialize()
+        controller = WebDeliveryController(restored)
+        operation = controller.operation("queued-limit")
+        assert operation["status"] == "interrupted"
+        assert operation["accepted"]["observed_token_limit"] == 200_000
+        assert not controller.delivery.load(delivery)["repair"]
+        with pytest.raises(ValueError, match="awaiting execution"):
+            controller.start("queued-limit")
+        assert not restored.provider.requests
+    finally:
+        await restored.close()
+
+
+@pytest.mark.parametrize("limit", [0, -1, 1_000_001, True, 60_000.0, "60000", None])
+def test_observed_token_limit_rejects_nonpositive_or_noninteger_input(limit):
+    from pydantic import ValidationError
+
+    from eventide.http_api.deliveries import DeliveryRepairBody
+
+    with pytest.raises(ValidationError):
+        DeliveryRepairBody.model_validate({
+            "goal": "repair", "checks": [CHECK], "observed_token_limit": limit,
+        })
 
 
 async def test_state_root_alias_is_canonical_but_nested_artifact_links_are_rejected(tmp_path):

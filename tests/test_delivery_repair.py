@@ -67,6 +67,69 @@ async def test_first_candidate_passes_then_requires_explicit_adoption(tmp_path):
         await host.close()
 
 
+@pytest.mark.parametrize("limit, expected_reason, attempts", [
+    (60_000, "delivery_token_limit", 1),
+    (120_000, "delivery_token_limit", 2),
+    (200_000, "passed", 3),
+])
+async def test_selected_token_limit_is_frozen_and_enforced_across_restart(
+    tmp_path, limit, expected_reason, attempts,
+):
+    from eventide.host import RuntimeHost
+    from eventide.providers import ScriptedProvider
+
+    first = edit("price + fraction", "price * (1 - fraction)")
+    second = edit("price * (1 - fraction)", "price * (1 - fraction) + 0", "second")
+    first["usage"] = second["usage"] = {"input_tokens": 60_000, "output_tokens": 1}
+    host = delivery_host(tmp_path, [first, second, done()])
+    try:
+        prepared = await host.manage_delivery("prepare", name="selected-limit")
+        result = await host.manage_delivery(
+            "repair", delivery_id=prepared["delivery_id"], goal="Repair discount",
+            checks=[CHECK], observed_token_limit=limit,
+        )
+        assert result["reason"] == expected_reason
+        assert result["usage"]["attempt_count"] == attempts
+        shown = await host.manage_delivery("show", delivery_id=prepared["delivery_id"])
+        assert shown["repair"]["limits"] == {
+            "model_attempts": 36, "observed_tokens": limit, "seconds": 900,
+        }
+        assert len(result["rounds"]) == (1 if expected_reason == "passed" else 0)
+        settings = host.settings
+    finally:
+        await host.close()
+    restored = RuntimeHost(settings, ScriptedProvider([]), enable_mcp=False)
+    try:
+        shown = await restored.manage_delivery("show", delivery_id=prepared["delivery_id"])
+        assert shown["repair"]["limits"]["observed_tokens"] == limit
+        assert shown["repair_result"]["usage"] == result["usage"]
+        with pytest.raises(ValueError, match="already started"):
+            await restored.manage_delivery(
+                "repair", delivery_id=prepared["delivery_id"], goal="retry",
+                checks=[CHECK], observed_token_limit=1_000_000,
+            )
+        assert not restored.provider.requests
+    finally:
+        await restored.close()
+
+
+async def test_python_repair_rejects_invalid_token_limit_before_writer_dispatch(tmp_path):
+    host = delivery_host(tmp_path)
+    try:
+        prepared = await host.manage_delivery("prepare", name="invalid-limit")
+        for limit in (0, -1, True, 60_000.0, "60000", 1_000_001):
+            with pytest.raises(ValueError, match="Observed Token limit"):
+                await host.manage_delivery(
+                    "repair", delivery_id=prepared["delivery_id"], goal="repair",
+                    checks=[CHECK], observed_token_limit=limit,
+                )
+        assert not host.provider.requests
+        shown = await host.manage_delivery("show", delivery_id=prepared["delivery_id"])
+        assert shown["repair"] is None
+    finally:
+        await host.close()
+
+
 async def test_second_candidate_uses_failed_checks_and_cumulative_usage(tmp_path):
     host = delivery_host(
         tmp_path,

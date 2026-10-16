@@ -94,6 +94,7 @@ class WebDeliveryController:
         checks: list[str] | None = None,
         image: str | None = None,
         max_rounds: int = 3,
+        observed_token_limit: int = 60_000,
         patch_sha256: str | None = None,
         request_fingerprint: str | None = None,
     ) -> str:
@@ -119,6 +120,8 @@ class WebDeliveryController:
                 raise ValueError("Provide 1-4 explicit acceptance commands")
             if type(max_rounds) is not int or not 1 <= max_rounds <= 3:
                 raise ValueError("Repair permits 1-3 candidate verifications")
+            if type(observed_token_limit) is not int or not 1 <= observed_token_limit <= 1_000_000:
+                raise ValueError("Observed Token limit must be an integer between 1 and 1000000")
             if image is not None and not image.strip():
                 raise ValueError("Container image cannot be empty")
         owner = self.owner(project_id, delivery_id)
@@ -165,6 +168,8 @@ class WebDeliveryController:
             "checks": list(checks or []),
             "image": image,
             "max_rounds": max_rounds,
+            **({"observed_token_limit": observed_token_limit}
+               if action == "repair" and observed_token_limit != 60_000 else {}),
             "patch_sha256": patch_sha256,
         }
         ticket = self.host.dispatch.scheduler.reserve_admission(run_id, owner, startable=True)
@@ -228,6 +233,7 @@ class WebDeliveryController:
                 checks=accepted["checks"],
                 image=accepted["image"],
                 max_rounds=accepted["max_rounds"],
+                observed_token_limit=accepted.get("observed_token_limit", 60_000),
                 _control_run_id=run_id,
             )
             summary = self.store.get_run_summary(run_id)

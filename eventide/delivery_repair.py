@@ -46,6 +46,7 @@ async def run_repair(
     checks: list[str],
     image: str | None,
     max_rounds: int,
+    observed_token_limit: int = 60_000,
 ) -> dict[str, Any]:
     host = controller.host
     checks = list(checks)
@@ -53,6 +54,8 @@ async def run_repair(
         raise ValueError("Repair goal must contain 1-20000 characters")
     if type(max_rounds) is not int or not 1 <= max_rounds <= 3:
         raise ValueError("Repair permits 1-3 candidate verifications")
+    if type(observed_token_limit) is not int or not 1 <= observed_token_limit <= 1_000_000:
+        raise ValueError("Observed Token limit must be an integer between 1 and 1000000")
     if not 1 <= len(checks) <= 4 or any(not c.strip() or len(c) > 2_000 for c in checks):
         raise ValueError("Repair requires 1-4 bounded acceptance commands")
     checkout = Path(checkout_ws.path)
@@ -67,7 +70,9 @@ async def run_repair(
         "checks": checks,
         "image": image,
         "max_rounds": max_rounds,
-        "limits": {"model_attempts": 36, "observed_tokens": 60_000, "seconds": MAX_SECONDS},
+        "limits": {
+            "model_attempts": 36, "observed_tokens": observed_token_limit, "seconds": MAX_SECONDS,
+        },
         "started_at": started,
         "deadline": started + MAX_SECONDS,
         "initial_patch_sha256": hashlib.sha256(initial_patch).hexdigest(),
