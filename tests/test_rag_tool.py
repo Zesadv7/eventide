@@ -111,3 +111,34 @@ async def test_corrupt_index_does_not_break_an_unrelated_run(isolated_workspace:
         assert index.read_bytes() == b"not a sqlite database"
     finally:
         await host.close()
+
+
+async def test_missing_local_model_is_diagnosed_and_lexical_search_remains_audited(
+    isolated_workspace: Path,
+) -> None:
+    repo = make_repo(isolated_workspace / "repo")
+    (repo / ".git/info/exclude").write_text(".eventide/\n")
+    (repo / "doc.txt").write_text("verify_token validates user credentials")
+    IndexStore(repo).build()
+    provider = ScriptedProvider([
+        {"tool_calls": [{"id": "search", "name": "search_knowledge",
+                         "arguments": {"query": "verify_token"}}]},
+        {"text": "done"},
+    ])
+    settings = replace(settings_for(repo), state_dir=isolated_workspace / "state",
+                       embedding_provider="local_semantic",
+                       embedding_model_path=isolated_workspace / "missing-model")
+    host = RuntimeHost(settings, provider, enable_mcp=False)
+    try:
+        result = await host.run(RunRequest("find token validation", mode="plan"))
+        assert result.status == "completed"
+        events = host.store.run_events(result.run_id)
+        degraded = next(event for event in events if event["type"] == "retrieval.degraded")
+        assert degraded["payload"]["fallback"] == "sparse"
+        completed = next(event for event in events if event["type"] == "tool.completed")
+        assert completed["payload"]["is_error"] is False
+        assert "mode: sparse" in completed["payload"]["content"]
+        assert "local_model_missing_or_linked_directory" in completed["payload"]["content"]
+        assert "doc.txt" in completed["payload"]["content"]
+    finally:
+        await host.close()

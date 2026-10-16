@@ -49,6 +49,8 @@ class Settings:
     embedding_base_url: str | None = None
     embedding_api_key: str | None = None
     embedding_dim: int = 256
+    embedding_model_path: Path | None = None
+    reranker_model_path: Path | None = None
     local_proxy_peers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -107,6 +109,14 @@ class Settings:
                 or None
             ),
             embedding_dim=int(os.getenv("EVENTIDE_EMBEDDING_DIM", "256")),
+            embedding_model_path=(
+                Path(os.environ["EVENTIDE_EMBEDDING_MODEL_PATH"])
+                if os.getenv("EVENTIDE_EMBEDDING_MODEL_PATH") else None
+            ),
+            reranker_model_path=(
+                Path(os.environ["EVENTIDE_RERANKER_MODEL_PATH"])
+                if os.getenv("EVENTIDE_RERANKER_MODEL_PATH") else None
+            ),
             local_proxy_peers=(
                 tuple(value.strip() for value in peers_value.split(",")) if peers_value else ()
             ),

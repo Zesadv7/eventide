@@ -627,3 +627,28 @@ Vue用量页可逐次展开输入组成，显示七类字符数与合计；历�
 设置页保存连接、恢复启动配置、修改模型默认参数或会话参数时，会校验读取时的配置版本。另一个标签页已经保存更新时，旧页面会提示刷新，避免覆盖新设置。保存响应丢失后可重试原请求，刷新页面也保留请求身份；请重新填写原候选参数及密钥。浏览器只保存请求键、版本及摘要，不保存密钥。
 
 保存成功后页面重新读取当前配置，历史回执不会覆盖其他窗口的更新。关闭旧模型客户端失败时，普通运行暂时拒绝，界面提示核对；显式重新保存可重试清理，无法核实数据库结果时需重启服务。上述操作不调用付费模型。生成参数仍区分未设置、0与恢复默认，已接收运行使用冻结值。
+
+### 可选本地语义检索与重排（C2）
+
+安装可选依赖 `uv sync --extra retrieval`，不会下载模型。先自行准备固定提交的 Sentence Transformers embedding 和 Transformers 序列分类 CrossEncoder 目录，再通过 Python 接口生成受校验的版本目录：
+
+```python
+from pathlib import Path
+from eventide.rag.local_models import prepare_local_model
+
+model = prepare_local_model(
+    Path("/absolute/downloaded/embedding"),
+    Path("/absolute/models/embedding-fixed-version"),
+    kind="embedding",  # 重排包使用 reranker
+    revision="替换为40或64位小写提交或内容SHA",
+)
+print(model.fingerprint)
+```
+
+准备过程只复制本地文件，不覆盖已有版本。首版接受标准 Transformer/Pooling/Normalize embedding 与序列分类重排器，权重必须为 safetensors；拒绝链接、pickle权重、远程代码及配置路径重定向。包包含内容清单，运行前后校验指纹；版本更新后需重新构建对应索引。
+
+配置 `EVENTIDE_EMBEDDING_PROVIDER=local_semantic` 和 `EVENTIDE_EMBEDDING_MODEL_PATH=/absolute/models/embedding-fixed-version`；可选 `EVENTIDE_RERANKER_MODEL_PATH=/absolute/models/reranker-fixed-version`。先通过现有显式索引构建入口建立索引，Host 的 `search_knowledge` 随后使用本地模型。未安装可选依赖不影响默认 Hash 路径或服务导入。模型只从本地加载，固定CPU执行，运行时不下载。
+
+重排最多读取20个融合候选、返回最多5条；展示独立CrossEncoder分数，保留原RRF分数。重排不可用时明确退回融合结果；本地embedding缺失时，在索引边界有效的前提下退回词面检索，工具结果和运行事件显示原因。模型配置与索引不匹配仍需重建，不混用向量。
+
+已在本机使用 all-MiniLM-L6-v2（`1110a243fdf4706b3f48f1d95db1a4f5529b4d41`）及 ms-marco-TinyBERT-L2-v2（`81d1926f67cb8eee2c2be17ca9f793c7c3bd20cc`）完成禁止网络连接的真实推理、索引、融合重排及Host工具链验证。这里只证明机制可用；这两个英文小模型不是中文代码检索的质量承诺，默认仍为Hash机制验证配置，质量晋升等待C4/C5冻结查询对照。模型和依赖不打入默认Docker镜像；本轮实测范围为macOS本地CPU。

@@ -146,6 +146,13 @@ def provider_from_settings(settings: Settings) -> tuple[EmbeddingProvider, Embed
             algorithm_version=HASH_ALGORITHM_VERSION,
             dimension=hash_embedder.dimension,
         )
+    if provider == "local_semantic":
+        from eventide.rag.local_models import LocalModelError, LocalSemanticEmbedder
+
+        if settings.embedding_model_path is None:
+            raise LocalModelError("local_model_absolute_directory_required")
+        local_embedder = LocalSemanticEmbedder(settings.embedding_model_path)
+        return local_embedder, local_embedder.profile()
     if provider != "openai_compatible":
         raise ValueError(f"Unsupported embedding provider: {settings.embedding_provider}")
     model = settings.embedding_model or ""

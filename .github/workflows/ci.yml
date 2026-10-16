@@ -43,9 +43,10 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --locked --all-extras
-      - run: uv run --all-extras pytest -q tests/test_code_structure.py tests/test_telemetry.py tests/test_delivery_runtime.py tests/test_delivery_lifecycle.py
-      - run: uv run --all-extras eventide eval evals/engineering.yaml
+      # Local model inference is a separate opt-in check with explicitly prepared models.
+      - run: uv sync --locked --extra code --extra telemetry
+      - run: uv run --extra code --extra telemetry pytest -q tests/test_code_structure.py tests/test_telemetry.py tests/test_delivery_runtime.py tests/test_delivery_lifecycle.py
+      - run: uv run --extra code --extra telemetry eventide eval evals/engineering.yaml
 
   container:
     runs-on: ubuntu-latest

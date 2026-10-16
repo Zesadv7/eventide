@@ -24,6 +24,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+retrieval = [
+    "sentence-transformers==6.1.0",
+]
 code = [
     "tree-sitter>=0.25,<0.27",
     "tree-sitter-python>=0.25,<0.26",

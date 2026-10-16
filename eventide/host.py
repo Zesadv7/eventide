@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import shutil
+import sqlite3
 import tempfile
 import time
 import uuid
@@ -58,9 +59,11 @@ from eventide.provider_probe import run_probe
 from eventide.providers import Provider, ProviderError, build_provider
 from eventide.rag.embedding import provider_from_settings
 from eventide.rag.index import INDEX_RELATIVE_PATH
+from eventide.rag.local_models import LocalModelError, reranker_from_settings
 from eventide.rag.tool import SEARCH_KNOWLEDGE_TOOL
 from eventide.rag.tool import handler as knowledge_search_handler
 from eventide.rag.tool import index_available as knowledge_index_available
+from eventide.rag.tool import sparse_handler as knowledge_sparse_handler
 from eventide.run_dispatch import RunDispatch
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skill_packages import SkillPackageError
@@ -2539,8 +2542,20 @@ class RuntimeHost:
                     if knowledge_index_available(workspace_root, rag_profile):
                         rag_tools.append(SEARCH_KNOWLEDGE_TOOL)
                         rag_handlers["search_knowledge"] = knowledge_search_handler(
-                            workspace_root, rag_embedder, rag_profile
+                            workspace_root, rag_embedder, rag_profile,
+                            reranker=reranker_from_settings(self.settings),
                         )
+                except LocalModelError as exc:
+                    try:
+                        fallback = knowledge_sparse_handler(workspace_root, exc.code)
+                    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+                        fallback = None
+                    if fallback is not None:
+                        rag_tools.append(SEARCH_KNOWLEDGE_TOOL)
+                        rag_handlers["search_knowledge"] = fallback
+                    await self._emit(run_id, "retrieval.degraded", {
+                        "reason": exc.code, "fallback": "sparse" if fallback else "unavailable",
+                    }, sink)
                 except (OSError, RuntimeError, ValueError):
                     pass
 

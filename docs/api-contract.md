@@ -319,3 +319,9 @@ Provider PUT、Provider DELETE、模型默认参数 PUT、会话参数 PUT 均�
 Provider 状态新增 `client_status=ready|cleanup_required|restart_required`。关闭旧客户端失败保留旧配置并阻止普通运行，明确发起新的恢复配置操作可重试关闭；无法核实持久配置时要求重启。配置保存不发起模型请求。会话生成配置事实由内部配置控制 Session 保存，绑定会话创建时间，删掉空会话后重建同名会话不会继承旧覆盖。
 
 Vue和旧页仅在浏览器会话存储中保存随机请求键、版本和候选摘要，不保存候选密钥。未知结果后要求重填原候选重试；确定冲突需刷新后重新编辑。连接测试和配置修改互相阻止在途覆盖。
+
+### 本地检索诊断与工具证据
+
+已配置本地语义包在Run准备时不可用且存在有效索引时，持久事件`retrieval.degraded`返回固定`reason`诊断码及`fallback=sparse|unavailable`。不会回显底层异常或创建第二事实源。`search_knowledge`结果注明`mode: sparse|dense+sparse|dense+sparse+rerank`，降级注明`Retrieval degraded`；重排分数独立展示，最多20候选/5结果。未启用重排时保留原k=1–10。
+
+本地模型配置目前通过启动配置和Python准备接口提供；没有宣称已提供模型下载、索引管理或检索对照HTTP页面。
