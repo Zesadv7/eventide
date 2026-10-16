@@ -451,3 +451,7 @@ EvaluationDetail.mode现在为offline|live，measurement_kind为scripted_mechani
 创建评测支持mode=offline|live（默认offline）。live额外要求confirmed=true和64位quote_hash；模型配置、任务、有效价格或划分变化导致409 rejected。首次持久接收冻结规划；同键同正文重放在重新核对规划之前返回原身份。offline仍使用原四字段请求指纹，不因新增默认字段破坏旧请求恢复。目录用supported_modes/default_mode描述支持能力；measurement_kind/billing_applicable由具体批次决定，不能将目录解释为免费声明。
 
 Vue显式读取估算并确认后才可发起live；未知结果保留原确认和请求键，刷新不会自动发请求。live报告为provider_experiment/billing_applicable=true，失败验收保留，实际用量从主控制Run查询；本地case账本引用不重复计费。
+
+### 附件写入请求身份
+
+`POST /api/sessions/{id}/attachments`与`DELETE /api/sessions/{id}/attachments/{attachment_id}`要求本机来源及Idempotency-Key。无键422；同操作/键不同内容409，同键成功回放原公开结果；回放上传不会复活已删除附件。上传输入校验在文件操作前，错误422。文件发布/删除或回执失败503且不标rejected，原键重试409未知，须检查列表，不自动重做。已引用附件删除409 rejected。Worker及控制Session不能上传。正文仅作摘要绑定，不落入事件原文。

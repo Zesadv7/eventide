@@ -181,14 +181,21 @@ export const api = {
     media_type: string,
     content_base64: string,
   ) =>
-    post<Attachment>(`/api/sessions/${id(session)}/attachments`, {
-      name,
-      media_type,
-      content_base64,
-    }),
+    durableMutation<Attachment>(
+      "attachment-upload",
+      `/api/sessions/${id(session)}/attachments`,
+      "POST",
+      {
+        name,
+        media_type,
+        content_base64,
+      },
+    ),
   deleteAttachment: (session: string, attachment: string) =>
-    request<unknown>(
+    durableMutation<unknown>(
+      "attachment-delete",
       `/api/sessions/${id(session)}/attachments/${id(attachment)}`,
-      { method: "DELETE" },
+      "DELETE",
+      {},
     ),
 };

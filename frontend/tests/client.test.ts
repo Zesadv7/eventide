@@ -93,3 +93,48 @@ describe("durable Session creation", () => {
     expect(keys[2]).not.toBe(keys[1]);
   });
 });
+
+describe("durable attachment operations", () => {
+  it("keeps upload and deletion identities after lost responses without storing file contents", async () => {
+    sessionStorage.clear();
+    const mocked = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("lost upload"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ attachment_id: "att_one" }), {
+          status: 201,
+        }),
+      )
+      .mockRejectedValueOnce(new Error("lost deletion"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ deleted: "att_one" })),
+      );
+    vi.stubGlobal("fetch", mocked);
+    await expect(
+      api.uploadAttachment(
+        "session",
+        "private-name",
+        "text/plain",
+        "cHJpdmF0ZQ==",
+      ),
+    ).rejects.toThrow("lost upload");
+    expect(JSON.stringify(sessionStorage)).not.toContain("private-name");
+    expect(JSON.stringify(sessionStorage)).not.toContain("cHJpdmF0ZQ==");
+    await api.uploadAttachment(
+      "session",
+      "private-name",
+      "text/plain",
+      "cHJpdmF0ZQ==",
+    );
+    await expect(api.deleteAttachment("session", "att_one")).rejects.toThrow(
+      "lost deletion",
+    );
+    await api.deleteAttachment("session", "att_one");
+    const keys = mocked.mock.calls.map(
+      (call) => call[1].headers["Idempotency-Key"],
+    );
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).toBe(keys[3]);
+    expect(keys[0]).not.toBe(keys[2]);
+  });
+});

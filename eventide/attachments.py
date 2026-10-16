@@ -183,6 +183,14 @@ def attachment_path(state_dir: str | Path, session_id: str, attachment_id: str) 
     return path
 
 
+def validate_upload(name: str, content_base64: str, media_type: str | None = None) -> None:
+    """Validate request data before recording a potentially effectful upload."""
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("附件缺少名称")
+    _decode_base64(content_base64)
+    _normalized_media_type(name, media_type)
+
+
 def save_attachment(
     state_dir: str | Path,
     session_id: str,

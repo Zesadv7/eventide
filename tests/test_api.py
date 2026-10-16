@@ -448,6 +448,7 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
         created = client.post(
             f"/api/sessions/{session}/attachments",
             json={"name": "notes.py", "content_base64": encoded("print(1)")},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert created.status_code == 201
         body = created.json()
@@ -459,6 +460,7 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
             client.post(
                 "/api/sessions/missing-session/attachments",
                 json={"name": "x.txt", "content_base64": ""},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
             ).status_code
             == 404
         )
@@ -466,6 +468,7 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
             client.post(
                 f"/api/sessions/{session}/attachments",
                 json={"name": "bad.txt", "content_base64": "not!!base64"},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
             ).status_code
             == 422
         )
@@ -476,6 +479,7 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
                 "content_base64": base64.b64encode(b"\xff\xfe\x00bin").decode("ascii"),
                 "media_type": "application/octet-stream",
             },
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert binary.status_code == 201
         assert binary.json()["kind"] == "file"
@@ -483,6 +487,7 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
             client.post(
                 f"/api/sessions/{session}/attachments",
                 json={"name": " ", "content_base64": ""},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
             ).status_code
             == 422
         )
@@ -493,7 +498,10 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
         downloaded = client.get(f"/api/sessions/{session}/attachments/{binary_id}")
         assert downloaded.content == b"\xff\xfe\x00bin"
         assert downloaded.headers["content-type"] == "application/octet-stream"
-        assert client.delete(f"/api/sessions/{session}/attachments/{binary_id}").status_code == 200
+        assert client.delete(
+            f"/api/sessions/{session}/attachments/{binary_id}",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        ).status_code == 200
         assert {
             item["name"] for item in client.get(f"/api/sessions/{session}/attachments").json()
         } == {"notes.py"}
@@ -502,6 +510,7 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
             client.post(
                 f"/api/sessions/{session}/attachments",
                 json={"name": "big.txt", "content_base64": oversized},
+                headers={"Idempotency-Key": uuid.uuid4().hex},
             ).status_code
             == 422
         )
@@ -516,10 +525,12 @@ def test_api_run_with_attachments_inlines_and_truncates(isolated_workspace):
         small = client.post(
             f"/api/sessions/{session}/attachments",
             json={"name": "notes.py", "content_base64": encoded("print('hi')")},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         ).json()
         big = client.post(
             f"/api/sessions/{session}/attachments",
             json={"name": "big.log", "content_base64": encoded("你" * 300_000)},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         ).json()
         accepted = client.post(
             f"/api/sessions/{session}/runs",
@@ -561,6 +572,7 @@ def test_api_image_attachment_is_hydrated_only_for_provider(isolated_workspace):
                 "media_type": "image/png",
                 "content_base64": base64.b64encode(b"png-bytes").decode("ascii"),
             },
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         ).json()
         accepted = client.post(
             f"/api/sessions/{session}/runs",
@@ -583,7 +595,8 @@ def test_api_image_attachment_is_hydrated_only_for_provider(isolated_workspace):
         assert history[0]["used"] is True
         assert (
             client.delete(
-                f"/api/sessions/{session}/attachments/{image['attachment_id']}"
+                f"/api/sessions/{session}/attachments/{image['attachment_id']}",
+                headers={"Idempotency-Key": uuid.uuid4().hex},
             ).status_code
             == 409
         )
@@ -601,6 +614,7 @@ def test_api_run_rejects_unknown_and_foreign_attachments(isolated_workspace):
         uploaded = client.post(
             f"/api/sessions/{session}/attachments",
             json={"name": "a.txt", "content_base64": encoded("hi")},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         ).json()
         missing = client.post(
             f"/api/sessions/{session}/runs",

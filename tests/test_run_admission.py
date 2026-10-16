@@ -273,6 +273,7 @@ def test_event_references_protect_attachments_when_used_cache_is_missing(
                 "name": "notes.txt",
                 "content_base64": "bm90ZXM=",
             },
+            headers={"Idempotency-Key": uuid.uuid4().hex},
         ).json()
         aid = uploaded["attachment_id"]
         accepted = client.post(
@@ -286,4 +287,7 @@ def test_event_references_protect_attachments_when_used_cache_is_missing(
         assert client.get(f"/api/sessions/{session}/attachments").json() == []
         used = client.get(f"/api/sessions/{session}/attachments?include_used=true").json()
         assert used[0]["used"] is True
-        assert client.delete(f"/api/sessions/{session}/attachments/{aid}").status_code == 409
+        assert client.delete(
+            f"/api/sessions/{session}/attachments/{aid}",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        ).status_code == 409

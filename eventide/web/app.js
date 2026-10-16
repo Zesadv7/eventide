@@ -1060,7 +1060,7 @@ async function removeAttachment(chip) {
   const owner = state.session;
   if (!owner) return;
   try {
-    await request(`/api/sessions/${owner}/attachments/${chip.attachment_id}`, {method: "DELETE"});
+    await mutateWorkspace(`/api/sessions/${owner}/attachments/${chip.attachment_id}`, "DELETE", {});
     const remaining = (state.attachments.get(owner) || []).filter((item) => item.attachment_id !== chip.attachment_id);
     state.attachments.set(owner, remaining);
     renderChips();
@@ -1081,7 +1081,7 @@ async function uploadAttachments(files) {
       const content = await fileBase64(file);
       let owner = state.session;
       if (!owner) owner = await createSession(state.workspace);
-      const result = await request(`/api/sessions/${owner}/attachments`, {method: "POST", body: JSON.stringify({name: file.name, media_type: file.type || null, content_base64: content})});
+      const result = await mutateWorkspace(`/api/sessions/${owner}/attachments`, "POST", {name: file.name, media_type: file.type || null, content_base64: content});
       const chips = state.attachments.get(owner) || [];
       chips.push({attachment_id: result.attachment_id, name: result.name || file.name});
       state.attachments.set(owner, chips);

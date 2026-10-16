@@ -11,6 +11,7 @@ from fastapi.responses import Response
 from eventide import attachments
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.schemas import AttachmentBody
+from eventide.http_control import begin_mutation, fail_mutation, finish_mutation, mutation_key
 
 
 def create_router(context: ApiContext) -> APIRouter:
@@ -22,13 +23,36 @@ def create_router(context: ApiContext) -> APIRouter:
         "/api/sessions/{session_id}/attachments",
         status_code=status.HTTP_201_CREATED,
     )
-    async def upload_attachment(session_id: str, body: AttachmentBody) -> dict[str, Any]:
+    async def upload_attachment(
+        session_id: str,
+        body: AttachmentBody,
+        request: Request,
+    ) -> dict[str, Any]:
+        require_local_request(request)
+        mutation_key(request)
         # Uploads never auto-create a session: an unknown session is a 404.
         await get_session(session_id)
-        if agent_runtime.is_worker_session(session_id):
-            raise HTTPException(status_code=409, detail="Worker sessions do not accept attachments")
+        if agent_runtime.is_worker_session(session_id) or agent_runtime.is_control_session(
+            session_id
+        ):
+            raise HTTPException(
+                status_code=409, detail="Managed sessions do not accept attachments"
+            )
         try:
-            return attachments.save_attachment(
+            attachments.validate_upload(body.name, body.content_base64, body.media_type)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        receipt = begin_mutation(
+            agent_runtime,
+            request,
+            agent_runtime.configuration_owner(),
+            "attachment_upload",
+            {"session_id": session_id, **body.model_dump()},
+        )
+        if receipt.result is not None:
+            return receipt.result
+        try:
+            result = attachments.save_attachment(
                 agent_runtime.settings.state_dir,
                 session_id,
                 attachments.new_attachment_id(),
@@ -36,8 +60,15 @@ def create_router(context: ApiContext) -> APIRouter:
                 body.content_base64,
                 body.media_type,
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            return finish_mutation(agent_runtime, receipt, result)
+        except Exception:
+            # Filesystem publication and SQLite cannot commit atomically. Keep the
+            # started receipt on any uncertain outcome; never create another file.
+            raise HTTPException(
+                503,
+                "Attachment upload outcome is unknown; "
+                "inspect attachments and retain the original request",
+            ) from None
 
     @router.get("/api/sessions/{session_id}/attachments")
     async def list_session_attachments(
@@ -79,7 +110,17 @@ def create_router(context: ApiContext) -> APIRouter:
         session_id: str, attachment_id: str, request: Request
     ) -> dict[str, Any]:
         require_local_request(request)
+        mutation_key(request)
         await get_session(session_id)
+        receipt = begin_mutation(
+            agent_runtime,
+            request,
+            agent_runtime.configuration_owner(),
+            "attachment_delete",
+            {"session_id": session_id, "attachment_id": attachment_id},
+        )
+        if receipt.result is not None:
+            return receipt.result
         try:
             if attachment_id in agent_runtime.store.referenced_attachments(session_id):
                 raise ValueError("附件已用于工作记录，不能删除")
@@ -92,7 +133,21 @@ def create_router(context: ApiContext) -> APIRouter:
                 code = 404
             else:
                 code = 409 if "不能删除" in message else 422
-            raise HTTPException(status_code=code, detail=message) from exc
-        return {"deleted": deleted["attachment_id"]}
+            fail_mutation(agent_runtime, receipt, message, code, rejected=True)
+            raise HTTPException(
+                status_code=code,
+                detail=message,
+                headers={"X-Eventide-Mutation-Outcome": "rejected"},
+            ) from exc
+        except Exception:
+            raise HTTPException(
+                503, "Attachment deletion outcome is unknown; retain the original request"
+            ) from None
+        try:
+            return finish_mutation(agent_runtime, receipt, {"deleted": deleted["attachment_id"]})
+        except Exception:
+            raise HTTPException(
+                503, "Attachment deletion outcome is unknown; retain the original request"
+            ) from None
 
     return router
