@@ -148,7 +148,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | R2 | 待开始 | 前端typecheck/组件/build/Playwright。 |
 | R3 | 待开始 | 并发/审批/队列/取消/重启/Skill版本/采纳冲突。 |
 | R4 | 待开始 | usage采集去重/父子/预留结算/价格/全历史/未知。 |
-| R5 | 待开始 | 冻结集对照与至少2个用户实际项目任务。 |
+| R5 | 进行中 | 2026-10-16：以Eventide历史源码b238620的HTTP接收/GLM参数两个真实问题做独立worktree修复重放；先冻结外部验收，旧源码各2项失败、当前实现10项通过。真实模型两任务均未形成候选：HTTP加载2个固定Skill后第二请求约5秒超时（2尝试/unknown1），GLM加载2个固定Skill后10请求触达60k observed上限；合计已报告输入65,317/输出1,718，费用未知，源码/冻结测试未改、未采纳。失败全保留，不宣称修复成功；据此补齐三adapter SDK传输超时与Host配置一致，78项相关回归通过。冻结集对照仍按B3/U5验收。 |
 | R6 | 待开始 | 安装包/容器/API/Markdown一致，本地提交。Docker不可用单列待外部验证，不能声称已实测。 |
 
 ## 用量、预算与实验细则

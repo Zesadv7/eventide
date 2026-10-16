@@ -54,7 +54,7 @@ execution_worktrees.py 用 WorktreeService 从干净源 HEAD 创建副本，Run 
 
 ## 存储与事件契约
 
-默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。EVENTIDE_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。当前 schema 版本为 4，版本 1/2/3 在同一 Runtime 数据模型内自动升级；未知版本和直接作为 RuntimeStore 打开的未版本化旧数据库明确拒绝，不自动删除。`migrate-v02` 通过独立只读连接校验旧 TraceStore schema，再把数据以单个目标事务导入当前库。
+默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。EVENTIDE_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。当前 schema 版本为 4，版本 1/2/3 在同一 Runtime 数据模型内自动升级；未知版本和直接作为 RuntimeStore 打开的未版本化旧数据库明确拒绝，不自动删除。`migration` Python模块通过独立只读连接校验旧 TraceStore schema，再把数据以单个目标事务导入当前库。
 
 | 表 | 职责 |
 |---|---|
@@ -147,7 +147,7 @@ SDK stream 在终态返回前关闭；异常、取消和消费者 aclose 同样�
 
 Responses 终态为 incomplete 时，即使带有格式正确的 function_call，也保留 max_output_tokens 等原始截断原因，不能改写成 tool_use。外层 completed 但工具项仍为 in_progress/incomplete、缺少调用身份或 JSON 无效时，同样标记 incomplete；缺身份的项不制造伪调用，带身份的 JSON 错误保留审计占位。完整 ModelResponse 继续携带最终 usage，使 Host 可先记账，再终止并标记未派发的调用，不能因工具不完整而丢失已知消费。
 
-`RuntimeStore.usage_events`在一个递归查询中选取指定Run/Session及可选持久子Run的调用事实；`usage.build_usage_ledger`纯派生去重、已报告/估算/未知及完整性，HTTP用量接口不依赖列表分页。终态/worker汇总不再次收费，历史只做不完整响应回退。价格、共享预算及Vue控制面见U2/U3章节；最终请求字符组成按下文固定方法记录，完整页面仍由U3集成验收。
+`RuntimeStore.usage_events`在一个递归查询中选取指定Run/Session及可选持久子Run的调用事实；`usage.build_usage_ledger`纯派生去重、已报告/估算/未知及完整性，HTTP用量接口不依赖列表分页。终态/worker汇总不再次收费，历史只做不完整响应回退。价格、共享预算及Vue控制面见U2/U3章节；最终请求字符组成按下文固定方法记录，Vue按Run、Session、项目、交付及UTC日查询完整历史。
 
 `RuntimeHost.run(RunRequest)`、create_session、Provider 配置和 RunResult 原字段保持当前契约；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。
 
@@ -171,7 +171,7 @@ RunBody 支持每次 Run 的 `mode`（auto/plan/agent，未知值按 auto 处理
 
 动态 schema 使用 jsonschema 和显式空的 referencing Registry。构造时按 dialect 遍历真实子 schema，拒绝网络/文件/相对外部引用、未知 dialect、未支持的引用关键字和无法解析的本地引用；const/default 中的普通数据不会被当作 schema。坏条目不使其他工具不可用。MCP 的 session、工具原名及 timeout 通过词法闭包绑定，模型 `_session` 等同名字段只能作为远端工具参数，无法替换 transport。
 
-本提交交付执行器和目录基础；Host 对实际可用目录传入 `tools=`、请求目录归一化以及每个 Run 最多一次参数修正仍待 A3 的集成步骤。定向测试覆盖严格类型、字段省略/空值、权限边界、冻结目录、局部引用、失败隔离和两个真实本地 MCP transport。
+Host已对实际可用目录传入 `tools=`，归一化请求目录，并限制每个Run最多一次参数修正。定向测试覆盖严格类型、字段省略/空值、权限边界、冻结目录、局部引用、失败隔离和两个真实本地 MCP transport。
 
 ## Workspace 知识检索
 
@@ -302,7 +302,7 @@ HistoryView 是独立只读观察页。先从当前 Project 的含归档 Session
 
 发送前生成 Idempotency-Key；网络、超时及 5xx 等接收结果不明时，按 Session 保存原请求与键，显式重试原内容，不改成第二个任务。已知参数拒绝允许编辑。草稿与待确认提交存当前标签页 sessionStorage，API Key 不进入 Pinia/浏览器持久存储；设置保存完成后清空密码输入。HTTP 请求有 30 秒等待上限，超时不代表后台任务已取消。会话切换与刷新使用代次检查，旧响应不覆盖新选择。待审批时 MessagesProjection 的不完整工具历史 409 只延用上次可见消息，运行详情和审批仍正常更新。
 
-开发服务器仅监听回环地址，HTTP 代理保留 Host 通过 API 同源校验；生产由FastAPI在/workbench/同源托管构建产物。Markdown 子集只用 Vue 文本插值与代码块，不执行 raw HTML，不创建任意协议链接。页面支持跟随系统的深浅主题和窄屏导航；生产资源已随Python包提供；完整管理页面与旧入口删除仍待后续步骤。
+开发服务器仅监听回环地址，HTTP 代理保留 Host 通过 API 同源校验；生产由FastAPI在/workbench/同源托管构建产物。Markdown 子集只用 Vue 文本插值与代码块，不执行 raw HTML，不创建任意协议链接。页面支持跟随系统的深浅主题和窄屏导航；生产资源已随Python包提供；管理能力已由Vue/API或Python开发接口承接，旧终端产品及原生前端已删除。
 
 
 ### Skills 管理 HTTP 与 Vue
@@ -585,3 +585,6 @@ scripted 与未跑完的批次保留统计，不产生真实优化通过结论�
 费用比较还核对固定计价行中的供应商、模型、类别、币种、版本及每百万费率指纹；
 跨独立实验只复用相同版本名不足以证明价格相同。缺少费率依据仍可显示旧快照，
 但不能用该快照宣称费用下降；不会重新计价或覆盖历史。
+
+
+三类官方SDK客户端显式使用Settings.model_timeout作为连接、读取、写入和连接池等待上限，避免隐含的5秒连接默认值先于配置截止；Host仍限制整个请求生命周期并保持原取消/断流不重放规则。SDK重试保持0，发生未知消费时不释放预留。此修正由真实项目重放中的早期超时暴露，但不能据此断言该次供应商超时的底层原因。
