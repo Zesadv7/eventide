@@ -50,7 +50,7 @@ Run与Continue要求`Idempotency-Key`（1–128个可见ASCII字符）。同Sess
 
 无usage是unknown，不是零；缓存与推理Token为细项，不能再加到总量。账本暂不报价，原`usage`字段保留兼容；需要完整性判断时使用新账本。历史响应只能回退统计已观察响应，complete保持false。取消和失败请求无返回usage时保留未知。
 
-calls另带`usage_basis: input_output|input_only`；旧调用默认input_output。仅输入型embedding事实采用input_only，reported输入完整即可usage_complete=true，output_tokens保持缺省，不能渲染为已报告0。费用和预算从首次预留的相同口径派生，普通生成缺输出仍为不完整。底座已验收，远程embedding生产调用按C阶段接入。
+calls另带`usage_basis: input_output|input_only`；旧调用默认input_output。仅输入型embedding事实采用input_only，reported输入完整即可usage_complete=true，output_tokens保持缺省，不能渲染为已报告0。费用和预算从首次预留的相同口径派生，普通生成缺输出仍为不完整。远程embedding查询与索引批次已按ADR-072/075接入Host模型槽、预算及唯一账本。
 
 ### 流式预览传输 —— 主链、SDK 与 Vue 已实现
 
@@ -162,7 +162,7 @@ POST /api/sessions/{id}/attachments
 
 Continue 保持原 Plan，只在相同 Provider 和 Base URL 下沿用选定模型；连接变化则使用当前默认模型。原 Agent 模式恢复为 Auto，自动审批不跨 Run。附件的归属以完整 Session ID 为准，DELETE 对 canonical 引用返回 409，不仅依赖文件 used 标记。
 
-`reason=token_budget` 表示已观测的输入+输出用量达到 `run_token_limit`，默认 0 关闭。摘要成功响应也计入，摘要事件不作为用户消息显示。单次响应可越过上限，Continue 重置预算；没有用量的失败请求不估算。前端用量继续消费 Run 的 usage，停驻区显示 Token 软上限原因。
+`reason=token_budget`可来自唯一attempt已报告用量软限，或共享预算拒绝（后者查看budget.blocked）。软限run_token_limit默认0关闭，累计摘要、辅助及持久子Run；一次返回可越过观测上限。Continue仅获得新Run额度，交付、项目、UTC日累计及未知预留不重置。没有usage的失败保持未知；页面读取完整账本及预算事实，不把终态usage当总账。
 
 ### 受控只读子任务 —— 已实现（显式开启）
 
@@ -181,7 +181,7 @@ Workspace capabilities 增加 readonly_workers（enabled/roles/max_concurrency/m
 
 Vue HTTP 客户端规范化列表/详情返回的 Run `id` 为内部 `run_id`；202 接收凭据仍直接使用 `run_id`。Run 列表是最近一页按追加顺序排列，最新项位于末尾。工具待审批期间，`/messages` 可能因工具历史尚未配对返回 409；客户端暂留上次可见消息，继续查询 Run/Session，不能因此隐藏审批或停止按钮。
 
-历史页 `#/history?session=<session_id>&run=<run_id>` 使用 `GET /api/projects/{id}/sessions?include_archived=true` 确认当前项目归属，再调用既有 Session Run 列表、精确 Run 详情及 export。列表请求固定 `limit=100`；下一页 `before` 使用当前已加载最旧 Run 的身份，服务端按追加 rowid 排序且排除游标本身，不使用时间戳翻页。每页仍按旧到新返回，Vue 反向展示；`hasOlder` 仅由满页推断，没有伪造总数。精确详情验证 `run_id` 和 `session_id` 后才显示导出入口；URL 恢复不要求先拉取全部中间页。JSONL 返回 canonical 事件，工具详情投影不是独立 trace 导出。本页没有写请求，不更改当前执行会话；会话管理与独立 trace 已分别由专页及历史详情承接，历史导入仍待迁移。
+历史页 `#/history?session=<session_id>&run=<run_id>` 使用 `GET /api/projects/{id}/sessions?include_archived=true` 确认当前项目归属，再调用既有 Session Run 列表、精确 Run 详情及 export。列表请求固定 `limit=100`；下一页 `before` 使用当前已加载最旧 Run 的身份，服务端按追加 rowid 排序且排除游标本身，不使用时间戳翻页。每页仍按旧到新返回，Vue 反向展示；`hasOlder` 仅由满页推断，没有伪造总数。精确详情验证 `run_id` 和 `session_id` 后才显示导出入口；URL 恢复不要求先拉取全部中间页。JSONL 返回 canonical 事件，工具详情投影不是独立 trace 导出。本页没有写请求，不更改当前执行会话；会话管理与独立 trace 已分别由专页及历史详情承接，历史导入已由独立页面及受控预检/确认API承接。
 
 Vue 使用 `include_preview=true` 订阅流式临时预览。`model.preview` 无 seq/id，不推进持久游标、不写入消息历史；`model.response` 与终态触发真实消息刷新并清除预览。客户端保留原提交键处理网络/超时/5xx 下的不确定接收，明确参数拒绝后允许编辑。开发代理保留原 Host，使浏览器 Origin 与 API 的请求源相符。
 
@@ -207,7 +207,7 @@ PackageBody 严格接受 directory、archive_base64、bundled 三选一，以及
 
 ## Vue 静态入口
 
-`GET /workbench/` 提供Python包内Vue页面；Hash路由无需后端路径回退，HTTP/SSE仍走同源`/api`。静态资源缺失404；整个构建缺失时工作台返回503 JSON错误，healthz/API仍可使用。根地址旧前端继续保留到X验收。`/workbench/manifest.json` 仅含构建来源指纹与文件校验清单，不含运行状态或凭据。
+`GET /workbench/` 提供Python包内Vue页面；Hash路由无需后端路径回退，HTTP/SSE仍走同源`/api`。静态资源缺失404；整个构建缺失时工作台返回503 JSON错误，healthz/API仍可使用。根地址307跳转/workbench/，旧/assets/*为404。`/workbench/manifest.json` 仅含构建来源指纹与文件校验清单，不含运行状态或凭据。
 
 
 ## Project 聚合与执行副本身份
@@ -310,11 +310,11 @@ Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入�
 
 事件复用`GET /api/runs/{run_id}/events`；评测事实为evaluation.accepted/case_started/case_completed/report_saved/finished及普通Run生命周期。通用Run/queue的execution投影为`{kind:evaluation,workspace_id,evaluation_id}`，不使用snapshot专属字段。刷新读取持久事实，不重复计数。重启将未完成批次标interrupted，已完成案例仍可查询，活动案例中断、剩余未执行；禁止普通Run、Continue和abandon进入控制Session，新测试使用新身份。
 
-### Vue 离线评测请求恢复
+### Vue 评测请求恢复
 
 Vue提交固定`engineering-v1`任务集目录返回的`suite_sha256`、development/holdout/all及默认`mode=offline`，live需额外规划确认；接收和取消均使用随机Idempotency-Key。网络错误或未明确拒绝的409保留原身份，刷新重试也固定原指纹与划分。明确无副作用拒绝（X-Eventide-Mutation-Outcome: rejected）或403/404/422才允许新请求身份，成功202只代表持久接收，运行结果从详情和报告查询。
 
-详情的queued/running/completed/failed/interrupted与逐题passed分别展示；passed=null、duration_ms=null不显示为false或0。报告接口失败不会抹掉运行详情，下载内容保留schema v2原字段和scripted_mechanism_validation/billing_applicable=false标记。`#/evaluations?evaluation=<id>`可恢复选择，但客户端必须核对详情project_id与当前项目；切项目或选择其他评测时丢弃迟到响应。
+详情的queued/running/completed/failed/interrupted与逐题passed分别展示；passed=null、duration_ms=null不显示为false或0。报告接口失败不会抹掉运行详情，下载保留schema v2原字段及该批次实际的measurement_kind/billing_applicable，不能把真实live标为scripted。`#/evaluations?evaluation=<id>`可恢复选择，但客户端必须核对详情project_id与当前项目；切项目或选择其他评测时丢弃迟到响应。
 
 ### 配置写入的版本与持久回执
 

@@ -106,9 +106,9 @@ ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读
 
 认领在模型槽和预算派发之前，因此取消、预算拒绝、未采用、摘要无效或崩溃都可能留下没有真实消费的认领；它不是模型 attempt，也不代表 checkpoint 或预算结算。实际返回、失败和取消继续由原 Host completion callback 记账。重启不清空认领；有效 checkpoint 直接复用，失效 checkpoint 不能绕过节流重新花费。跳过原因随 `context.trimmed.summary_skipped` 记录；既有工具结果折叠后仍超限，沿用 `context_overflow` 失败，不发送主模型请求。这里的 4,000 字符和 60 秒是保守机制参数，尚无真实任务成本改善结论。
 
-Host 的两阶段接收由 `admit_run` / `admit_continue` 和 `start_admitted_run` 组成：先在 Workspace 锁内预留精确 Run/Session 身份，通过可取消但会等待线程结束的恢复和 checkpoint 检查，再由 `RuntimeStore.admit_run()` 在一个 SQLite 事务中写入 turn/run、`run.admitted`、用户消息或恢复事实和 checkpoint。附件验证、事务提交与 used 缓存写入之间没有 await；跨文件和 SQLite 仍不是共同事务，因此附件 API 同时查询 canonical 引用来保护生命周期。202 前同步登记执行 Task，使立即取消、关闭和配置切换都能找到所有者。Python直接调用与HTTP共用持久队列，忙源在接收前拒绝；临时ticket/lease只管理进程内所有权，重启事实仍以Event Log为准。
+Host 的两阶段接收由 `admit_run` / `admit_continue` 和 `start_admitted_run` 组成：先在 Workspace 锁内预留精确 Run/Session 身份，通过可取消但会等待线程结束的恢复和 checkpoint 检查，再由 `RuntimeStore.admit_run()` 在一个 SQLite 事务中写入 turn/run、`run.admitted`、用户消息或恢复事实和 checkpoint。附件验证、事务提交与 used 缓存写入之间没有 await；跨文件和 SQLite 仍不是共同事务，因此附件 API 同时查询 canonical 引用来保护生命周期。持久接收后由Host登记及跟踪派发所有者，支持立即取消、关闭和配置切换；接收后的缓存或派发故障仍返回原202身份，并可查询真实终态。Python直接调用与HTTP共用持久队列，忙源在接收前拒绝；临时ticket/lease只管理进程内所有权，重启事实仍以Event Log为准。
 
-ContextBuilder 的可选 completion callback 把生产摘要接入 Host 的模型 timeout/retry 和统一用量账本；不提供 callback 的离线调用者保持 Provider.complete 行为。`context.summary_requested/generated` 不进入 MessagesProjection，也不增加主 Agent 步数；成功生成的 usage 在是否采用判断前记账，新 `context.compacted` 不重复携带 usage。旧 compacted usage 仍可投影兼容。`run_token_limit`（默认 0）检查成功响应返回的 input+output tokens，包括摘要，在下一次主模型或摘要请求前停驻；它是按 Run 计数的软上限，不估计重试未返回的消费或视觉 token，不保证账单硬上限。
+ContextBuilder 的可选 completion callback 把生产摘要接入 Host 的模型 timeout/retry 和统一用量账本；不提供 callback 的离线调用者保持 Provider.complete 行为。`context.summary_requested/generated` 不进入 MessagesProjection，也不增加主 Agent 步数；成功生成的 usage 在是否采用判断前记账，新 `context.compacted` 不重复携带 usage。旧 compacted usage 仍可投影兼容。`run_token_limit`（默认0）按唯一attempt的reported输入/输出累计，包含摘要、辅助调用和持久子Run，在下一次请求前停驻；未知消费不当零，仍由持久预算预留控制。它是观测软限，不保证供应商账单硬上限；Continue的新Run额度不能重置交付、项目或UTC日限额。
 
 ## 中断与 Continue
 
@@ -127,7 +127,7 @@ Continue 从来源 `run.admitted` / `run.started` 继承 Plan 的只读限制与
 
 ## 入口、模型与 MCP
 
-`api.py` 是 FastAPI 组装入口，保留 `create_app(runtime=None)`；现有 HTTP 路由按工作区、Session、Run、模型生成参数、Provider 配置、附件及 SSE/导出拆入 `http_api/`。请求模型集中声明；每个 router factory 接收同一应用的 `ApiContext`，其中只保存 Host 引用、审批 Future、暂存 reservation 与 Task 集合，不是新的运行状态库。每个应用独立创建上下文，禁止模块级共享可变状态。Host/Store 仍管理接收、执行和全部事实；应用 lifespan 在退出时取消并等待自己跟踪的 Task 后再关闭 Host。
+`api.py` 是 FastAPI 组装入口，保留 `create_app(runtime=None)`；现有 HTTP 路由按工作区、Session、Run、模型生成参数、Provider 配置、附件及 SSE/导出拆入 `http_api/`。请求模型集中声明；每个 router factory 接收同一应用的 `ApiContext`，其中只保存Host引用、ApprovalBroker和冻结的proxy peers，不拥有接收reservation或执行Task集合。每个应用独立创建上下文，禁止模块级共享可变状态。Host/RunDispatch管理接收与执行所有权，Store保存唯一事实；应用lifespan调用Host.close并等待实际清理。
 
 容器部署的本机转发可通过启动配置 `EVENTIDE_LOCAL_PROXY_PEERS` 指定最多32个精确IP，默认空。Settings启动时校验并规范化，ApiContext创建时固定副本；API及模型设置不能修改该信任边界。管理守卫仅在socket peer精确匹配时追加放行，并始终检查回环Host和匹配Origin（包括使用该守卫的GET）；缺少Origin或cross-site仍拒绝。`eventide-server`禁用Uvicorn代理头解析，不信任请求中的转发地址。部署必须保持宿主回环发布；这不提供公网身份认证，也不自动信任私网段或Docker网关。
 
@@ -143,7 +143,7 @@ SDK内部重试显式关闭，Host统一重试，因此每条attempt对应一次
 
 三类 Provider adapter 同时提供 `complete(request)` 与可选 `stream(request)`。`streaming.ModelStreamEvent` 只有 `text_delta` 和 `response_completed`；只有后者含完整 ModelResponse 和工具调用，增量中没有可执行 ToolCall。Responses 读取 SDK 的终态对象，Chat 按调用 index 拼接参数，Anthropic 按消息/内容块生命周期拼接 JSON；各自保留必要的私有推理状态，增量只发送可见文本。收到最终对象前不会执行工具。Chat 等待结束原因并读取后续 usage，Anthropic 用累计 message_delta 覆盖临时用量，不把 message_start 的输出零值冒充最终消费。
 
-SDK stream 在终态返回前关闭；异常、取消和消费者 aclose 同样释放连接。SDK 请求创建成功后任何断流均为不可重试错误，不能因预览失败回退为 complete 重发。适配器限制保留内容/参数/推理合计 8 MiB、128 个输出项及 65,536 个事件；超限与缺终态均不返回完整响应。这些是响应组装边界，不是请求费用上限或操作系统隔离。适配器协议已通过内存 SSE 与官方 SDK 验证，Host 的临时预览、SSE 及尝试账本集成仍按 A6/A7 单独验收。
+SDK stream 在终态返回前关闭；异常、取消和消费者 aclose 同样释放连接。SDK 请求创建成功后任何断流均为不可重试错误，不能因预览失败回退为 complete 重发。适配器限制保留内容/参数/推理合计 8 MiB、128 个输出项及 65,536 个事件；超限与缺终态均不返回完整响应。这些是响应组装边界，不是请求费用上限或操作系统隔离。适配器及Host临时预览、SSE和尝试账本已完成A6/A7集成验收，最终综合门禁按R阶段执行。
 
 Responses 终态为 incomplete 时，即使带有格式正确的 function_call，也保留 max_output_tokens 等原始截断原因，不能改写成 tool_use。外层 completed 但工具项仍为 in_progress/incomplete、缺少调用身份或 JSON 无效时，同样标记 incomplete；缺身份的项不制造伪调用，带身份的 JSON 错误保留审计占位。完整 ModelResponse 继续携带最终 usage，使 Host 可先记账，再终止并标记未派发的调用，不能因工具不完整而丢失已知消费。
 
@@ -179,7 +179,7 @@ RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户从知识�
 
 C1 进一步固定 `IndexStore` 的 Workspace 目录身份。扫描拒绝非规范相对路径及任何祖先链接，打开文件后检查常规文件类型与身份，读取最多 1 MiB 加一个检测字节。索引只允许固定 `.eventide/index.sqlite` 路径；父目录、数据库与三个 SQLite 附属文件检查真实路径、文件类型与链接，数据库和附属文件拒绝硬链接。新建数据库先以独占创建取得已知文件身份，SQLite 打开后复核，失败关闭连接；构建在 embedding 完成后及提交扫描后再核对索引目录/数据库身份。链接与目录重定向拒绝，不改变 Runtime 的状态根配置或预算事实。
 
-Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源码和普通文本再使用 600～800 字符窗口及约 100 字符 overlap；每块保存准确的 1-based 闭区间行号。默认 HashEmbedder 用 SHA-256 token hashing 生成确定性本地向量，只验证离线机制，不声称具备学习得到的语义能力；可选 OpenAI-compatible provider 只在显式配置后惰性调用。provider、model、base URL、dimension 和算法版本组成 fingerprint，任何变化都要求 `--force`，避免比较来自不同向量空间的 BLOB。
+Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源码和普通文本再使用 600～800 字符窗口及约 100 字符 overlap；每块保存准确的 1-based 闭区间行号。默认 HashEmbedder 用 SHA-256 token hashing 生成确定性本地向量，只验证离线机制，不声称具备学习得到的语义能力；可选 OpenAI-compatible provider 只在显式配置后惰性调用。provider、model、base URL、dimension 和算法版本组成 fingerprint，任何变化都要求页面选择强制重建、HTTP `force=true`或Python `force=True`，避免比较来自不同向量空间的 BLOB。
 
 增量复用前同时验证已存 embedding 及切块指纹与其元数据一致，损坏时要求显式全量重建；不以写入新指纹掩盖旧向量身份不明。历史索引同时缺少切块元数据时仍按原固定窗口兼容，单项缺失或内容不一致则拒绝。未变化文件不重新 embedding，新增/改变/删除统一在一笔写事务生效；计算异常、源码漂移或另一个构建已提交新 generation 时，旧快照或另一个构建的获胜快照保持可读。此处仍是可重建索引，不建立第二运行事实源；embedding 网络请求治理属于后续 U1，未在 C1 扩充。
 
@@ -193,9 +193,9 @@ Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源
 
 ## 评测
 
-评测套件是 YAML 的 `cases` 列表（`evals/smoke.yaml` 覆盖机制，`evals/tasks.yaml` 覆盖任务级完成）。每条用例包含 `id`、`prompt`、离线 `script`（ScriptedProvider 步骤）、`expected`，以及可选的 `workspace`（相对路径 → 文件内容的 fixture 映射）。所有用例各自创建一次性 Git 沙箱：未声明 `workspace` 时使用空 fixture，其他情况仅接受相对路径映射；写入 fixture、`git init` 并提交初始 commit（仓库级 user identity 和 `.eventide/` 排除规则写在沙箱内）。Runtime 使用沙箱 `workdir`、沙箱内 `.eventide` 状态根和独立数据库，离线与 live 都关闭外部 MCP。每次评测统一临时产物根保存所有用例与 JSON 报告，不自动删除，不写启动 checkout 或用户状态根。报告顶层 `artifact_dir` / `report_path` 和逐用例 `artifact_dir` 可定位失败证据；Python `output_dir` 只导出报告，不复制状态数据库。
+评测套件是 YAML 的 `cases` 列表（`evals/smoke.yaml` 覆盖机制，`evals/tasks.yaml` 覆盖任务级完成）。每条用例包含 `id`、`prompt`、离线 `script`（ScriptedProvider 步骤）、`expected`，以及可选的 `workspace`（相对路径 → 文件内容的 fixture 映射）。所有用例各自创建一次性 Git 沙箱：未声明 `workspace` 时使用空 fixture，其他情况仅接受相对路径映射；写入 fixture、`git init` 并提交初始 commit（仓库级 user identity 和 `.eventide/` 排除规则写在沙箱内）。旧YAML套件Runtime使用沙箱workdir、沙箱内.eventide状态根和独立数据库；冻结工程集的状态与验收目录是源码目录的兄弟目录。离线与live都关闭外部MCP。每次评测统一临时产物根保存所有用例与 JSON 报告，不自动删除，不写启动 checkout 或用户状态根。报告顶层 `artifact_dir` / `report_path` 和逐用例 `artifact_dir` 可定位失败证据；Python `output_dir` 只导出报告，不复制状态数据库。
 
-live 在更换状态根之前调用共享 `resolve_provider_configuration`；其使用 `mode=ro` SQLite 读事务读取已提交 Provider 配置（包括活跃 WAL），不初始化 schema、不获取 HostLease、不恢复历史 Run。Host 与 live 共用 `apply_provider_configuration` 的已保存配置优先级；没有保存配置时保持启动配置，密文不可解密时禁止环境密钥回退。SecretBox 解密不创建密钥，缺失/无效/不可读密钥分别明确报告；凭据只留内存，评测使用注入 Provider，不向临时库保存连接凭据。离线路径不调用 resolver，并移除启动 API Key 与真实 embedding 凭据。
+独立旧套件live在更换状态根之前调用共享 `resolve_provider_configuration`；其使用 `mode=ro` SQLite 读事务读取已提交 Provider 配置（包括活跃 WAL），不初始化 schema、不获取 HostLease、不恢复历史 Run。Host 与 live 共用 `apply_provider_configuration` 的已保存配置优先级；没有保存配置时保持启动配置，密文不可解密时禁止环境密钥回退。SecretBox 解密不创建密钥，缺失/无效/不可读密钥分别明确报告；凭据只留内存，评测使用注入 Provider，不向临时库保存连接凭据。受控冻结live使用主Host已固定的连接和调用桥接，case禁止重新解析凭据或自行创建真实Provider。离线路径不调用resolver，并移除启动API Key与真实embedding凭据。
 
 判分（`_judge`）是确定性的 fs/git 证据检查，零模型调用：既有 `status`、`final_contains`、`required_tools`、`permission_denied`，任务级另有 `file_exists`、`file_absent`、`file_contains`（大小写不敏感子串）和 `git_committed`（初始提交之外存在新提交且 `git status --porcelain` 为空；非 Git 沙箱报 `git evidence unavailable`）。模型最终输出只参与 `final_contains`，从不作为完成证据。报告在 `mode/suite/passed/total/pass_rate/average_duration_ms/tool_success_rate/safety_blocks/duration_ms/results` 之外提供 `task_completion_rate`、`failure_reasons` 分布和 `average_steps`；live 模式另计 `total_input_tokens` / `total_output_tokens`，offline 模式带 `regression_smoke: true` 标记。Web报告和Python返回值保留完成率、失败原因和所有逐例结果；tests.check_offline_evaluations只做离线CI断言，全通过才返回成功。每条 `EvalCaseResult` 透传 RunResult 的 `steps`、`usage`、`status`。
 
@@ -268,11 +268,11 @@ CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optiona
 
 新账本按 Run 与 attempt_id 唯一归并 model.attempt_started/finished；同请求重试使用不同尝试身份。已有尝试事实的 Run 不再累计 model.response、context.summary_generated、worker.completed 或 run 终态中的汇总。缺结束事实或缺 usage 保持未知；reported 和 estimated 汇总分别输出，缓存细项不再额外加入输入/输出总量。只传父 Run 得到 exclusive 消费，汇总子任务须提供子 Run 自身事实，不能把父 inclusive 汇总相加。重复事件重放不增加消费，冲突的尝试事实拒绝静默改账。
 
-无尝试事实的历史 Run 仅回退已观察到的 model.response/context.summary_generated，标记历史证据不完整，不补造请求、重试或费用。JSON/OTel trace 对新 Run 直接派生尝试 span，仍只输出固定类别、哈希身份和数字，不导出请求参数或模型正文。Host与用量API已接线，流式供应商及embedding等后续验收仍见U1清单。
+无尝试事实的历史 Run 仅回退已观察到的 model.response/context.summary_generated，标记历史证据不完整，不补造请求、重试或费用。JSON/OTel trace 对新 Run 直接派生尝试 span，仍只输出固定类别、哈希身份和数字，不导出请求参数或模型正文。Host、用量API、流式供应商及embedding已完成U1接线，最终综合门禁按R阶段执行。
 
 ## 临时流式预览（A6/A7）
 
-Host对具有stream方法的主调用消费text_delta/response_completed，完整响应之前不派发工具；辅助摘要保持complete。预览每Run最多16,000字符、最多64个活跃条目，完成/失败/取消删除，不写Event Log。已知凭据保留足够跨片lookahead后脱敏，过长密钥禁预览而非泄漏。完整内容与usage仍由持久响应/attempt事实承担。SSE显式include_preview才发送无id临时帧；持久游标不被改变。流式失败/超时不自动重新请求或降级complete，未知消费保留；三类官方SDK适配已集成；Vue显示按F阶段承接。
+Host对具有stream方法的主调用消费text_delta/response_completed，完整响应之前不派发工具；辅助摘要保持complete。预览每Run最多16,000字符、最多64个活跃条目，完成/失败/取消删除，不写Event Log。已知凭据保留足够跨片lookahead后脱敏，过长密钥禁预览而非泄漏。完整内容与usage仍由持久响应/attempt事实承担。SSE显式include_preview才发送无id临时帧；持久游标不被改变。流式失败/超时不自动重新请求或降级complete，未知消费保留；三类官方SDK适配及Vue预览已集成，最终综合门禁按R阶段执行。
 
 Host的全部实际目录已接入严格工具契约，包括MCP、Skills、RAG及只读Worker过滤后的目录。每Run仅允许一次参数错误后的修正轮次，再次出现参数错误即在保存全部已知结果后失败；不重新执行先前副作用。截断响应中的完整JSON也不执行，未派发调用写tool.abandoned补齐消息配对。严格schema使基础目录实测从约2,738增加至3,283字符；上下文测试固定成本相应更新，保留独立目录上限检测，不能把新增校验成本当作Token优化收益。
 
@@ -337,9 +337,9 @@ BudgetLedger从budget.configured/reserved/settled/resolved派生状态，预留�
 
 生成调用只有reported且同时具有input_tokens/output_tokens才释放预留并结算实际量。embedding底层预留可固定usage_basis=input_only，必须与kind=embedding的attempt_started同事务、output_estimate为0；此0是无输出额度而非已报告输出Token。结算从预留读取口径，不能由返回结果改变，只有已报告input_tokens才能释放，且拒绝输出/推理计数。旧预留和历史调用默认input_output，不补造精度。未知/estimated/partial继续保留预留；部分reported高于估算时保留已观察下界。完整用量后迟到的未知回执不降级状态；用户确认未知消费必须有独立身份、实际量和理由，配置/确认事实author=user。超限响应真实记录，后续请求拒绝，不宣称账单硬上限。
 
-ModelBudgetController.begin_embedding按输入数组序列化UTF-8字节数预留（embedding_serialized_utf8_bytes_v1），不创建虚假的生成请求或input_composition，正文不入事实。费用快照据同一固定口径只要求输入价格；汇总保留output_tokens缺省。198项相关离线回归覆盖重放、重启、父子共享桶、未知和估算不释放及生成旧口径；此为C阶段远程embedding接线的底座，尚不表示生产派发已受控，本地推理也不进入供应商账本。
+ModelBudgetController.begin_embedding按输入数组序列化UTF-8字节数预留（embedding_serialized_utf8_bytes_v1），不创建虚假的生成请求或input_composition，正文不入事实。费用快照据同一固定口径只要求输入价格；汇总保留output_tokens缺省。198项相关离线回归覆盖重放、重启、父子共享桶、未知和估算不释放及生成旧口径；远程查询及索引批次已由ADR-072/075接入同一Host治理；本地推理不进入供应商Token账本。
 
-embedding_runtime.embed_remote提供Host所属的异步远程请求底座，先取得全局model_slot再预留，SDK关闭隐式重试；最多64项/1MiB是输入字节边界，不冒充供应商Token限制。返回prompt_tokens映射输入，total_tokens只检查一致性，缺失或冲突不推算。向量无效但已返回usage仍结算；重复取消等待真实请求及客户端清理，迟到的已报告usage也保留。54项离线派发/账本回归通过；尚未替代生产检索中的旧同步适配器，后续接线后才验收U1/U2整体。协议依据：[官方embeddings响应](https://developers.openai.com/api/reference/resources/embeddings/methods/create)。
+embedding_runtime.embed_remote提供Host所属的异步远程请求底座，先取得全局model_slot再预留，SDK关闭隐式重试；最多64项/1MiB是输入字节边界，不冒充供应商Token限制。返回prompt_tokens映射输入，total_tokens只检查一致性，缺失或冲突不推算。向量无效但已返回usage仍结算；重复取消等待真实请求及客户端清理，迟到的已报告usage也保留。54项离线派发/账本回归通过；生产检索及索引构建已通过ADR-072/075接入此底座，使用共享预算和唯一尝试账本。协议依据：[官方embeddings响应](https://developers.openai.com/api/reference/resources/embeddings/methods/create)。
 
 CostLedger从同一预留/结算事实生成cost.estimated；price.registered按Provider/model/category/currency/effective_at固定版本，价格使用严格Decimal字符串。费用行从总量划分有价格的cache/reasoning子集；不一致的细项整组标未知，不能将超出总量的缓存作为已知费用。缺价格不显示免费，不同币种分别汇总；estimated用量费用独立于reported用量费用。首次费用快照固定当时采用的价格版本；重新估价必须显式引用旧快照并生成新身份，历史保留，汇总按每次尝试最新一份去重。
 
@@ -385,7 +385,7 @@ HTTP接收复用control Session上的http.mutation事实，Idempotency-Key必填
 
 Vue SettingsView将候选草稿与store.provider分离，后者仍只由配置读取/保存/恢复结果更新；连接测试仅保留独立的ProbeResult。加载、保存及探测期间字段和冲突操作禁用，按钮没有自动触发路径。api/probe.ts复用durableMutation管理请求键，并保存单个候选摘要阻止未知结果被新表单替换；凭据留在组件内存，刷新后重新输入。同标签页的轻量内存观察器只共享在途请求状态及已返回结果，切页后仍锁定表单并接收原结果，避免旧请求清键后新页面把“重试”误变成新调用；它不保存凭据，也不替代持久Run事实。页面展示真实Run/usage、服务UTC日预算范围，未知Token与null耗时不转换为零。Playwright跨文件使用单worker，因为测试共用真实Host及全局队列；单场景内部继续验证并发窗口。
 
-GET /api/queue只读查询上述事实与所有权；project_id只过滤列表，容量和counts始终是全局。dispatch_state区分queued/starting/running/finishing；Run status继续使用canonical投影，审批等待或终态清理不会伪装为新执行。排队取消复用精确Run取消并保留输入，关闭等待准备线程/执行清理后停驻全部已接收工作。重启不自动派发；尚未started的admission保留原checkpoint，不调用crash-gap补新基线，实际开始过的旧运行继续保守恢复。所有未知Token预留保持原状。前端生成类型、队列页面和整包门禁由集成阶段验证。
+GET /api/queue只读查询上述事实与所有权；project_id只过滤列表，容量和counts始终是全局。dispatch_state区分queued/starting/running/finishing；Run status继续使用canonical投影，审批等待或终态清理不会伪装为新执行。排队取消复用精确Run取消并保留输入，关闭等待准备线程/执行清理后停驻全部已接收工作。重启不自动派发；尚未started的admission保留原checkpoint，不调用crash-gap补新基线，实际开始过的旧运行继续保守恢复。所有未知Token预留保持原状。前端生成类型和队列页面已集成验收；最终分发门禁按R阶段执行。
 
 Vue队列控制面只读取Host队列快照，不维护浏览器调度器；全局counts/limits与带精确Run/Session/副本身份的列表分开。queued被视为同Session活跃工作，但不作为源Workspace执行锁；UI取消只发送该Run身份。每次单一在途轮询、卸载后停止回填，后台任务继续由Host拥有；狭窄屏幕横向滚动任务表。
 
@@ -396,7 +396,7 @@ P3源码证据补充：Host为接收、派发、只读工具基线、worker与�
 
 恢复不能把旧checkpoint静默升成新策略：旧口径与当前策略不同，crash-gap只记录不可恢复证据，不补写新基线；Continue保持拒绝，用户检查后显式放弃并新建。已经固定manifest的快照继续按其原身份校验。S3在源项目更新后复用旧Skill的验收使用真正固定snapshot；source任务的项目Skill漂移在模型派发前拒绝。
 
-P3/P4/P5集成验收已完成：完整1180项通过、覆盖93.90%，默认7项Docker跳过另由76项真实容器及生命周期回归补验；6条真实API页面旅程覆盖快照/写副本并发、排队、取消和自动补位。Ruff/Mypy87、前端类型/构建/格式、48项前端回归及smoke12/12通过。评测和交付后续控制面仍独立按B/D验收。
+P3/P4/P5集成验收已完成：完整1180项通过、覆盖93.90%，默认7项Docker跳过另由76项真实容器及生命周期回归补验；6条真实API页面旅程覆盖快照/写副本并发、排队、取消和自动补位。Ruff/Mypy87、前端类型/构建/格式、48项前端回归及smoke12/12通过。评测和交付控制面已分别接入B/D主链，真实模型效果仍独立按B/U验收。
 
 ### 冻结任务与独立判分（B1）
 
@@ -404,17 +404,17 @@ P3/P4/P5集成验收已完成：完整1180项通过、覆盖93.90%，默认7项D
 
 `bundled_evaluations`通过`importlib.resources`读取白名单ID，支持常规安装与ZIP/wheel，不把用户ID当路径解析，也不依赖工作目录。逐资源有3MiB读取上限；文件系统路径及祖先、ZIP的UNIX链接项与祖先均拒绝。整个题集验证后才选split，某个留出题损坏时不能悄悄只运行开发集。返回独立纯JSON任务快照和三个指纹：`manifest_sha256`绑定原manifest字节，`suite_sha256`保留原规范manifest口径，`inputs_sha256`绑定所选cases的UTF-8 JSON（ensure_ascii=False、sort_keys=True，逗号和冒号分隔均无额外空白）。后续Web接收须将该快照持久固定，不在队列派发时重新读取当前包或别名；本模块没有第二状态源，也不读取凭据或启动模型。
 
-`evaluation.run_evaluations` 仍是唯一 Python 入口，旧 YAML suites 继续可用。冻结集先在读取环境或已保存凭据前禁止 live；离线数据注明 `scripted_mechanism_validation`，逐例带清单和任务版本哈希。每例源 Git 项目、状态根、冻结验收目录彼此独立，状态与验收目录作为源目录的兄弟目录，避免 worktree checkpoint 被评测自身数据库污染。模型步骤最多12、已观测 Token 软限最多20,000；整例5分钟上限及部分失败记录由下文B2实现，真实批次成本预算仍由B3前置评估。
+`evaluation.run_evaluations` 仍是唯一 Python 入口，旧 YAML suites 继续可用。冻结集禁止没有主账本权威的独立live；受控Web/Python live经主Host规划确认、模型槽及预算桥接开放。离线数据注明 `scripted_mechanism_validation`，逐例带清单和任务版本哈希。每例源 Git 项目、状态根、冻结验收目录彼此独立，状态与验收目录作为源目录的兄弟目录，避免 worktree checkpoint 被评测自身数据库污染。模型步骤最多12、已观测 Token 软限最多20,000；整例5分钟上限及部分失败记录由下文B2实现，真实批次成本预算仍由B3前置评估。
 
 `eval_grading.py` 仅编排已有 RuntimeHost/ToolExecutor/PolicyEngine、check_project 和 manage_delivery；没有替代执行器或结果数据库。事实题在持久 Plan 快照中运行，要求结构化事实和精确行号与人工标注一致；修复题在 Session 固定 worktree 中运行。验收先确认原版测试失败，再在独立 Python 进程运行事先冻结的 unittest；源码允许范围、固定测试、额外文件和原项目未被修改均参与判断，正文自报成功没有分数。
 
-恢复交付题明确区分 scripted Provider 经工具修改业务文件与评测程序控制动作：一题关闭重开 Host 后 verify/apply 并复验源，另一题在 verify 后注入独立源变化并要求拒绝 apply。测试及候选产物持久保留并引用 Run 身份，不注入“已通过”事实。该机制验证不证明真实模型自主修复、不包含未来 C 检索或 D 三候选流程；本地执行仍不是恶意代码安全沙箱。Web 评测未来必须纳入主服务模型额度和项目／日预算，不能复制账本制造第二事实源。
+恢复交付题明确区分 scripted Provider 经工具修改业务文件与评测程序控制动作：一题关闭重开 Host 后 verify/apply 并复验源，另一题在 verify 后注入独立源变化并要求拒绝 apply。测试及候选产物持久保留并引用 Run 身份，不注入“已通过”事实。该机制验证不证明真实模型自主修复、不包含未来 C 检索或 D 三候选流程；本地执行仍不是恶意代码安全沙箱。Web评测已纳入主服务模型额度和项目/日预算，case只保存执行事实及模型权威引用，不能复制账本制造第二事实源。
 
 ### 评测证据与部分失败（B2）
 
 报告 schema v2 由 `evaluation.py` 编排、`eval_evidence.py` 从每例现有 Store 只读重建。批次先冻结标准化任务输入与 Runtime commit/dirty/code SHA-256，逐例保存有效配置、Run/Session/Turn、context.configured 工具／指令／Skill 指纹、skills.snapshot 版本、模型尝试配置及全部 canonical 事件快照的哈希。源、固定验收原文和唯一事件数据库保留；JSON 报告只是可重建的审计导出，不参与运行恢复或预算决策。
 
-用量直接调用 `build_usage_ledger`，收集用例全部 Session 的独占尝试；父终态汇总不重复累计，重试失败及取消无usage保持unknown。报告总量分别累计reported/estimated；完整性要求全部已尝试题有可用账本，缺失证据题显式列出；历史简表没有对应字段就缺省，live全未知总量为null，不填0。费用直接读取同一 Store 的 CostLedger，保存历史估算和精确价格版本。价格必须由实验调用方显式传入，不访问用户预算/费用库；费用按币种及用量来源分桶，脚本消费标注 `billing_applicable=false`。
+用量直接调用 `build_usage_ledger`，收集用例全部 Session 的独占尝试；父终态汇总不重复累计，重试失败及取消无usage保持unknown。报告总量分别累计reported/estimated；完整性要求全部已尝试题有可用账本，缺失证据题显式列出；历史简表没有对应字段就缺省，live全未知总量为null，不填0。独立旧套件的费用读取本case Store及显式价格；受控live的模型尝试、费用和价格版本固定于主Host，case Store仅保存工具/验收事实及权威引用。费用按币种和用量来源分桶，脚本消费标注billing_applicable=false，不重新定价历史。
 
 每例准备之后，剩余整例期限交给独立 asyncio Task；到期取消并等待清理，不把单请求超时等同整例上限。所有套件默认12步/20,000已观测Token/300秒，允许更严格配置；数据库、Git同步准备和实际副作用清理不能被描述成实时强制终止。保存初始running报告、每例结果和最终状态，写入采用同目录临时文件、fsync、replace。发生取消用独立清理Task和shield等待收尾，重复取消也不截断证据导出和部分报告，然后向调用者重新抛出CancelledError；剩余题不运行、不伪造用量。离线失败保留并继续，live失败/超时/未知终态停止扩大批次。报告total保留原定题数，attempted/remaining与终态分开；证据导出失败本身也是失败。
 
@@ -464,9 +464,9 @@ Vue的InputComposition只展示服务端已校验的固定字符统计，旧值�
 
 `rag/local_models.py`负责本地包清单、准备、内容校验和惰性依赖；`rag/search.py`支持已取得向量的融合接口，避免未来异步受预算管理的调用链重复请求embedding。模型profile包含包内容指纹和算法版本，索引维度在构建时固定。Sentence Transformers依赖版本固定，模型仅使用local_files_only和禁用远程代码的加载路径。
 
-Host在既有ToolExecutor/Policy边界内绑定重排器，CPU推理通过现有同步工具线程执行，取消仍等待实际工具收尾。重排候选不超过20，输出不超过5，失败输出诊断并保留融合排序；本地模型包在运行准备时缺失，验证索引后提供词面工具并记`retrieval.degraded`事件，不静默消失。无重排的原k=1–10契约保留。
+Host在既有ToolExecutor/Policy边界内绑定重排器，CPU推理通过现有同步工具线程执行，取消仍等待实际工具收尾。重排候选不超过20，输出不超过5，失败输出诊断并保留融合排序；本地模型包在运行准备时缺失，验证索引后提供词面工具并记`retrieval.degraded`事件，不静默消失。所有生产检索路径最多返回5条，开发候选接口可保留原k范围。
 
-每次模型加载/推理前后校验本地文件内容，额外I/O成本需纳入C4/C5延迟测量。该层不产生远程Provider用量，不把本地字符或CPU耗时冒充供应商Token；远程embedding的主链接入和索引Web控制面仍按后续阶段完成。默认CI不安装retrieval重依赖、不下载模型；原可选扩展门禁明确安装code/telemetry，真实本地模型测试需显式提供两个固定目录环境变量。
+每次模型加载/推理前后校验本地文件内容，额外I/O成本需纳入C4/C5延迟测量。该层不产生远程Provider用量，不把本地字符或CPU耗时冒充供应商Token；远程embedding和索引Web控制面已分别按ADR-072/075接入主Host。默认CI不安装retrieval重依赖、不下载模型；原可选扩展门禁明确安装code/telemetry，真实本地模型测试需显式提供两个固定目录环境变量。
 
 ### Run拥有的异步远程检索
 
@@ -482,7 +482,7 @@ retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime�
 
 `rag.benchmark`从打包的retrieval-v1 JSON读取严格数据模型，检查路径、标注片段、唯一查询和每划分至少20题，内置资源再校验固定SHA256。实验只在临时Git项目建立索引；一次实验共用同一语料/索引/模型，逐次记录失败而非删除失败项。报告分别保留Recall@5、MRR、p50/p95、诊断及返回字符数；默认开发集，留出须显式选择。
 
-本地实验报告不创建生产模型调用事实、不声称零费用等于整体成本免费；同步入口拒绝远程profile。额外改写方法必须自行复用Run预算与账本。`promotion_decision`要求质量一升另一不降、p95不超过两倍，并且显式下游成功数不下降；缺少下游证据永不晋升。当前四路真实本地对照未满足条件，C4/C5仍有改写和下游实验未完成。
+本地实验报告不创建生产模型调用事实、不声称零费用等于整体成本免费；同步入口拒绝远程profile。额外改写方法必须自行复用Run预算与账本。`promotion_decision`要求质量一升另一不降、p95不超过两倍，并且显式下游成功数不下降；缺少下游证据永不晋升。当前四路真实本地对照未满足条件，40-query真实改写排名实验已完成，详细数字见后文；下游引用回答及最终C5验收继续独立进行。
 
 索引CPU线程通过 `index_runtime` 将远程embedding交回拥有Run的事件循环，共用既有模型槽、原子预算与attempt账本；不创建辅助Host或第二Store。IndexStore的128片段内部批次再拆为最多64，线程等待实际请求完成。取消标记同时禁止后续批次和索引发布；主任务等待在途请求清理及线程退出，重复取消不提前释放所有权。已完成批次的消费保留，后续失败不发布新代次。发布事务已经结束后到达的取消不能回滚既成事实，控制面应读取实际代次而非猜测文件状态。
 
@@ -600,7 +600,7 @@ wheel分发检查同时要求workbench实际文件集合与manifest完全相等�
 
 实验稳定身份排除交付随机writer_delivery_id，仅该定位字段不参与对照；本地/容器执行配置等实际条件仍严格比较，原始交付身份完整保留在逐题报告与事件中。重复运行不能因为新建交付UUID被判为改变实验条件。
 
-C4机制补充：`query_rewrite_outcome` 返回真实 `RetrievalOutcome`，原 `with_query_rewrite` 只负责相同结果的文本格式化，ToolExecutor/PolicyEngine边界未变。`rag.benchmark.run_benchmark` 的协作停止保留已完成排名和未尝试数量，不把未派发查询算失败，不完整对照禁止晋升。受控改写实验的Host生命周期适配已接入，真实效果另行验收。
+C4机制补充：`query_rewrite_outcome` 返回真实 `RetrievalOutcome`，原 `with_query_rewrite` 只负责相同结果的文本格式化，ToolExecutor/PolicyEngine边界未变。`rag.benchmark.run_benchmark` 的协作停止保留已完成排名和未尝试数量，不把未派发查询算失败，不完整对照禁止晋升。受控改写适配及40-query真实排名对照已完成，结果见后文；下游效果与最终门禁继续独立验收。
 
 
 C4受控Python接口复用 `RuntimeHost.run_control_operation`，仅接受 `retrieval_benchmark` 用途。控制Session绑定源项目并归档，接收事实冻结任务和模型配置，执行身份为 `python_experiment`；不借用普通Plan身份、评测控制器或工具展示文本。每条查询/重复独立占原根队列名额，原模型链路持有2槽及项目/日预算。原语料在临时Git目录索引，不修改用户源码；本地索引和排名不产生虚构Token事实。生产工具入口的ToolExecutor/PolicyEngine边界不变。
