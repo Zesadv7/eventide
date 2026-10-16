@@ -23,7 +23,7 @@ from eventide.rag.evaluation import (
 )
 from eventide.rag.index import IndexStore
 from eventide.rag.search import format_results, hybrid_search
-from eventide.telemetry import build_run_trace, export_run_trace
+from eventide.telemetry import build_run_trace, collect_trace_events, export_run_trace
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -297,30 +297,6 @@ def _render_plan_text(status: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _trace_events(runtime: RuntimeHost, run_id: str) -> list[dict[str, Any]]:
-    identity = runtime.store.get_run_identity(run_id)
-    if identity is None:
-        raise ValueError(f"Run not found: {run_id}")
-    pending = [identity["session_id"]]
-    seen: set[str] = set()
-    events: list[dict[str, Any]] = []
-    while pending:
-        session = pending.pop()
-        if session in seen:
-            continue
-        if len(seen) >= 64:
-            raise ValueError("Trace exceeds the bounded child-session limit")
-        seen.add(session)
-        facts = runtime.store.session_events(session)
-        events.extend(facts)
-        pending.extend(
-            e["payload"]["child_session_id"]
-            for e in facts
-            if e["type"] == "worker.started" and e["payload"].get("child_session_id")
-        )
-    return events
-
-
 async def _manage(args: argparse.Namespace) -> int:
     runtime = RuntimeHost(Settings.from_env())
     try:
@@ -393,7 +369,7 @@ async def _manage(args: argparse.Namespace) -> int:
             print(json.dumps({"run_id": args.run_id, "destination": str(destination)}))
             return 0
         if args.command == "trace":
-            events = _trace_events(runtime, args.run_id)
+            events = collect_trace_events(runtime.store, args.run_id)
             if args.otel_endpoint:
                 try:
                     from opentelemetry.exporter.otlp.proto.http.trace_exporter import (

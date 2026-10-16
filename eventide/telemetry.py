@@ -11,10 +11,13 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from eventide import __version__
 from eventide.usage import TOKEN_FIELDS, build_usage_ledger
+
+if TYPE_CHECKING:
+    from eventide.store import RuntimeStore
 
 _TERMINALS = {"run.completed", "run.failed", "run.interrupted"}
 _REASONS = {
@@ -41,6 +44,43 @@ _TOOLS = {
     "review",
 }
 _PROVIDERS = {"anthropic", "openai_compatible", "openai_responses", "scripted"}
+
+
+def collect_trace_events(store: RuntimeStore, run_id: str) -> list[dict[str, Any]]:
+    """Read only the selected Run, descendants and observed relationship endpoints.
+
+    Ancestors/continuations supply links without pulling unrelated siblings into
+    the response. The projection decides which spans belong to the selected Run.
+    """
+    if store.get_run_identity(run_id) is None:
+        raise ValueError("Run not found")
+    pending = [(run_id, True)]
+    facts: dict[str, list[dict[str, Any]]] = {}
+    expanded: set[str] = set()
+    while pending:
+        identity, descend = pending.pop()
+        if identity not in facts:
+            if len(facts) >= 64:
+                raise ValueError("Trace exceeds the bounded related-Run limit")
+            record = store.get_run_identity(identity)
+            if record is None:
+                continue
+            items = facts[identity] = store.run_events(identity)
+            references = {record.get("continuation_of")}
+            for event in items:
+                if event["type"] in {"run.admitted", "run.started"}:
+                    references.update(event["payload"].get(key) for key in (
+                        "parent_run_id", "continuation_of",
+                    ))
+            pending.extend((reference, False) for reference in references
+                           if isinstance(reference, str) and reference not in facts)
+        if descend and identity not in expanded:
+            expanded.add(identity)
+            pending.extend((event["payload"]["child_run_id"], True)
+                           for event in facts[identity]
+                           if event["type"] == "worker.started"
+                           and isinstance(event["payload"].get("child_run_id"), str))
+    return [event for items in facts.values() for event in items]
 
 
 def _id(value: str, size: int) -> str:

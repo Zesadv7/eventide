@@ -474,6 +474,8 @@
 
 **影响：** 不强制引入LangGraph、向量服务或外部Tracing平台；import/help/offline仍无Key和网络。增加parser版本维护和可选SDK回归成本，由lockfile、无extra路径与真实parser/内存exporter测试守住。
 
+ADR-046补充（2026-10-16）：HTTP与历史页复用相同脱敏投影，新增显式JSON下载。关系收集按Run而非整Session遍历，最多64个相关Run，祖先/Continue只用于关系定位；不会为一次读取启动网络exporter。验证包含无关会话历史隔离、子任务/Continue关系、脱敏下载、迟到响应与真实API浏览器旅程。
+
 ## ADR-047：交付以不可变验收证据和显式采纳为边界
 
 **状态：Accepted**，扩展 ADR-037、ADR-043/045/046。

@@ -6,6 +6,7 @@ import {
   type HistoryRun,
   type HistorySession,
 } from "../api/history";
+import RunTrace from "../components/RunTrace.vue";
 import { useWorkbench } from "../stores/workbench";
 
 const store = useWorkbench(),
@@ -384,6 +385,7 @@ function toolLabel(value: unknown) {
       <p class="muted">
         运行完成不等于变更已验收。运行中的记录每3秒更新；本页不发起审批、继续或修改任务。
       </p>
+      <RunTrace :run-id="detail.run_id" />
       <h3>工具证据</h3>
       <details
         v-for="(tool, id) in detail.tools || {}"

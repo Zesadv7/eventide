@@ -102,6 +102,23 @@ test("real run history: archived evidence, exact JSONL and reload without replac
     expect(records.some((record) => record.type === "tool.completed")).toBe(
       true,
     );
+    await detail
+      .getByRole("button", { name: "查看 Trace", exact: true })
+      .click();
+    await expect(detail.locator(".trace-panel ol li")).not.toHaveCount(0);
+    const traceDownloadEvent = page.waitForEvent("download");
+    await detail.getByRole("link", { name: "下载脱敏 Trace JSON" }).click();
+    const traceDownload = await traceDownloadEvent;
+    const traceText = await readFile((await traceDownload.path())!, "utf8");
+    const trace = JSON.parse(traceText);
+    expect(
+      trace.spans.some(
+        (span: { name: string }) => span.name === "eventide.model",
+      ),
+    ).toBe(true);
+    expect(traceText).not.toContain(oldRun);
+    expect(traceText).not.toContain("E2E 演示工作区");
+    expect(traceText).not.toContain("README.md");
     await page.reload();
     await expect(page).toHaveURL(
       new RegExp(`session=${session}&run=${oldRun}`),

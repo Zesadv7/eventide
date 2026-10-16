@@ -363,3 +363,10 @@ Python `RuntimeHost.manage_delivery("repair", delivery_id, goal, checks, image?,
 - `POST /api/delivery-operations/{run_id}/cancel`：同源/幂等键；精确取消并等待清理，重复调用返回现状。排队取消不创建副本、不调用模型。
 
 持久`delivery.operation_accepted`/`delivery.cancel_requested`与既有交付事实沿用Run SSE。父控制Run与Writer共享根名额，Writer为子Run；usage汇总通过既有include_children口径，不能再加repair_result.usage。重启停驻，普通Agent Continue不能恢复控制操作。`completed`不等于`repair_status=passed`。
+
+
+### 脱敏 Trace 读取
+
+`GET /api/runs/{run_id}/trace`返回schema_version/source/spans。span包含name、trace_id/span_id/parent_span_id、纳秒时间范围、status、固定allowlist属性与links；不包含原Run/Session身份、提示、任意模型/工具名称、参数/结果、路径或凭据。模型用量沿用独占attempt口径，不能把父子区间的时长或计数直接累加成总成本。
+
+`?download=true`返回相同JSON并设置attachment文件名与Cache-Control:no-store。不存在Run为404，超过64个相关Run或canonical关系无效为409。只读取所选Run及子任务；祖先和Continue来源用于关系定位，不额外展示无关运行。缺失来源保留unobserved语义。读取和下载不修改事件、不启动全局TracerProvider，也不向OTLP发送数据；显式外部导出仍由Python开发接口负责。
