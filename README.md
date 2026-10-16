@@ -114,6 +114,8 @@ Skill包采用 `SKILL.md`、`references/`、`scripts/` 和 `assets/`。支持本
 
 2026-10-16 模型接入补验：隔离状态中使用 `glm-5.3-flash`，普通 BigModel API 返回余额/资源包不足（1113），该次用量未知；切换 `https://open.bigmodel.cn/api/coding/paas/v4/` 后一次最小请求成功，供应商报告输入897、输出44 Token（其中推理41属于输出子集）。这仅证明单次连接成功，不是工具/修复效果验收。官方 Coding Plan 文档限定支持的工具范围，Eventide 不在当前名单；不能由连接成功推断订阅授权或长期可用性，也不把普通API人民币单价用于套餐费用。凭据和原始产物未入库。
 
+BigModel普通Chat接口为 `https://open.bigmodel.cn/api/paas/v4/`，Coding Plan专用接口为 `https://open.bigmodel.cn/api/coding/paas/v4/`；按实际账户资源和官方支持范围选择，两个端点的计费口径分开。
+
 GLM-5.3-Flash 生成设置：`openai_compatible` 在官方普通与 Coding Plan Chat 端点下识别精确模型 `glm-5.3-flash`。按[官方模型说明](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)和[Chat 参数契约](https://docs.bigmodel.cn/api-reference/模型-api/对话补全)，温度0–1、top_p 0.01–1且最多两位小数，推理强度low/high/max，思考仅开启，最大输出131,072。页面按能力限制选项；超范围配置在发请求前拒绝，不自动取整。Chat 使用顶层 `reasoning_effort`，Responses仍使用 `reasoning.effort`，共用原有请求和用量链路。
 
 GLM补验使用low推理、温度1、输出上限8,000：普通响应及只读文件工具均完成，共3次请求、输入2,746/输出49 Token、缓存读取832（输入子集），未知用量0。保留思考上下文供工具后续响应使用；未修改用户项目。以上为连通和协议验证，冻结开发集效果另行报告。
