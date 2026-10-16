@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import aclosing, asynccontextmanager, contextmanager, suppress
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from eventide import attachments, model_catalog, run_policy
 from eventide.budget_prices import PriceVersion
@@ -100,6 +100,9 @@ from eventide.workspace import (
     workspace_checkpoint,
 )
 from eventide.worktrees import WorktreeService
+
+if TYPE_CHECKING:
+    from eventide.evaluation_calls import EvaluationCallBridge
 
 # stop_reason values that mean the provider cut the answer off at max_tokens.
 TRUNCATION_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
@@ -224,6 +227,7 @@ class RuntimeHost:
         self._admissions: dict[str, str] = {}
         self._admission_done: dict[str, _Admission] = {}
         self._active_tasks: set[asyncio.Task[Any]] = set()
+        self._evaluation_bridge: EvaluationCallBridge | None = None
         self._run_tasks: dict[str, asyncio.Task[Any]] = {}
         self._closed = False
         self._configuring = False
@@ -861,6 +865,14 @@ class RuntimeHost:
         run = self.store.get_run(run_id)
         if not run:
             raise ValueError("Run not found")
+        if self._evaluation_bridge is not None and event_type in {
+            "model.response", "context.summary_generated",
+        }:
+            payload = {**payload, "usage_authority": {
+                "kind": "evaluation", "run_id": self._evaluation_bridge.evaluation_id,
+                "case_id": self._evaluation_bridge.case_id,
+                "case_index": self._evaluation_bridge.index,
+            }}
         event = self.store.append_fact(
             run["session_id"],
             event_type,
@@ -889,7 +901,19 @@ class RuntimeHost:
         *,
         kind: str = "agent",
         max_attempts: int = 3,
+        _evaluation_origin: dict[str, Any] | None = None,
     ) -> ModelResponse:
+        if self._evaluation_bridge is not None:
+            if _evaluation_origin is not None:
+                raise ValueError("Nested evaluation model authority is not supported")
+            return await self._evaluation_bridge.complete(
+                self, request, run_id, sink, kind=kind, max_attempts=max_attempts,
+            )
+        if _evaluation_origin is not None:
+            from eventide.evaluation_control import is_evaluation_run
+
+            if not is_evaluation_run(self.store, run_id):
+                raise ValueError("Evaluation origin requires a trusted control Run")
         if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
             raise ValueError("Invalid model attempt limit")
         request_id = f"request_{uuid.uuid4().hex}"
@@ -904,6 +928,8 @@ class RuntimeHost:
                     "kind": call_kind, "model": request.model, "generation": request.generation,
                     "max_output_tokens": request.max_tokens,
                     "provider": self.settings.provider,
+                    **({"evaluation_origin": dict(_evaluation_origin)}
+                       if _evaluation_origin is not None else {}),
                 }
                 try:
                     receipt = self.model_budget.begin(run_id, request, identity)
@@ -963,6 +989,12 @@ class RuntimeHost:
                     return response
             await asyncio.sleep(0.25 * (2 ** (attempt - 1)))
         raise RuntimeError("Model attempts exhausted")
+
+    def model_usage_events(self, run_id: str) -> list[dict[str, Any]]:
+        """Resolve exclusive attempts from the owning model-call authority."""
+        if self._evaluation_bridge is not None:
+            return self._evaluation_bridge.usage_events(self, run_id)
+        return self.store.usage_events(run_id=run_id)
 
     async def _notify_model_attempt(self, run_id: str, sink: EventSink | None) -> None:
         """Publish a committed attempt; accounting never depends on delivery to a sink."""
@@ -2966,7 +2998,7 @@ class RuntimeHost:
 
             def ensure_token_budget() -> None:
                 totals = build_usage_ledger(
-                    self.store.usage_events(run_id=run_id)
+                    self.model_usage_events(run_id)
                 )["reported_totals"]
                 usage.update({key: totals.get(key, 0) for key in usage})
                 if token_limit and sum(usage.values()) >= token_limit:

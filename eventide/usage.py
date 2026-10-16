@@ -159,6 +159,7 @@ def build_usage_ledger(
     }
     attempts: dict[tuple[str, str], dict[str, Mapping[str, Any]]] = {}
     legacy: dict[tuple[str, str], Mapping[str, Any]] = {}
+    authorities: list[dict[str, Any]] = []
     for event in canonical:
         kind, payload = event.get("type"), event["payload"]
         run = str(event.get("run_id", ""))
@@ -177,6 +178,19 @@ def build_usage_ledger(
         elif event.get("run_id") not in new_runs and kind in {
             "model.response", "context.summary_generated"
         }:
+            if "usage_authority" in payload:
+                reference = payload["usage_authority"]
+                if (not isinstance(reference, dict) or set(reference) != {
+                    "kind", "run_id", "case_id", "case_index",
+                } or reference.get("kind") != "evaluation"
+                        or not isinstance(reference.get("run_id"), str) or not reference["run_id"]
+                        or not isinstance(reference.get("case_id"), str) or not reference["case_id"]
+                        or type(reference.get("case_index")) is not int
+                        or reference["case_index"] < 1):
+                    raise ValueError("Invalid external usage authority")
+                if reference not in authorities:
+                    authorities.append(dict(reference))
+                continue
             event_id = str(event.get("event_id", ""))
             if not event_id:
                 raise ValueError("Legacy usage requires an event_id")
@@ -204,7 +218,8 @@ def build_usage_ledger(
         "attempt_count": len(calls),
         "unknown_attempts": sum(call["usage_source"] == "unknown" for call in calls),
         "incomplete_attempts": sum(not call["usage_complete"] for call in calls),
-        "complete": all(call["usage_complete"] for call in calls),
+        "complete": not authorities and all(call["usage_complete"] for call in calls),
+        **({"authority_references": authorities} if authorities else {}),
     }
 
 

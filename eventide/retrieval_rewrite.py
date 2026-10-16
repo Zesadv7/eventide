@@ -72,9 +72,7 @@ def with_query_rewrite(
             return render(original, "rewrite_query_too_large")
         # The observed limit is advisory; configured reservations remain the admission guard.
         _, context = host.model_budget.context(run_id)
-        totals = build_usage_ledger(host.store.usage_events(
-            run_id=context.root_run_id,
-        ))["reported_totals"]
+        totals = build_usage_ledger(host.model_usage_events(context.root_run_id))["reported_totals"]
         if host.settings.run_token_limit and sum(totals.get(key, 0) for key in (
             "input_tokens", "output_tokens",
         )) >= host.settings.run_token_limit:

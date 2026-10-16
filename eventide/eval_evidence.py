@@ -8,13 +8,16 @@ import os
 import platform
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from eventide.budget_prices import CostLedger
 from eventide.config import Settings
 from eventide.normalization import normalize
 from eventide.store import RuntimeStore
 from eventide.usage import build_usage_ledger
+
+if TYPE_CHECKING:
+    from eventide.evaluation_calls import EvaluationCallBridge
 
 
 def json_bytes(value: Any) -> bytes:
@@ -85,9 +88,30 @@ def collect_events(store: RuntimeStore) -> list[dict[str, Any]]:
 
 def case_evidence(
     store: RuntimeStore, directory: Path, *, main_run_id: str | None,
+    model_authority: EvaluationCallBridge | None = None,
 ) -> dict[str, Any]:
     events = collect_events(store)
     usage = build_usage_ledger(events)
+    authority = model_authority.evidence(directory) if model_authority is not None else None
+    references = list(usage.get("authority_references", []))
+    references.extend({
+        "run_id": event["payload"].get("authority_run_id"),
+        "case_id": event["payload"].get("case_id"),
+        "case_index": event["payload"].get("case_index"),
+    } for event in events if event["type"] == "evaluation.model_request")
+    if references and authority is None:
+        raise ValueError("External model usage requires its authoritative evidence")
+    if authority is not None:
+        for reference in references:
+            if any(reference[key] != authority[field] for key, field in (
+                ("run_id", "authority_run_id"), ("case_id", "case_id"),
+                ("case_index", "case_index"),
+            )):
+                raise ValueError("External model authority does not match execution evidence")
+        usage = authority["usage"]
+        if main_run_id is None:
+            main_run_id = next((e["run_id"] for e in events
+                                if e["type"] == "evaluation.model_request"), None)
     event_file = atomic_json(directory / "events.json", events)
     runs: dict[str, dict[str, Any]] = {}
     for event in events:
@@ -138,12 +162,16 @@ def case_evidence(
     return {
         "tool_metrics": {"calls": len(tool_results), "errors": len(errors) - blocks,
                          "safety_blocks": blocks},
-        "source": "eventide.event_log", "main_run_id": main_run_id,
+        "source": "eventide.execution_and_model_authorities" if authority else "eventide.event_log",
+        "main_run_id": main_run_id,
         "database": str(store.path), "events": event_file,
-        "runs": list(runs.values()), "model_attempts": attempts, "usage": usage,
-        "costs": CostLedger(store).snapshot(),
-        "price_versions": [event["payload"] for event in events
-                           if event["type"] == "price.registered"],
+        "runs": list(runs.values()),
+        "model_attempts": authority["model_attempts"] if authority else attempts, "usage": usage,
+        "costs": authority["costs"] if authority else CostLedger(store).snapshot(),
+        **({"model_authority": authority} if authority else {}),
+        "price_versions": authority["price_versions"] if authority else [
+            event["payload"] for event in events if event["type"] == "price.registered"
+        ],
     }
 
 
@@ -168,5 +196,7 @@ def summarize_usage(results: list[Any]) -> dict[str, Any]:
         "complete": bool(ledgers) and len(ledgers) == len(results)
         and all(item["complete"] for item in ledgers),
         "missing_evidence_cases": [item.id for item in results if "usage" not in item.evidence],
-        "source": "exclusive_case_event_logs", "covered_cases": len(ledgers),
+        "source": ("exclusive_model_authorities" if any(
+            "model_authority" in item.evidence for item in results
+        ) else "exclusive_case_event_logs"), "covered_cases": len(ledgers),
     }
