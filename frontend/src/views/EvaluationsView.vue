@@ -6,6 +6,7 @@ import {
   evaluationRequestState,
   observeEvaluations,
   type EvaluationQuote,
+  type EvaluationPreset,
   type EvaluationDetail,
   type EvaluationReport,
   type EvaluationSplit,
@@ -29,6 +30,7 @@ const projectName = computed(
 const suites = ref<EvaluationSuite[]>([]),
   split = ref<EvaluationSplit>("development");
 const mode = ref<"offline" | "live">("offline"),
+  preset = ref<EvaluationPreset>("none"),
   quote = ref<EvaluationQuote | null>(null),
   quoting = ref(false),
   confirmed = ref(false);
@@ -36,17 +38,19 @@ let quoteRevision = 0;
 async function loadQuote() {
   const revision = ++quoteRevision,
     owner = project.value,
-    selection = split.value;
+    selection = split.value,
+    skillPreset = preset.value;
   quoting.value = true;
   quote.value = null;
   confirmed.value = false;
   error.value = "";
   try {
-    const result = await evaluationsApi.quote(owner, selection);
+    const result = await evaluationsApi.quote(owner, selection, skillPreset);
     if (
       revision === quoteRevision &&
       owner === project.value &&
-      selection === split.value
+      selection === split.value &&
+      skillPreset === preset.value
     )
       quote.value = result;
   } catch (reason) {
@@ -55,7 +59,7 @@ async function loadQuote() {
     if (revision === quoteRevision) quoting.value = false;
   }
 }
-watch([project, split, mode], () => {
+watch([project, split, mode, preset], () => {
   quoteRevision++;
   quote.value = null;
   confirmed.value = false;
@@ -304,6 +308,7 @@ async function start() {
     suite_sha256: suite.value!.suite_sha256,
     split: split.value,
     mode: mode.value,
+    ...(preset.value === "engineering" ? { preset: preset.value } : {}),
     ...(mode.value === "live"
       ? { quote_hash: quote.value!.quote_hash, confirmed: true }
       : {}),
@@ -434,6 +439,19 @@ function downloadReport() {
             真实模型实验（产生费用）
           </option>
         </select>
+        <label for="evaluation-preset">Skills 对照</label>
+        <select
+          id="evaluation-preset"
+          :value="pending?.preset || preset"
+          :disabled="requestState.active || !!pending"
+          @change="
+            preset = ($event.target as HTMLSelectElement)
+              .value as EvaluationPreset
+          "
+        >
+          <option value="none">不启用评测 Skills</option>
+          <option value="engineering">三项内置工程 Skills</option>
+        </select>
         <label for="evaluation-split">任务划分</label
         ><select
           id="evaluation-split"
@@ -465,6 +483,10 @@ function downloadReport() {
           }}
         </button>
       </form>
+      <p class="muted">
+        工程对照固定代码审查、故障定位、测试修复三个用户包；正文由模型按需加载。
+        选择不代表已加载，实际加载与版本见逐题报告，任务和验收保持相同。
+      </p>
       <section
         v-if="mode === 'live' && !pending"
         class="live-quote"
@@ -481,6 +503,18 @@ function downloadReport() {
             {{ quote.provider }} / {{ quote.model }} · {{ quote.case_count }} 题
           </p>
           <p>
+            Skills：{{
+              quote.profile?.preset === "engineering"
+                ? "三项内置工程 Skills"
+                : "不启用评测 Skills"
+            }}
+          </p>
+          <ul v-if="quote.profile?.skills.length" aria-label="固定 Skill 版本">
+            <li v-for="skill in quote.profile.skills" :key="skill.name">
+              {{ skill.name }} · {{ skill.version }}
+            </li>
+          </ul>
+          <p>
             规划输入 {{ quote.planning_tokens.input_tokens }} Token，输出
             {{ quote.planning_tokens.output_tokens }} Token。
           </p>
@@ -496,7 +530,8 @@ function downloadReport() {
             ><input
               type="checkbox"
               v-model="confirmed"
-            />我已核对本批模型、规划估算及未知费用，确认发起真实调用</label
+            />我已核对本批模型、Skills
+            固定版本、规划估算及未知费用，确认发起真实调用</label
           >
         </template>
       </section>
@@ -661,7 +696,12 @@ function downloadReport() {
         <summary>固定任务与事件身份</summary>
         <p>
           任务集 {{ detail.suite_id }} · 版本 {{ detail.suite_version }} ·
-          {{ splitLabels[detail.split] }}
+          {{ splitLabels[detail.split] }} ·
+          {{
+            detail.preset === "engineering"
+              ? "三项内置工程 Skills"
+              : "不启用评测 Skills"
+          }}
         </p>
         <p class="mono">SHA-256 {{ detail.suite_sha256 }}</p>
         <p class="mono">

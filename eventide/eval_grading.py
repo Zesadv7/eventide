@@ -171,6 +171,16 @@ async def _delivery_case(
         "prepare", name=case["id"], protected_patterns=("tests/**", "README.md"),
     )
     delivery_id = prepared["delivery_id"]
+    # The evaluation preset is case-local user authorization. Delivery Writers
+    # have another Workspace, so explicitly pin the same versions there before
+    # the normal Run admission freezes them. Never put Skills in the task fixture.
+    skill_config = host.skills.configuration(host.default_workspace.workspace_id)
+    if skill_config["enabled_user"]:
+        checkout = host.resolve_or_register_workspace(Path(prepared["receipt"]["checkout"]))
+        host.configure_skills(
+            checkout.workspace_id, enabled_user=skill_config["enabled_user"],
+            disabled_project=[], selected=skill_config["selected"],
+        )
     writer = await host.manage_delivery("run", delivery_id=delivery_id, goal=case["prompt"])
     row = host.store.get_run(writer["worker_run_id"])
     identity = host.store.get_run_identity(writer["worker_run_id"])

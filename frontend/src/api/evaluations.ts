@@ -5,12 +5,21 @@ import type { components, paths } from "./schema";
 export type EvaluationInput = Omit<
   components["schemas"]["EvaluationBody"],
   "confirmed"
-> & { confirmed?: boolean };
+> & { confirmed?: boolean; preset?: EvaluationPreset };
+export type EvaluationPreset = "none" | "engineering";
 export type EvaluationSplit = EvaluationInput["split"];
 export type EvaluationSuite = components["schemas"]["EvaluationSuite"];
 export type EvaluationReceipt = components["schemas"]["EvaluationReceipt"];
 export type EvaluationCase = components["schemas"]["EvaluationCase"];
-export type EvaluationDetail = components["schemas"]["EvaluationDetail"];
+export type EvaluationDetail = components["schemas"]["EvaluationDetail"] & {
+  preset?: EvaluationPreset;
+  profile?: EvaluationProfile;
+};
+export interface EvaluationProfile {
+  preset: EvaluationPreset;
+  sha256: string;
+  skills: { name: string; version: string; manifest: unknown[] }[];
+}
 export interface EvaluationQuote {
   quote_hash: string;
   project_id: string;
@@ -23,6 +32,7 @@ export interface EvaluationQuote {
   planning_tokens: { input_tokens: number; output_tokens: number };
   assumptions: string;
   estimates: Record<string, { known_amount: string; complete: boolean }>;
+  profile?: EvaluationProfile;
 }
 
 export interface EvaluationReport {
@@ -59,6 +69,8 @@ export function evaluationRequestState(project: string) {
             typeof value.quote_hash === "string" &&
             /^[a-f0-9]{64}$/.test(value.quote_hash))) &&
         /^[a-f0-9]{64}$/.test(value.suite_sha256) &&
+        (value.preset === undefined ||
+          ["none", "engineering"].includes(value.preset)) &&
         ["development", "holdout", "all"].includes(value.split)
       )
         pending = value;
@@ -84,12 +96,17 @@ function changed() {
 const suitesPath: keyof paths = "/api/evaluations/suites";
 export const evaluationsApi = {
   suites: () => request<EvaluationSuite[]>(suitesPath),
-  quote: (project: string, split: EvaluationSplit) =>
+  quote: (
+    project: string,
+    split: EvaluationSplit,
+    preset: EvaluationPreset = "none",
+  ) =>
     request<EvaluationQuote>(
       "/api/projects/" +
         encodeURIComponent(project) +
         "/evaluations/quote?split=" +
-        split,
+        split +
+        (preset === "none" ? "" : "&preset=" + preset),
     ),
   list: (project: string, before?: string) =>
     request<EvaluationDetail[]>(
@@ -119,6 +136,7 @@ export const evaluationsApi = {
       suite_sha256: input.suite_sha256,
       split: input.split,
       mode: input.mode,
+      ...(input.preset === "engineering" ? { preset: input.preset } : {}),
       ...(input.mode === "live"
         ? { quote_hash: input.quote_hash, confirmed: input.confirmed }
         : {}),

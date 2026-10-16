@@ -302,7 +302,7 @@ Vue队列路由已绑定OpenAPI路径，queued保留SSE观察与精确取消入�
 支持内置工程冻结集，默认offline的scripted机制验证标注`measurement_kind=scripted_mechanism_validation`、`billing_applicable=false`，不代表真实模型成功率。live须按下文规划确认契约显式接收。以下POST沿用本机/同源防护，`Idempotency-Key`必填（1–128可见ASCII字符）。
 
 - `GET /api/evaluations/suites` → 数组：`id,benchmark_id,version(int),description,split(null),total,splits,manifest_sha256,suite_sha256,inputs_sha256,supported_modes:[offline,live],default_mode:offline`。先完整验证20题再公布，损坏不能静默隐藏。
-- `POST /api/projects/{project_id}/evaluations` → 202：`evaluation_id,run_id,session_id,project_id,status=accepted,status_url,events_url`。严格请求为`{suite_id:engineering-v1,suite_sha256:<catalog hash>,split:development|holdout|all,mode:offline}`；split默认development，mode默认offline。live额外要求quote_hash与confirmed=true；未知字段422，禁止路径、脚本、模型或凭据输入。同键同内容返回原202和身份，包括重启/终态；同键异内容409。suite过期、同项目busy为409，全局队列满429，确定未接收的拒绝带`X-Eventide-Mutation-Outcome: rejected`。不得在内容冲突或结果未知时自行换键。
+- `POST /api/projects/{project_id}/evaluations` → 202：`evaluation_id,run_id,session_id,project_id,status=accepted,status_url,events_url`。严格请求为`{suite_id:engineering-v1,suite_sha256:<catalog hash>,split:development|holdout|all,mode:offline,preset:none|engineering}`；split默认development，mode默认offline，preset默认none。live额外要求quote_hash与confirmed=true；未知字段422，禁止路径、脚本、模型或凭据输入。同键同内容返回原202和身份，包括重启/终态；同键异内容409。suite过期、同项目busy为409，全局队列满429，确定未接收的拒绝带`X-Eventide-Mutation-Outcome: rejected`。不得在内容冲突或结果未知时自行换键。
 - `GET /api/projects/{project_id}/evaluations?limit=20&before=<run_id>` → 最新在前的详情数组，limit范围1–100。
 - `GET /api/evaluations/{evaluation_id}` → 身份、suite_id/suite_version/suite_sha256、split/mode、机制标记、`status`（queued/running/completed/failed/interrupted）、`dispatch_state`（queued/starting/running/finishing/null）、queue_position、total/attempted/passed/failed/remaining、current_case、cases、report_available/report_url/events_url/error。cases逐项`id,category,split,status,passed(bool|null),reasons,duration_ms`；未执行passed为null。批次completed表示全部案例执行完，失败数另计。
 - `POST /api/evaluations/{evaluation_id}/cancel` → 当前详情；排队/运行取消均等待实际收尾并变为interrupted，终态重复停止无副作用。活动取消请求按键摘要记入原Run事实；已完成终态不追加事实、不重启。通用Run取消端点亦有效。
@@ -486,3 +486,18 @@ Executor捕获真实异常时，metadata可带`exception_type`类名。新窗口
 
 
 受控Python检索实验没有新增HTTP写入口。已有Run/Session/队列只读投影可显示 `execution={kind:"python_experiment",purpose:"retrieval_benchmark",operation_id,workspace_id}`；Session为managed且归档。普通Run、Continue和abandon拒绝此身份，停止仍使用精确Run停止接口并等待实际清理。事件包含control.operation_accepted、retrieval.benchmark_result和原Run/模型尝试事实；重启停驻且不能通过HTTP自动重放实验。
+
+
+### 评测 Skill preset
+
+quote查询新增可选`preset=none|engineering`，默认none。返回profile为
+`{preset,sha256,skills:[{name,version,manifest}]}`，manifest沿用Skill资源路径、大小、
+SHA-256清单。engineering严格包含code-review、fault-localization、test-repair；
+profile参与quote_hash，确认后变更preset或内容需重新读取规划。quote保持只读。
+
+创建正文采用相同可选preset，未知值422。显式none在幂等正文规范化中省略，保持
+历史省略字段请求的身份；engineering是不同意图，同键改变返回409。旧已接收记录
+没有profile时按none读取，重试原成功回执不重新核对当前包。详情新增preset及profile，
+报告provenance.profile记录固定输入；逐题evidence.runs[].skill_snapshot记录选中目录，
+loaded_skills仅来自实际skill.loaded事件，可以为空。profile不把正文放入HTTP规划，
+也不添加工具调用、消费或完成证据。队列等待和刷新不改变固定内容。

@@ -20,6 +20,7 @@ class EvaluationBody(BaseModel):
     suite_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     split: Literal["development", "holdout", "all"] = "development"
     mode: Literal["offline", "live"] = "offline"
+    preset: Literal["none", "engineering"] = "none"
     quote_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     confirmed: bool = False
 
@@ -70,6 +71,8 @@ class EvaluationDetail(BaseModel):
     suite_sha256: str
     split: Literal["development", "holdout", "all"]
     mode: Literal["offline", "live"]
+    preset: Literal["none", "engineering"] = "none"
+    profile: dict[str, Any] = Field(default_factory=dict)
     measurement_kind: Literal["scripted_mechanism_validation", "provider_experiment"]
     billing_applicable: bool
     status: Literal["queued", "running", "completed", "failed", "interrupted"]
@@ -101,9 +104,10 @@ def create_router(context: ApiContext) -> APIRouter:
     @router.get("/api/projects/{project_id}/evaluations/quote")
     async def quote(
         project_id: str, split: Literal["development", "holdout", "all"] = "development",
+        preset: Literal["none", "engineering"] = "none",
     ) -> dict[str, Any]:
         try:
-            return evaluation_quote(context.runtime, project_id, split=split)
+            return evaluation_quote(context.runtime, project_id, split=split, preset=preset)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
 
@@ -117,6 +121,9 @@ def create_router(context: ApiContext) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
         payload = body.model_dump()
+        if body.preset == "none":
+            # Omitted/default-none requests retain their pre-preset durable identity.
+            payload.pop("preset")
         if body.mode == "offline":
             # Preserve the identity of pre-live queued and retried offline requests.
             payload.pop("quote_hash")
@@ -128,6 +135,7 @@ def create_router(context: ApiContext) -> APIRouter:
                     project_id, receipt.run_id, suite_id=body.suite_id,
                     suite_sha256=body.suite_sha256, split=body.split,
                     mode=body.mode, quote_hash=body.quote_hash, confirmed=body.confirmed,
+                    preset=body.preset,
                     request_fingerprint=receipt.fingerprint,
                 )
             except ValueError as exc:

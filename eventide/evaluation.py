@@ -31,6 +31,7 @@ from eventide.eval_evidence import (
 from eventide.eval_grading import _tests_run, run_benchmark_case
 from eventide.eval_suite import load_benchmark
 from eventide.evaluation_calls import EvaluationCallBridge, EvaluationLocalProvider
+from eventide.evaluation_profiles import EvaluationPreset, EvaluationProfile, evaluation_profile
 from eventide.generation import GenerationCapabilities, GenerationPatch
 from eventide.host import RuntimeHost
 from eventide.models import RunRequest, RunResult
@@ -335,6 +336,7 @@ async def _evaluate_case(
     live: bool, prices: tuple[PriceVersion, ...], case_timeout: float,
     call_authority: tuple[RuntimeHost, str] | None = None,
     generation_snapshot: dict[str, Any] | None = None,
+    profile: EvaluationProfile | None = None,
 ) -> tuple[EvalCaseResult, bool]:
     mode = "live" if live else "offline"
     started = time.perf_counter()
@@ -382,6 +384,7 @@ async def _evaluate_case(
         runtime = RuntimeHost(
             settings=case_settings, provider=provider, store=store, enable_mcp=False,
         )
+        await (profile or EvaluationProfile()).install(runtime)
         if call_authority is not None:
             runtime._evaluation_bridge = EvaluationCallBridge(
                 call_authority[0], call_authority[1], str(case["id"]), index,
@@ -529,6 +532,7 @@ async def run_evaluations(
     artifact_parent: Path | None = None,
     progress: Callable[[str, dict[str, Any]], None] | None = None,
     call_authority: tuple[RuntimeHost, str] | None = None,
+    preset: EvaluationPreset = "none", profile: EvaluationProfile | None = None,
 ) -> dict[str, Any]:
     """Run isolated cases; retain canonical evidence and incremental reports on every outcome.
 
@@ -558,6 +562,7 @@ async def run_evaluations(
     for price in prices:
         price.payload()
     generation_snapshot = None
+    profile = profile or evaluation_profile(preset)
     if call_authority is not None:
         if not live or prices:
             raise ValueError("Controlled model authority requires live mode and service prices")
@@ -568,6 +573,9 @@ async def run_evaluations(
                         if e["type"] == "evaluation.accepted")
         if accepted.get("suite", {}).get("cases") != cases:
             raise ValueError("Controlled evaluation cases differ from frozen admission")
+        frozen_profile = accepted.get("profile", EvaluationProfile().snapshot())
+        if profile.snapshot() != frozen_profile:
+            raise ValueError("Controlled evaluation Skills differ from frozen admission")
         settings = settings or authority.settings
         if (settings.provider, settings.model, settings.base_url, settings.api_key) != (
             authority.settings.provider, authority.settings.model,
@@ -600,6 +608,7 @@ async def run_evaluations(
                                 else hashlib.sha256(path.read_bytes()).hexdigest()),
         "inputs": inputs, "split": split, "prices": [price.payload() for price in prices],
         "case_timeout": case_timeout,
+        "profile": profile.snapshot(),
         **({"builtin_suite": suite_metadata} if suite_metadata is not None else {}),
     }
     results: list[EvalCaseResult] = []
@@ -624,6 +633,7 @@ async def run_evaluations(
             case, index, settings, directory / f"case-{index:03d}",
             live=live, prices=prices, case_timeout=case_timeout,
             call_authority=call_authority, generation_snapshot=generation_snapshot,
+            profile=profile,
         )
         results.append(entry)
         if progress is not None:

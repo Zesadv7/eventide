@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from eventide.bundled_evaluations import load_builtin_suite
 from eventide.eval_suite import Split
+from eventide.evaluation_profiles import EvaluationPreset, EvaluationProfile, evaluation_profile
 from eventide.workspace import digest
 
 if TYPE_CHECKING:
@@ -16,7 +17,8 @@ if TYPE_CHECKING:
 
 def evaluation_quote(
     host: RuntimeHost, project_id: str, *, suite_id: str = "engineering-v1",
-    split: str = "development",
+    split: str = "development", preset: EvaluationPreset = "none",
+    profile: EvaluationProfile | None = None,
 ) -> dict[str, Any]:
     host.store.get_project(project_id)
     if split not in {"development", "holdout", "all"}:
@@ -25,6 +27,9 @@ def evaluation_quote(
         "development" if split == "development" else "holdout" if split == "holdout" else None
     )
     suite = load_builtin_suite(suite_id, split=selected)
+    profile = profile or evaluation_profile(preset)
+    if profile.preset != preset:
+        raise ValueError("Evaluation Skill preset does not match its profile")
     generation = host.generation_settings(host.settings.model)
     # A reproducible planning scenario, not a prediction or provider billing bound.
     total = len(suite["cases"]) * 20_000
@@ -65,6 +70,7 @@ def evaluation_quote(
         "split": split, "case_count": len(suite["cases"]),
         "provider": host.settings.provider, "model": host.settings.model,
         "generation": generation, "planning_tokens": planning,
+        "profile": profile.snapshot(),
         "estimate_method": "observed_case_budget_90_10_v1",
         "assumptions": (
             "每题按20,000规划Token、输入90%/输出10%估算；不是预测或账单上限。"

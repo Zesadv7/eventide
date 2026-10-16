@@ -606,3 +606,22 @@ C4机制补充：`query_rewrite_outcome` 返回真实 `RetrievalOutcome`，原 `
 C4受控Python接口复用 `RuntimeHost.run_control_operation`，仅接受 `retrieval_benchmark` 用途。控制Session绑定源项目并归档，接收事实冻结任务和模型配置，执行身份为 `python_experiment`；不借用普通Plan身份、评测控制器或工具展示文本。每条查询/重复独立占原根队列名额，原模型链路持有2槽及项目/日预算。原语料在临时Git目录索引，不修改用户源码；本地索引和排名不产生虚构Token事实。生产工具入口的ToolExecutor/PolicyEngine边界不变。
 
 `retrieval.benchmark_result` 与唯一模型尝试写同一Store，包含原结果和结构化融合结果；导出只派生统计，不再写另一份用量。无效/不变/截断改写保留原排名并标degraded，不视为成功改写；认证、网络或协议故障造成的rewrite_failed、索引漂移、预算及取消停止扩批。队列取消时不伪造已尝试查询，原检索失败则记录已尝试失败。重复取消等待实际请求和本地线程收尾后释放根和模型槽；重启停驻，无自动重放或普通Agent/Continue入口。报告拆分纯检索、Provider及总延迟，返回字符不冒充供应商Token；缺下游证据始终禁止默认晋升。
+
+### 评测 Skill preset 与内容固定
+
+`evaluation_profiles.py`只解析none或engineering两种显式输入；engineering固定三个内置包，
+通过既有SkillPackagePreview及内容清单形成profile摘要。quote读取资源但不创建包产物、
+安装事实、Run或模型调用；profile摘要参与quote_hash。接收阶段将相同预检字节物化到
+原skill-packages内容寻址目录，并把名称、版本、manifest及profile hash写入
+`evaluation.accepted`。物化不代表安装或授权，接收失败留下的孤立产物不产生可执行状态。
+
+派发从接收快照复验固定资源，不再读取当前内置目录；篡改或丢失拒绝执行，重启仍沿
+既有控制任务规则停驻，不重放批次。每个隔离case通过原import_skill/configure_skills
+安装及启用用户包，普通Run admission继续冻结版本与资源。Delivery Writer使用新的
+Workspace，grader只复制该case已明确授权的用户版本与选择，再让Writer admission冻结；
+不改任务源码、提示或冻结判分。默认none和旧接收记录不启用预设包。
+
+报告provenance.profile记录实验输入；每题skill_snapshot.selected和skill.loaded事实
+独立保留。加载正文不由评测器自动调用，不能用选择数代替加载数、用正文字符代替
+Token或把整个任务消耗归因给某个Skill。共享模型槽/预算及主账本引用保持不变，
+profile不授予新的模型、预算、脚本或文件权限。

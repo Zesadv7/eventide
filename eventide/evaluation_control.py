@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from eventide.config import Settings
 from eventide.eval_evidence import atomic_json, runtime_revision
 from eventide.eval_suite import Split
+from eventide.evaluation_profiles import EvaluationPreset, EvaluationProfile, evaluation_profile
 from eventide.evaluation_quote import evaluation_quote
 from eventide.models import RunResult
 
@@ -75,6 +76,7 @@ class EvaluationController:
         self, project_id: str, run_id: str, *, suite_id: str, suite_sha256: str,
         split: str = "development", request_fingerprint: str | None = None,
         mode: str = "offline", quote_hash: str | None = None, confirmed: bool = False,
+        preset: EvaluationPreset = "none",
     ) -> str:
         from eventide.bundled_evaluations import load_builtin_suite
         from eventide.host import _Admission
@@ -89,10 +91,12 @@ class EvaluationController:
         generation = None
         provider_config_hash = None
         quote = None
+        profile = evaluation_profile(preset)
         if mode == "live":
             if confirmed is not True:
                 raise ValueError("Live evaluation requires explicit confirmation")
-            quote = evaluation_quote(self.host, project_id, suite_id=suite_id, split=split)
+            quote = evaluation_quote(self.host, project_id, suite_id=suite_id, split=split,
+                                     preset=preset, profile=profile)
             if quote_hash != quote["quote_hash"]:
                 raise ValueError("Evaluation estimate or model configuration changed; review again")
             generation = quote["generation"]
@@ -120,6 +124,7 @@ class EvaluationController:
             "measurement_kind": ("provider_experiment" if mode == "live"
                                  else "scripted_mechanism_validation"),
             "billing_applicable": mode == "live",
+            "profile": profile.snapshot(),
             **({"generation": generation, "provider_config_hash": provider_config_hash,
                 "planning_quote": quote}
                if mode == "live" else {}),
@@ -128,6 +133,7 @@ class EvaluationController:
         }
         ticket = self.host.dispatch.scheduler.reserve_admission(run_id, owner, startable=True)
         try:
+            await self.host._admission_check(lambda: profile.persist(self.host.skills.packages))
             self.store.admit_run(run_id, owner, [
                 ("run.admitted", intent, "system", "runtime"),
                 ("evaluation.accepted", accepted, "system", "runtime"),
@@ -195,6 +201,8 @@ class EvaluationController:
             })
             try:
                 directory = self._directory(run_id, create=True)
+                profile = EvaluationProfile.restore(self.host.skills.packages,
+                                                    accepted.get("profile"))
                 suite = accepted["suite"]
                 cases = suite["cases"]
                 encoded = json.dumps(cases, ensure_ascii=False, sort_keys=True,
@@ -251,6 +259,7 @@ class EvaluationController:
                         "admission_runtime": accepted["runtime"],
                     },
                     artifact_parent=directory, progress=progress,
+                    profile=profile,
                     split=None if accepted["split"] == "all" else accepted["split"],
                 )
             except BaseException as exc:
@@ -308,6 +317,8 @@ class EvaluationController:
             "project_id": project_id, "suite_id": suite["id"], "suite_version": suite["version"],
             "suite_sha256": suite["suite_sha256"], "split": accepted["split"],
             "mode": accepted["mode"], "measurement_kind": accepted["measurement_kind"],
+            "preset": accepted.get("profile", {}).get("preset", "none"),
+            "profile": accepted.get("profile", EvaluationProfile().snapshot()),
             "billing_applicable": accepted["billing_applicable"], "status": run["status"],
             "dispatch_state": entry["dispatch_state"] if entry else None,
             "queue_position": entry["position"] if entry else None,

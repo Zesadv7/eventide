@@ -10,6 +10,7 @@ import {
   type EvaluationReceipt,
   type EvaluationReport,
   type EvaluationSuite,
+  type EvaluationQuote,
 } from "../src/api/evaluations";
 import EvaluationsView from "../src/views/EvaluationsView.vue";
 import { useWorkbench } from "../src/stores/workbench";
@@ -170,6 +171,24 @@ function mockReads(values = [detail()]) {
 }
 
 describe("durable evaluation requests", () => {
+  it("keeps the selected engineering preset in an unknown request and omits default none", async () => {
+    const fetch = vi.fn().mockRejectedValue(new TypeError("lost"));
+    vi.stubGlobal("fetch", fetch);
+    await expect(
+      evaluationsApi.create(project, { ...body, preset: "engineering" }),
+    ).rejects.toThrow("lost");
+    expect(evaluationRequestState(project).pending?.preset).toBe("engineering");
+    expect(JSON.parse(fetch.mock.calls[0]![1].body).preset).toBe("engineering");
+    await expect(evaluationsApi.create(project, body)).rejects.toThrow(
+      "原任务集",
+    );
+    await expect(
+      evaluationsApi.create("default-project", { ...body, preset: "none" }),
+    ).rejects.toThrow("lost");
+    expect(JSON.parse(fetch.mock.calls[1]![1].body)).not.toHaveProperty(
+      "preset",
+    );
+  });
   it("recovers the original suite fingerprint after an unknown response and rejects a changed intent", async () => {
     const fetch = vi
       .fn()
@@ -444,5 +463,73 @@ it("requires a fresh quote and explicit live confirmation without automatic call
   await wrapper.get("#evaluation-split").setValue("holdout");
   expect(start().attributes("disabled")).toBeDefined();
   expect(create).not.toHaveBeenCalled();
+  wrapper.unmount();
+});
+
+it("invalidates a confirmed quote when the Skill preset changes and ignores late old profiles", async () => {
+  mockReads([]);
+  const base: EvaluationQuote = {
+    quote_hash: "d".repeat(64),
+    project_id: project,
+    suite_sha256: suite.suite_sha256,
+    split: "development",
+    case_count: 12,
+    provider: "fixture",
+    model: "fixture",
+    planning_tokens: { input_tokens: 216000, output_tokens: 24000 },
+    estimates: {},
+    complete: false,
+    assumptions: "planning",
+    profile: { preset: "none", sha256: "n".repeat(64), skills: [] },
+  };
+  const stale = deferred<EvaluationQuote>();
+  const quote = vi
+    .spyOn(evaluationsApi, "quote")
+    .mockResolvedValueOnce(base)
+    .mockReturnValueOnce(stale.promise);
+  const create = vi
+    .spyOn(evaluationsApi, "create")
+    .mockResolvedValue(receipt());
+  const { wrapper } = await render();
+  await wrapper.get("#evaluation-mode").setValue("live");
+  const read = () =>
+    wrapper.findAll("button").find((b) => b.text() === "读取模型与费用估算")!;
+  const start = () =>
+    wrapper.findAll("button").find((b) => b.text() === "运行一次真实模型实验")!;
+  await read().trigger("click");
+  await flushPromises();
+  await wrapper.get('input[type="checkbox"]').setValue(true);
+  expect(start().attributes("disabled")).toBeUndefined();
+  await read().trigger("click");
+  await wrapper.get("#evaluation-preset").setValue("engineering");
+  stale.resolve(base);
+  await flushPromises();
+  expect(start().attributes("disabled")).toBeDefined();
+  expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
+  quote.mockResolvedValueOnce({
+    ...base,
+    quote_hash: "e".repeat(64),
+    profile: {
+      preset: "engineering",
+      sha256: "p".repeat(64),
+      skills: [{ name: "test-repair", version: "v".repeat(64), manifest: [] }],
+    },
+  });
+  await read().trigger("click");
+  await flushPromises();
+  expect(quote).toHaveBeenLastCalledWith(project, "development", "engineering");
+  expect(wrapper.get('[aria-label="固定 Skill 版本"]').text()).toContain(
+    "test-repair",
+  );
+  await wrapper.get('input[type="checkbox"]').setValue(true);
+  await wrapper.get("form").trigger("submit");
+  await flushPromises();
+  expect(create).toHaveBeenCalledWith(project, {
+    ...body,
+    mode: "live",
+    preset: "engineering",
+    quote_hash: "e".repeat(64),
+    confirmed: true,
+  });
   wrapper.unmount();
 });

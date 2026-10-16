@@ -25,6 +25,7 @@ test("real bundled evaluation: lost acceptance, reload, exact retry and offline 
   ).toBeEnabled();
   expect(keys).toHaveLength(0);
   await page.getByLabel("任务划分").selectOption("holdout");
+  await page.getByLabel("Skills 对照").selectOption("engineering");
   await page
     .getByRole("button", { name: "运行一次离线自检", exact: true })
     .click();
@@ -32,6 +33,8 @@ test("real bundled evaluation: lost acceptance, reload, exact retry and offline 
   await page.reload();
   await expect(page.getByLabel("任务划分")).toHaveValue("holdout");
   await expect(page.getByLabel("任务划分")).toBeDisabled();
+  await expect(page.getByLabel("Skills 对照")).toHaveValue("engineering");
+  await expect(page.getByLabel("Skills 对照")).toBeDisabled();
   await page
     .getByRole("button", { name: "重试原评测请求", exact: true })
     .click();
@@ -50,6 +53,8 @@ test("real bundled evaluation: lost acceptance, reload, exact retry and offline 
   expect(detail.passed).toBe(8);
   expect(detail.measurement_kind).toBe("scripted_mechanism_validation");
   expect(detail.billing_applicable).toBe(false);
+  expect(detail.preset).toBe("engineering");
+  expect(detail.profile.skills).toHaveLength(3);
   expect(
     (
       await (
@@ -73,6 +78,14 @@ test("real bundled evaluation: lost acceptance, reload, exact retry and offline 
   expect(report.schema_version).toBe(2);
   expect(report.results).toHaveLength(8);
   expect(report.billing_applicable).toBe(false);
+  expect(report.provenance.profile).toEqual(detail.profile);
+  for (const result of report.results) {
+    const main = result.evidence.runs.find(
+      (run: { run_id: string }) => run.run_id === result.run_id,
+    );
+    expect(main.skill_snapshot.selected).toHaveLength(3);
+    expect(main.loaded_skills || []).toHaveLength(0);
+  }
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
     path: "test-results/evaluations-desktop.png",
@@ -265,7 +278,9 @@ test("live-mode mechanism journey reviews unknown costs and replays a lost accep
   ).toBeVisible();
   await expect(start).toBeDisabled();
   await page
-    .getByLabel("我已核对本批模型、规划估算及未知费用，确认发起真实调用")
+    .getByLabel(
+      "我已核对本批模型、Skills 固定版本、规划估算及未知费用，确认发起真实调用",
+    )
     .check();
   const keys: string[] = [];
   let identity = "";
