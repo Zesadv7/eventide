@@ -115,6 +115,7 @@ export interface InputComposition {
   };
 }
 export interface UsageCall {
+  usage_basis?: "input_output" | "input_only";
   run_id: string;
   request_id: string | null;
   attempt_id: string;

@@ -64,6 +64,7 @@ from eventide.rag.tool import SEARCH_KNOWLEDGE_TOOL
 from eventide.rag.tool import handler as knowledge_search_handler
 from eventide.rag.tool import index_available as knowledge_index_available
 from eventide.rag.tool import sparse_handler as knowledge_sparse_handler
+from eventide.retrieval_runtime import remote_search_handler
 from eventide.run_dispatch import RunDispatch
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skill_packages import SkillPackageError
@@ -79,6 +80,7 @@ from eventide.tool_contracts import production_tool_catalog
 from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
 from eventide.tool_results import reader as tool_result_reader
 from eventide.tools.runtime_catalog import HANDLERS, TOOLS
+from eventide.usage import build_usage_ledger
 from eventide.workers import (
     READONLY_WORKER_TOOL,
     ReadonlyProfile,
@@ -2541,9 +2543,15 @@ class RuntimeHost:
                     rag_embedder, rag_profile = provider_from_settings(self.settings)
                     if knowledge_index_available(workspace_root, rag_profile):
                         rag_tools.append(SEARCH_KNOWLEDGE_TOOL)
-                        rag_handlers["search_knowledge"] = knowledge_search_handler(
-                            workspace_root, rag_embedder, rag_profile,
-                            reranker=reranker_from_settings(self.settings),
+                        reranker = reranker_from_settings(self.settings)
+                        rag_handlers["search_knowledge"] = (
+                            remote_search_handler(
+                                self, run_id, workspace_root, rag_profile,
+                                settings=self.settings, reranker=reranker,
+                            ) if rag_profile.provider == "openai_compatible" else
+                            knowledge_search_handler(
+                                workspace_root, rag_embedder, rag_profile, reranker=reranker,
+                            )
                         )
                 except LocalModelError as exc:
                     try:
@@ -2894,6 +2902,10 @@ class RuntimeHost:
                     usage[key] += max(0, int(response.usage.get(key, 0)))
 
             def ensure_token_budget() -> None:
+                totals = build_usage_ledger(
+                    self.store.usage_events(run_id=run_id)
+                )["reported_totals"]
+                usage.update({key: totals.get(key, 0) for key in usage})
                 if token_limit and sum(usage.values()) >= token_limit:
                     raise _RunTokenBudgetExceeded(
                         f"Run token budget reached ({sum(usage.values())}/"
@@ -3154,6 +3166,8 @@ class RuntimeHost:
                         },
                         sink,
                     )
+                    if result.metadata.get("code") == "budget_exceeded":
+                        raise BudgetExceeded(result.metadata.get("violations", []))
                     if call.name == "compact" and not result.is_error:
                         force_compact = True
                     if not readonly:

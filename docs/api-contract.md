@@ -325,3 +325,7 @@ Vue和旧页仅在浏览器会话存储中保存随机请求键、版本和候�
 已配置本地语义包在Run准备时不可用且存在有效索引时，持久事件`retrieval.degraded`返回固定`reason`诊断码及`fallback=sparse|unavailable`。不会回显底层异常或创建第二事实源。`search_knowledge`结果注明`mode: sparse|dense+sparse|dense+sparse+rerank`，降级注明`Retrieval degraded`；重排分数独立展示，最多20候选/5结果。未启用重排时保留原k=1–10。
 
 本地模型配置目前通过启动配置和Python准备接口提供；没有宣称已提供模型下载、索引管理或检索对照HTTP页面。
+
+### 远程检索用量与预算停止
+
+Host检索新增kind=embedding、usage_basis=input_only的调用事实，复用现有Run/Session/项目usage与费用查询，无新增账本。tool.completed.metadata.code=budget_exceeded表示请求派发前预算拒绝，Run随后以token_budget停驻。仅输入调用的output_tokens缺省表示不适用，不能渲染成供应商已报告0；未知输入仍保持unknown。

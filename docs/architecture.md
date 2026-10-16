@@ -459,3 +459,7 @@ Vue的InputComposition只展示服务端已校验的固定字符统计，旧值�
 Host在既有ToolExecutor/Policy边界内绑定重排器，CPU推理通过现有同步工具线程执行，取消仍等待实际工具收尾。重排候选不超过20，输出不超过5，失败输出诊断并保留融合排序；本地模型包在运行准备时缺失，验证索引后提供词面工具并记`retrieval.degraded`事件，不静默消失。无重排的原k=1–10契约保留。
 
 每次模型加载/推理前后校验本地文件内容，额外I/O成本需纳入C4/C5延迟测量。该层不产生远程Provider用量，不把本地字符或CPU耗时冒充供应商Token；远程embedding的主链接入和索引Web控制面仍按后续阶段完成。默认CI不安装retrieval重依赖、不下载模型；原可选扩展门禁明确安装code/telemetry，真实本地模型测试需显式提供两个固定目录环境变量。
+
+### Run拥有的异步远程检索
+
+retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime、再复验固定profile并融合结果；没有第二次同步embedding请求。索引和重排CPU线程通过owned_local_work保留所有权至实际退出，重复取消不会提前释放Workspace。预算拒绝经ToolResult的budget_exceeded元数据持久记录后交由Host停驻。ensure_token_budget读取独占attempt账本与子Run已报告总量，避免旧响应计数漏掉辅助请求。未知消费由持久预留控制，不伪造已观测Token。

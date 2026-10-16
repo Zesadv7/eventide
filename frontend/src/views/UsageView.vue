@@ -265,7 +265,13 @@ const grouped = computed(() => {
                   </td>
                   <td>{{ duration(call.duration_ms) }}</td>
                   <td>{{ tokens(call.usage.input_tokens) }}</td>
-                  <td>{{ tokens(call.usage.output_tokens) }}</td>
+                  <td>
+                    {{
+                      call.usage_basis === "input_only"
+                        ? "不适用（仅输入）"
+                        : tokens(call.usage.output_tokens)
+                    }}
+                  </td>
                   <td>
                     {{
                       call.usage_source === "reported"

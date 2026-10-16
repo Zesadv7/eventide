@@ -113,6 +113,30 @@ describe("content and generation controls", () => {
     expect(wrapper.get(".call-details").text()).toContain("未报告");
     wrapper.unmount();
   });
+  it("labels input-only embedding output as inapplicable rather than unknown or zero", async () => {
+    vi.spyOn(budgetsApi, "costs").mockResolvedValue({
+      ...costs,
+      usage: {
+        ...costs.usage,
+        calls: [
+          {
+            ...costs.usage.calls[0]!,
+            kind: "embedding",
+            usage_basis: "input_only",
+            usage: { input_tokens: 7 },
+            usage_source: "reported",
+            usage_complete: true,
+          },
+        ],
+      },
+    });
+    vi.spyOn(budgetsApi, "prices").mockResolvedValue({ prices: [] });
+    useWorkbench().selectedSession = "session-1";
+    const wrapper = mount(UsageView);
+    await flushPromises();
+    expect(wrapper.text()).toContain("不适用（仅输入）");
+    wrapper.unmount();
+  });
   it("shows unknown usage rather than inventing zero tokens or a price", async () => {
     vi.spyOn(budgetsApi, "costs").mockResolvedValue(costs);
     vi.spyOn(budgetsApi, "prices").mockResolvedValue({ prices: [] });

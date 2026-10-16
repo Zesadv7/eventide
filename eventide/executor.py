@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from eventide.budgets import BudgetExceeded
 from eventide.models import CommandResult, ToolCall, ToolResult
 from eventide.policy import PolicyDecision, PolicyEngine
 from eventide.tool_contracts import (
@@ -371,6 +372,9 @@ class ToolExecutor:
                 call.id, call.name, text, failed,
                 {"code": "execution_failed"} if failed else {},
             )
+        except BudgetExceeded as exc:
+            return ToolResult(call.id, call.name, str(exc), True,
+                              {"code": "budget_exceeded", "violations": exc.violations})
         except Exception as exc:
             metadata = {"code": "timeout" if isinstance(exc, TimeoutError) else "execution_failed"}
             if getattr(exc, "outcome_unknown", False):
