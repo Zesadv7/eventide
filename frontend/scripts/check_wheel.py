@@ -33,6 +33,8 @@ from eventide.api import create_app
 from eventide.config import Settings
 from eventide.host import RuntimeHost
 from eventide.providers import ScriptedProvider
+from eventide.rag.benchmark import load_dataset
+assert len(load_dataset().cases) == 40
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     settings = Settings(workdir=root, state_dir=root / 'state', provider='openai',

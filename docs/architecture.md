@@ -469,3 +469,9 @@ retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime�
 可选 `retrieval_rewrite` 包装既有 `retrieval_runtime`，仍位于ToolExecutor/Policy之后。根身份由ModelBudgetController沿可信parent链解析；同步检查及追加 `retrieval.rewrite_claimed` 在单进程事件循环内不让出执行权，子任务不能各获一次额度。认领事实持久保存，即使改写失败或服务重启也不重置。`retrieval.supplement_requested` 标记唯一补检索，完成状态记录在 `retrieval.rewrite_finished`；日志仅记录查询摘要，不复制原文。
 
 原查询优先完成，改写使用冻结模型、统一请求账本及一次实际请求上限，不继承主任务采样覆盖。校验单行长度、工具调用和截断状态；索引generation在原检索前、改写前和补检索前后复验，代次变化则返回原结果及诊断。合并按片段路径/行号/正文去重，再对两条查询做RRF，保留原查询候选池，清除不可横向比较的CrossEncoder查询分数。只允许一次补检索，不形成递归查询Agent。默认关闭，效果晋升另由冻结对照决定。
+
+### 冻结检索实验入口
+
+`rag.benchmark`从打包的retrieval-v1 JSON读取严格数据模型，检查路径、标注片段、唯一查询和每划分至少20题，内置资源再校验固定SHA256。实验只在临时Git项目建立索引；一次实验共用同一语料/索引/模型，逐次记录失败而非删除失败项。报告分别保留Recall@5、MRR、p50/p95、诊断及返回字符数；默认开发集，留出须显式选择。
+
+本地实验报告不创建生产模型调用事实、不声称零费用等于整体成本免费；同步入口拒绝远程profile。额外改写方法必须自行复用Run预算与账本。`promotion_decision`要求质量一升另一不降、p95不超过两倍，并且显式下游成功数不下降；缺少下游证据永不晋升。当前四路真实本地对照未满足条件，C4/C5仍有改写和下游实验未完成。

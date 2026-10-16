@@ -1,0 +1,346 @@
+{
+  "schema_version": 1,
+  "version": "retrieval-v1",
+  "documents": {
+    "docs/backup.md": "# Backup recovery\nrestore_snapshot recovers database records from a verified nightly backup.\nIt does not roll back the application image or change deployment traffic.\n",
+    "docs/cache-ttl.md": "# Cache expiry\ncache_ttl_seconds sets the lifetime of a cached response.\nExpiry removes stale values automatically; explicit invalidation removes them immediately.\n",
+    "docs/canary.md": "# Canary deployment\ncanary_percentage limits traffic to the new release during a gradual rollout.\nThis strategy differs from switching all traffic between blue and green environments.\n",
+    "docs/database-timeout.md": "# SQL 超时\nstatement_timeout 限制单条 SQL 语句的执行时间，不控制数据库连接池大小。\n超时后回滚当前事务，并保留错误日志用于诊断。\n",
+    "docs/database.md": "# 数据库\n\n数据库连接池配置位于服务启动参数中，默认保留十个连接。\n\n",
+    "docs/deployment.md": "# Deployment\n\nProduction releases use a blue-green rollout so traffic can switch safely.\n\n",
+    "docs/errors.md": "# Errors\n\nE_AUTH_401 means that authentication credentials were rejected.\n\n",
+    "docs/health.md": "# Service readiness\nreadiness_probe checks whether a service can accept requests before routing traffic.\nliveness_probe restarts an unresponsive process and is not a deployment strategy.\n",
+    "docs/password-reset.md": "# Password recovery\nreset_password sends a one-time recovery link to the registered email address.\nThe recovery credential is not an access bearer token or a refresh token.\n",
+    "docs/permission-error.md": "# Authorization failures\nE_AUTH_403 means the user is authenticated but lacks permission to access the resource.\nDo not refresh the bearer token to fix a missing role assignment.\n",
+    "docs/rate-limit.md": "# Rate limiting\nE_RATE_429 indicates too many requests. retry_after_seconds controls client backoff.\nAuthentication may have succeeded; this error is not a token verification failure.\n",
+    "docs/redis-pool.md": "# Redis 连接池\n缓存连接池通过 redis_pool_size 配置，限制 Redis 客户端的并发连接。\n它和 SQL 数据库连接池分别管理，不能共用连接。\n",
+    "docs/rollback.md": "# Rollback procedure\nrollback_release restores the previous stable image after deployment health checks fail.\nKeep the earlier image until the rollout has passed the observation window.\n",
+    "docs/token-refresh.md": "# Token refresh\nrefresh_token rotates an expired access token using a refresh credential.\nIt does not verify the bearer signature; verify_token handles that separately.\n",
+    "src/auth.py": "def verify_token(token: str) -> bool:\n    \"\"\"Verify the bearer token signature before accepting a request.\"\"\"\n    return token.startswith(\"signed:\")\n\n",
+    "src/cache.py": "def invalidate_cache(key: str) -> None:\n    \"\"\"Remove one stale cache entry after a successful write.\"\"\"\n    del key\n\n"
+  },
+  "cases": [
+    {
+      "id": "find-auth-logic",
+      "query": "verify_token bearer signature",
+      "expect_files": [
+        "src/auth.py"
+      ],
+      "expect_contains": "verify_token",
+      "split": "development"
+    },
+    {
+      "id": "find-deployment-strategy",
+      "query": "blue-green rollout",
+      "expect_files": [
+        "docs/deployment.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "find-database-pool",
+      "query": "数据库连接池配置",
+      "expect_files": [
+        "docs/database.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "find-auth-error",
+      "query": "E_AUTH_401",
+      "expect_files": [
+        "docs/errors.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-token-refresh",
+      "query": "refresh_token expired credential",
+      "expect_files": [
+        "docs/token-refresh.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-password-reset",
+      "query": "reset_password recovery email",
+      "expect_files": [
+        "docs/password-reset.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-canary",
+      "query": "canary_percentage gradual traffic",
+      "expect_files": [
+        "docs/canary.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-rollback",
+      "query": "rollback_release stable image",
+      "expect_files": [
+        "docs/rollback.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-redis-pool",
+      "query": "redis_pool_size 缓存连接池",
+      "expect_files": [
+        "docs/redis-pool.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-sql-timeout",
+      "query": "statement_timeout SQL",
+      "expect_files": [
+        "docs/database-timeout.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-permission-error",
+      "query": "E_AUTH_403 permission",
+      "expect_files": [
+        "docs/permission-error.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-rate-limit",
+      "query": "E_RATE_429 retry_after_seconds",
+      "expect_files": [
+        "docs/rate-limit.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-cache-expiry",
+      "query": "cache_ttl_seconds expiry",
+      "expect_files": [
+        "docs/cache-ttl.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "distinguish-backup",
+      "query": "restore_snapshot nightly backup",
+      "expect_files": [
+        "docs/backup.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "find-both-health-probes",
+      "query": "readiness_probe liveness_probe",
+      "expect_files": [
+        "docs/health.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "compare-pool-settings",
+      "query": "数据库连接池 redis_pool_size",
+      "expect_files": [
+        "docs/database.md",
+        "docs/redis-pool.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "dev-refresh",
+      "query": "refresh_token token renewal expiry",
+      "expect_files": [
+        "docs/token-refresh.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "dev-backup",
+      "query": "restore_snapshot disaster recovery",
+      "expect_files": [
+        "docs/backup.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "dev-limit",
+      "query": "请求过多 retry_after_seconds",
+      "expect_files": [
+        "docs/rate-limit.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "dev-health",
+      "query": "readiness_probe 启动流量",
+      "expect_files": [
+        "docs/health.md"
+      ],
+      "split": "development"
+    },
+    {
+      "id": "hold-auth",
+      "query": "Where is a bearer credential checked for a valid signature?",
+      "expect_files": [
+        "src/auth.py"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-refresh",
+      "query": "How can an expired access credential be renewed without signing in again?",
+      "expect_files": [
+        "docs/token-refresh.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-password",
+      "query": "忘记密码后如何通过邮件恢复登录？",
+      "expect_files": [
+        "docs/password-reset.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-deploy",
+      "query": "Switch all production traffic between two identical release environments",
+      "expect_files": [
+        "docs/deployment.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-canary",
+      "query": "How do we expose a new release to a small percentage of visitors first?",
+      "expect_files": [
+        "docs/canary.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-rollback",
+      "query": "The new release is broken; return traffic to the last known good image",
+      "expect_files": [
+        "docs/rollback.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-db",
+      "query": "数据库客户端连接用完了，哪个参数控制池大小？",
+      "expect_files": [
+        "docs/database.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-redis",
+      "query": "Which setting limits the number of open cache server connections?",
+      "expect_files": [
+        "docs/redis-pool.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-sql",
+      "query": "A database query runs forever; where is the statement deadline configured?",
+      "expect_files": [
+        "docs/database-timeout.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-unauth",
+      "query": "客户端没有有效身份凭据时返回什么错误？",
+      "expect_files": [
+        "docs/errors.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-forbidden",
+      "query": "An authenticated user lacks the required permission; which error is returned?",
+      "expect_files": [
+        "docs/permission-error.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-ratelimit",
+      "query": "Too many API calls were made; how long must a client wait before trying again?",
+      "expect_files": [
+        "docs/rate-limit.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-ttl",
+      "query": "Which value determines how long cached entries remain usable?",
+      "expect_files": [
+        "docs/cache-ttl.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-backup",
+      "query": "Where is the procedure to restore data from the nightly snapshot?",
+      "expect_files": [
+        "docs/backup.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-health",
+      "query": "Which probe distinguishes a running process from one ready to receive requests?",
+      "expect_files": [
+        "docs/health.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-cache",
+      "query": "Where is the function that removes a stale cache entry after a successful write?",
+      "expect_files": [
+        "src/cache.py"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-auth-id",
+      "query": "verify_token 签名检查位置",
+      "expect_files": [
+        "src/auth.py"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-rollback-id",
+      "query": "rollback_release 稳定镜像回退",
+      "expect_files": [
+        "docs/rollback.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-sql-id",
+      "query": "statement_timeout 查询超时配置",
+      "expect_files": [
+        "docs/database-timeout.md"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "hold-pools",
+      "query": "redis_pool_size 与数据库连接池有何不同？",
+      "expect_files": [
+        "docs/redis-pool.md"
+      ],
+      "split": "holdout"
+    }
+  ]
+}
