@@ -463,3 +463,9 @@ Host在既有ToolExecutor/Policy边界内绑定重排器，CPU推理通过现有
 ### Run拥有的异步远程检索
 
 retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime、再复验固定profile并融合结果；没有第二次同步embedding请求。索引和重排CPU线程通过owned_local_work保留所有权至实际退出，重复取消不会提前释放Workspace。预算拒绝经ToolResult的budget_exceeded元数据持久记录后交由Host停驻。ensure_token_budget读取独占attempt账本与子Run已报告总量，避免旧响应计数漏掉辅助请求。未知消费由持久预留控制，不伪造已观测Token。
+
+### 根任务查询改写边界
+
+可选 `retrieval_rewrite` 包装既有 `retrieval_runtime`，仍位于ToolExecutor/Policy之后。根身份由ModelBudgetController沿可信parent链解析；同步检查及追加 `retrieval.rewrite_claimed` 在单进程事件循环内不让出执行权，子任务不能各获一次额度。认领事实持久保存，即使改写失败或服务重启也不重置。`retrieval.supplement_requested` 标记唯一补检索，完成状态记录在 `retrieval.rewrite_finished`；日志仅记录查询摘要，不复制原文。
+
+原查询优先完成，改写使用冻结模型、统一请求账本及一次实际请求上限，不继承主任务采样覆盖。校验单行长度、工具调用和截断状态；索引generation在原检索前、改写前和补检索前后复验，代次变化则返回原结果及诊断。合并按片段路径/行号/正文去重，再对两条查询做RRF，保留原查询候选池，清除不可横向比较的CrossEncoder查询分数。只允许一次补检索，不形成递归查询Agent。默认关闭，效果晋升另由冻结对照决定。

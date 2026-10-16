@@ -64,7 +64,7 @@ from eventide.rag.tool import SEARCH_KNOWLEDGE_TOOL
 from eventide.rag.tool import handler as knowledge_search_handler
 from eventide.rag.tool import index_available as knowledge_index_available
 from eventide.rag.tool import sparse_handler as knowledge_sparse_handler
-from eventide.retrieval_runtime import remote_search_handler
+from eventide.retrieval_runtime import runtime_search_handler
 from eventide.run_dispatch import RunDispatch
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skill_packages import SkillPackageError
@@ -852,11 +852,14 @@ class RuntimeHost:
         sink: EventSink | None,
         *,
         kind: str = "agent",
+        max_attempts: int = 3,
     ) -> ModelResponse:
+        if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
+            raise ValueError("Invalid model attempt limit")
         request_id = f"request_{uuid.uuid4().hex}"
         admitted = self._admitted_intent(run_id) or {}
         call_kind = "worker" if kind == "agent" and admitted.get("parent_run_id") else kind
-        for attempt in range(1, 4):
+        for attempt in range(1, max_attempts + 1):
             async with self.dispatch.scheduler.model_slot():
                 attempt_id = f"attempt_{uuid.uuid4().hex}"
                 started = time.perf_counter()
@@ -902,10 +905,10 @@ class RuntimeHost:
                         if isinstance(exc, asyncio.TimeoutError) else self._clean(str(exc))
                     )
                     await self._emit(run_id, "model.retry", {
-                        **identity, "retryable": retryable and attempt < 3,
+                        **identity, "retryable": retryable and attempt < max_attempts,
                         "error": message,
                     }, sink)
-                    if not retryable or attempt == 3:
+                    if not retryable or attempt == max_attempts:
                         if isinstance(exc, asyncio.TimeoutError):
                             raise RuntimeError(message) from exc
                         raise
@@ -2545,10 +2548,11 @@ class RuntimeHost:
                         rag_tools.append(SEARCH_KNOWLEDGE_TOOL)
                         reranker = reranker_from_settings(self.settings)
                         rag_handlers["search_knowledge"] = (
-                            remote_search_handler(
+                            runtime_search_handler(
                                 self, run_id, workspace_root, rag_profile,
-                                settings=self.settings, reranker=reranker,
-                            ) if rag_profile.provider == "openai_compatible" else
+                                settings=self.settings, reranker=reranker, embedder=rag_embedder,
+                            ) if (rag_profile.provider == "openai_compatible"
+                                  or self.settings.retrieval_query_rewrite) else
                             knowledge_search_handler(
                                 workspace_root, rag_embedder, rag_profile, reranker=reranker,
                             )

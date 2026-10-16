@@ -652,6 +652,11 @@ class IndexStore:
             for rank, row in enumerate(rows, 1)
         ]
 
+    def generation(self) -> int:
+        """Read the current published generation without holding a transaction during inference."""
+        with self._reader() as connection:
+            return self._generation(connection)
+
     def embedding_profile(self) -> EmbeddingProfile:
         """Read and verify the vector identity stored with the index."""
         with self._reader() as connection:

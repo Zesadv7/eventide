@@ -51,6 +51,7 @@ class Settings:
     embedding_dim: int = 256
     embedding_model_path: Path | None = None
     reranker_model_path: Path | None = None
+    retrieval_query_rewrite: bool = False
     local_proxy_peers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -117,6 +118,7 @@ class Settings:
                 Path(os.environ["EVENTIDE_RERANKER_MODEL_PATH"])
                 if os.getenv("EVENTIDE_RERANKER_MODEL_PATH") else None
             ),
+            retrieval_query_rewrite=os.getenv("EVENTIDE_RETRIEVAL_QUERY_REWRITE", "0") == "1",
             local_proxy_peers=(
                 tuple(value.strip() for value in peers_value.split(",")) if peers_value else ()
             ),

@@ -329,3 +329,9 @@ Vue和旧页仅在浏览器会话存储中保存随机请求键、版本和候�
 ### 远程检索用量与预算停止
 
 Host检索新增kind=embedding、usage_basis=input_only的调用事实，复用现有Run/Session/项目usage与费用查询，无新增账本。tool.completed.metadata.code=budget_exceeded表示请求派发前预算拒绝，Run随后以token_budget停驻。仅输入调用的output_tokens缺省表示不适用，不能渲染成供应商已报告0；未知输入仍保持unknown。
+
+### 查询改写事件与用量
+
+部署开关 `EVENTIDE_RETRIEVAL_QUERY_REWRITE=1` 允许每根Run及子任务共用一次改写。持久事件 `retrieval.rewrite_claimed`、`retrieval.supplement_requested`、`retrieval.rewrite_finished` 归属根Run，payload含 `requesting_run_id`，查询仅保存hash。完成状态包括completed、rewrite_invalid_or_unchanged、rewrite_index_changed、failed、cancelled、budget_blocked。请求失败也消耗次数，恢复不重放；请求用量以实际调用Run的 `query_rewrite` attempt计入原账本，根汇总不重复计费。
+
+search_knowledge在启用时最多返回5条，附原查询/改写来源；失败及次数耗尽诊断随工具结果返回。改写不会派发返回文本内的工具指令，预算拒绝仍停驻Run。该开关不是默认收益承诺，也不增加另一套HTTP模型调用入口。
