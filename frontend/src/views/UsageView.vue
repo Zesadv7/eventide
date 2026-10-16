@@ -13,9 +13,12 @@ const route = useRoute();
 const linkedRun = computed(() =>
   typeof route?.query.run === "string" ? route.query.run : "",
 );
+const linkedDelivery = computed(() =>
+  typeof route?.query.delivery === "string" ? route.query.delivery : "",
+);
 const store = useWorkbench(),
-  scope = ref<"session" | "run" | "project" | "day">(
-    linkedRun.value ? "run" : "session",
+  scope = ref<Scope["kind"]>(
+    linkedDelivery.value ? "delivery" : linkedRun.value ? "run" : "session",
   ),
   day = ref(new Date().toISOString().slice(0, 10)),
   ledger = ref<UsageLedger | null>(null),
@@ -28,6 +31,7 @@ let version = 0,
 const identity = computed(() => {
   if (scope.value === "session") return store.selectedSession;
   if (scope.value === "run") return linkedRun.value || store.currentRun?.run_id;
+  if (scope.value === "delivery") return linkedDelivery.value;
   if (scope.value === "day") return day.value;
   return store.workspaces.find(
     (item) => item.workspace_id === store.selectedWorkspace,
@@ -62,8 +66,10 @@ async function load() {
     if (current === version) loading.value = false;
   }
 }
-watch(linkedRun, (value) => {
-  if (value) scope.value = "run";
+watch([linkedRun, linkedDelivery], ([run, delivery]) => {
+  if (delivery) scope.value = "delivery";
+  else if (run) scope.value = "run";
+  else if (scope.value === "delivery") scope.value = "session";
 });
 watch(
   [identity, scope],
@@ -135,6 +141,13 @@ const grouped = computed(() => {
     </header>
     <div class="segmented">
       <button
+        v-if="linkedDelivery"
+        :class="{ selected: scope === 'delivery' }"
+        @click="scope = 'delivery'"
+      >
+        指定交付全部轮次
+      </button>
+      <button
         :class="{ selected: scope === 'session' }"
         @click="scope = 'session'"
       >
@@ -152,6 +165,12 @@ const grouped = computed(() => {
         每日（UTC）
       </button>
     </div>
+    <p v-if="scope === 'delivery'" class="muted">
+      交付
+      {{
+        linkedDelivery
+      }}：包含所有轮次、摘要和子任务的真实尝试；关闭或重启交付不会清零累计用量。
+    </p>
     <label v-if="scope === 'day'" class="button-row"
       >统计日期（UTC）<input v-model="day" type="date" required
     /></label>

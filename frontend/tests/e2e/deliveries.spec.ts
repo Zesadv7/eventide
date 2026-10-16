@@ -105,8 +105,29 @@ test("delivery survives lost acceptance and refresh, then requires reviewed adop
     .toBe("completed");
   await page.getByRole("link", { name: "查看累计用量与预算" }).click();
   await expect(
-    page.getByText(`运行：${value.repair.control_run_id}`, { exact: true }),
+    page.getByText(new RegExp(`交付 ${identity}：包含所有轮次`)),
   ).toBeVisible();
+  const costs = await (
+    await page.request.get(
+      `/api/costs?scope_kind=delivery&scope_id=${identity}`,
+    )
+  ).json();
+  expect(costs.usage.attempt_count).toBeGreaterThan(0);
+  const detailCount = await page.locator(".call-details tbody > tr").count();
+  expect(detailCount).toBe(costs.usage.calls.length * 2);
+  await page.reload();
+  await expect(
+    page.getByText(new RegExp(`交付 ${identity}：包含所有轮次`)),
+  ).toBeVisible();
+  await expect(page.locator(".call-details tbody > tr")).toHaveCount(
+    detailCount,
+  );
+  await page.setViewportSize({ width: 320, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
   await page.goBack();
   await page.reload();
   await page.setViewportSize({ width: 320, height: 844 });

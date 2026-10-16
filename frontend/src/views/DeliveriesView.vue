@@ -365,7 +365,7 @@ const status: Record<string, string> = {
         <RouterLink
           :to="{
             path: '/usage',
-            query: { run: String(detail.repair.control_run_id) },
+            query: { delivery: detail.delivery_id },
           }"
           >查看累计用量与预算</RouterLink
         >
