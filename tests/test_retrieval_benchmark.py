@@ -83,3 +83,31 @@ def test_promotion_requires_all_three_independent_evidence_conditions():
                                   downstream_baseline=10, downstream_candidate=10)["promote"]
     assert not promotion_decision(baseline, candidate, downstream_baseline=10,
                                   downstream_candidate=9)["promote"]
+
+
+@pytest.mark.parametrize("before_any", [False, True])
+def test_stopped_benchmark_retains_partial_results_and_unattempted_are_not_failures(before_any):
+    from threading import Event
+
+    from eventide.rag.search import RetrievalOutcome, sparse_search
+
+    stopped = Event()
+    seen = []
+    if before_any:
+        stopped.set()
+
+    def method(workspace, query):
+        seen.append(query)
+        if len(seen) == 3:
+            stopped.set()
+        return RetrievalOutcome(tuple(sparse_search(workspace, query)), "sparse")
+
+    report = run_benchmark(embedder=HashEmbedder(16), profile=_profile(16), repeats=1,
+                           extra_methods={"candidate": method}, stop_requested=stopped.is_set)
+    result = report["comparisons"]["candidate"]
+    assert report["status"] == "aborted"
+    assert result["total"] == len(seen) == (0 if before_any else 3)
+    assert result["unattempted"] == (20 if before_any else 17)
+    assert result["failed"] == 0
+    assert result["recall_at_5"] is None if before_any else result["recall_at_5"] >= 0
+    assert report["promotion"]["candidate"]["reason"] == "incomplete_comparison"

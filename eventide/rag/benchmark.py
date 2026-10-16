@@ -109,6 +109,7 @@ def run_benchmark(
     split: Literal["development", "holdout", "all"] = "development",
     repeats: int = 3, reranker_identity: str | None = None,
     extra_methods: dict[str, Callable[[Path, str], RetrievalOutcome]] | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """CPU/local ablations. Extra methods must explicitly own any external usage themselves."""
     if type(repeats) is not int or not 1 <= repeats <= 10:
@@ -152,6 +153,8 @@ def run_benchmark(
             results = []
             for case in cases:
                 for repetition in range(repeats):
+                    if stop_requested is not None and stop_requested():
+                        break
                     started = time.perf_counter()
                     try:
                         outcome = method(workspace, case.query)
@@ -167,11 +170,19 @@ def run_benchmark(
                     result.update(duration_ms=(time.perf_counter() - started) * 1000,
                                   split=case.split, repetition=repetition)
                     results.append(result)
-            comparisons[name] = {**_summarize(results),
+            summary = _summarize(results) if results else {
+                "passed": 0, "total": 0, "recall_at_5": None, "mrr": None,
+                "latency_p50_ms": None, "latency_p95_ms": None, "results": [],
+            }
+            comparisons[name] = {**summary,
+                                 "expected": len(cases) * repeats,
+                                 "unattempted": len(cases) * repeats - len(results),
                                  "failed": sum(r["status"] == "failed" for r in results),
                                  "degraded": sum(bool(r["diagnostics"]) for r in results)}
         return {
             "schema_version": 1, "dataset_version": frozen.version, "split": split,
+            "status": "aborted" if any(c["unattempted"] for c in comparisons.values())
+            else "completed",
             "runtime": runtime_revision(),
             "dataset_sha256": _digest(frozen.model_dump()),
             "corpus_sha256": _digest(frozen.documents), "repeats": repeats,
@@ -180,6 +191,10 @@ def run_benchmark(
             "chunking_fingerprint": stats.chunking_fingerprint,
             "comparisons": comparisons,
             "promotion": {name: promotion_decision(comparisons["sparse"], value)
+                          if not value["unattempted"] and not comparisons["sparse"]["unattempted"]
+                          else {"quality_improved": False, "latency_within_limit": False,
+                                "downstream_verified": False, "promote": False,
+                                "reason": "incomplete_comparison"}
                           for name, value in comparisons.items() if name != "sparse"},
             "limitations": ["local CPU only; no automatic downstream promotion",
                             "timings include inference and index/model integrity checks",

@@ -131,6 +131,35 @@ async def test_worker_and_parent_share_claim_after_reopening_store(tmp_path):
         await reopened.close()
 
 
+async def test_shared_typed_outcome_preserves_real_candidates_without_parsing_display(tmp_path):
+    from eventide.retrieval_rewrite import query_rewrite_outcome
+    from tests.test_budget_api import new_run
+
+    repo = make_repo(tmp_path / "repo")
+    (repo / "doc.txt").write_text("credentials")
+    IndexStore(repo).build()
+    settings = replace(settings_for(repo), state_dir=tmp_path / "state")
+    host = RuntimeHost(settings, ScriptedProvider([{
+        "text": "rewritten credentials", "usage": {"input_tokens": 3, "output_tokens": 2},
+    }]), enable_mcp=False)
+    new_run(host, "root")
+    outcomes = []
+
+    async def search(query, k):
+        chunk = IndexedChunk(len(outcomes), f"file-{len(outcomes)}.py", 1, 1, "", query)
+        outcome = RetrievalOutcome((SearchResult(chunk, 9, ("dense",)),), "hybrid")
+        outcomes.append(outcome)
+        return outcome
+
+    try:
+        outcome = await query_rewrite_outcome(host, "root", repo, search, "original")
+        assert isinstance(outcome, RetrievalOutcome)
+        assert outcome == merge_queries(outcomes[0], outcomes[1], 5)
+        assert {r.chunk.file for r in outcome.results} == {"file-0.py", "file-1.py"}
+    finally:
+        await host.close()
+
+
 @pytest.mark.parametrize("failure", ["budget", "cancel", "drift", "search"])
 async def test_supplement_failure_and_control_outcomes(tmp_path, monkeypatch, failure):
     import asyncio
