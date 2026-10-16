@@ -1,6 +1,6 @@
 import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=15";
 import {EventFeed, request} from "./transport.js?v=12";
-import {mutateSession} from "./session-management.js?v=1";
+import {mutateSession, createSession as createSessionRequest} from "./session-management.js?v=2";
 import {el, button, icon, reconcile, markdown} from "./view.js?v=14";
 
 // config.js is null-safe for nodes the v2 console dropped, so a failed import is
@@ -240,7 +240,7 @@ async function selectWorkspace(id) {
 
 async function createSession(workspace = state.workspace) {
   const version = viewVersion;
-  const result = await request("/api/sessions", {method: "POST", body: JSON.stringify({workspace_id: workspace})});
+  const result = await createSessionRequest(workspace);
   await refreshSession(result.session_id);
   if (state.workspace === workspace && viewVersion === version) await selectSession(result.session_id);
   return result.session_id;

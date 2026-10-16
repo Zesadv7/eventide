@@ -2,6 +2,7 @@
 
 import base64
 import io
+import uuid
 import zipfile
 
 import pytest
@@ -140,7 +141,9 @@ def test_explicit_selected_skills_are_frozen_by_http_admission(isolated_workspac
     package(isolated_workspace / "skills/diagnose")
     host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
     with TestClient(create_app(host)) as client:
-        session = client.post("/api/sessions", json={}).json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}, json={}
+        ).json()["session_id"]
         response = client.post(
             f"/api/sessions/{session}/runs",
             json={
@@ -190,20 +193,33 @@ def test_configuration_conflicts_and_broken_pin_can_be_repaired(isolated_workspa
 def test_loaded_records_are_durable_and_separate_from_selection(isolated_workspace):
     package(isolated_workspace / "skills/diagnose")
     settings = settings_for(isolated_workspace)
-    host = RuntimeHost(settings, ScriptedProvider([
-        call("load_skill", {"name": "diagnose"}, "load"), {"text": "done"},
-    ]))
+    host = RuntimeHost(
+        settings,
+        ScriptedProvider(
+            [
+                call("load_skill", {"name": "diagnose"}, "load"),
+                {"text": "done"},
+            ]
+        ),
+    )
     with TestClient(create_app(host)) as client:
-        session = client.post("/api/sessions", json={}).json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}, json={}
+        ).json()["session_id"]
         run = client.post(
-            f"/api/sessions/{session}/runs", json={"prompt": "check"}, headers=key(),
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "check"},
+            headers=key(),
         ).json()["run_id"]
+
         # TestClient portal waits on the actual owned task, not an arbitrary sleep.
         async def wait():
             tasks = list(host._active_tasks)
             if tasks:
                 import asyncio
+
                 await asyncio.gather(*tasks)
+
         client.portal.call(wait)
         record = client.get(f"/api/runs/{run}/skills").json()
         assert record["snapshot"]["selected"] == []

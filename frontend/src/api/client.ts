@@ -1,3 +1,4 @@
+import { durableMutation } from "./mutations";
 import type { paths } from "./schema";
 import { configurationMutation, generationScope } from "./configuration";
 import type {
@@ -91,7 +92,12 @@ export const api = {
       `/api/workspaces/${id(workspace)}/sessions?include_archived=${archived}`,
     ).then((items) => items.map(normalizeSession)),
   createSession: (workspace: string) =>
-    post<{ session_id: string }>("/api/sessions", { workspace_id: workspace }),
+    durableMutation<{ session_id: string }>(
+      "session-create",
+      "/api/sessions",
+      "POST",
+      { workspace_id: workspace },
+    ),
   session: (session: string) =>
     request<RawSession>(`/api/sessions/${id(session)}`).then(normalizeSession),
   messages: (session: string) =>

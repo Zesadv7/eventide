@@ -79,6 +79,7 @@ test("delivery survives lost acceptance and refresh, then requires reviewed adop
   const session = (
     await (
       await page.request.post("/api/sessions", {
+        headers: { "Idempotency-Key": crypto.randomUUID() },
         data: { workspace_id: result.workspace_id },
       })
     ).json()

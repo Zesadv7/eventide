@@ -3,6 +3,7 @@
 import base64
 import json
 import time
+import uuid
 
 from fastapi.testclient import TestClient
 
@@ -42,7 +43,9 @@ def test_api_run_and_console(isolated_workspace):
         assert "配置大模型" in console
         assert 'value="openai_responses"' in console
         assert "检查连接" in console
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
         assert accepted.status_code == 202
         run = wait_for_run(client, accepted.json()["run_id"])
@@ -54,7 +57,9 @@ def test_api_run_and_console(isolated_workspace):
 def test_api_rejects_empty_prompt(isolated_workspace):
     runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         response = client.post(f"/api/sessions/{session}/runs", json={"prompt": ""})
         assert response.status_code == 422
 
@@ -64,7 +69,9 @@ def test_api_sse_and_missing_resources(isolated_workspace):
         settings_for(isolated_workspace), ScriptedProvider([{"text": "streamed"}])
     )
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
         run_id = accepted.json()["run_id"]
         wait_for_run(client, run_id)
@@ -97,7 +104,9 @@ def test_api_resolves_pending_approval(isolated_workspace):
     )
     runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "delete"})
         run_id = accepted.json()["run_id"]
         approval_id = None
@@ -261,9 +270,12 @@ def test_provider_save_waits_for_active_run(isolated_workspace):
 
     runtime = RuntimeHost(settings_for(isolated_workspace), SlowProvider())
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "wait"})
-        response = put_configuration(client,
+        response = put_configuration(
+            client,
             "/api/config/provider",
             json={"provider": "anthropic", "model": "model", "api_key": "secret"},
         )
@@ -280,7 +292,9 @@ def test_api_cancels_active_run(isolated_workspace):
 
     runtime = RuntimeHost(settings_for(isolated_workspace), WaitingProvider())
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "wait"})
         run_id = accepted.json()["run_id"]
         for _ in range(100):
@@ -315,7 +329,9 @@ def test_api_session_status_exposes_task_plan(isolated_workspace):
     runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
         (isolated_workspace / "data").write_text("x", encoding="utf-8")
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "plan"})
         wait_for_run(client, accepted.json()["run_id"])
         record = client.get(f"/api/sessions/{session}").json()
@@ -426,7 +442,9 @@ def test_api_workspace_capabilities_configured_reports_no_secrets(isolated_works
 def test_api_upload_attachment_success_and_rejections(isolated_workspace):
     runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         created = client.post(
             f"/api/sessions/{session}/attachments",
             json={"name": "notes.py", "content_base64": encoded("print(1)")},
@@ -475,12 +493,10 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
         downloaded = client.get(f"/api/sessions/{session}/attachments/{binary_id}")
         assert downloaded.content == b"\xff\xfe\x00bin"
         assert downloaded.headers["content-type"] == "application/octet-stream"
-        assert client.delete(
-            f"/api/sessions/{session}/attachments/{binary_id}"
-        ).status_code == 200
-        assert {item["name"] for item in client.get(
-            f"/api/sessions/{session}/attachments"
-        ).json()} == {"notes.py"}
+        assert client.delete(f"/api/sessions/{session}/attachments/{binary_id}").status_code == 200
+        assert {
+            item["name"] for item in client.get(f"/api/sessions/{session}/attachments").json()
+        } == {"notes.py"}
         oversized = base64.b64encode(b"x" * (MAX_UPLOAD_BYTES + 1)).decode("ascii")
         assert (
             client.post(
@@ -494,7 +510,9 @@ def test_api_upload_attachment_success_and_rejections(isolated_workspace):
 def test_api_run_with_attachments_inlines_and_truncates(isolated_workspace):
     runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         small = client.post(
             f"/api/sessions/{session}/attachments",
             json={"name": "notes.py", "content_base64": encoded("print('hi')")},
@@ -533,7 +551,9 @@ def test_api_image_attachment_is_hydrated_only_for_provider(isolated_workspace):
     provider = ScriptedProvider([{"text": "done"}])
     runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         image = client.post(
             f"/api/sessions/{session}/attachments",
             json={
@@ -553,28 +573,31 @@ def test_api_image_attachment_is_hydrated_only_for_provider(isolated_workspace):
         assert provider_block["type"] == "image"
         assert provider_block["data"] == base64.b64encode(b"png-bytes").decode("ascii")
         event = next(
-            item
-            for item in runtime.store.run_events(run["id"])
-            if item["type"] == "message.user"
+            item for item in runtime.store.run_events(run["id"]) if item["type"] == "message.user"
         )
         stored_block = event["payload"]["message"]["content"][1]
         assert stored_block["type"] == "attachment"
         assert "data" not in stored_block
         assert client.get(f"/api/sessions/{session}/attachments").json() == []
-        history = client.get(
-            f"/api/sessions/{session}/attachments?include_used=true"
-        ).json()
+        history = client.get(f"/api/sessions/{session}/attachments?include_used=true").json()
         assert history[0]["used"] is True
-        assert client.delete(
-            f"/api/sessions/{session}/attachments/{image['attachment_id']}"
-        ).status_code == 409
+        assert (
+            client.delete(
+                f"/api/sessions/{session}/attachments/{image['attachment_id']}"
+            ).status_code
+            == 409
+        )
 
 
 def test_api_run_rejects_unknown_and_foreign_attachments(isolated_workspace):
     runtime = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
-        other = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
+        other = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
+            "session_id"
+        ]
         uploaded = client.post(
             f"/api/sessions/{session}/attachments",
             json={"name": "a.txt", "content_base64": encoded("hi")},
@@ -599,7 +622,9 @@ def test_api_run_summary_includes_usage(isolated_workspace):
         ScriptedProvider([{"text": "done", "usage": {"input_tokens": 11, "output_tokens": 7}}]),
     )
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
         run = wait_for_run(client, accepted.json()["run_id"])
         expected = {"input_tokens": 11, "output_tokens": 7}
@@ -614,7 +639,9 @@ def test_api_run_accepts_per_message_model(isolated_workspace):
     provider = ScriptedProvider([{"text": "done"}])
     runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(
             f"/api/sessions/{session}/runs",
             json={"prompt": "hello", "model": "one-off-model"},
@@ -641,7 +668,9 @@ def test_api_run_plan_mode_blocks_write_tool(isolated_workspace):
     )
     runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(
             f"/api/sessions/{session}/runs", json={"prompt": "plan it", "mode": "plan"}
         )
@@ -662,7 +691,9 @@ def test_api_run_agent_mode_auto_approves(isolated_workspace):
     )
     runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with TestClient(create_app(runtime)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         accepted = client.post(
             f"/api/sessions/{session}/runs", json={"prompt": "clean", "mode": "agent"}
         )

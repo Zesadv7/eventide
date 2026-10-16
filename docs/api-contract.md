@@ -435,3 +435,5 @@ Session查询增加legacy_imported；导入会话归档且作为只读控制历�
 返回seq/role/content；limit为1–100，每页升序，before排除游标自身。
 普通会话或不存在的身份404，非法分页422。历史页以纯文本展示消息，旧汇总用量
 保留在legacy.run_summary，原事件保留在legacy.event，不加入现代逐调用账本。
+
+POST /api/sessions 要求 Idempotency-Key（1–128可见ASCII），body严格只接受workspace_id/working_directory。缺键422，同键同内容回放201和原session_id，不同内容409；缺失body与空对象均规范化为默认字段。会话及成功回执原子提交，结果未知503或在途409保留原键；明确拒绝附X-Eventide-Mutation-Outcome: rejected。删除原会话后旧请求仍返回原身份，不重新创建。Vue和暂存旧页均保留未知请求身份，Python内部创建接口不受HTTP头约束。

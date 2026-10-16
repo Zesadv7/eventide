@@ -1,6 +1,7 @@
 """Durable Plan copies overlap without sharing source files or conversation owners."""
 
 import asyncio
+import uuid
 from dataclasses import replace
 
 import pytest
@@ -169,7 +170,9 @@ async def test_accept_then_cancel_snapshot_remains_resumable(isolated_workspace)
 def test_snapshot_http_contract_and_legacy_source_default(isolated_workspace):
     host = snapshot_host(isolated_workspace, ScriptedProvider([{"text": "done"}, {"text": "done"}]))
     with TestClient(create_app(host)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         invalid = client.post(
             f"/api/sessions/{session}/runs", json={"prompt": "x", "execution_target": "snapshot"}
         )
@@ -188,7 +191,9 @@ def test_snapshot_http_contract_and_legacy_source_default(isolated_workspace):
         assert result["status"] == "completed"
         assert result["execution"]["kind"] == "snapshot"
         assert client.get(f"/api/sessions/{session}").json()["execution"] == result["execution"]
-        source_session = client.post("/api/sessions").json()["session_id"]
+        source_session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         direct = client.post(f"/api/sessions/{source_session}/runs", json={"prompt": "hello"})
         assert wait_for_run(client, direct.json()["run_id"])["execution"] == {"kind": "source"}
 

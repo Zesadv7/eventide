@@ -67,3 +67,29 @@ describe("HTTP identity contract", () => {
     });
   });
 });
+
+describe("durable Session creation", () => {
+  it("reuses the request identity after a lost response, then starts a new intent", async () => {
+    sessionStorage.clear();
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session_id: "one" }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session_id: "two" }), { status: 201 }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.createSession("workspace")).rejects.toThrow(
+      "connection lost",
+    );
+    expect(await api.createSession("workspace")).toEqual({ session_id: "one" });
+    expect(await api.createSession("workspace")).toEqual({ session_id: "two" });
+    const keys = fetch.mock.calls.map(
+      (call) => call[1].headers["Idempotency-Key"],
+    );
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[1]);
+  });
+});

@@ -1569,9 +1569,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Create Session Api Sessions Post"
                 }
@@ -15252,6 +15250,7 @@
             "title": "Working Directory"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "SessionBody"
       },

@@ -32,3 +32,22 @@ export async function mutateSession(session, action, candidate = {}) {
     }
   } finally { active.delete(identity); }
 }
+
+export async function createSession(workspace) {
+  const storage = "eventide.legacy-session-create.v1." + workspace;
+  const key = sessionStorage.getItem(storage) || crypto.randomUUID();
+  sessionStorage.setItem(storage, key);
+  try {
+    const response = await request("/api/sessions", {
+      method: "POST",
+      headers: {"Idempotency-Key": key},
+      body: JSON.stringify({workspace_id: workspace}),
+    });
+    sessionStorage.removeItem(storage);
+    return response;
+  } catch (error) {
+    if ([403,404,422].includes(error.status) || error.mutationOutcome === "rejected")
+      sessionStorage.removeItem(storage);
+    throw error;
+  }
+}

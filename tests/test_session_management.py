@@ -1,5 +1,7 @@
 """Session metadata writes reject stale tabs and commit replay receipts atomically."""
 
+import uuid
+
 from fastapi.testclient import TestClient
 
 from eventide.api import create_app
@@ -12,7 +14,9 @@ def test_replay_stale_tab_archive_and_delete_after_restart(tmp_path):
     host = delivery_host(tmp_path)
     settings = host.settings
     with TestClient(create_app(host)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         path = f"/api/sessions/{session}"
         before = client.get(path).json()
         body = {"title": "Renamed", "expected_metadata_hash": before["metadata_hash"]}
@@ -137,3 +141,50 @@ def test_failed_transaction_rolls_back_metadata_and_receipt(tmp_path, monkeypatc
         assert repeated.status_code == 409
         assert "X-Eventide-Mutation-Outcome" not in repeated.headers
         assert client.get(path).json() == before
+
+
+def test_creation_receipt_survives_restart_and_deleted_session(tmp_path):
+    host = delivery_host(tmp_path)
+    settings = host.settings
+    headers = {"Idempotency-Key": "create-once"}
+    with TestClient(create_app(host)) as client:
+        assert client.post("/api/sessions").status_code == 422
+        result = client.post("/api/sessions", json={}, headers=headers)
+        assert result.status_code == 201
+        identity = result.json()["session_id"]
+        assert client.post("/api/sessions", headers=headers).json() == result.json()
+        assert client.post(
+            "/api/sessions", json={"working_directory": "."}, headers=headers
+        ).status_code == 409
+    restored = RuntimeHost(settings, ScriptedProvider([]), enable_mcp=False)
+    with TestClient(create_app(restored)) as client:
+        assert client.post("/api/sessions", headers=headers).json() == result.json()
+        metadata = client.get(f"/api/sessions/{identity}").json()
+        assert client.request(
+            "DELETE", f"/api/sessions/{identity}",
+            json={"expected_metadata_hash": metadata["metadata_hash"]},
+            headers={"Idempotency-Key": "delete-created"},
+        ).status_code == 200
+        assert client.post("/api/sessions", headers=headers).json() == result.json()
+        assert client.get(f"/api/sessions/{identity}").status_code == 404
+
+
+def test_creation_receipt_failure_rolls_back_session(tmp_path, monkeypatch):
+    host = delivery_host(tmp_path)
+    with TestClient(create_app(host)) as client:
+        host.configuration_owner()
+        before = host.store.list_sessions(host.default_workspace.workspace_id)
+        original = host.store._append_fact_locked
+
+        def fail(owner, kind, payload, **kwargs):
+            if kind == "http.mutation_completed":
+                raise RuntimeError("storage failure")
+            return original(owner, kind, payload, **kwargs)
+
+        monkeypatch.setattr(host.store, "_append_fact_locked", fail)
+        headers = {"Idempotency-Key": "uncertain-create"}
+        assert client.post("/api/sessions", headers=headers).status_code == 503
+        assert host.store.list_sessions(host.default_workspace.workspace_id) == before
+        monkeypatch.setattr(host.store, "_append_fact_locked", original)
+        assert client.post("/api/sessions", headers=headers).status_code == 409
+        assert host.store.list_sessions(host.default_workspace.workspace_id) == before

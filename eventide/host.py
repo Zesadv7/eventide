@@ -136,10 +136,11 @@ class SessionManager:
         workspace_id: str,
         session_id: str | None = None,
         working_directory: str | Path | None = None,
+        mutation: tuple[str, str] | None = None,
     ) -> str:
         identity = session_id or f"session_{uuid.uuid4().hex[:16]}"
         if self.store.get_session(identity) and working_directory is None:
-            self.store.create_session(identity, workspace_id)
+            self.store.create_session(identity, workspace_id, mutation=mutation)
             return identity
         workspace = self.store.get_workspace(workspace_id)
         relative, _ = session_working_directory(Path(workspace.path), working_directory)
@@ -147,6 +148,7 @@ class SessionManager:
             identity,
             workspace_id,
             working_directory=relative,
+            mutation=mutation,
         )
         return identity
 
@@ -314,6 +316,7 @@ class RuntimeHost:
         *,
         workspace_id: str | None = None,
         working_directory: str | Path | None = None,
+        _mutation: tuple[str, str] | None = None,
     ) -> str:
         existing = self.store.get_session(session_id) if session_id else None
         target_workspace = (
@@ -326,6 +329,7 @@ class RuntimeHost:
             target_workspace,
             session_id,
             working_directory if working_directory is not None else None,
+            mutation=_mutation,
         )
 
     async def manage_worktree(

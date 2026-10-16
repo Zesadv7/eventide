@@ -184,10 +184,13 @@ export const useWorkbench = defineStore("workbench", () => {
     );
   }
   async function selectWorkspace(workspace: string) {
+    const version = ++selectionVersion;
     selectedWorkspace.value = workspace;
     selectedSession.value = "";
     persistSelection();
     await loadSessions(workspace);
+    if (version !== selectionVersion || selectedWorkspace.value !== workspace)
+      return;
     const first = currentSessions.value[0];
     if (first) await selectSession(first.session_id);
     else watchRun();
@@ -258,9 +261,12 @@ export const useWorkbench = defineStore("workbench", () => {
     if (!selectedWorkspace.value || creating.value) return;
     creating.value = true;
     const workspace = selectedWorkspace.value;
+    const version = ++selectionVersion;
     try {
       const result = await api.createSession(workspace);
       await loadSessions(workspace);
+      if (version !== selectionVersion || selectedWorkspace.value !== workspace)
+        return;
       await selectSession(result.session_id);
       return result.session_id;
     } finally {

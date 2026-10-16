@@ -143,7 +143,7 @@ def verify(image: str) -> dict[str, object]:
                 "/api/sessions",
                 {"workspace_id": workspace["workspace_id"]},
                 "POST",
-                **origin,
+                **{**origin, "Idempotency-Key": "container-session-create"},
             )
         )["session_id"]
         # Only save a fake connection; never probe or send a model request.

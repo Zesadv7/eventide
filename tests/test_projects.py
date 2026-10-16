@@ -3,6 +3,7 @@
 import asyncio
 import sqlite3
 import subprocess
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
@@ -200,22 +201,38 @@ def test_project_api_aggregates_and_keeps_workspace_contract(isolated_workspace)
         assert execution["kind"] == "worktree"
         assert client.post("/api/workspaces", json={"path": str(copy)}).json() == execution
         sessions = [
-            client.post("/api/sessions", json={"workspace_id": workspace_id}).json()["session_id"]
+            client.post(
+                "/api/sessions",
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+                json={"workspace_id": workspace_id},
+            ).json()["session_id"]
             for workspace_id in (execution["source_workspace_id"], execution["workspace_id"])
         ]
         assert {
             s["session_id"] for s in client.get(f"/api/projects/{project_id}/sessions").json()
         } == set(sessions)
         assert client.get(f"/api/sessions/{sessions[1]}").json()["project_id"] == project_id
-        client.patch(f"/api/sessions/{sessions[1]}", json={"archived": True,
-                     "expected_metadata_hash":
-                     client.get(f"/api/sessions/{sessions[1]}").json()["metadata_hash"]},
-                     headers={"Idempotency-Key": "archive"})
+        client.patch(
+            f"/api/sessions/{sessions[1]}",
+            json={
+                "archived": True,
+                "expected_metadata_hash": client.get(f"/api/sessions/{sessions[1]}").json()[
+                    "metadata_hash"
+                ],
+            },
+            headers={"Idempotency-Key": "archive"},
+        )
         assert len(client.get(f"/api/projects/{project_id}/sessions").json()) == 1
         assert (
-            len([s for s in client.get(
-                f"/api/projects/{project_id}/sessions?include_archived=true").json()
-                 if not s["managed"]])
+            len(
+                [
+                    s
+                    for s in client.get(
+                        f"/api/projects/{project_id}/sessions?include_archived=true"
+                    ).json()
+                    if not s["managed"]
+                ]
+            )
             == 2
         )
         assert client.get(f"/api/projects/{project_id}").json()["workspace_count"] == 2

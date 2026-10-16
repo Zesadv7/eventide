@@ -1,6 +1,7 @@
 """Generation inheritance, zero/null semantics, wire mapping and request ownership."""
 
 import asyncio
+import uuid
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -184,7 +185,8 @@ def test_generation_api_declares_capability_and_rejects_unsupported_values(isola
         before = client.get("/api/generation/defaults", params={"model": model}).json()
         assert before["capabilities"]["source"] == "unknown"
         assert (
-            put_configuration(client,
+            put_configuration(
+                client,
                 "/api/generation/defaults",
                 json={
                     "model": model,
@@ -193,7 +195,8 @@ def test_generation_api_declares_capability_and_rejects_unsupported_values(isola
             ).status_code
             == 422
         )
-        declared = put_configuration(client,
+        declared = put_configuration(
+            client,
             "/api/generation/defaults",
             json={
                 "model": model,
@@ -203,9 +206,12 @@ def test_generation_api_declares_capability_and_rejects_unsupported_values(isola
         )
         assert declared.status_code == 200
         assert declared.json()["capabilities"]["source"] == "declared"
-        sid = client.post("/api/sessions").json()["session_id"]
+        sid = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
+            "session_id"
+        ]
         assert (
-            put_configuration(client,
+            put_configuration(
+                client,
                 f"/api/sessions/{sid}/generation",
                 json={
                     "model": model,
@@ -225,7 +231,8 @@ def test_generation_api_declares_capability_and_rejects_unsupported_values(isola
             ).status_code
             == 422
         )
-        reset = put_configuration(client,
+        reset = put_configuration(
+            client,
             f"/api/sessions/{sid}/generation",
             json={
                 "model": model,

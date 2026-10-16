@@ -9,6 +9,7 @@ test("session management preserves retry identity and rejects stale tabs", async
   const session = (
     await (
       await page.request.post("/api/sessions", {
+        headers: { "Idempotency-Key": crypto.randomUUID() },
         data: { workspace_id: workspace },
       })
     ).json()
@@ -69,4 +70,36 @@ test("session management preserves retry identity and rejects stale tabs", async
       (await page.request.get(`/api/sessions/${session}`)).status(),
     )
     .toBe(404);
+});
+
+test("new Session retries a lost acceptance across reload without duplicates", async ({
+  page,
+}) => {
+  await page.goto("./#/");
+  await expect(page.getByRole("button", { name: "＋ 新建对话" })).toBeEnabled();
+  const workspace = (
+    await (await page.request.get("/api/workspaces")).json()
+  )[0].workspace_id;
+  const path = "/api/workspaces/" + workspace + "/sessions";
+  const before = (await (await page.request.get(path)).json()).length;
+  const keys: string[] = [];
+  let dropped = false;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    keys.push(route.request().headers()["idempotency-key"]!);
+    if (!dropped) {
+      dropped = true;
+      await route.fetch();
+      await route.abort();
+    } else await route.continue();
+  });
+  await page.getByRole("button", { name: "＋ 新建对话" }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "＋ 新建对话" }).click();
+  await expect.poll(() => keys.length).toBe(2);
+  expect(keys[0]).toBe(keys[1]);
+  await expect
+    .poll(async () => (await (await page.request.get(path)).json()).length)
+    .toBe(before + 1);
 });

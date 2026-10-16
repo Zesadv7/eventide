@@ -33,6 +33,7 @@ class AttachmentBody(BaseModel):
 
 
 class SessionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     workspace_id: str | None = None
     working_directory: str | None = Field(default=None, min_length=1)
 

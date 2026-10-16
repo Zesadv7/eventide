@@ -323,10 +323,15 @@ class RuntimeStore:
         workspace_id: str | None = None,
         *,
         working_directory: str | None = None,
+        mutation: tuple[str, str] | None = None,
     ) -> None:
         with self._lock, self._connection:
+            if mutation is not None:
+                self._connection.execute("BEGIN IMMEDIATE")
             existing = self.get_session(session_id)
             if existing:
+                if mutation is not None:
+                    raise ValueError("Session creation identity already exists")
                 if workspace_id and existing["workspace_id"] != workspace_id:
                     raise ValueError("Session is bound to a different workspace")
                 if (
@@ -336,6 +341,8 @@ class RuntimeStore:
                     raise ValueError("Session is bound to a different working directory")
                 return
             if workspace_id is None:
+                if mutation is not None:
+                    raise ValueError("Atomic Session creation requires a Workspace")
                 workspace_id = self.register_workspace(
                     self.path.parent.resolve(), None
                 ).workspace_id
@@ -345,6 +352,27 @@ class RuntimeStore:
                 "(id, workspace_id, created_at, working_directory) VALUES (?, ?, ?, ?)",
                 (session_id, workspace_id, time.time(), working_directory or "."),
             )
+            if mutation is not None:
+                owner, identity = mutation
+                self._append_fact_locked(
+                    owner,
+                    "session.created",
+                    {
+                        "target_session_id": session_id,
+                        "workspace_id": workspace_id,
+                        "working_directory": working_directory or ".",
+                    },
+                    author="user",
+                )
+                self._append_fact_locked(
+                    owner,
+                    "http.mutation_completed",
+                    {
+                        "identity": identity,
+                        "result": {"session_id": session_id},
+                    },
+                    author="user",
+                )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:

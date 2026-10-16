@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.schemas import SessionBody, SessionDeleteBody, SessionUpdateBody
+from eventide.http_api.session_management import create_session as create_session_mutation
 from eventide.http_api.session_management import mutate_session
 from eventide.usage import build_usage_ledger
 
@@ -25,17 +26,12 @@ def create_router(context: ApiContext) -> APIRouter:
     get_workspace = context.get_workspace
 
     @router.post("/api/sessions", status_code=status.HTTP_201_CREATED)
-    async def create_session(body: SessionBody | None = None) -> dict[str, str]:
-        try:
-            return {
-                "session_id": agent_runtime.create_session(
-                    workspace_id=body.workspace_id if body else None,
-                    working_directory=body.working_directory if body else None,
-                )
-            }
-        except (ValueError, OSError) as exc:
-            code = 404 if str(exc).startswith("Workspace not found") else 422
-            raise HTTPException(status_code=code, detail=str(exc)) from exc
+    async def create_session(
+        request: Request,
+        body: SessionBody | None = None,
+    ) -> dict[str, Any]:
+        require_local_request(request)
+        return create_session_mutation(agent_runtime, request, (body or SessionBody()).model_dump())
 
     @router.get("/api/workspaces/{workspace_id}/sessions")
     async def list_sessions(
@@ -66,7 +62,9 @@ def create_router(context: ApiContext) -> APIRouter:
 
     @router.delete("/api/sessions/{session_id}")
     async def delete_session(
-        session_id: str, body: SessionDeleteBody, request: Request,
+        session_id: str,
+        body: SessionDeleteBody,
+        request: Request,
     ) -> dict[str, Any]:
         require_local_request(request)
         return mutate_session(agent_runtime, request, session_id, body.model_dump(), delete=True)
@@ -81,7 +79,8 @@ def create_router(context: ApiContext) -> APIRouter:
 
     @router.get("/api/sessions/{session_id}/legacy-messages", response_model=list[ImportedMessage])
     async def imported_messages(
-        session_id: str, limit: int = Query(default=50, ge=1, le=100),
+        session_id: str,
+        limit: int = Query(default=50, ge=1, le=100),
         before: int | None = Query(default=None, ge=1),
     ) -> list[dict[str, Any]]:
         try:

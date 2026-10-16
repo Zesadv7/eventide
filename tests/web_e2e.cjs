@@ -88,7 +88,8 @@ async function api(method, pathName, body) {
   const hasBody = body !== undefined;
   const resp = await fetch(`${state.BASE}${pathName}`, {
     method,
-    headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+    headers: {...(hasBody ? {"Content-Type": "application/json"} : {}),
+      ...(method === "POST" && pathName === "/api/sessions" ? {"Idempotency-Key": require("node:crypto").randomUUID()} : {})},
     body: hasBody ? JSON.stringify(body) : undefined,
   });
   const text = await resp.text();

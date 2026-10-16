@@ -1,6 +1,7 @@
 """Durable request de-duplication and browser mutation origin boundaries."""
 
 import time
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,7 +27,9 @@ def test_run_key_is_persistent_and_content_bound(isolated_workspace):
     provider = ScriptedProvider([{"text": "done"}])
     host = RuntimeHost(settings, provider)
     with TestClient(create_app(host)) as client:
-        sid = client.post("/api/sessions").json()["session_id"]
+        sid = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
+            "session_id"
+        ]
         path = f"/api/sessions/{sid}/runs"
         header = {"Idempotency-Key": "same-submit"}
         first = client.post(path, json={"prompt": "work"}, headers=header)
@@ -61,7 +64,9 @@ def test_continue_key_does_not_create_another_turn(isolated_workspace):
         ),
     )
     with TestClient(create_app(host)) as client:
-        sid = client.post("/api/sessions").json()["session_id"]
+        sid = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
+            "session_id"
+        ]
         initial = client.post(f"/api/sessions/{sid}/runs", json={"prompt": "work"}).json()
         assert wait(client, initial["run_id"])["status"] == "interrupted"
         path = f"/api/sessions/{sid}/continue"
@@ -96,7 +101,10 @@ def test_cross_site_mutation_is_rejected_without_changes(isolated_workspace, hea
 def test_same_origin_and_header_validation(isolated_workspace):
     host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(host)) as client:
-        created = client.post("/api/sessions", headers={"Origin": "http://testserver"})
+        created = client.post(
+            "/api/sessions",
+            headers={"Idempotency-Key": uuid.uuid4().hex, "Origin": "http://testserver"},
+        )
         assert created.status_code == 201
         sid = created.json()["session_id"]
         assert (

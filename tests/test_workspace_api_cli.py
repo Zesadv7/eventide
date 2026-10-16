@@ -4,6 +4,7 @@ import asyncio
 import json
 import sqlite3
 import time
+import uuid
 
 from fastapi.testclient import TestClient
 
@@ -30,9 +31,11 @@ def test_workspace_http_catalog_and_session_binding(isolated_workspace):
         assert "git_head" in response.json()
         assert client.get(f"/api/workspaces/{workspace_id}").json()["path"] == str(other)
         assert len(client.get("/api/workspaces").json()) == 2
-        session = client.post("/api/sessions", json={"workspace_id": workspace_id}).json()[
-            "session_id"
-        ]
+        session = client.post(
+            "/api/sessions",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+            json={"workspace_id": workspace_id},
+        ).json()["session_id"]
         accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "hello"})
         run_id = accepted.json()["run_id"]
         assert wait_for_run(client, run_id)["status"] == "completed"
@@ -50,7 +53,14 @@ def test_workspace_http_catalog_and_session_binding(isolated_workspace):
         assert client.delete(f"/api/workspaces/{workspace_id}").status_code == 409
         assert client.get("/api/sessions/missing").status_code == 404
         assert client.get("/api/workspaces/missing").status_code == 404
-        assert client.post("/api/sessions", json={"workspace_id": "missing"}).status_code == 404
+        assert (
+            client.post(
+                "/api/sessions",
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+                json={"workspace_id": "missing"},
+            ).status_code
+            == 404
+        )
         assert (
             client.post("/api/workspaces", json={"path": str(other / "absent")}).status_code == 422
         )
@@ -105,13 +115,19 @@ def test_http_session_metadata_archive_and_delete(isolated_workspace):
     host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
     with TestClient(create_app(host)) as client:
         workspace_id = host.default_workspace.workspace_id
-        empty = client.post("/api/sessions", json={"workspace_id": workspace_id}).json()[
-            "session_id"
-        ]
+        empty = client.post(
+            "/api/sessions",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+            json={"workspace_id": workspace_id},
+        ).json()["session_id"]
         renamed = client.patch(
             f"/api/sessions/{empty}",
-            json={"title": "Named work", "expected_metadata_hash":
-                  client.get(f"/api/sessions/{empty}").json()["metadata_hash"]},
+            json={
+                "title": "Named work",
+                "expected_metadata_hash": client.get(f"/api/sessions/{empty}").json()[
+                    "metadata_hash"
+                ],
+            },
             headers={"Idempotency-Key": "rename"},
         )
         assert renamed.status_code == 200
@@ -124,26 +140,48 @@ def test_http_session_metadata_archive_and_delete(isolated_workspace):
         )
         assert archived.json()["archived"] is True
         assert client.get(f"/api/workspaces/{workspace_id}/sessions").json() == []
-        assert len(
-            [s for s in client.get(
-                f"/api/workspaces/{workspace_id}/sessions?include_archived=true"
-            ).json() if not s["managed"]]
-        ) == 1
-        assert client.request("DELETE", f"/api/sessions/{empty}",
-                              json={"expected_metadata_hash": archived.json()["metadata_hash"]},
-                              headers={"Idempotency-Key": "delete-empty"}).status_code == 200
+        assert (
+            len(
+                [
+                    s
+                    for s in client.get(
+                        f"/api/workspaces/{workspace_id}/sessions?include_archived=true"
+                    ).json()
+                    if not s["managed"]
+                ]
+            )
+            == 1
+        )
+        assert (
+            client.request(
+                "DELETE",
+                f"/api/sessions/{empty}",
+                json={"expected_metadata_hash": archived.json()["metadata_hash"]},
+                headers={"Idempotency-Key": "delete-empty"},
+            ).status_code
+            == 200
+        )
 
         history = client.post(
-            "/api/sessions", json={"workspace_id": workspace_id}
+            "/api/sessions",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+            json={"workspace_id": workspace_id},
         ).json()["session_id"]
-        accepted = client.post(
-            f"/api/sessions/{history}/runs", json={"prompt": "work"}
-        )
+        accepted = client.post(f"/api/sessions/{history}/runs", json={"prompt": "work"})
         wait_for_run(client, accepted.json()["run_id"])
-        assert client.request("DELETE", f"/api/sessions/{history}",
-                              json={"expected_metadata_hash":
-                                    client.get(f"/api/sessions/{history}").json()["metadata_hash"]},
-                              headers={"Idempotency-Key": "delete-history"}).status_code == 409
+        assert (
+            client.request(
+                "DELETE",
+                f"/api/sessions/{history}",
+                json={
+                    "expected_metadata_hash": client.get(f"/api/sessions/{history}").json()[
+                        "metadata_hash"
+                    ]
+                },
+                headers={"Idempotency-Key": "delete-history"},
+            ).status_code
+            == 409
+        )
 
 
 def test_http_session_working_directory_scopes_execution(isolated_workspace):
@@ -169,28 +207,24 @@ def test_http_session_working_directory_scopes_execution(isolated_workspace):
         workspace_id = host.default_workspace.workspace_id
         created = client.post(
             "/api/sessions",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
             json={"workspace_id": workspace_id, "working_directory": "package"},
         )
         assert created.status_code == 201
         session = created.json()["session_id"]
-        assert client.get(f"/api/sessions/{session}").json()["working_directory"] == str(
-            package
-        )
-        accepted = client.post(
-            f"/api/sessions/{session}/runs", json={"prompt": "read marker"}
-        )
+        assert client.get(f"/api/sessions/{session}").json()["working_directory"] == str(package)
+        accepted = client.post(f"/api/sessions/{session}/runs", json={"prompt": "read marker"})
         run_id = accepted.json()["run_id"]
         assert wait_for_run(client, run_id)["status"] == "completed"
         result = next(
-            event
-            for event in host.store.run_events(run_id)
-            if event["type"] == "tool.completed"
+            event for event in host.store.run_events(run_id) if event["type"] == "tool.completed"
         )
         assert result["payload"]["content"] == "from package"
         assert f"Working directory: {package}" in provider.requests[0].system
         assert (
             client.post(
                 "/api/sessions",
+                headers={"Idempotency-Key": uuid.uuid4().hex},
                 json={"workspace_id": workspace_id, "working_directory": ".."},
             ).status_code
             == 422

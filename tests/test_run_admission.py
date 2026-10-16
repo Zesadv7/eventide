@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import threading
+import uuid
 from dataclasses import replace
 
 import pytest
@@ -233,7 +234,9 @@ def test_http_202_has_durable_history_and_immediate_stop(isolated_workspace, mon
     monkeypatch.setattr(host, "_execute", held_execution)
     try:
         with TestClient(create_app(host)) as client:
-            session = client.post("/api/sessions").json()["session_id"]
+            session = client.post(
+                "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+            ).json()["session_id"]
             accepted = client.post(
                 f"/api/sessions/{session}/runs", json={"prompt": "HTTP durable goal"}
             )
@@ -261,7 +264,9 @@ def test_event_references_protect_attachments_when_used_cache_is_missing(
     host = host_for(isolated_workspace, ScriptedProvider([{"text": "done"}]))
     monkeypatch.setattr(attachments, "mark_attachments_used", lambda *args: None)
     with TestClient(create_app(host)) as client:
-        session = client.post("/api/sessions").json()["session_id"]
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
         uploaded = client.post(
             f"/api/sessions/{session}/attachments",
             json={

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import uuid
 
 import httpx
 import pytest
@@ -71,7 +72,9 @@ def test_stale_configuration_and_key_reuse_are_distinct(isolated_workspace, path
     host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(host)) as client:
         if path == "session":
-            sid = client.post("/api/sessions").json()["session_id"]
+            sid = client.post(
+                "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+            ).json()["session_id"]
             path = f"/api/sessions/{sid}/generation"
         body = provider_body(client) if path == URL else generation_body(client, path)
         assert write(client, path, body).status_code == 200
@@ -117,7 +120,9 @@ def test_transport_close_failure_keeps_config_and_blocks_reuse(isolated_workspac
         assert host.settings is before and host.store.get_provider_config() is None
         assert host.provider is transport
         assert client.get(URL).json()["client_status"] == "cleanup_required"
-        sid = client.post("/api/sessions").json()["session_id"]
+        sid = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
+            "session_id"
+        ]
         assert client.post(f"/api/sessions/{sid}/runs", json={"prompt": "wait"}).status_code == 409
         recovered = write(client, URL, provider_body(client), "explicit-recovery")
         assert recovered.status_code == 200 and transport.calls == 2
@@ -187,7 +192,9 @@ def test_completion_append_failure_rolls_back_provider_and_generation(
 def test_generation_receipts_preserve_unset_null_and_empty_session_deletion(isolated_workspace):
     host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(host)) as client:
-        sid = client.post("/api/sessions").json()["session_id"]
+        sid = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
+            "session_id"
+        ]
         path = f"/api/sessions/{sid}/generation"
         body = generation_body(client, path, generation={})
         response = write(client, path, body)
@@ -196,12 +203,19 @@ def test_generation_receipts_preserve_unset_null_and_empty_session_deletion(isol
         assert conflict.status_code == 409 and "different content" in conflict.text
         assert host.store.session_events(sid) == []
         assert host.is_control_session("configuration_control")
-        assert client.request(
-            "DELETE", f"/api/sessions/{sid}",
-            json={"expected_metadata_hash":
-                  client.get(f"/api/sessions/{sid}").json()["metadata_hash"]},
-            headers={"Idempotency-Key": "delete-empty"},
-        ).status_code == 200
+        assert (
+            client.request(
+                "DELETE",
+                f"/api/sessions/{sid}",
+                json={
+                    "expected_metadata_hash": client.get(f"/api/sessions/{sid}").json()[
+                        "metadata_hash"
+                    ]
+                },
+                headers={"Idempotency-Key": "delete-empty"},
+            ).status_code
+            == 200
+        )
         host.create_session(sid)
         assert host.generation_settings("test-model", sid)["session"] == {}
         assert write(client, path, body).status_code == 409
@@ -212,16 +226,25 @@ def test_generation_receipts_preserve_unset_null_and_empty_session_deletion(isol
 def test_generation_saved_session_identity_does_not_survive_recreation(isolated_workspace):
     host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([]))
     with TestClient(create_app(host)) as client:
-        sid = client.post("/api/sessions").json()["session_id"]
+        sid = client.post("/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}).json()[
+            "session_id"
+        ]
         path = f"/api/sessions/{sid}/generation"
         body = generation_body(client, path)
         assert write(client, path, body).json()["session"] == {"max_output_tokens": 128}
-        assert client.request(
-            "DELETE", f"/api/sessions/{sid}",
-            json={"expected_metadata_hash":
-                  client.get(f"/api/sessions/{sid}").json()["metadata_hash"]},
-            headers={"Idempotency-Key": "delete-empty"},
-        ).status_code == 200
+        assert (
+            client.request(
+                "DELETE",
+                f"/api/sessions/{sid}",
+                json={
+                    "expected_metadata_hash": client.get(f"/api/sessions/{sid}").json()[
+                        "metadata_hash"
+                    ]
+                },
+                headers={"Idempotency-Key": "delete-empty"},
+            ).status_code
+            == 200
+        )
         host.create_session(sid)
         assert host.generation_settings("test-model", sid)["session"] == {}
 

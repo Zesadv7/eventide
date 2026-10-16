@@ -13,6 +13,7 @@ test("real run history: archived evidence, exact JSONL and reload without replac
       await (await page.request.get("/api/workspaces")).json()
     )[0].workspace_id;
     const historical = await page.request.post("/api/sessions", {
+      headers: { "Idempotency-Key": crypto.randomUUID() },
       data: { workspace_id: workspace },
     });
     expect(historical.ok()).toBe(true);

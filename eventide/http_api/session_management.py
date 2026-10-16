@@ -60,3 +60,34 @@ def mutate_session(
             503,
             "Session mutation outcome is unknown; retry the original identity",
         ) from None
+
+
+def create_session(
+    host: RuntimeHost,
+    request: Request,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    mutation_key(request)
+    owner = host.configuration_owner()
+    receipt = begin_mutation(host, request, owner, "session_create", body)
+    if receipt.result is not None:
+        return receipt.result
+    try:
+        identity = host.create_session(
+            workspace_id=body.get("workspace_id"),
+            working_directory=body.get("working_directory"),
+            _mutation=(owner, receipt.identity),
+        )
+        return {"session_id": identity}
+    except (ValueError, OSError) as exc:
+        message = str(exc)
+        code = 404 if message.startswith("Workspace not found") else 422
+        fail_mutation(host, receipt, message, code, rejected=True)
+        raise HTTPException(
+            code, message, headers={"X-Eventide-Mutation-Outcome": "rejected"}
+        ) from exc
+    except Exception:
+        raise HTTPException(
+            503,
+            "Session creation outcome is unknown; retry the original identity",
+        ) from None

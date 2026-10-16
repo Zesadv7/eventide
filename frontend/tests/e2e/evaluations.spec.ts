@@ -111,6 +111,7 @@ test("real evaluation scheduler: queued zero-case cancellation and running clean
       const session = (
         await (
           await page.request.post("/api/sessions", {
+            headers: { "Idempotency-Key": crypto.randomUUID() },
             data: { workspace_id: workspace },
           })
         ).json()
