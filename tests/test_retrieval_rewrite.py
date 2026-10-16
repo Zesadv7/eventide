@@ -74,6 +74,22 @@ async def test_invalid_rewrite_never_dispatches_supplement_or_tools(tmp_path, re
     assert "doc.txt" in outputs[0]
 
 
+@pytest.mark.parametrize("stop_reason", ["length", "max_tokens", "max_output_tokens", "incomplete"])
+async def test_all_provider_truncation_reasons_preserve_usage_without_supplement(
+    tmp_path, stop_reason,
+):
+    result, events, ledger, requests = await run_script(tmp_path, {
+        "text": "credentials", "stop_reason": stop_reason,
+        "usage": {"input_tokens": 7, "output_tokens": 2},
+    })
+    assert result.status == "completed" and len(requests) == 4
+    assert not any(e["type"] == "retrieval.supplement_requested" for e in events)
+    assert ledger["reported_totals"] == {"input_tokens": 14, "output_tokens": 5}
+    assert ledger["unknown_attempts"] == 0
+    assert any(e["type"] == "retrieval.rewrite_finished" and e["payload"]["status"]
+               == "rewrite_invalid_or_unchanged" for e in events)
+
+
 async def test_retryable_failure_consumes_single_attempt_and_keeps_unknown_usage(tmp_path):
     result, events, ledger, requests = await run_script(tmp_path, {
         "error": "temporary unavailable", "retryable": True,

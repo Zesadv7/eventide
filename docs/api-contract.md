@@ -501,3 +501,5 @@ profile参与quote_hash，确认后变更preset或内容需重新读取规划。
 报告provenance.profile记录固定输入；逐题evidence.runs[].skill_snapshot记录选中目录，
 loaded_skills仅来自实际skill.loaded事件，可以为空。profile不把正文放入HTTP规划，
 也不添加工具调用、消费或完成证据。队列等待和刷新不改变固定内容。
+
+Python可选引用提取只增加retrieval.answer_result可读事件，不新增产品请求路由。结果报告的result_missing区分已开始却缺少结果事实，unattempted仅指确认未开始；权威读取覆盖未知时对应计数和remaining为null并标evidence.read_errors。Token/费用仍来自同一Host模型尝试，不能把两臂投影再次累计。

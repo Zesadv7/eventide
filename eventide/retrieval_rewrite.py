@@ -104,7 +104,9 @@ async def query_rewrite_outcome(
         )
         rewritten = response.text.strip()
         if (response.tool_calls
-                or response.stop_reason in {"length", "max_tokens", "incomplete"}
+                or response.stop_reason in {
+                    "length", "max_tokens", "max_output_tokens", "incomplete",
+                }
                 or not rewritten or len(rewritten) > 512 or "\n" in rewritten
                 or rewritten == query.strip()):
             reason = "rewrite_invalid_or_unchanged"

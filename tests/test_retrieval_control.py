@@ -55,6 +55,7 @@ async def test_all_forty_queries_use_distinct_control_roots_and_one_attempt(tmp_
     try:
         report = await benchmark(host, split="all", output_path=tmp_path / "report.json")
         assert report["status"] == "completed"
+        assert report["downstream"] == {"enabled": False}
         assert report["comparisons"]["query_rewrite"]["total"] == 40
         assert report["comparisons"]["original"]["total"] == 40
         assert len(report["evidence"]["run_ids"]) == 40
@@ -558,7 +559,7 @@ async def test_original_retrieval_failure_is_attempted_failed_query_not_unattemp
         for comparison in report["comparisons"].values():
             assert comparison["failed"] == comparison["total"] == 1
             assert comparison["unattempted"] == 19
-            assert comparison["results"][0]["ranking"]["results"] == ()
+            assert not comparison["results"][0]["ranking"]["results"]
         assert host.provider.requests == []
         assert "private local" not in json.dumps(report)
     finally:
@@ -590,5 +591,148 @@ async def test_cancel_queued_benchmark_exports_all_queries_unattempted(tmp_path)
             assert comparison["recall_at_5"] is None
             assert comparison["unattempted"] == 20
         assert not report["promotion"]["promote"]
+    finally:
+        await host.close()
+
+
+@pytest.mark.parametrize("after_commit", [False, True])
+async def test_result_append_failure_never_hides_actual_usage_or_marks_started_query_unattempted(
+    tmp_path,
+    monkeypatch,
+    after_commit,
+):
+    host = host_for(tmp_path)
+    host.provider = ScriptedProvider(
+        [
+            {
+                "text": "credentials validation lifecycle",
+                "usage": {
+                    "input_tokens": 3,
+                    "output_tokens": 2,
+                },
+            }
+        ]
+    )
+    append = host.store.append_event
+
+    def failed(run, kind, payload, *args, **kwargs):
+        if kind == "retrieval.benchmark_result":
+            if after_commit:
+                append(run, kind, payload, *args, **kwargs)
+            raise OSError("result receipt failed")
+        return append(run, kind, payload, *args, **kwargs)
+
+    monkeypatch.setattr(host.store, "append_event", failed)
+    try:
+        report = await benchmark(host)
+        assert report["status"] == "aborted"
+        assert report["evidence"]["usage"]["attempt_count"] == len(host.provider.requests) == 1
+        assert report["evidence"]["usage"]["reported_totals"] == {
+            "input_tokens": 3,
+            "output_tokens": 2,
+        }
+        assert report["comparisons"]["query_rewrite"]["result_missing"] == (
+            0 if after_commit else 1
+        )
+        assert report["comparisons"]["query_rewrite"]["total"] == (1 if after_commit else 0)
+        assert report["comparisons"]["query_rewrite"]["unattempted"] == 19
+        assert len(report["remaining"]) == 19
+        run = report["evidence"]["run_ids"][0]
+        assert host.store.get_run(run)["status"] == "failed"
+        assert host.store.run_events(run)[-1]["type"] == "run.failed"
+        assert not report["evidence"]["read_errors"]
+    finally:
+        await host.close()
+
+
+@pytest.mark.parametrize("answer_comparison", [False, True])
+async def test_canonical_read_failure_is_unknown_not_complete_zero_attempts(
+    tmp_path,
+    monkeypatch,
+    answer_comparison,
+):
+    host = host_for(tmp_path)
+    host.provider = ScriptedProvider(
+        [
+            {
+                "text": "credentials validation lifecycle",
+                "usage": {
+                    "input_tokens": 3,
+                    "output_tokens": 2,
+                },
+            }
+        ]
+    )
+    if answer_comparison:
+        from tests.test_retrieval_answers import AnswerProvider
+
+        host.provider = AnswerProvider()
+    append = host.store.append_event
+    read = host.store.run_events
+    blocked = set()
+
+    def written(run, kind, payload, *args, **kwargs):
+        result = append(run, kind, payload, *args, **kwargs)
+        if kind == "retrieval.benchmark_result":
+            blocked.add(run)
+        return result
+
+    def failed_read(run):
+        if run in blocked:
+            raise OSError("canonical snapshot unavailable")
+        return read(run)
+
+    monkeypatch.setattr(host.store, "append_event", written)
+    monkeypatch.setattr(host.store, "run_events", failed_read)
+    try:
+        report = await benchmark(host, answer_comparison=answer_comparison)
+        usage = report["evidence"]["usage"]
+        assert report["status"] == "aborted"
+        assert len(host.provider.requests) == (3 if answer_comparison else 1)
+        assert not usage["complete"] and usage["attempt_count"] is None
+        assert usage["unknown_attempts"] is None
+        assert report["remaining"] is None
+        assert report["comparisons"]["query_rewrite"]["unattempted"] is None
+        assert report["evidence"]["read_errors"]
+        assert not report["promotion"]["promote"]
+        if answer_comparison:
+            for arm in report["downstream"]["arms"].values():
+                assert arm["pipeline_usage"]["attempt_count"] is None
+                assert arm["pipeline_usage"]["unknown_attempts"] is None
+                assert arm["pipeline_costs"]["unknown_attempts"] is None
+    finally:
+        blocked.clear()
+        await host.close()
+
+
+async def test_session_cost_read_failure_retains_already_read_model_attempts(tmp_path, monkeypatch):
+    host = host_for(tmp_path)
+    host.provider = ScriptedProvider(
+        [
+            {
+                "text": "credentials validation lifecycle",
+                "usage": {
+                    "input_tokens": 3,
+                    "output_tokens": 2,
+                },
+            }
+        ]
+    )
+    read = host.store.facts_by_type
+
+    def failed(kinds):
+        if kinds == ("cost.estimated",):
+            raise OSError("Session cost snapshot unavailable")
+        return read(kinds)
+
+    monkeypatch.setattr(host.store, "facts_by_type", failed)
+    try:
+        report = await benchmark(host)
+        usage = report["evidence"]["usage"]
+        assert report["status"] == "aborted" and len(host.provider.requests) == 1
+        assert usage["attempt_count"] == 1 and not usage["complete"]
+        assert usage["reported_totals"] == {"input_tokens": 3, "output_tokens": 2}
+        assert len(report["remaining"]) == 19
+        assert report["evidence"]["read_errors"]
     finally:
         await host.close()
