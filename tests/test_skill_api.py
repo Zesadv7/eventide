@@ -112,6 +112,7 @@ def test_upload_diagnostics_bundled_and_origin_boundary(isolated_workspace):
         assert preview.json()["diagnostics"]
         response = client.post(route + "/import", json=body, headers=key())
         assert response.status_code == 422
+        assert response.headers["X-Eventide-Mutation-Outcome"] == "rejected"
         assert client.post(route + "/import", json=body, headers=key()).json() == response.json()
         assert len(client.get("/api/skills/bundled").json()) == 3
         assert (
@@ -268,3 +269,46 @@ def test_invalid_mutation_keys_are_rejected(isolated_workspace, bad):
         )
         assert response.status_code == 422
         assert not host.skills.installed()
+
+
+@pytest.mark.parametrize("scope", ["user", "project"])
+@pytest.mark.parametrize("failure", ["installation_fact", "success_receipt"])
+def test_published_import_failure_stays_unknown_without_republishing(
+    isolated_workspace, monkeypatch, scope, failure,
+):
+    settings = settings_for(isolated_workspace)
+    host = RuntimeHost(settings, ScriptedProvider([]))
+    workspace = host.default_workspace.workspace_id
+    route = f"/api/workspaces/{workspace}/skills/import"
+    body = {"bundled": "code-review", "scope": scope}
+    with TestClient(create_app(host)) as client:
+        original = host.store.append_fact
+        publications = []
+        def append(owner, kind, *args, **kwargs):
+            if kind in {"skill.installed", "skill.project_imported"}:
+                publications.append(kind)
+                if failure == "installation_fact":
+                    raise OSError("post-publication installation fact failed")
+            if kind == "http.mutation_completed" and failure == "success_receipt":
+                raise ValueError("post-publication receipt failed")
+            return original(owner, kind, *args, **kwargs)
+        monkeypatch.setattr(host.store, "append_fact", append)
+        response = client.post(route, json=body, headers=key("publication"))
+        assert response.status_code == 503
+        assert response.headers.get("X-Eventide-Mutation-Outcome") is None
+        assert "unknown" in response.json()["detail"]
+        if scope == "project":
+            assert (isolated_workspace / "skills/code-review/SKILL.md").is_file()
+        else:
+            assert list((host.skills.packages.root / "code-review").glob("*/SKILL.md"))
+        assert client.post(route, json=body, headers=key("publication")).status_code == 409
+        assert len(publications) == 1
+        events = host.store.session_events(host._skill_owner(workspace))
+        assert not any(e["type"] == "http.mutation_failed" for e in events)
+        assert host.provider.requests == []
+    monkeypatch.undo()
+    reopened = RuntimeHost(settings, ScriptedProvider([]))
+    with TestClient(create_app(reopened)) as client:
+        response = client.post(route, json=body, headers=key("publication"))
+        assert response.status_code == 409 and "unknown" in response.json()["detail"]
+        assert reopened.provider.requests == []

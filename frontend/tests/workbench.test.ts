@@ -100,6 +100,53 @@ describe("request identity and UI isolation", () => {
     ).rejects.toThrow("上次接收结果");
     expect(api.submit).toHaveBeenCalledTimes(1);
   });
+  it("retains an unmarked conflict across refresh and only clears an explicit refusal", async () => {
+    const submit = vi
+      .spyOn(api, "submit")
+      .mockRejectedValueOnce(new ApiError(409, "接收结果未知"))
+      .mockRejectedValueOnce(new ApiError(409, "明确未接收", "rejected"))
+      .mockResolvedValue({
+        run_id: "accepted",
+        session_id: session.session_id,
+        status: "accepted",
+      });
+    let store = useWorkbench();
+    store.selectedSession = session.session_id;
+    await expect(store.submit(input)).rejects.toThrow("接收结果未知");
+    const original = store.pending[session.session_id]!.key;
+    setActivePinia(createPinia());
+    store = useWorkbench();
+    store.selectedSession = session.session_id;
+    await expect(store.retryPending()).rejects.toThrow("明确未接收");
+    expect(submit.mock.calls[1]![2]).toBe(original);
+    expect(store.pending[session.session_id]).toBeUndefined();
+    await store.submit(input);
+    expect(submit.mock.calls[2]![2]).not.toBe(original);
+  });
+  it("keeps Continue identity after an unknown result and refresh, but clears a refusal", async () => {
+    const resume = vi
+      .spyOn(api, "continue")
+      .mockRejectedValueOnce(new ApiError(503, "接收结果未知"))
+      .mockRejectedValueOnce(new ApiError(409, "源码变化，未接收", "rejected"))
+      .mockResolvedValue({
+        run_id: "continued",
+        session_id: session.session_id,
+        status: "accepted",
+      });
+    let store = useWorkbench();
+    store.selectedSession = session.session_id;
+    await expect(store.continueRun()).rejects.toThrow("接收结果未知");
+    const storage = `eventide.continue.${session.session_id}`;
+    const original = JSON.parse(sessionStorage.getItem(storage)!);
+    setActivePinia(createPinia());
+    store = useWorkbench();
+    store.selectedSession = session.session_id;
+    await expect(store.continueRun()).rejects.toThrow("未接收");
+    expect(resume.mock.calls[1]![1]).toBe(original);
+    expect(sessionStorage.getItem(storage)).toBeNull();
+    await store.continueRun();
+    expect(resume.mock.calls[2]![1]).not.toBe(original);
+  });
   it("persists separate drafts without storing provider secrets", () => {
     const store = useWorkbench();
     store.provider = provider;

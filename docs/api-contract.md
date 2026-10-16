@@ -463,3 +463,5 @@ Run、Continue、cancel、approvals、abandon全部要求本机来源和Idempote
 `POST /api/sessions/{id}/abandon`严格正文为`{expected_run_id: <页面看到的中断Run>}`；接收前及Host执行锁内再次检查，过期身份409，不处理后来产生的中断任务。审批approved必须为JSON布尔值，拒绝字符串/数值；审批结果仅针对指定Run/approval。重复成功回放只确认原决定，不表示最新Run仍处于原状态，应再次查询。
 
 生成参数capabilities增加向后兼容字段：`thinking_modes`（默认enabled/disabled，仍受thinking开关限制）、`top_p_min`（默认0）、`sampling_precision`（默认null）、`max_output_tokens`（默认null）。已确认GLM-5.3-Flash Chat端点返回仅enabled、top_p下限0.01、两位小数、输出上限131072；非法值接收前422，不静默修正。已有存量能力声明不补造新约束。
+
+Run／Continue接收补充：已经存在canonical接收身份时，后续附件缓存或派发故障仍返回202和该run_id/session_id；accepted不表示执行成功，需查询Run终态。未创建Run的已知前置拒绝附`X-Eventide-Mutation-Outcome: rejected`，未分类故障返回503、保留原键。客户端不得将未标记409当作允许重发的新意图。Skill导入预检错误可明确拒绝；进入实际发布或成功回执阶段后失败返回503，不附rejected，原键后续返回409未知且不重新发布。

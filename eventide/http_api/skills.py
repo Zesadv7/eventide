@@ -11,7 +11,12 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eventide.http_api.context import ApiContext, require_local_request
-from eventide.http_control import begin_mutation, fail_mutation, finish_mutation
+from eventide.http_control import (
+    MUTATION_OUTCOME_HEADER,
+    begin_mutation,
+    fail_mutation,
+    finish_mutation,
+)
 from eventide.skills import bundled_skill_directories
 from eventide.workspace import digest
 
@@ -109,15 +114,41 @@ def create_router(context: ApiContext) -> APIRouter:
             return receipt.result
         try:
             source, zipped = body.source()
-            result = await runtime.import_skill(
-                workspace_id, source, zipped=zipped, scope=body.scope,
-                expected_version=body.expected_version,
-            )
+            # Reject only during this read-only preflight. The actual import can
+            # publish a directory before its canonical installation fact commits.
+            preview = await runtime.preview_skill(source, zipped=zipped)
+            if not preview["valid"]:
+                raise ValueError("; ".join(d["message"] for d in preview["diagnostics"]))
+            if body.expected_version is not None and preview["version"] != body.expected_version:
+                raise ValueError("Skill changed since preview; review it again")
+            if body.scope == "project":
+                if runtime.workspace_busy(workspace_id):
+                    raise ValueError("Workspace is busy")
+                root = Path(runtime.store.get_workspace(workspace_id).path) / "skills"
+                if root.is_symlink():
+                    raise ValueError("Project skills directory cannot be a symlink")
+                target = root / preview["name"]
+                if target.exists() or target.is_symlink():
+                    raise ValueError("Project Skill already exists; manage updates with Git")
         except (ValueError, OSError) as exc:
             code = 409 if "busy" in str(exc) or "already exists" in str(exc) else 422
-            fail_mutation(runtime, receipt, str(exc), code)
-            raise HTTPException(code, str(exc)) from exc
-        return finish_mutation(runtime, receipt, result)
+            fail_mutation(runtime, receipt, str(exc), code, rejected=True)
+            raise HTTPException(
+                code, str(exc), headers={MUTATION_OUTCOME_HEADER: "rejected"},
+            ) from exc
+        try:
+            result = await runtime.import_skill(
+                workspace_id, source, zipped=zipped, scope=body.scope,
+                expected_version=preview["version"],
+            )
+            return finish_mutation(runtime, receipt, result)
+        except Exception:
+            # Keep the started receipt. A retry may inspect it but cannot publish
+            # again, including after cancellation, restart or a lost success reply.
+            raise HTTPException(
+                503, "Skill import outcome is unknown; "
+                "inspect Skills and retain the original request",
+            ) from None
 
     @router.put("/api/workspaces/{workspace_id}/skills/configuration")
     async def configure(

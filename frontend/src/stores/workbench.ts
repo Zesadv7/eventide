@@ -302,9 +302,8 @@ export const useWorkbench = defineStore("workbench", () => {
     } catch (reason) {
       if (
         reason instanceof ApiError &&
-        reason.status >= 400 &&
-        reason.status < 500 &&
-        reason.status !== 408
+        ([403, 404, 422].includes(reason.status) ||
+          reason.mutationOutcome === "rejected")
       ) {
         delete pending.value[session];
         persistPending();
@@ -323,10 +322,20 @@ export const useWorkbench = defineStore("workbench", () => {
     const key =
       stored<string>(`eventide.continue.${session}`, "") || crypto.randomUUID();
     sessionStorage.setItem(`eventide.continue.${session}`, JSON.stringify(key));
-    const receipt = await api.continue(session, key);
-    sessionStorage.removeItem(`eventide.continue.${session}`);
-    await refreshSession(session);
-    return receipt;
+    try {
+      const receipt = await api.continue(session, key);
+      sessionStorage.removeItem(`eventide.continue.${session}`);
+      await refreshSession(session);
+      return receipt;
+    } catch (reason) {
+      if (
+        reason instanceof ApiError &&
+        ([403, 404, 422].includes(reason.status) ||
+          reason.mutationOutcome === "rejected")
+      )
+        sessionStorage.removeItem(`eventide.continue.${session}`);
+      throw reason;
+    }
   }
   async function cancel() {
     if (currentRun.value) {

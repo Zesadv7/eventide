@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.run_mutations import mutate_run_action
 from eventide.http_api.schemas import AbandonBody, ApprovalBody, RunBody
-from eventide.http_control import mutation_key, run_receipt
+from eventide.http_control import MUTATION_OUTCOME_HEADER, mutation_key, run_receipt
 from eventide.models import RunRequest
 from eventide.scheduler import QueueFull
 from eventide.usage import build_usage_ledger
@@ -21,6 +21,24 @@ def create_router(context: ApiContext) -> APIRouter:
     agent_runtime = context.runtime
     get_session = context.get_session
     broker = context.approvals
+
+    def admission_error(run_id: str, exc: Exception) -> HTTPException | None:
+        # Admission can commit before a cache write or dispatch registration fails.
+        # The durable identity is still the receipt; never describe it as rejected.
+        if agent_runtime.store.get_run_identity(run_id) is not None:
+            return None
+        if isinstance(exc, QueueFull):
+            code = 429
+        elif isinstance(exc, (ValueError, OSError)):
+            code = 409 if any(word in str(exc) for word in (
+                "busy", "parked", "configuration",
+            )) else 422
+        else:
+            return HTTPException(
+                503, "Run admission outcome is unknown; retain the original request",
+            )
+        return HTTPException(code, str(exc), headers={MUTATION_OUTCOME_HEADER: "rejected"})
+
     @router.get("/api/sessions/{session_id}/runs")
     async def list_runs(
         session_id: str,
@@ -53,10 +71,14 @@ def create_router(context: ApiContext) -> APIRouter:
                 **({"request_fingerprint": receipt.fingerprint} if receipt.fingerprint else {}),
             )
             agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
-        except QueueFull as exc:
-            raise HTTPException(status_code=429, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            error = admission_error(run_id, exc)
+            if error is not None:
+                # Continue preconditions have always been a conflict, not an
+                # ordinary new-Run parameter validation error.
+                if error.status_code == 422:
+                    error.status_code = 409
+                raise error from exc
         return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
 
     @router.post("/api/sessions/{session_id}/abandon")
@@ -97,7 +119,9 @@ def create_router(context: ApiContext) -> APIRouter:
         if receipt.existing:
             return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
         if record["status"] == "parked":
-            raise HTTPException(status_code=409, detail="Session is parked")
+            raise HTTPException(
+                409, "Session is parked", headers={MUTATION_OUTCOME_HEADER: "rejected"},
+            )
         run_id = receipt.run_id
         try:
             await agent_runtime.admit_run(
@@ -115,15 +139,10 @@ def create_router(context: ApiContext) -> APIRouter:
                 )
             )
             agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
-        except QueueFull as exc:
-            raise HTTPException(status_code=429, detail=str(exc)) from exc
-        except (ValueError, OSError) as exc:
-            code = (
-                409
-                if any(word in str(exc) for word in ("busy", "parked", "configuration"))
-                else 422
-            )
-            raise HTTPException(status_code=code, detail=str(exc)) from exc
+        except Exception as exc:
+            error = admission_error(run_id, exc)
+            if error is not None:
+                raise error from exc
         return {"run_id": run_id, "session_id": session_id, "status": "accepted"}
 
     @router.get("/api/runs/{run_id}")
