@@ -30,16 +30,9 @@ def make_repo(path: Path) -> Path:
     path.mkdir()
     for args in (
         ["init"],
-        [
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.invalid",
-            "commit",
-            "--allow-empty",
-            "-m",
-            "initial",
-        ],
+        ["config", "user.name", "Test"],
+        ["config", "user.email", "test@example.invalid"],
+        ["commit", "--allow-empty", "-m", "initial"],
     ):
         subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
     return path
