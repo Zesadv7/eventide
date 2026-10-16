@@ -6,12 +6,41 @@ Eventide 是以 Web 为唯一用户操作入口的软件工程 Agent 工作台�
 
 后端使用 Python、asyncio、FastAPI 和 Pydantic 2；前端使用 Vue 3、TypeScript、Vite、Router 和 Pinia。单服务进程支持持久任务队列、流式预览、权限审批、Token 与费用治理。实现进度和验收证据以 [AGENTS.md](AGENTS.md) 为准；真实模型效果与离线机制验证分开报告。
 
+## 当前版本：0.4.0
+
+主流程：**添加项目 → 配置模型与 Skills → 创建对话 → 检索与隔离修改 → 独立验收 → 查看补丁 → 人工采纳**。
+
+| 核心能力 | 当前实现 |
+|---|---|
+| Web 工作台 | 项目、多会话、模型设置、审批、历史与 SSE 流式预览 |
+| Agent 执行 | 自有 RuntimeHost、工具契约、权限策略、追加式事件和重启恢复 |
+| 同项目并发 | 只读快照、会话独立 Git worktree、持久队列与共享模型额度 |
+| Skills / MCP | 本地目录与 ZIP 导入、版本固定、按需加载、受控脚本和官方 MCP SDK |
+| 代码检索 | 增量 FTS5 / RRF，可选本地语义检索、重排与查询改写 |
+| 修复交付 | 最多三轮候选、固定独立验收、补丁与源码复核、人工采纳 |
+
+最近一次验证结果如下；详细实验条件和失败保留在[追加质量改进验证](#追加质量改进验证)。
+
+| 验证范围 | 结果 |
+|---|---|
+| 后端离线门禁 | 1,820 项通过，10 项可选路径跳过；语句覆盖率 93.65% |
+| 前端与浏览器 | 128 项前端测试、24 条浏览器检查；浏览器使用真实 API 和假 Provider |
+| 容器与分发 | 54 项真实 Docker 测试，wheel 及镜像资源、启动与恢复验证通过 |
+| GLM 冻结任务回归 | 20 题各三次，共 42/60 通过；理解、定位与修复任务合计 |
+| 新独立理解 / 定位任务 | 8 题各三次，共 22/24 通过，单独报告 |
+
+当前面向本机、单用户使用。模型仍会出现事实和引用错误，复杂修复可能触及预算或失败；worktree 不提供操作系统沙箱。尚无已证实的 Token 或费用改善，不将离线测试通过当作模型任务成功率。
+
+文档入口：[页面操作](#页面操作) · [修复交付](#修复交付) · [容器部署](#容器部署) · [架构](docs/architecture.md) · [API 契约](docs/api-contract.md) · [设计决策](docs/decisions.md)。
+
 ## 安装与启动
 
 需要 Python 3.10 以上，推荐 [uv](https://docs.astral.sh/uv/)：
 
 ```bash
-uv sync --locked --extra dev
+git clone https://github.com/Zesadv7/eventide.git
+cd eventide
+uv sync --locked
 uv run eventide-server --host 127.0.0.1 --port 8000
 ```
 
@@ -132,7 +161,7 @@ GLM-5.3-Flash 生成设置：`openai_compatible` 在官方普通与 Coding Plan 
 
 GLM补验使用low推理、温度1、输出上限8,000：普通响应及只读文件工具均完成，共3次请求、输入2,746/输出49 Token、缓存读取832（输入子集），未知用量0。保留思考上下文供工具后续响应使用；未修改用户项目。以上为连通和协议验证，冻结开发集效果另行报告。
 
-2026-10-16完整GLM开发集单次为7/12，72次真实请求，reported输入115,783/输出3,943 Token，费用未知。先前3批中断实验另保留16次请求、已报告输入15,709/输出516及3次unknown；这些失败和未知消费不从总成本中抹去。开发集结果不等于候选每题三次或留出集验收，B3/U5继续执行。
+2026-10-16首次完整GLM开发集单次为7/12，72次真实请求，reported输入115,783/输出3,943 Token，费用未知。先前3批中断实验另保留16次请求、已报告输入15,709/输出516及3次unknown；这些失败和未知消费不从总成本中抹去。这是历史开发基线，后续完整重复及追加质量回归见文末，不用该单次结果替代最终验收。
 
 ## 历史与开发接口
 
@@ -178,6 +207,7 @@ uv run python tests/container_smoke.py --image eventide:validation
 帮助、导入模块和默认离线门禁不需要API Key或模型网络：
 
 ```bash
+uv sync --locked --extra dev
 uv run python -m eventide --help
 uv run python tests/check_service.py
 uv run pytest -q --cov=eventide --cov-fail-under=85
