@@ -152,6 +152,7 @@ uv run eventide eval evals/smoke.yaml
 
 ## 用量、预算与实验细则
 
+- 2026-10-16 U1/U2 远程embedding异步派发底座已实现：共享模型槽、显式单次SDK调用、输入用量归一化、预算拒绝及重复取消等待请求/客户端清理；54项派发/账本专项、Ruff/Mypy91通过。仍待检索Host接线，不标整体完成。F2历史页集成补验：78项前端回归、构建/类型/格式、1条真实API历史旅程及3项分发检查通过，静态产物同步。
 - 2026-10-16 U1/U2 补充底座已验收：embedding预留固定input_only，Provider输入/缺失输出、预算结算及价格口径一致，未知/估算不释放；198项相关离线回归、Ruff/Mypy90通过。README/architecture/api-contract同步；远程embedding派发仍待C，不标整体完成。
 - 每次真实请求尝试独立记账；主Agent/摘要/worker/查询改写/embedding分类。成功响应使用供应商usage；请求失败、取消或断流无usage保持未知。
 - cache/read/write/reasoning细项按供应商协议归一化，不默认是互斥计费桶；非Token计费不强行并入。历史数据不补造精度。
