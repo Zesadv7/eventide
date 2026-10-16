@@ -539,3 +539,5 @@ checkpoint、不重放创建或删除。CLI仍临时复用同一底层实现，�
 GLM Chat能力声明以供应商、HTTPS精确主机/路径和模型ID共同匹配，普通`/api/paas/v4`及套餐`/api/coding/paas/v4`只确认`glm-5.3-flash`；其他路径或未来模型不推断。GenerationCapabilities补充thinking_modes、top_p_min、sampling_precision与max_output_tokens，Vue按能力显示可用范围。服务默认输出上限也参与最终冻结校验；null仍恢复服务默认。SDK Chat与Responses分别映射推理字段，stream/complete共用同一参数生成器，工具续轮的reasoning_content仍保留为Provider私有状态。
 
 HTTP接收边界以canonical Run身份为准，而非异常类型。admit_run/admit_continue在Store提交后仍可能遇到附件used缓存或dispatch错误；路由检查稳定Run身份，存在时返回202供查询真实终态，不把已接收任务伪装成参数拒绝。尚未创建Run的已知前置拒绝附rejected响应头，未分类故障保留未知；Vue保留未标记409及5xx的Run/Continue请求身份。Skills导入将只读预检与实际发布分开，预检固定版本；进入import_skill或成功回执阶段后发生异常，保留started而不追加失败回执，避免发布成功、安装事实失败时被自动重放。
+
+B5提示注入专项把攻击内容分别置于文件、已固定Skill和真实Hash索引候选中，确认它实际到达模型续轮，再强制模型生成恶意工具调用。执行仍由ToolExecutor/PolicyEngine及worker只读目录决定，不从工具文本推断权限；configure_budget始终不是模型工具。7项新增测试覆盖Plan/Auto与独立worker，预算配置事实和源码都保持原值。既有并发、生成配置、Skills固定、取消恢复及唯一用量专项一并通过218项回归。
