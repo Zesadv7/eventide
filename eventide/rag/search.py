@@ -12,6 +12,9 @@ from eventide.rag.index import DenseCandidate, IndexedChunk, IndexStore, SparseC
 from eventide.rag.local_models import MAX_RERANK_CANDIDATES, LocalModelError
 
 RRF_K = 60
+MAX_RESULT_PASSAGES = 5
+MAX_SNIPPET_CHARACTERS = 800
+MAX_SOURCE_CHARACTERS = 4_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,7 +201,7 @@ def retrieval_from_vector(
     k: int = 5, diagnostics: tuple[str, ...] = (),
 ) -> RetrievalOutcome:
     """Return explicit retrieval mode, independent rerank scores and fallback reasons."""
-    count = min(validate_k(k), 5) if reranker is not None else validate_k(k)
+    count = min(validate_k(k), MAX_RESULT_PASSAGES)
     if vector is None:
         candidates = sparse_search(workspace, query, k=count)
         return RetrievalOutcome(tuple(candidates), "sparse", diagnostics)
@@ -249,11 +252,17 @@ def retrieve(
 
 def format_results(
     results: list[SearchResult], *, mode: str, diagnostics: tuple[str, ...] = (),
+    source_budget: int = MAX_SOURCE_CHARACTERS,
 ) -> str:
-    lines = [f"Found {len(results)} passages (mode: {mode}):"]
+    """Bound source text separately from citations; truncation never means a full file."""
+    if type(source_budget) is not int or not 0 <= source_budget <= MAX_SOURCE_CHARACTERS:
+        raise ValueError("source_budget must be between 0 and 4000 characters")
+    selected = results[:MAX_RESULT_PASSAGES]
+    remaining = source_budget
+    lines = [f"Found {len(selected)} passages (mode: {mode}):"]
     if diagnostics:
         lines.append("Retrieval degraded: " + ", ".join(diagnostics))
-    for index, result in enumerate(results, 1):
+    for index, result in enumerate(selected, 1):
         chunk = result.chunk
         source_text = "+".join(result.sources)
         lines.append(
@@ -262,5 +271,14 @@ def format_results(
         )
         if result.rerank_score is not None:
             lines.append(f"    CrossEncoder score {result.rerank_score:.4f}; RRF score unchanged")
-        lines.extend(f"    {line}" for line in chunk.text[:800].splitlines())
+        snippet = chunk.text[:min(MAX_SNIPPET_CHARACTERS, remaining)]
+        remaining -= len(snippet)
+        lines.extend(f"    {line}" for line in snippet.splitlines())
+        if len(snippet) < len(chunk.text):
+            lines.append(
+                f"    [Snippet truncated: {len(snippet)}/{len(chunk.text)} source characters; "
+                "use read_file with the cited path and line range.]"
+            )
+    if len(selected) < len(results):
+        lines.append(f"[Omitted {len(results) - len(selected)} additional passages; maximum 5.]")
     return "\n".join(lines)

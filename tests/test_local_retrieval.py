@@ -403,3 +403,14 @@ def test_real_local_models_with_network_blocked(tmp_path, monkeypatch):
             await host.close()
 
     asyncio.run(verify_host_path())
+
+
+@pytest.mark.parametrize("sparse_only", [True, False])
+def test_production_outcome_caps_five_without_reranker(corpus, sparse_only):
+    root, embedder, profile = corpus
+    vector = None if sparse_only else embedder.embed(["common query"])[0]
+    outcome = retrieval_from_vector(
+        root, "common query", vector=vector, profile=None if sparse_only else profile, k=10,
+    )
+    assert len(outcome.results) == 5
+    assert outcome.mode == ("sparse" if sparse_only else "dense+sparse")

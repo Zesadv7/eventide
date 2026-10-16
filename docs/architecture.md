@@ -547,3 +547,5 @@ HTTP接收边界以canonical Run身份为准，而非异常类型。admit_run/ad
 B5提示注入专项把攻击内容分别置于文件、已固定Skill和真实Hash索引候选中，确认它实际到达模型续轮，再强制模型生成恶意工具调用。执行仍由ToolExecutor/PolicyEngine及worker只读目录决定，不从工具文本推断权限；configure_budget始终不是模型工具。7项新增测试覆盖Plan/Auto与独立worker，预算配置事实和源码都保持原值。既有并发、生成配置、Skills固定、取消恢复及唯一用量专项一并通过218项回归。
 
 交付用量页面通过delivery身份查询cost_view及budget_view，包含旧手动writer、有界修复各轮及其摘要/worker；不以最新控制Run代替整个交付范围。Vue路由保存精确delivery身份，切换身份丢弃迟到响应，刷新重查全历史并替换投影，不在浏览器累加。119项前端及真实API有界交付、采纳、相同费用查询与页面刷新验证通过。
+
+生产retrieval_from_vector所有模式均钳制到最多5个候选结果；format_results单片800、合计4,000源字符，保留每个片段路径/行号/原分数并明确标记截断，展示可回读提示。源文本字符预算不包含引用及格式说明，实际请求仍由input_composition按完整序列化字符统计、供应商usage记账。新边界未改变RRF或分数，缺模型降级说明保持；94项关联及49项补充回归通过（显式本地ML各跳过1项），Ruff/Mypy113通过。
