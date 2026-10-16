@@ -30,7 +30,8 @@ const name = ref(""),
   goal = ref(""),
   checks = ref(""),
   image = ref(""),
-  rounds = ref(3);
+  rounds = ref(3),
+  tokenLimit = ref(60_000);
 const error = ref(""),
   loading = ref(false),
   stopping = ref(""),
@@ -150,6 +151,9 @@ function repair() {
         .filter(Boolean),
       image: image.value.trim() || null,
       max_rounds: rounds.value,
+      ...(tokenLimit.value === 60_000
+        ? {}
+        : { observed_token_limit: tokenLimit.value }),
     },
   });
 }
@@ -203,6 +207,7 @@ function reset() {
   checks.value = "";
   image.value = "";
   rounds.value = 3;
+  tokenLimit.value = 60_000;
   sync();
   void refresh();
 }
@@ -243,10 +248,12 @@ const status: Record<string, string> = {
     </p>
     <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
     <p v-if="state.pending">
-      上次接收尚未确认，重试沿用原请求内容与身份。<button
-        :disabled="state.active"
-        @click="submit(state.pending!)"
-      >
+      上次接收尚未确认，重试沿用原请求内容与身份。
+      <span v-if="state.pending.action === 'repair'">
+        原请求 Token 软限：{{
+          state.pending.body.observed_token_limit ?? 60_000
+        }}。 </span
+      ><button :disabled="state.active" @click="submit(state.pending!)">
         重试原交付请求
       </button>
     </p>
@@ -295,6 +302,16 @@ const status: Record<string, string> = {
           />
         </label>
         <label
+          >累计 Token 软限<input
+            v-model.number="tokenLimit"
+            type="number"
+            required
+            min="1"
+            max="1000000"
+            step="1"
+            :disabled="locked || busy"
+        /></label>
+        <label
           >验收命令（每行一条，最多四条）<textarea
             v-model="checks"
             required
@@ -319,7 +336,9 @@ const status: Record<string, string> = {
         >
         <p class="muted">
           验收命令将在所选执行后端运行。本地执行不提供操作系统隔离。整条交付最多
-          36 次模型请求、60,000 已观测 Token、15 分钟；使用项目和每日共享预算。
+          36 次模型请求、15 分钟；Token
+          软限默认为60,000，按供应商已报告输入与输出累计，
+          不代表套餐费用或账单上限。使用项目和每日共享预算，接收后不能更改。
         </p>
         <button :disabled="locked || busy">开始有界修复</button>
       </form>
@@ -330,6 +349,7 @@ const status: Record<string, string> = {
           }}。停止原因：{{ detail.repair_result?.reason || "尚未结束" }}
         </p>
         <p>固定验收：{{ detail.repair.checks }}</p>
+        <p>固定 Token 软限：{{ detail.repair.limits.observed_tokens }}</p>
         <div
           v-for="round in detail.rounds"
           :key="String(round.round)"
@@ -402,6 +422,11 @@ const status: Record<string, string> = {
         {{ operation.accepted.action }} · {{ status[operation.status] }} ·
         {{ operation.run_id }}
       </button>
+      <p v-if="operation.accepted.action === 'repair'">
+        已接收 Token 软限：{{
+          operation.accepted.observed_token_limit ?? 60_000
+        }}
+      </p>
       <p v-if="operation.error" class="inline-error">{{ operation.error }}</p>
       <button
         v-if="['queued', 'running'].includes(operation.status)"

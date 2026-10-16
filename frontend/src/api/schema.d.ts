@@ -1387,6 +1387,11 @@ export interface components {
        * @default 3
        */
       max_rounds: number;
+      /**
+       * Observed Token Limit
+       * @default 60000
+       */
+      observed_token_limit: number;
     };
     /** DeliveryRepairResult */
     DeliveryRepairResult: {
@@ -1697,6 +1702,11 @@ export interface components {
       sampling_precision?: number | null;
       /** Max Output Tokens */
       max_output_tokens?: number | null;
+      /**
+       * Response Formats
+       * @default []
+       */
+      response_formats: ("text" | "json_object")[];
     };
     /**
      * GenerationPatch
@@ -1724,6 +1734,8 @@ export interface components {
         | null;
       /** Thinking */
       thinking?: ("enabled" | "disabled") | null;
+      /** Response Format */
+      response_format?: ("text" | "json_object") | null;
     };
     /** HistoryCounts */
     HistoryCounts: {

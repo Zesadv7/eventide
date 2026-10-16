@@ -507,7 +507,8 @@ function downloadReport() {
               quote.fact_response_format === "json_object"
                 ? "JSON 对象"
                 : "模型默认（未启用 JSON 约束）"
-            }}。JSON 只约束格式，不保证事实正确；修复任务保持原输出设置。
+            }}。JSON 只约束格式，不保证事实正确；修复任务保持原输出设置。 JSON
+            最终整理会增加一次模型调用，计入原步数和预算。
           </p>
           <p>
             Skills：{{

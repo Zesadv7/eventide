@@ -18,7 +18,11 @@ const detail = (): Delivery => ({
   workspace_id: "w",
   name: "repair-fixture",
   receipt: { checkout: "/isolated" },
-  repair: { control_run_id: "control", checks: ["test"] },
+  repair: {
+    control_run_id: "control",
+    checks: ["test"],
+    limits: { observed_tokens: 60_000 },
+  },
   repair_result: {
     delivery_id: id,
     control_run_id: "control",
@@ -113,6 +117,41 @@ it("requires explicit patch inspection and review before adoption", async () => 
   expect(wrapper.text()).toContain("fixture rejection");
   wrapper.unmount();
 });
+it.each([60_000, 150_000])(
+  "submits the chosen delivery limit %i",
+  async (limit) => {
+    reads();
+    vi.mocked(deliveriesApi.list).mockResolvedValue([
+      {
+        ...detail(),
+        repair: null,
+        repair_result: null,
+        repair_status: null,
+        verification: null,
+      },
+    ]);
+    const submit = vi
+      .spyOn(deliveriesApi, "submit")
+      .mockRejectedValue(new Error("fixture rejection"));
+    const wrapper = await render();
+    const input = wrapper.get('input[type="number"]');
+    expect((input.element as HTMLInputElement).value).toBe("60000");
+    await input.setValue(limit);
+    await wrapper.findAll("textarea")[0]!.setValue("repair source");
+    await wrapper.findAll("textarea")[1]!.setValue("python -m pytest");
+    await wrapper.findAll("form")[1]!.trigger("submit");
+    await flushPromises();
+    const body = submit.mock.calls[0]![1].body;
+    expect(body).toMatchObject({
+      goal: "repair source",
+      checks: ["python -m pytest"],
+    });
+    if (limit === 60_000)
+      expect(body).not.toHaveProperty("observed_token_limit");
+    else expect(body).toHaveProperty("observed_token_limit", limit);
+    wrapper.unmount();
+  },
+);
 it("never presents a late response from the previous project", async () => {
   reads();
   let resolve!: (value: Delivery[]) => void;
@@ -175,5 +214,31 @@ it("refresh with uncertain admission locks forms and offers exact retry", async 
     wrapper.get('input[placeholder="fix-login"]').attributes("disabled"),
   ).toBeDefined();
   expect(wrapper.text()).toContain("重试原交付请求");
+  wrapper.unmount();
+});
+it("shows the frozen queued limit after refresh before the writer starts", async () => {
+  reads();
+  vi.mocked(deliveriesApi.list).mockResolvedValue([
+    { ...detail(), repair: null, repair_result: null, repair_status: null },
+  ]);
+  vi.mocked(deliveriesApi.operations).mockResolvedValue([
+    {
+      run_id: "queued-run",
+      session_id: "control-session",
+      status: "queued",
+      accepted: {
+        action: "repair",
+        delivery_id: id,
+        observed_token_limit: 200_000,
+      },
+      error: null,
+      reason: null,
+    },
+  ]);
+  const wrapper = await render();
+  expect(wrapper.text()).toContain("已接收 Token 软限：200000");
+  expect(
+    wrapper.get('input[type="number"]').attributes("disabled"),
+  ).toBeDefined();
   wrapper.unmount();
 });

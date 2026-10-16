@@ -1,7 +1,14 @@
 import { ApiError, request } from "./client";
 import { durableMutation } from "./mutations";
 import type { components } from "./schema";
-export type Delivery = components["schemas"]["DeliveryDetail"];
+type RawDelivery = components["schemas"]["DeliveryDetail"];
+export type Delivery = Omit<RawDelivery, "repair"> & {
+  repair:
+    | (NonNullable<RawDelivery["repair"]> & {
+        limits: { observed_tokens: number };
+      })
+    | null;
+};
 export type Operation = components["schemas"]["DeliveryOperation"];
 export type Receipt = components["schemas"]["DeliveryReceipt"];
 export type Patch = components["schemas"]["DeliveryPatch"];
@@ -10,7 +17,12 @@ export type Intent =
   | {
       action: "repair";
       delivery: string;
-      body: components["schemas"]["DeliveryRepairBody"];
+      body: Omit<
+        components["schemas"]["DeliveryRepairBody"],
+        "observed_token_limit"
+      > & {
+        observed_token_limit?: number;
+      };
     }
   | {
       action: "apply";

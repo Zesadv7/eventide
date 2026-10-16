@@ -205,7 +205,7 @@ const labels: Record<string, string> = {
   max_output_tokens: "最大输出 Token",
   reasoning_effort: "推理强度",
   thinking: "思考模式",
-  response_format: "输出格式",
+  response_format: "最终输出格式",
 };
 </script>
 <template>
@@ -329,7 +329,8 @@ const labels: Record<string, string> = {
     <p class="muted">
       思考模式与采样参数的组合由后端校验；温度 0
       不保证完全确定性。输出上限不等于任务总预算。JSON
-      模式只保证输出格式，不保证事实正确。
+      模式只保证输出格式，不保证事实正确。 JSON
+      最终整理会增加一次模型调用，计入原步数和预算。
     </p>
     <p v-if="status.pending && scope !== 'run'" class="alert" role="status">
       上次生成配置请求尚未确认。请恢复原参数后重试；刷新只读取当前值，不清除原请求身份或原配置版本。

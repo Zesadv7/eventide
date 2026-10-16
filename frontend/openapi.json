@@ -13747,6 +13747,13 @@
             "minimum": 1.0,
             "title": "Max Rounds",
             "default": 3
+          },
+          "observed_token_limit": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Observed Token Limit",
+            "default": 60000
           }
         },
         "additionalProperties": false,
@@ -14424,6 +14431,15 @@
               }
             ],
             "title": "Max Output Tokens"
+          },
+          "response_formats": {
+            "items": {
+              "type": "string",
+              "enum": ["text", "json_object"]
+            },
+            "type": "array",
+            "title": "Response Formats",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -14503,6 +14519,18 @@
               }
             ],
             "title": "Thinking"
+          },
+          "response_format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["text", "json_object"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Format"
           }
         },
         "additionalProperties": false,
