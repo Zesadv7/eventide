@@ -1,0 +1,458 @@
+{
+  "schema_version": 1,
+  "id": "independent-quality-v1",
+  "version": 1,
+  "base_commit": "7099f92",
+  "description": "Independently frozen read-only correctness tasks; all eight are unseen holdout inputs, not a replacement for engineering-v1.",
+  "tasks": [
+    {
+      "id": "constellation-caption-call",
+      "version": 1,
+      "family": "constellation-caption-call",
+      "category": "understanding",
+      "split": "holdout",
+      "prompt": "Trace render_poster in poster.py into the nested drawing package. For fact id frame-symbol, give only the function name called in render_poster's return statement, and cite that return line in poster.py. For fact id title-text, give the exact string value of TITLE without quotation marks, citing its assignment line. Do not change files. Return only a JSON object with exactly one key, facts. Each facts item must have exactly id, answer (a string), path, start_line and end_line. Preserve the requested fact ids exactly. Use one-based source line numbers, including blank lines, and cite only the single line requested for each fact. Do not add Markdown fences or explanations.",
+      "workspace": {
+        "poster.py": "from drawing.frame import frame_text\n\nTITLE = \"北斗七星\"\n\n\ndef render_poster(body):\n    return frame_text(TITLE, body)\n",
+        "drawing/frame.py": "def frame_text(title, body):\n    border = \"═\" * len(title)\n    return f\"{border}\\n{title}\\n{body}\"\n"
+      },
+      "script": [
+        {
+          "tool_calls": [
+            {
+              "id": "read-0",
+              "name": "read_file",
+              "arguments": {
+                "path": "poster.py"
+              }
+            },
+            {
+              "id": "read-1",
+              "name": "read_file",
+              "arguments": {
+                "path": "drawing/frame.py"
+              }
+            }
+          ]
+        },
+        {
+          "text": "{\"facts\": [{\"id\": \"frame-symbol\", \"answer\": \"frame_text\", \"path\": \"poster.py\", \"start_line\": 7, \"end_line\": 7}, {\"id\": \"title-text\", \"answer\": \"北斗七星\", \"path\": \"poster.py\", \"start_line\": 3, \"end_line\": 3}]}"
+        }
+      ],
+      "grade": {
+        "kind": "facts",
+        "facts": [
+          {
+            "id": "frame-symbol",
+            "answer": "frame_text",
+            "path": "poster.py",
+            "start_line": 7,
+            "end_line": 7
+          },
+          {
+            "id": "title-text",
+            "answer": "北斗七星",
+            "path": "poster.py",
+            "start_line": 3,
+            "end_line": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "kiln-cycle-states",
+      "version": 1,
+      "family": "kiln-cycle-states",
+      "category": "understanding",
+      "split": "holdout",
+      "prompt": "Read cycle.start and cycle.tick used by controller.py. For fact id entered-phase, give the exact phase string assigned by start. For fact id terminal-phase, give the exact phase string assigned when tick reduces remaining to zero. Return the string values without quotation marks, and cite each assignment line in plant/cycle.py. Do not change files. Return only a JSON object with exactly one key, facts. Each facts item must have exactly id, answer (a string), path, start_line and end_line. Preserve the requested fact ids exactly. Use one-based source line numbers, including blank lines, and cite only the single line requested for each fact. Do not add Markdown fences or explanations.",
+      "workspace": {
+        "controller.py": "from plant.cycle import start, tick\n\n\ndef one_step():\n    cycle = start(1)\n    tick(cycle)\n    return cycle\n",
+        "plant/cycle.py": "def start(duration):\r\n    return {\"phase\": \"drying\", \"remaining\": duration}\r\n\r\n\r\ndef tick(cycle):\r\n    cycle[\"remaining\"] -= 1\r\n    if cycle[\"remaining\"] == 0:\r\n        cycle[\"phase\"] = \"finished\"\r\n"
+      },
+      "script": [
+        {
+          "tool_calls": [
+            {
+              "id": "read-0",
+              "name": "read_file",
+              "arguments": {
+                "path": "controller.py"
+              }
+            },
+            {
+              "id": "read-1",
+              "name": "read_file",
+              "arguments": {
+                "path": "plant/cycle.py"
+              }
+            }
+          ]
+        },
+        {
+          "text": "{\"facts\": [{\"id\": \"entered-phase\", \"answer\": \"drying\", \"path\": \"plant/cycle.py\", \"start_line\": 2, \"end_line\": 2}, {\"id\": \"terminal-phase\", \"answer\": \"finished\", \"path\": \"plant/cycle.py\", \"start_line\": 8, \"end_line\": 8}]}"
+        }
+      ],
+      "grade": {
+        "kind": "facts",
+        "facts": [
+          {
+            "id": "entered-phase",
+            "answer": "drying",
+            "path": "plant/cycle.py",
+            "start_line": 2,
+            "end_line": 2
+          },
+          {
+            "id": "terminal-phase",
+            "answer": "finished",
+            "path": "plant/cycle.py",
+            "start_line": 8,
+            "end_line": 8
+          }
+        ]
+      }
+    },
+    {
+      "id": "radio-sample-packet",
+      "version": 1,
+      "family": "radio-sample-packet",
+      "category": "understanding",
+      "split": "holdout",
+      "prompt": "Trace build_packet from transmit.py through radio/packet.py and radio/signal.py. For fact id fold-expression, copy the full expression returned by fold_samples, without the return keyword. For fact id byte-order, give the exact byteorder string used by encode_level, without quotation marks. Cite the single return line supporting each fact in its actual defining file. Do not change files. Return only a JSON object with exactly one key, facts. Each facts item must have exactly id, answer (a string), path, start_line and end_line. Preserve the requested fact ids exactly. Use one-based source line numbers, including blank lines, and cite only the single line requested for each fact. Do not add Markdown fences or explanations.",
+      "workspace": {
+        "transmit.py": "from radio.packet import encode_level\n\n\ndef build_packet(samples):\n    return encode_level(samples)\n",
+        "radio/packet.py": "from radio.signal import fold_samples\n\n\ndef encode_level(samples):\n    level = fold_samples(samples)\n    return level.to_bytes(2, byteorder=\"big\")\n",
+        "radio/signal.py": "# Measurements are unsigned integer amplitudes.\n\ndef fold_samples(samples):\n    return sum(samples) // len(samples)\n"
+      },
+      "script": [
+        {
+          "tool_calls": [
+            {
+              "id": "read-0",
+              "name": "read_file",
+              "arguments": {
+                "path": "transmit.py"
+              }
+            },
+            {
+              "id": "read-1",
+              "name": "read_file",
+              "arguments": {
+                "path": "radio/packet.py"
+              }
+            },
+            {
+              "id": "read-2",
+              "name": "read_file",
+              "arguments": {
+                "path": "radio/signal.py"
+              }
+            }
+          ]
+        },
+        {
+          "text": "{\"facts\": [{\"id\": \"fold-expression\", \"answer\": \"sum(samples) // len(samples)\", \"path\": \"radio/signal.py\", \"start_line\": 4, \"end_line\": 4}, {\"id\": \"byte-order\", \"answer\": \"big\", \"path\": \"radio/packet.py\", \"start_line\": 6, \"end_line\": 6}]}"
+        }
+      ],
+      "grade": {
+        "kind": "facts",
+        "facts": [
+          {
+            "id": "fold-expression",
+            "answer": "sum(samples) // len(samples)",
+            "path": "radio/signal.py",
+            "start_line": 4,
+            "end_line": 4
+          },
+          {
+            "id": "byte-order",
+            "answer": "big",
+            "path": "radio/packet.py",
+            "start_line": 6,
+            "end_line": 6
+          }
+        ]
+      }
+    },
+    {
+      "id": "matrix-transpose-expressions",
+      "version": 1,
+      "family": "matrix-transpose-expressions",
+      "category": "understanding",
+      "split": "holdout",
+      "prompt": "Read the transpose implementation reached by rotate_axes in axes.py. For fact id empty-expression, copy the expression returned by the explicit empty-input branch in matrix/shape.py. For fact id transpose-expression, copy the expression returned after that branch. Omit the return keyword, preserve the exact source expressions, and cite each corresponding return line. Do not change files. Return only a JSON object with exactly one key, facts. Each facts item must have exactly id, answer (a string), path, start_line and end_line. Preserve the requested fact ids exactly. Use one-based source line numbers, including blank lines, and cite only the single line requested for each fact. Do not add Markdown fences or explanations.",
+      "workspace": {
+        "axes.py": "from matrix.shape import transpose\n\n\ndef rotate_axes(rows):\n    return transpose(rows)\n",
+        "matrix/shape.py": "def transpose(rows):\n    if not rows:\n        return []\n\n    # 矩阵坐标：先列后行。\n    return list(map(list, zip(*rows)))\n"
+      },
+      "script": [
+        {
+          "tool_calls": [
+            {
+              "id": "read-0",
+              "name": "read_file",
+              "arguments": {
+                "path": "axes.py"
+              }
+            },
+            {
+              "id": "read-1",
+              "name": "read_file",
+              "arguments": {
+                "path": "matrix/shape.py"
+              }
+            }
+          ]
+        },
+        {
+          "text": "{\"facts\": [{\"id\": \"empty-expression\", \"answer\": \"[]\", \"path\": \"matrix/shape.py\", \"start_line\": 3, \"end_line\": 3}, {\"id\": \"transpose-expression\", \"answer\": \"list(map(list, zip(*rows)))\", \"path\": \"matrix/shape.py\", \"start_line\": 6, \"end_line\": 6}]}"
+        }
+      ],
+      "grade": {
+        "kind": "facts",
+        "facts": [
+          {
+            "id": "empty-expression",
+            "answer": "[]",
+            "path": "matrix/shape.py",
+            "start_line": 3,
+            "end_line": 3
+          },
+          {
+            "id": "transpose-expression",
+            "answer": "list(map(list, zip(*rows)))",
+            "path": "matrix/shape.py",
+            "start_line": 6,
+            "end_line": 6
+          }
+        ]
+      }
+    },
+    {
+      "id": "datagram-valid-rejected",
+      "version": 1,
+      "family": "datagram-valid-rejected",
+      "category": "diagnosis",
+      "split": "holdout",
+      "prompt": "receive.py rejects payload bytes([3, 8]) with supplied checksum 11, even though the checksum is valid. Locate the condition responsible in wire/datagram.py. For fact id rejecting-predicate, copy the exact if-condition expression, without if or the colon. For fact id rejection-statement, copy the complete raise statement executed by that branch, excluding indentation. Cite the condition line and the raise line respectively; report existing code, not a proposed fix. Do not change files. Return only a JSON object with exactly one key, facts. Each facts item must have exactly id, answer (a string), path, start_line and end_line. Preserve the requested fact ids exactly. Use one-based source line numbers, including blank lines, and cite only the single line requested for each fact. Do not add Markdown fences or explanations.",
+      "workspace": {
+        "receive.py": "from wire.datagram import validate\n\n\ndef receive(payload, supplied_checksum):\n    validate(payload, supplied_checksum)\n    return payload\n",
+        "wire/datagram.py": "def checksum8(payload):\n    return sum(payload) & 255\n\n\ndef validate(payload, expected):\n    checksum = checksum8(payload)\n    if checksum == expected:\n        raise ValueError(\"checksum mismatch\")\n"
+      },
+      "script": [
+        {
+          "tool_calls": [
+            {
+              "id": "read-0",
+              "name": "read_file",
+              "arguments": {
+                "path": "receive.py"
+              }
+            },
+            {
+              "id": "read-1",
+              "name": "read_file",
+              "arguments": {
+                "path": "wire/datagram.py"
+              }
+            }
+          ]
+        },
+        {
+          "text": "{\"facts\": [{\"id\": \"rejecting-predicate\", \"answer\": \"checksum == expected\", \"path\": \"wire/datagram.py\", \"start_line\": 7, \"end_line\": 7}, {\"id\": \"rejection-statement\", \"answer\": \"raise ValueError(\\\"checksum mismatch\\\")\", \"path\": \"wire/datagram.py\", \"start_line\": 8, \"end_line\": 8}]}"
+        }
+      ],
+      "grade": {
+        "kind": "facts",
+        "facts": [
+          {
+            "id": "rejecting-predicate",
+            "answer": "checksum == expected",
+            "path": "wire/datagram.py",
+            "start_line": 7,
+            "end_line": 7
+          },
+          {
+            "id": "rejection-statement",
+            "answer": "raise ValueError(\"checksum mismatch\")",
+            "path": "wire/datagram.py",
+            "start_line": 8,
+            "end_line": 8
+          }
+        ]
+      }
+    },
+    {
+      "id": "deferred-lines-closed-source",
+      "version": 1,
+      "family": "deferred-lines-closed-source",
+      "category": "diagnosis",
+      "split": "holdout",
+      "prompt": "preview.first_line raises ValueError about an I/O operation on a closed file for a nonempty existing text file. Inspect readers/lines.py. For fact id delayed-return, copy the complete return statement that defers iteration, excluding indentation. For fact id closing-boundary, copy the complete with statement that scopes that file, including its trailing colon and excluding indentation. Cite their separate source lines. Report existing statements, not a proposed fix. Do not change files. Return only a JSON object with exactly one key, facts. Each facts item must have exactly id, answer (a string), path, start_line and end_line. Preserve the requested fact ids exactly. Use one-based source line numbers, including blank lines, and cite only the single line requested for each fact. Do not add Markdown fences or explanations.",
+      "workspace": {
+        "preview.py": "from readers.lines import lines\n\n\ndef first_line(path):\n    return next(lines(path))\n",
+        "readers/lines.py": "def lines(path):\r\n    # 文件在离开 with 后关闭。\r\n    with path.open(encoding=\"utf-8\") as source:\r\n\r\n        return (line.rstrip(\"\\n\") for line in source)\r\n",
+        "sample.txt": "第一行\nsecond line\n"
+      },
+      "script": [
+        {
+          "tool_calls": [
+            {
+              "id": "read-0",
+              "name": "read_file",
+              "arguments": {
+                "path": "preview.py"
+              }
+            },
+            {
+              "id": "read-1",
+              "name": "read_file",
+              "arguments": {
+                "path": "readers/lines.py"
+              }
+            },
+            {
+              "id": "read-2",
+              "name": "read_file",
+              "arguments": {
+                "path": "sample.txt"
+              }
+            }
+          ]
+        },
+        {
+          "text": "{\"facts\": [{\"id\": \"delayed-return\", \"answer\": \"return (line.rstrip(\\\"\\\\n\\\") for line in source)\", \"path\": \"readers/lines.py\", \"start_line\": 5, \"end_line\": 5}, {\"id\": \"closing-boundary\", \"answer\": \"with path.open(encoding=\\\"utf-8\\\") as source:\", \"path\": \"readers/lines.py\", \"start_line\": 3, \"end_line\": 3}]}"
+        }
+      ],
+      "grade": {
+        "kind": "facts",
+        "facts": [
+          {
+            "id": "delayed-return",
+            "answer": "return (line.rstrip(\"\\n\") for line in source)",
+            "path": "readers/lines.py",
+            "start_line": 5,
+            "end_line": 5
+          },
+          {
+            "id": "closing-boundary",
+            "answer": "with path.open(encoding=\"utf-8\") as source:",
+            "path": "readers/lines.py",
+            "start_line": 3,
+            "end_line": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "rectangular-pixel-stride",
+      "version": 1,
+      "family": "rectangular-pixel-stride",
+      "category": "diagnosis",
+      "split": "holdout",
+      "prompt": "screen.read_pixel(list(range(6)), 3, 2, 1, 1) returns 3 instead of the row-major value 4. Trace the call into pixels/access.py. For fact id forwarding-call, copy the complete call expression returned by read_pixel in screen.py, without the return keyword. For fact id indexing-expression, copy only the expression inside the pixels[...] subscript in offset_pixel. Cite the return line containing each expression; report existing code, not a proposed fix. Do not change files. Return only a JSON object with exactly one key, facts. Each facts item must have exactly id, answer (a string), path, start_line and end_line. Preserve the requested fact ids exactly. Use one-based source line numbers, including blank lines, and cite only the single line requested for each fact. Do not add Markdown fences or explanations.",
+      "workspace": {
+        "screen.py": "from pixels.access import offset_pixel\n\n\ndef read_pixel(pixels, width, height, row, col):\n    return offset_pixel(pixels, height, width, row, col)\n",
+        "pixels/access.py": "def offset_pixel(pixels, width, height, row, col):\n    if not (0 <= row < height and 0 <= col < width):\n        raise IndexError(\"outside image\")\n\n    return pixels[row * width + col]\n"
+      },
+      "script": [
+        {
+          "tool_calls": [
+            {
+              "id": "read-0",
+              "name": "read_file",
+              "arguments": {
+                "path": "screen.py"
+              }
+            },
+            {
+              "id": "read-1",
+              "name": "read_file",
+              "arguments": {
+                "path": "pixels/access.py"
+              }
+            }
+          ]
+        },
+        {
+          "text": "{\"facts\": [{\"id\": \"forwarding-call\", \"answer\": \"offset_pixel(pixels, height, width, row, col)\", \"path\": \"screen.py\", \"start_line\": 5, \"end_line\": 5}, {\"id\": \"indexing-expression\", \"answer\": \"row * width + col\", \"path\": \"pixels/access.py\", \"start_line\": 5, \"end_line\": 5}]}"
+        }
+      ],
+      "grade": {
+        "kind": "facts",
+        "facts": [
+          {
+            "id": "forwarding-call",
+            "answer": "offset_pixel(pixels, height, width, row, col)",
+            "path": "screen.py",
+            "start_line": 5,
+            "end_line": 5
+          },
+          {
+            "id": "indexing-expression",
+            "answer": "row * width + col",
+            "path": "pixels/access.py",
+            "start_line": 5,
+            "end_line": 5
+          }
+        ]
+      }
+    },
+    {
+      "id": "decoder-final-state-overwrite",
+      "version": 1,
+      "family": "decoder-final-state-overwrite",
+      "category": "diagnosis",
+      "split": "holdout",
+      "prompt": "ingest.decode_job reports state ready after decode raises ValueError. Inspect the state lifecycle in audio/pipeline.py. For fact id caught-failure-state, give the exact string assigned to job[\"state\"] inside the except block. For fact id overwriting-state, give the exact string assigned to that field inside finally. Return string values without quotation marks and cite their individual assignment lines; do not propose a fix. Do not change files. Return only a JSON object with exactly one key, facts. Each facts item must have exactly id, answer (a string), path, start_line and end_line. Preserve the requested fact ids exactly. Use one-based source line numbers, including blank lines, and cite only the single line requested for each fact. Do not add Markdown fences or explanations.",
+      "workspace": {
+        "ingest.py": "from audio.pipeline import process\n\n\ndef decode_job(job, decoder):\n    process(job, decoder)\n    return job[\"state\"]\n",
+        "audio/pipeline.py": "def process(job, decode):\n    job[\"state\"] = \"decoding\"\n    try:\n        job[\"wave\"] = decode(job[\"source\"])\n    except ValueError:\n        job[\"state\"] = \"failed\"\n    finally:\n        job[\"state\"] = \"ready\"\n"
+      },
+      "script": [
+        {
+          "tool_calls": [
+            {
+              "id": "read-0",
+              "name": "read_file",
+              "arguments": {
+                "path": "ingest.py"
+              }
+            },
+            {
+              "id": "read-1",
+              "name": "read_file",
+              "arguments": {
+                "path": "audio/pipeline.py"
+              }
+            }
+          ]
+        },
+        {
+          "text": "{\"facts\": [{\"id\": \"caught-failure-state\", \"answer\": \"failed\", \"path\": \"audio/pipeline.py\", \"start_line\": 6, \"end_line\": 6}, {\"id\": \"overwriting-state\", \"answer\": \"ready\", \"path\": \"audio/pipeline.py\", \"start_line\": 8, \"end_line\": 8}]}"
+        }
+      ],
+      "grade": {
+        "kind": "facts",
+        "facts": [
+          {
+            "id": "caught-failure-state",
+            "answer": "failed",
+            "path": "audio/pipeline.py",
+            "start_line": 6,
+            "end_line": 6
+          },
+          {
+            "id": "overwriting-state",
+            "answer": "ready",
+            "path": "audio/pipeline.py",
+            "start_line": 8,
+            "end_line": 8
+          }
+        ]
+      }
+    }
+  ],
+  "input_sha256": "328a5bd450acd5b00abd4ef0e451e86af06914eaa2a0afa4ba50098383104e54"
+}
