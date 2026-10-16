@@ -168,6 +168,8 @@ Continue 保持原 Plan，只在相同 Provider 和 Base URL 下沿用选定模�
 
 Workspace capabilities 增加 readonly_workers（enabled/roles/max_concurrency/max_depth/max_tasks_per_run）。父 Run 的 worker.started/completed 事件关联 child_run_id，子 Run 查询和 history 返回 parent_run_id/worker_role/snapshot_id。子Session默认归档且不能接收普通Run、Continue或附件。父usage含子消费，子usage仅自身；跨父子汇总需按exclusive模型事件计算。
 
+新子任务的canonical `run.admitted.delegation`含fingerprint和parent_call_id，不含额外目标正文。相同Run/显式Continue链的重复角色、精确目标和源码快照（包括批内重复）使整个delegate工具调用返回错误，零子任务派发；已有任务返回`existing_calls`中的父run_id/call_id及child_run_id供查询，未缓存回答。该错误是工具结果，不更改HTTP状态码或工具schema；普通新Run、其他Session与源码/角色/目标变化不共享去重。旧无指纹接收事实不补造精度，仍保留原四子任务上限。
+
 ### 交付、执行配置与未知结果 —— 已实现
 
 交付由下述持久HTTP与Vue有界修复控制面提供准备、修复、查询、补丁核对和人工采纳；手动run/verify保留Python开发接口。原Run/Session/SSE/export可读取Writer与control Run证据；delivery事实与patch artifact hash存同一Event Log。Writer的execution_config在后续Run/Continue生效；图片/PDF契约不变。control Session归档且不能用于普通模型执行。

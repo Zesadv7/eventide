@@ -12,9 +12,12 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from eventide.workspace import digest, git, workspace_checkpoint
+
+if TYPE_CHECKING:
+    from eventide.store import RuntimeStore
 
 MAX_SNAPSHOT_FILES = 2_000
 MAX_SNAPSHOT_BYTES = 10 * 1024 * 1024
@@ -63,6 +66,57 @@ def validate_tasks(tasks: object) -> list[dict[str, str]]:
             raise ValueError("Worker goal must contain 1-2000 characters")
         validated.append({"role": role, "goal": goal})
     return validated
+
+
+def delegation_fingerprint(task: dict[str, str], snapshot_id: str) -> str:
+    """Hash the exact goal before redaction; never persist an extra goal copy."""
+    return digest({"version": 1, "task": task, "snapshot_id": snapshot_id})
+
+
+def delegation_history(store: RuntimeStore, run_id: str) -> dict[str, dict[str, str]]:
+    """Project admitted workers from this Run and its same-Session Continue chain.
+
+    Admission is the evidence even if worker.started or the parent result was never
+    committed. Old admissions without a raw-input fingerprint are not reconstructed
+    from redacted messages. No child answer is read, returned or replayed here.
+    """
+    identity = store.get_run_identity(run_id)
+    if identity is None:
+        raise ValueError("Parent Run not found")
+    session_id = identity["session_id"]
+    seen: set[str] = set()
+    history: dict[str, dict[str, str]] = {}
+    while identity and identity["id"] not in seen:
+        parent_id = identity["id"]
+        if identity["session_id"] != session_id:
+            raise ValueError("Worker continuation crosses Session boundary")
+        seen.add(parent_id)
+        calls = {
+            event["payload"].get("call_id")
+            for event in store.run_events(parent_id)
+            if event["type"] == "tool.prepared"
+            and not event["partial"]
+            and event["payload"].get("name") == "delegate_readonly"
+        }
+        for event in store.worker_admissions(parent_id):
+            payload = event["payload"]
+            reference = payload.get("delegation", {})
+            signature = reference.get("fingerprint") if isinstance(reference, dict) else None
+            call_id = reference.get("parent_call_id") if isinstance(reference, dict) else None
+            if (
+                isinstance(signature, str)
+                and len(signature) == 64
+                and isinstance(call_id, str)
+                and call_id in calls
+                and payload.get("worker_role") in WORKER_ROLES
+                and isinstance(payload.get("snapshot_id"), str)
+            ):
+                history.setdefault(signature, {
+                    "run_id": parent_id, "call_id": call_id, "child_run_id": event["run_id"],
+                })
+        source_id = identity.get("continuation_of")
+        identity = store.get_run_identity(source_id) if source_id else None
+    return history
 
 
 @dataclass(frozen=True, slots=True)

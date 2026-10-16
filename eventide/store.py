@@ -840,6 +840,18 @@ class RuntimeStore:
         with self._lock:
             return [self._decode(row) for row in self._connection.execute(query, parameters)]
 
+    def worker_admissions(self, parent_run_id: str) -> list[dict[str, Any]]:
+        """Read only child admission facts linked to this exact parent Run."""
+        with self._lock:
+            return [
+                self._decode(row)
+                for row in self._connection.execute(
+                    "SELECT * FROM runtime_events WHERE partial=0 AND type='run.admitted' "
+                    "AND json_extract(payload_json,'$.parent_run_id')=? ORDER BY rowid",
+                    (parent_run_id,),
+                )
+            ]
+
     def usage_events(
         self, *, session_id: str | None = None, run_id: str | None = None,
         include_children: bool = True,

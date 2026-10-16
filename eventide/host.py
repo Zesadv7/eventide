@@ -86,6 +86,8 @@ from eventide.workers import (
     READONLY_WORKER_TOOL,
     ReadonlyProfile,
     SourceSnapshot,
+    delegation_fingerprint,
+    delegation_history,
     validate_report,
     validate_tasks,
 )
@@ -2847,7 +2849,6 @@ class RuntimeHost:
                 child_limit = min(4_000, remaining // len(goals))
                 if child_limit < 1:
                     raise ValueError("Insufficient parent token budget for workers")
-                delegated_count += len(goals)
                 snapshots: list[SourceSnapshot] = []
                 children: list[tuple[str, asyncio.Task[RunResult], SourceSnapshot]] = []
                 settled_reports: dict[str, tuple[bool, str | None]] = {}
@@ -2868,7 +2869,29 @@ class RuntimeHost:
                         snapshot = snapshots[-1]
                         if snapshot.checkpoint != snapshots[0].checkpoint:
                             raise ValueError("Source changed between worker snapshots")
-                    for goal, snapshot in zip(goals, snapshots, strict=True):
+                    # Check the whole batch before admitting or dispatching any child.
+                    signatures = [
+                        delegation_fingerprint(goal, snapshot.identity)
+                        for goal, snapshot in zip(goals, snapshots, strict=True)
+                    ]
+                    history = delegation_history(self.store, run_id)
+                    duplicates = [history[sig] for sig in signatures if sig in history]
+                    if duplicates or len(set(signatures)) != len(signatures):
+                        return (
+                            "Error: duplicate read-only delegation; no workers started. "
+                            "Use read_tool_result with the existing parent run_id/call_id "
+                            "when its result is available; inspect child status otherwise. "
+                            + json.dumps({"existing_calls": duplicates}, ensure_ascii=False)
+                        )
+                    prepared = next(
+                        event["payload"]
+                        for event in reversed(self.store.run_events(run_id))
+                        if event["type"] == "tool.prepared" and not event["partial"]
+                    )
+                    if prepared.get("name") != "delegate_readonly":
+                        raise ValueError("Worker delegation has no owning tool call")
+                    delegated_count += len(goals)
+                    for goal, snapshot, signature in zip(goals, snapshots, signatures, strict=True):
                         child_session = self.create_session(
                             workspace_id=execution_workspace.workspace_id,
                             working_directory=str(working_root),
@@ -2894,6 +2917,10 @@ class RuntimeHost:
                             "parent_run_id": run_id,
                             "worker_role": profile.role,
                             "snapshot_id": snapshot.identity,
+                            "delegation": {
+                                "fingerprint": signature,
+                                "parent_call_id": prepared["call_id"],
+                            },
                         }
                         child_intent.pop("execution_config", None)
                         child_intent.pop("execution_binding", None)
@@ -2907,7 +2934,7 @@ class RuntimeHost:
                                     {
                                         "message": {
                                             "role": "user",
-                                            "content": profile.prompt(goal["goal"]),
+                                            "content": self._semantic(profile.prompt(goal["goal"])),
                                         }
                                     },
                                     "user",

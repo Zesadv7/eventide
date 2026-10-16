@@ -239,6 +239,10 @@ Vue 3/TypeScript/Vite、Vue Router和Pinia提供唯一用户界面，Hash路由�
 
 子 Run 不读取父消息、不连接 MCP、不使用 custom handlers/Skills/RAG/delegate，目录和执行器仅含四个安全读取工具。深度为 1，每父 Run 最多 4 个子任务，8 步/4,000 Token 软上限/60 秒批次期限；在开启父 Token 上限时按剩余量分配。worker.started 保留源 checkpoint、manifest 和排除数；worker.completed 保留子用量和报告校验状态，父 usage 为 inclusive，子 usage 为 exclusive。未知失败请求消费不估算。父取消或超时先取消并等待子终态，再删除自己创建的快照；重启不自动重派或采纳结果。
 
+派发前先为整批建立并复核可信源码快照，再计算原始角色/精确目标与snapshot_id的SHA-256；目标在脱敏前参与摘要，新增元数据不保存原文。`run.admitted.delegation`在子身份事务内固定fingerprint和parent_call_id；源于该Run的子admission本身即为已接收证据，不依赖稍后可能缺失的worker.started或父工具结果。child message沿原语义脱敏入口保存，已知凭据不复制到新子会话。
+
+`delegation_history`只沿相同Session的显式continuation_of链，`RuntimeStore.worker_admissions`定向查询这些父身份的子接收事实，并校验真实父delegate工具调用引用。不读取其他根任务或其他Session的调查历史，不从旧脱敏目标猜测缺失指纹。整批存在历史重复或批内重复时不创建任何子身份、不增加已委派数量、不发额外模型请求，工具返回Error及已有父Run/call和child身份；原回答须由本Session的read_tool_result或子状态显式查询，未完成/失败不伪装成功。源快照、角色或精确目标改变与普通新Run允许新调查；原4worker/共享2模型槽/预算/只读及取消所有权边界保持。这里仅做字面去重，不判断两个不同表述是否语义重复，也不宣称真实成本收益。
+
 ## 可选结构切块与观测出口
 
 显式 code_structure 模式通过懒加载 tree-sitter Python/JS/TS grammar 提取类、函数和嵌套符号，heading携带符号路径；装饰器/UTF-8/CRLF行号按真实源码保留。大符号继续窗口化，class骨架与方法分开避免复制整类。build统计报告解析文件数与fallback原因；窗口/结构模式、parser版本组成chunking_profile/fingerprint，在写事务内复核，变化必须force。缺依赖/不支持语言/解析损坏时回退窗口；默认不导入parser。检索eval可对相同复制语料分别运行两种切法，记录实际提交的chunking指纹和hit heading，不以机制测试声称质量提升。
