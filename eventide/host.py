@@ -500,6 +500,7 @@ class RuntimeHost:
             "title": title[:96],
             "metadata_hash": self.store.session_metadata_hash(session_id),
             "managed": self.store.session_is_control(session_id),
+            "legacy_imported": self.store.session_is_imported(session_id),
             "archived": bool(session.get("archived", False)),
             "status": "parked"
             if run and run["status"] == "interrupted"
@@ -1082,7 +1083,7 @@ class RuntimeHost:
         binding = intent.get("execution_binding", {})
         if binding.get("kind") == "delivery":
             return f"delivery_operation:{binding['delivery_id']}"
-        if binding.get("kind") in {"evaluation", "index", "worktree_control"}:
+        if binding.get("kind") in {"evaluation", "index", "worktree_control", "history_import"}:
             return f"{binding['kind']}_run:{run_id}"
         if binding.get("kind") == "snapshot":
             return f"snapshot_run:{run_id}"
@@ -1110,9 +1111,10 @@ class RuntimeHost:
             return {"kind": "source"}
         if binding["kind"] == "delivery":
             return dict(binding)
-        if binding["kind"] in {"evaluation", "index", "worktree_control"}:
+        if binding["kind"] in {"evaluation", "index", "worktree_control", "history_import"}:
             identifier = {"evaluation": "evaluation_id", "index": "index_run_id",
-                          "worktree_control": "operation_id"}[binding["kind"]]
+                          "worktree_control": "operation_id",
+                          "history_import": "operation_id"}[binding["kind"]]
             return {key: binding[key] for key in ("kind", "workspace_id", identifier)}
         if binding["kind"] == "worktree":
             return {key: binding[key] for key in (
@@ -2191,6 +2193,7 @@ class RuntimeHost:
         """
         from eventide.delivery_control import is_delivery_control_run
         from eventide.evaluation_control import is_evaluation_run
+        from eventide.history_import_control import is_history_import_run
         from eventide.index_control import is_index_run
         from eventide.worktree_control import is_worktree_control_run
 
@@ -2205,6 +2208,7 @@ class RuntimeHost:
                         or is_evaluation_run(self.store, run_id) or is_index_run(self.store, run_id)
                         or is_delivery_control_run(self.store, run_id)
                         or is_worktree_control_run(self.store, run_id)
+                        or is_history_import_run(self.store, run_id)
                         else self._crash_gap_evidence(run_id))
             if queued:
                 payload["reason"] = "host_stopped_before_dispatch"

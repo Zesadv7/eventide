@@ -420,6 +420,31 @@ class RuntimeStore:
                 (session_id,),
             ).fetchone()[0])
 
+    def session_is_imported(self, session_id: str) -> bool:
+        with self._lock:
+            return bool(self._connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE session_id=? "
+                "AND type='control.session' "
+                "AND json_extract(payload_json,'$.kind')='legacy_history')", (session_id,),
+            ).fetchone()[0])
+
+    def imported_messages(
+        self, session_id: str, *, limit: int = 50, before: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not self.session_is_imported(session_id):
+            raise ValueError("Imported history Session not found")
+        if not 1 <= limit <= 100 or (before is not None and before < 1):
+            raise ValueError("Invalid imported message page")
+        with self._lock:
+            records = self._connection.execute(
+                "SELECT session_seq,payload_json FROM runtime_events "
+                "WHERE session_id=? AND type='message.imported' "
+                "AND (? IS NULL OR session_seq<?) ORDER BY session_seq DESC LIMIT ?",
+                (session_id, before, before, limit),
+            ).fetchall()
+        return [{"seq": row["session_seq"], **json.loads(row["payload_json"])["message"]}
+                for row in reversed(records)]
+
     def session_metadata_hash(self, session_id: str) -> str:
         record = self.get_session(session_id)
         if record is None:

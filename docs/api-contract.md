@@ -407,3 +407,31 @@ Run execution.kind=worktree_control，含 operation_id/workspace_id，使用同�
 持久队列、Run/SSE/精确取消。服务控制会话不能作为普通Agent对话或Continue。
 停止派发后的Git操作会等待结果；已完成的操作仍记录completed，不能解读为撤销。
 进程退出的未完成操作标为interrupted，不自动重放。页面通过目录与历史查看结果。
+
+### 旧版历史预检与确认导入
+
+- POST /api/projects/{id}/history-imports/preview：严格正文 {source: 本机数据库路径}。
+- POST /api/projects/{id}/history-imports：严格正文
+  {preview_id, archive_sha256, confirmed:true}；confirmed必须是真正布尔true。
+- 两者要求本机同源及Idempotency-Key，持久接收返回202及
+  run_id/session_id/project_id/status_url/events_url。同键不同内容拒绝。
+- GET /api/projects/{id}/history-imports?limit=20&before={run_id}：按身份分页的操作历史。
+- GET /api/history-imports/{run_id}：预检计数/大小/SHA256或导入结果、状态、错误。
+  预检的imported表示已导入；成功结果包含first_session_id供历史页定位。
+- POST /api/history-imports/{run_id}/cancel：精确取消，要求幂等键。
+
+预检是只读任务，固定脱敏档案，不恢复Provider配置；原路径只在接收进程内存
+保有，事件仅保存请求摘要。确认必须匹配项目、已完成预检和hash；派发时再检查
+受管档案的路径、大小与hash。导入记录使用预检命名空间映射身份，同一预检不能
+重复导入，空档案也遵守该规则。记录与控制成功回执/终态同事务提交；错误整批回滚。
+
+run.execution.kind=history_import并带operation_id/workspace_id；共享4根/20等待
+调度。排队取消不读取源库，已派发操作停止时等待真实线程收尾；已提交的导入保持
+completed，停止不表示撤销。重启不自动重放。源文件在预检后变化不影响固定档案。
+
+Session查询增加legacy_imported；导入会话归档且作为只读控制历史，Run/Continue
+拒绝，不借用旧事件作为执行或审批依据。GET
+/api/sessions/{id}/legacy-messages?limit=50&before={session_seq} 仅对导入会话开放，
+返回seq/role/content；limit为1–100，每页升序，before排除游标自身。
+普通会话或不存在的身份404，非法分页422。历史页以纯文本展示消息，旧汇总用量
+保留在legacy.run_summary，原事件保留在legacy.event，不加入现代逐调用账本。

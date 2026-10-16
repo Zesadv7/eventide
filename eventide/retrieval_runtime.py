@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING
 
 from eventide.config import Settings
 from eventide.embedding_runtime import embed_remote
@@ -19,30 +18,10 @@ from eventide.rag.search import (
     retrieve,
     validate_k,
 )
+from eventide.utils import owned_local_work
 
 if TYPE_CHECKING:
     from eventide.host import RuntimeHost
-
-T = TypeVar("T")
-
-
-async def owned_local_work(function: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-    """Cancellation retains ownership of the actual CPU/SQLite worker until it exits."""
-    task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
-    cancelled = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            cancelled = True
-        except Exception:
-            break
-    if cancelled:
-        # Observe an exception without replacing the caller's cancellation intent.
-        if not task.cancelled():
-            task.exception()
-        raise asyncio.CancelledError
-    return task.result()
 
 
 def runtime_search_handler(

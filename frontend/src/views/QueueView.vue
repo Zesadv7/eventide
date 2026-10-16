@@ -58,6 +58,13 @@ async function open(entry: QueueEntry) {
   try {
     if (store.selectedWorkspace !== entry.workspace_id)
       await store.selectWorkspace(entry.workspace_id);
+    if (entry.execution.kind === "history_import") {
+      await router.push({
+        path: "/imports",
+        query: { operation: entry.run_id },
+      });
+      return;
+    }
     if (entry.execution.kind === "worktree_control") {
       await router.push({
         path: "/worktrees",
@@ -98,6 +105,7 @@ function project(entry: QueueEntry) {
   );
 }
 function target(entry: QueueEntry) {
+  if (entry.execution.kind === "history_import") return "旧版历史导入";
   if (entry.execution.kind === "worktree_control") return "工作副本管理";
   if (entry.execution.kind === "delivery") return "隔离修复交付";
   if (entry.execution.kind === "index") return "项目索引构建";

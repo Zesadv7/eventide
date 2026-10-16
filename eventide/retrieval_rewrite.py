@@ -13,8 +13,8 @@ from eventide.budgets import BudgetExceeded
 from eventide.models import ModelRequest
 from eventide.rag.index import IndexStore
 from eventide.rag.search import RetrievalOutcome, SearchResult, format_results, validate_k
-from eventide.retrieval_runtime import owned_local_work
 from eventide.usage import build_usage_ledger
+from eventide.utils import owned_local_work
 from eventide.workspace import digest
 
 if TYPE_CHECKING:

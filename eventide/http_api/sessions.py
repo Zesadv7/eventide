@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from pydantic import BaseModel
 
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.schemas import SessionBody, SessionDeleteBody, SessionUpdateBody
 from eventide.http_api.session_management import mutate_session
 from eventide.usage import build_usage_ledger
+
+
+class ImportedMessage(BaseModel):
+    seq: int
+    role: str
+    content: Any
 
 
 def create_router(context: ApiContext) -> APIRouter:
@@ -71,6 +78,16 @@ def create_router(context: ApiContext) -> APIRouter:
             return agent_runtime.store.load_messages(session_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.get("/api/sessions/{session_id}/legacy-messages", response_model=list[ImportedMessage])
+    async def imported_messages(
+        session_id: str, limit: int = Query(default=50, ge=1, le=100),
+        before: int | None = Query(default=None, ge=1),
+    ) -> list[dict[str, Any]]:
+        try:
+            return agent_runtime.store.imported_messages(session_id, limit=limit, before=before)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
     @router.get("/api/sessions/{session_id}/usage")
     async def session_usage(session_id: str, include_children: bool = True) -> dict[str, Any]:

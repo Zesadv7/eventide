@@ -1,3 +1,4 @@
+import HistoryImportsView from "./views/HistoryImportsView.vue";
 import WorktreesView from "./views/WorktreesView.vue";
 import { createRouter, createWebHashHistory } from "vue-router";
 import ChatView from "./views/ChatView.vue";
@@ -13,6 +14,7 @@ import SessionsView from "./views/SessionsView.vue";
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
+    { path: "/imports", component: HistoryImportsView },
     { path: "/worktrees", component: WorktreesView },
     { path: "/", redirect: "/chat" },
     { path: "/chat/:sessionId?", name: "chat", component: ChatView },

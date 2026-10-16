@@ -7,6 +7,7 @@ import {
   type HistorySession,
 } from "../api/history";
 import RunTrace from "../components/RunTrace.vue";
+import LegacyMessages from "../components/LegacyMessages.vue";
 import { useWorkbench } from "../stores/workbench";
 
 const store = useWorkbench(),
@@ -308,6 +309,10 @@ function toolLabel(value: unknown) {
         {{ sessionLoading ? "正在读取会话…" : "选择当前项目的会话查看记录。" }}
       </p>
     </section>
+    <LegacyMessages
+      v-if="selectedSession?.legacy_imported"
+      :session="sessionId"
+    />
     <section v-if="sessionId" class="panel" aria-label="历史运行列表">
       <h2>运行记录</h2>
       <p class="muted">
@@ -356,6 +361,12 @@ function toolLabel(value: unknown) {
         }}<br />步骤：{{ detail.steps ?? "未记录" }} · 工具调用：{{
           detail.tool_calls ?? "未记录"
         }}
+      </p>
+      <p v-if="detail.execution?.kind === 'history_import'">
+        <RouterLink
+          :to="{ path: '/imports', query: { operation: detail.run_id } }"
+          >查看历史导入操作</RouterLink
+        >
       </p>
       <p v-if="detail.execution?.kind === 'worktree_control'">
         <RouterLink

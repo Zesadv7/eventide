@@ -14,8 +14,8 @@ from eventide.policy import PolicyDecision, PolicyEngine, PolicyResult
 from eventide.providers import ScriptedProvider
 from eventide.rag.embedding import HashEmbedder, provider_from_settings
 from eventide.rag.index import IndexStore
-from eventide.retrieval_runtime import owned_local_work
 from eventide.usage import build_usage_ledger
+from eventide.utils import owned_local_work
 from tests.test_embedding_runtime import Client, response
 from tests.test_host import make_repo
 from tests.test_runtime import settings_for

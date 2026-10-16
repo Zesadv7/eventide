@@ -236,7 +236,7 @@ def import_legacy_data(
     if not namespace and any(
         key == "configuration_control" or key.startswith(
             ("index_control_", "worktree_control_", "evaluation_control_", "delivery_prepare_",
-             "deliveries_", "worktrees_", "probe_"))
+             "deliveries_", "worktrees_", "probe_", "history_import_"))
         for key in session_ids
     ):
         raise ValueError("Legacy Session uses a reserved runtime identity")
@@ -398,6 +398,7 @@ def import_legacy_data(
             "messages": len(legacy["messages"]), "events": len(legacy["events"]),
             "provider_config_imported": False, "api_key_imported": False,
             "read_only_history": True,
+            "first_session_id": legacy["sessions"][0]["id"] if legacy["sessions"] else None,
         }
         if on_committed is not None:
             on_committed(report)

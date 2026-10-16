@@ -35,7 +35,8 @@ export interface Execution {
     | "evaluation"
     | "index"
     | "delivery"
-    | "worktree_control";
+    | "worktree_control"
+    | "history_import";
   operation_id?: string;
   evaluation_id?: string;
   index_run_id?: string;
@@ -60,6 +61,7 @@ export interface Approval {
 export interface Session {
   metadata_hash?: string;
   managed?: boolean;
+  legacy_imported?: boolean;
   session_id: string;
   workspace_id: string;
   title: string;
