@@ -34,6 +34,7 @@ test("delivery survives lost acceptance and refresh, then requires reviewed adop
   await page
     .getByLabel("验收命令")
     .fill('test "$(cat delivery-result.txt)" = "independently accepted"');
+  await page.getByLabel("累计 Token 软限").fill("200000");
   await page.getByRole("button", { name: "开始有界修复" }).click();
   await expect
     .poll(
@@ -60,7 +61,11 @@ test("delivery survives lost acceptance and refresh, then requires reviewed adop
   ).json();
   expect(value.applied).toBe(false);
   expect(value.rounds).toHaveLength(1);
+  expect(value.repair.limits.observed_tokens).toBe(200000);
   await page.reload();
+  await expect(
+    page.getByText("固定 Token 软限：200000", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "查看验收补丁" }).click();
   await expect(page.locator("pre.patch")).toContainText(
     "independently accepted",
@@ -113,8 +118,10 @@ test("delivery survives lost acceptance and refresh, then requires reviewed adop
     )
   ).json();
   expect(costs.usage.attempt_count).toBeGreaterThan(0);
-  const detailCount = await page.locator(".call-details tbody > tr").count();
-  expect(detailCount).toBe(costs.usage.calls.length * 2);
+  const detailCount = costs.usage.calls.length * 2;
+  await expect(page.locator(".call-details tbody > tr")).toHaveCount(
+    detailCount,
+  );
   await page.reload();
   await expect(
     page.getByText(new RegExp(`交付 ${identity}：包含所有轮次`)),
