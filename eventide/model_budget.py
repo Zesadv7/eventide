@@ -17,6 +17,7 @@ from eventide.budgets import (
     ReservationReceipt,
     is_service_probe_run,
 )
+from eventide.delivery_limits import enforce_delivery_request
 from eventide.input_composition import measure_input_composition
 from eventide.models import ModelRequest
 from eventide.store import RuntimeStore
@@ -99,6 +100,7 @@ class ModelBudgetController:
         self, run_id: str, request: ModelRequest, identity: dict[str, Any],
     ) -> ReservationReceipt:
         session_id, context = self.context(run_id)
+        enforce_delivery_request(self.store, context.delivery_id, identity["kind"])
         inputs, outputs, method = estimate_request(request)
         return self.ledger.reserve(
             session_id, run_id, identity["attempt_id"], context=context,
@@ -140,6 +142,7 @@ class ModelBudgetController:
         if not texts or any(not isinstance(text, str) for text in texts):
             raise ValueError("Embedding input must be a non-empty list of strings")
         session_id, context = self.context(run_id)
+        enforce_delivery_request(self.store, context.delivery_id, "embedding")
         serialized = json.dumps({"input": texts}, ensure_ascii=False)
         return self.ledger.reserve(
             session_id, run_id, identity["attempt_id"], context=context,

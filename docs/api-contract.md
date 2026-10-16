@@ -344,3 +344,9 @@ search_knowledge在启用时最多返回5条，附原查询/改写来源；失�
 - `POST /api/indexes/{run_id}/cancel`：同源及幂等键，等待精确任务清理；重复停止或终态调用返回同一任务现状。取消排队任务不请求模型、不生成索引。
 
 持久`index.accepted`、`index.published`、`index.cancel_requested`沿用Run SSE；没有逐片段伪进度或第二日志源。重启未完成任务为interrupted，普通Continue不适用于索引控制Session。发布证据含generation和files/rebuilt_files/deleted_files/chunks/skipped/duration_ms/structured_files/structure_fallbacks/chunking_fingerprint；代次与统计同事务绑定。远程embedding用量通过既有Run/project成本接口查询，索引终态不重复累计。
+
+### 有界交付内部事实（HTTP 页面仍在 D6 实施）
+
+Python `RuntimeHost.manage_delivery("repair", delivery_id, goal, checks, image?, max_rounds=3)` 只接受1–3轮、1–4个明确验收命令。`show`新增repair（固定条件）、repair_result（停止原因/用量）、repair_status（running/passed/stopped/interrupted）和rounds。repair开始后普通run/verify被拒绝，apply要求修复通过且原有双方checkpoint/patch校验仍有效。
+
+`delivery.repair_started`含control_run_id/deadline/limits；`delivery.round_started/round_finished`含round和候选证据；`delivery.repair_finished`含reason、verified_candidates及usage投影。常见reason为passed、round_limit、no_source_progress、repeated_acceptance_failure、writer_stopped、unknown_tool_outcome、cancelled、delivery_time_limit、delivery_token_limit、delivery_step_limit、repair_failed。终态usage只是派生展示，不能再次入账。API消费者不能把控制Run的completed等同候选验收通过，应读取repair_status/reason。

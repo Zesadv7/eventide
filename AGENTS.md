@@ -97,7 +97,7 @@ uv run eventide eval evals/smoke.yaml
 | 0.2 | 已完成 | 2026-10-15：Host/live 共用配置优先级；live 只读解析已提交 WAL 配置、隔离前解密且不创建 Host/密钥，错误不回退。88 项定向回归、Ruff、Mypy 50 模块通过；README/architecture/ADR-051 已同步。真实调用另属 0.4。 |
 | 0.3 | 已完成 | 2026-10-15：全部用例独立临时 Git 项目/数据库，live/offline 均关闭 MCP；失败产物保留，报告可逐例定位，凭据不写产物、用户源码/状态不变。88 项回归及 smoke12/tasks14/engineering3/workers1 全通过；README/architecture/ADR-051 同步。 |
 | 0.4 | 已完成 | 2026-10-16：真实DeepSeek Responses非思考模式，普通/只读工具及3工程fixture各2次，共10次、7次完整完成；3次Token软限停驻且固定测试仍通过，6次修复独立验收均通过。累计131,359输入/7,630输出Token、48次请求、未知0；失败全保留，未改用户状态。README/architecture有摘要，不能外推成功率。 |
-| A1 | 进行中 | 2026-10-16：索引已接持久HTTP接收/查询/取消、4根20等待调度及Vue专页，配置冻结/同键回放/取消/重启停驻/发布代次同事务；103项关联及13项专项回归、模块覆盖91.09%、Ruff/Mypy99、88项前端、16条浏览器检查及320px复核、wheel和真实Docker索引/重启验证通过。README/architecture/api-contract/ADR-075同步。现有路由已模块化，真实模型评测与有界交付长任务仍待完成，不标整体完成。 |
+| A1 | 进行中 | 2026-10-16：索引已接持久HTTP接收/查询/取消、4根20等待调度及Vue专页，配置冻结/同键回放/取消/重启停驻/发布代次同事务；完整1434项后端通过/9项显式跳过、覆盖92.46%；103项关联及13项专项回归、模块覆盖91.09%、Ruff/Mypy99、88项前端、16条浏览器检查及320px复核、wheel和真实Docker索引/重启验证通过。README/architecture/api-contract/ADR-075同步。现有路由已模块化，真实模型评测与有界交付长任务仍待完成，不标整体完成。 |
 | A2 | 进行中 | 2026-10-16：Provider保存/重置及模型/会话参数已接持久幂等、版本冲突保护和SQLite原子回执；写入前客户端清理失败可明确重试，结果未知保留原身份。Vue与旧页同步承接，修复连接测试切页后的表单锁定。完整后端1344通过/8个显式跳过、覆盖92.67%；最后恢复边界97项专项通过，Ruff/Mypy92、82项前端/36项旧页、14条整套浏览器检查加生成参数0/null专项通过，typecheck/build/format、smoke12/12、wheel及最新真实Docker分发/重启/12题离线评测通过。README/architecture/api-contract/ADR-070同步；其余管理写接口仍按后续阶段补齐，A2不标整体完成。 2026-10-16：连接探测HTTP持久幂等及旧页稳定重试身份已实现；14项HTTP专项、159项关联后端回归、34项旧页JS（新增5项）、真实Chrome丢响应/刷新/同键回放旅程、Ruff/Mypy83模块通过，HTTP探测模块覆盖100%。README/architecture/api-contract/ADR-067同步；其余写接口仍按后续阶段补齐。 Run/Continue持久幂等接收、重启重试、内容冲突及同源/DNS-rebinding防护已实现；43项HTTP/接收/API回归、Ruff/mypy52模块通过。api-contract/architecture同步；Skills导入/配置已接持久幂等与来源检查、配置竞争返回409；Delivery等继续按后续步骤接入。2026-10-16：容器本机转发精确peer启动配置已接管理守卫，额外peer仍强制回环Host/匹配Origin，禁用代理头信任；85项来源/API/Skills/CLI回归及Ruff/Mypy72模块通过，README/architecture/api-contract/ADR-061同步。真实镜像验证仍由F5记录。 |
 | A3 | 已完成 | 生产Host全部实际目录/动态MCP/Worker接入严格契约，首次参数错误允许一次修正轮次，再次错误停机且不重放副作用；截断调用不派发。97项core及81项主链回归、Ruff/mypy55模块通过。README/architecture/api-contract/ADR-052同步；真实Docker命令与Skill脚本路径已由S4/F5补验。 |
 | A4 | 已完成 | generation严格配置/能力声明/模型与会话API和三adapter映射；17项生成参数测试及59项相关回归通过，Ruff/mypy50模块通过。README/architecture/api-contract/ADR-050同步；页面在F迁移。 |
@@ -129,11 +129,11 @@ uv run eventide eval evals/smoke.yaml
 | C3 | 已完成 | 2026-10-16：默认关闭的单次改写/补检索接入统一模型槽与预算，根Run/worker共用持久认领；一次失败不重试，取消/预算拒绝保持控制语义，索引漂移/无效输出保留原候选，按RRF去重最多5条。86项相关回归通过、改写/派发覆盖93.08%，Ruff/Mypy95通过；README/architecture/api-contract/ADR-073同步。没有付费调用，效果与默认晋升仍待C4/C5。 |
 | C4 | 进行中 | 2026-10-16：已冻结打包16语料/40查询，开发留出各20，严格hash/标签/临时索引及报告指纹；24项评测回归通过、模块覆盖96.40%，真实禁网MiniLM/TinyBERT四路各题3次共480查询完成，无失败/降级。留出词面Recall/MRR 0.80/0.75，语义0.85/0.85、混合0.85/0.80、重排0.85/0.7292；p95分别15.03/108.35/121.10/145.75ms，均不晋升默认。README/architecture/ADR-074同步；真实查询改写与下游质量费用对照仍待完成。 |
 | C5 | 待开始 | 片段占用/输入/cache/改写开销/下游结果；Recall@5或MRR提升另一不降、p95≤基线2倍、任务通过不降才晋升默认。 |
-| D1 | 待开始 | DeliveryController 有界修复：初次+最多2次修正，总计3次候选验收。 |
+| D1 | 已完成 | 2026-10-16：复用DeliveryController/独立Writer/Verifier实现首次+最多2轮修正，失败输出反馈、候选patch与唯一验收call绑定；最多3次候选验收，不接受模型自评。99项交付/生命周期/预算回归通过、相关模块覆盖90%，另1项真实Docker两轮修复/验收/人工采纳通过，Ruff/Mypy101与smoke12/12通过。README/architecture/api-contract/ADR-076同步；Web仍按D6。 |
 | D2 | 已完成 | 2026-10-16：随P2落地独立writer checkout和每交付owner/管理Session；prepare、源码比对及apply短期协调source/Git，writer模型期不占源。并发交付、验收期间源漂移拒绝采纳、排队apply重读最新证据、取消后实际副作用收尾及writer重启恢复均通过；52项副本/交付/Skills回归、全量937通过/7跳过及6项真实Docker通过，architecture/README/ADR-063同步。D1/D3-D6有界流程仍待实施。 |
-| D3 | 待开始 | 交付默认36步/60,000已观测Token/15分钟，摘要/子任务累计；恢复不清零。 |
-| D4 | 待开始 | 通过/取消/超限/无进展/重复失败/保护变化/未知结果停止，等待副作用收尾。 |
-| D5 | 待开始 | 固定验收/保护范围，patch/checkpoint绑定，新改动使旧验收失效；显式采纳，不自动提交/合并/推送。 |
+| D3 | 已完成 | 2026-10-16：交付固定36次模型尝试/60k已报告Token/900秒，统一请求预留前检查，摘要/worker/改写/重试及embedding消费跨根Run累计；新Run/Continue/关闭所有者/重启不重置。36次混合调用、embedding输入限额、绝对deadline和终态关闭专项通过；99项关联回归、限额模块100%覆盖，真实Docker验证通过。README/architecture/ADR-076同步；清理允许超时后继续收尾，不承诺账单硬限。 |
+| D4 | 已完成 | 2026-10-16：通过/取消/超限/无源码进展/重复验收失败/保护变化/未知工具结果均停止；重复取消等待Provider与真实工具清理，未知保留账本和产物。99项交付/生命周期/预算回归、并发独立副本/重启/超时/未知writer及verifier专项通过；真实Docker两轮闭环通过。README/architecture/api-contract/ADR-076同步。 |
+| D5 | 已完成 | 2026-10-16：开始固定checks/image/保护范围，每轮patch/checkpoint和验收绑定，旧run/verify禁止追加候选或放宽条件；修复成功后仍显式apply，候选修改/源漂移及并发采纳冲突拒绝。99项关联回归，重启保留通过证据、篡改与并发采纳专项及真实Docker修正后人工采纳通过；README/architecture/api-contract/ADR-076同步，未自动commit/merge/push。 |
 | D6 | 待开始 | Vue目标/后端/轮次/失败/补丁/用量/停止/采纳，失败保留产物。 |
 | X1 | 待开始 | CLI能力清单逐项承接，包括历史导入、worktree、export/trace/检索/评测/交付。 |
 | X2 | 待开始 | 删除用户命令行产品和旧前端/专属死代码，不留转发空壳。 |

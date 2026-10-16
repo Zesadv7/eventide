@@ -483,3 +483,11 @@ retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime�
 `IndexController`为每个项目建立归档的受信任control Session，拒绝普通Agent消息/Continue。HTTP以同源幂等键持久接收 `run.admitted` 与 `index.accepted`，随后由原Root调度器执行；同项目索引串行，索引控制身份独立于源码会话，不长期占住源码执行锁。Run冻结配置指纹与构建选项，凭据仅在内存的Settings中传递。恢复仅停驻，不根据旧事实重发外部请求。
 
 执行使用 `index_runtime.build_index`，全部远程批次归属该Run/项目/UTC日预算。发布统计与generation从同一SQLite提交事务返回，避免提交后另读索引误绑定其他构建的代次。`index.published`仅存摘要，运行详情/分页历史从主Event Log重建；取消及失败保留既有attempt、未知预留和旧索引。队列、历史页跳转专门索引页，用量页接受明确Run身份，控制Session不进入普通聊天执行。
+
+### 有界交付与跨轮限额
+
+`DeliveryController`继续拥有准备/单次Writer/独立验收/采纳，`delivery_repair`仅编排有界轮次，复用同一独立worktree和执行边界。`delivery.repair_started`固定目标、checks、image、最大轮次和绝对deadline；`round_started/round_finished`绑定每轮Writer及补丁，`repair_finished`记录停止原因和派生用量。每次验收拥有唯一tool call ID，避免多轮在工具投影中覆盖旧证据。没有完成事实但控制Run已中断时，读取显示interrupted，禁止自动重新启动和采纳。
+
+`ModelBudgetController`在主请求和embedding预留前检查 `delivery_limits`。以可信预算context.delivery_id筛选独占attempt，跨Writer根Run及其子任务累计；无await的检查/预留保持单进程串行原子边界。36次上限包含失败尝试和辅助模型请求，embedding只进Token总量。控制Run终止或交付结束后，不允许通过Writer Continue再派发。独立验收不占模型槽；Writer共用原根队列，交付管理Run不重复占根名额。
+
+每轮先复核源码/保护范围与patch，和上一轮完全相同即停止；失败签名对测试耗时文本做归一化，重复失败停止。最多3次候选验收，成功才开放显式采纳。超时/取消只发一次子任务取消并等待收尾；真实未知工具结果停驻副本。此流程没有恢复自动重放，失败产物保留用于检查；Web接收/页面验收由D6完成。

@@ -46,8 +46,22 @@ class DeliveryController:
         verified = next(
             (e["payload"] for e in reversed(facts) if e["type"] == "delivery.verified"), None
         )
+        repair = next((e["payload"] for e in facts
+                       if e["type"] == "delivery.repair_started"), None)
+        finished = next((e["payload"] for e in reversed(facts)
+                         if e["type"] == "delivery.repair_finished"), None)
+        owner = self.host.store.get_run_summary(repair["control_run_id"]) if repair else None
+        repair_status = None
+        if repair:
+            if finished:
+                repair_status = "passed" if finished["reason"] == "passed" else "stopped"
+            else:
+                active = owner is not None and owner["status"] in {"running", "queued"}
+                repair_status = "running" if active else "interrupted"
         return {
             **prepared,
+            "repair": repair, "repair_result": finished, "repair_status": repair_status,
+            "rounds": [e["payload"] for e in facts if e["type"] == "delivery.round_finished"],
             "verification": verified,
             "applied": any(e["type"] == "delivery.applied" for e in facts),
         }
@@ -86,12 +100,13 @@ class DeliveryController:
         checks: list[str] | None = None,
         image: str | None = None,
         protected_patterns: tuple[str, ...] = (),
+        max_rounds: int = 3,
     ) -> dict[str, Any]:
         host = self.host
         await host.initialize()
         if image is not None and (not isinstance(image, str) or not image.strip()):
             raise ValueError("Container image cannot be empty")
-        if action not in {"prepare", "run", "verify", "apply", "show"}:
+        if action not in {"prepare", "run", "verify", "apply", "show", "repair"}:
             raise ValueError("Unknown delivery action")
         value = self.load(delivery_id) if delivery_id else None
         if action == "show":
@@ -185,52 +200,31 @@ class DeliveryController:
                     checkout_ws = host.resolve_or_register_workspace(checkout)
                     async with self._source_owner(workspace):
                         await host._admission_check(verify_source_unchanged, source, receipt)
-                    if action == "run":
+                    repair = value.get("repair")
+                    if repair:
+                        if action in {"run", "repair"}:
+                            raise ValueError("Delivery repair already started; no unbounded replay")
+                        if action == "verify":
+                            raise ValueError(
+                                "Delivery acceptance conditions are frozen; "
+                                "repair owns verification"
+                            )
+                        if action == "apply" and (not value.get("repair_result")
+                                or value["repair_result"]["reason"] != "passed"):
+                            raise ValueError("Delivery repair has no passing final result")
+                    if action == "repair":
+                        from eventide.delivery_repair import run_repair
+
+                        result = await run_repair(
+                            self, run_id, delivery_id, source, checkout_ws, receipt,
+                            goal or "", checks or [], image, max_rounds,
+                        )
+                    elif action == "run":
                         if not goal or not goal.strip() or len(goal) > 20_000:
                             raise ValueError("Worker goal must contain 1-20000 characters")
-                        child_session = host.create_session(workspace_id=checkout_ws.workspace_id)
-                        child_id = f"run_{uuid.uuid4().hex[:16]}"
-                        config = {
-                            "kind": "container" if image is not None else "local",
-                            "disable_mcp": True,
-                            "writer_delivery_id": delivery_id,
-                            **({"image": image} if image is not None else {}),
-                        }
-                        await host._reserve_run(
-                            child_session,
-                            child_id,
-                            RunRequest(goal, child_session, child_id),
-                            execution_config=config,
+                        result = await self._run_writer(
+                            run_id, delivery_id, checkout_ws, goal, image,
                         )
-                        await host._emit(
-                            run_id,
-                            "worker.started",
-                            {
-                                "child_run_id": child_id,
-                                "child_session_id": child_session,
-                                "role": "writer",
-                                "delivery_id": delivery_id,
-                            },
-                            None,
-                        )
-                        child = host.start_admitted_run(child_id)
-                        try:
-                            completed = await child
-                        finally:
-                            if not child.done():
-                                child.cancel()
-                            with suppress(asyncio.CancelledError):
-                                await child
-                        result = {
-                            "delivery_id": delivery_id,
-                            "worker_run_id": completed.run_id,
-                            "worker_session_id": child_session,
-                            "status": completed.status,
-                            "output": completed.output,
-                            "usage": completed.usage,
-                            "checkout": str(checkout),
-                        }
-                        await host._emit(run_id, "delivery.worker_finished", result, None)
                     else:
                         async with host._workspace_execution(checkout_ws.workspace_id):
                             if host.store.workspace_has_unknown_outcome(checkout_ws.workspace_id):
@@ -302,6 +296,57 @@ class DeliveryController:
                 host._run_tasks.pop(run_id, None)
             host._active_tasks.discard(task)
 
+    async def _run_writer(
+        self, run_id: str, delivery_id: str, checkout_ws: WorkspaceRecord,
+        goal: str, image: str | None,
+    ) -> dict[str, Any]:
+        host = self.host
+        checkout = Path(checkout_ws.path)
+        child_session = host.create_session(workspace_id=checkout_ws.workspace_id)
+        child_id = f"run_{uuid.uuid4().hex[:16]}"
+        config = {
+            "kind": "container" if image is not None else "local",
+            "disable_mcp": True,
+            "writer_delivery_id": delivery_id,
+            **({"image": image} if image is not None else {}),
+        }
+        await host._reserve_run(
+            child_session,
+            child_id,
+            RunRequest(goal, child_session, child_id),
+            execution_config=config,
+        )
+        await host._emit(
+            run_id,
+            "worker.started",
+            {
+                "child_run_id": child_id,
+                "child_session_id": child_session,
+                "role": "writer",
+                "delivery_id": delivery_id,
+            },
+            None,
+        )
+        child = host.start_admitted_run(child_id)
+        try:
+            completed = await child
+        finally:
+            if not child.done():
+                child.cancel()
+            with suppress(asyncio.CancelledError):
+                await child
+        result = {
+            "delivery_id": delivery_id,
+            "worker_run_id": completed.run_id,
+            "worker_session_id": child_session,
+            "status": completed.status,
+            "output": completed.output,
+            "usage": completed.usage,
+            "checkout": str(checkout),
+        }
+        await host._emit(run_id, "delivery.worker_finished", result, None)
+        return result
+
     async def _verify(
         self,
         run_id: str,
@@ -332,8 +377,9 @@ class DeliveryController:
         )
         tools = ToolExecutor({"bash": lambda **_args: ""}, command_executor=command_executor)
         results: list[dict[str, Any]] = []
+        verification_id = uuid.uuid4().hex[:16]
         for index, command in enumerate(checks):
-            call = ToolCall(f"check_{index + 1}", "bash", {"command": command})
+            call = ToolCall(f"check_{verification_id}_{index + 1}", "bash", {"command": command})
             await host._emit(
                 run_id,
                 "tool.prepared",
