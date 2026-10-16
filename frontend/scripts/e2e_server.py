@@ -39,11 +39,25 @@ def main() -> None:
     import eventide.host as host_module
 
     class JourneyProvider(FakeProvider):
+        async def complete(self, request):
+            if "交付修复场景" in self._prompt(request):
+                async for event in self.stream(request):
+                    if event.response is not None:
+                        return event.response
+            return await super().complete(request)
+
         async def stream(self, request):
             prompt = self._prompt(request)
             step = self.counts[prompt] = self.counts.get(prompt, 0) + 1
             usage = {"input_tokens": 100 + step, "output_tokens": 20}
-            if "队列并发场景" in prompt:
+            if "交付修复场景" in prompt:
+                if step == 1:
+                    response = ModelResponse(tool_calls=[self._call("write_file", {
+                        "path": "delivery-result.txt", "content": "independently accepted\n",
+                    })], stop_reason="tool_use", usage=usage)
+                else:
+                    response = ModelResponse(text="交付候选完成", usage=usage)
+            elif "队列并发场景" in prompt:
                 yield ModelStreamEvent("text_delta", text="正在执行队列隔离验证。" * 50)
                 await asyncio.sleep(60)
                 response = ModelResponse(text="队列验证结束", usage=usage)

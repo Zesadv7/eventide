@@ -324,7 +324,7 @@ Vue和旧页仅在浏览器会话存储中保存随机请求键、版本和候�
 
 已配置本地语义包在Run准备时不可用且存在有效索引时，持久事件`retrieval.degraded`返回固定`reason`诊断码及`fallback=sparse|unavailable`。不会回显底层异常或创建第二事实源。`search_knowledge`结果注明`mode: sparse|dense+sparse|dense+sparse+rerank`，降级注明`Retrieval degraded`；重排分数独立展示，最多20候选/5结果。未启用重排时保留原k=1–10。
 
-本地模型配置目前通过启动配置和Python准备接口提供；没有宣称已提供模型下载、索引管理或检索对照HTTP页面。
+本地模型配置目前通过启动配置和Python准备接口提供；索引管理HTTP与页面见后文；未提供模型下载或检索对照HTTP页面。
 
 ### 远程检索用量与预算停止
 
@@ -345,8 +345,21 @@ search_knowledge在启用时最多返回5条，附原查询/改写来源；失�
 
 持久`index.accepted`、`index.published`、`index.cancel_requested`沿用Run SSE；没有逐片段伪进度或第二日志源。重启未完成任务为interrupted，普通Continue不适用于索引控制Session。发布证据含generation和files/rebuilt_files/deleted_files/chunks/skipped/duration_ms/structured_files/structure_fallbacks/chunking_fingerprint；代次与统计同事务绑定。远程embedding用量通过既有Run/project成本接口查询，索引终态不重复累计。
 
-### 有界交付内部事实（HTTP 页面仍在 D6 实施）
+### 有界交付内部事实
 
 Python `RuntimeHost.manage_delivery("repair", delivery_id, goal, checks, image?, max_rounds=3)` 只接受1–3轮、1–4个明确验收命令。`show`新增repair（固定条件）、repair_result（停止原因/用量）、repair_status（running/passed/stopped/interrupted）和rounds。repair开始后普通run/verify被拒绝，apply要求修复通过且原有双方checkpoint/patch校验仍有效。
 
 `delivery.repair_started`含control_run_id/deadline/limits；`delivery.round_started/round_finished`含round和候选证据；`delivery.repair_finished`含reason、verified_candidates及usage投影。常见reason为passed、round_limit、no_source_progress、repeated_acceptance_failure、writer_stopped、unknown_tool_outcome、cancelled、delivery_time_limit、delivery_token_limit、delivery_step_limit、repair_failed。终态usage只是派生展示，不能再次入账。API消费者不能把控制Run的completed等同候选验收通过，应读取repair_status/reason。
+
+### Web 交付接收和人工采纳
+
+- `POST /api/projects/{project_id}/deliveries`：`{name}`，1–48个小写字母/数字/连字符，创建独立副本。
+- `POST /api/deliveries/{delivery_id}/repair`：`{goal,checks,image?,max_rounds?}`，目标1–20000字符，1–4个最多2000字符的明确验收命令，最多1–3轮（默认3）。固定后不允许改验收条件或重启同一修复流程。
+- `POST /api/deliveries/{delivery_id}/apply`：`{patch_sha256}`，必须与当前通过验收的补丁一致。持久接收和执行时均检查，源码漂移仍由原采纳检查拒绝。
+- 以上写入严格禁止额外字段，要求本机同源和`Idempotency-Key`；202返回run_id/delivery_id/project_id/status_url/events_url。同键同正文返回原身份，不重放；同键不同正文409。确定未接收的繁忙/冲突409或队列满429附`X-Eventide-Mutation-Outcome: rejected`，未知结果保留原键。
+- `GET /api/projects/{project_id}/deliveries`、`GET /api/deliveries/{delivery_id}`：已准备交付、固定修复条件、轮次、独立验收与采纳状态。
+- `GET /api/projects/{project_id}/delivery-operations?limit=20&before=<run_id>`：按提交顺序逆序查询，包括准备失败/排队/中断，limit最大100。`GET /api/delivery-operations/{run_id}`返回精确操作状态、接受正文和错误。
+- `GET /api/deliveries/{delivery_id}/patch`：返回delivery_id/patch_sha256/patch；没有验收产物或产物变化409。
+- `POST /api/delivery-operations/{run_id}/cancel`：同源/幂等键；精确取消并等待清理，重复调用返回现状。排队取消不创建副本、不调用模型。
+
+持久`delivery.operation_accepted`/`delivery.cancel_requested`与既有交付事实沿用Run SSE。父控制Run与Writer共享根名额，Writer为子Run；usage汇总通过既有include_children口径，不能再加repair_result.usage。重启停驻，普通Agent Continue不能恢复控制操作。`completed`不等于`repair_status=passed`。

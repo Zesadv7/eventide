@@ -119,7 +119,7 @@ Continue 从来源 `run.admitted` / `run.started` 继承 Plan 的只读限制与
 
 容器部署的本机转发可通过启动配置 `EVENTIDE_LOCAL_PROXY_PEERS` 指定最多32个精确IP，默认空。Settings启动时校验并规范化，ApiContext创建时固定副本；API及模型设置不能修改该信任边界。管理守卫仅在socket peer精确匹配时追加放行，并始终检查回环Host和匹配Origin（包括使用该守卫的GET）；缺少Origin或cross-site仍拒绝。`serve`禁用Uvicorn代理头解析，不信任请求中的转发地址。部署必须保持宿主回环发布；这不提供公网身份认证，也不自动信任私网段或Docker网关。
 
-同源写入守卫仍在应用级，领域路由继续执行原本的回环、身份和权限检查。统一 HTTP 错误包含 code/message/detail，保留状态码、HTTP 异常响应头以及字符串或列表 detail；RequestValidationError 不返回原始 input/ctx，内部异常仅返回通用错误。OpenAPI 使用共同 ErrorResponse 描述该契约；模型连接探测的 HTTP 200 失败结果不改为协议错误。38 条现有路由全部保留，用量查询仍覆盖完整历史，SSE 持久游标及 opt-in 临时预览语义不变。Skills 管理已由专用路由承接；索引、评测及交付长任务控制面仍待后续步骤，A1 尚未整体完成。
+同源写入守卫仍在应用级，领域路由继续执行原本的回环、身份和权限检查。统一 HTTP 错误包含 code/message/detail，保留状态码、HTTP 异常响应头以及字符串或列表 detail；RequestValidationError 不返回原始 input/ctx，内部异常仅返回通用错误。OpenAPI 使用共同 ErrorResponse 描述该契约；模型连接探测的 HTTP 200 失败结果不改为协议错误。38 条现有路由全部保留，用量查询仍覆盖完整历史，SSE 持久游标及 opt-in 临时预览语义不变。Skills、索引、离线评测及交付管理已有专用领域路由；真实模型评测等剩余管理能力继续实施，A1尚未整体完成。
 
 HTTP写请求先校验浏览器同源与本机Origin；无Origin的可信非浏览器路径沿用现有权限边界。Run/Continue可用Idempotency-Key生成操作/Session隔离的确定性Run身份，在admission原子保存内容指纹；重复提交先查持久接收事实，再检查busy/parked，不重新启动已接收任务。未落库接收竞争仍拒绝为busy，不通过内存缓存伪造持久成功。
 
@@ -345,7 +345,7 @@ ModelBudgetController已接入RuntimeHost._complete_with_retry：每次真实尝
 
 费用筛选先以budget.reserved的精确Run、Project、Delivery、预留UTC日期选择尝试，再汇总该尝试的不可变费用快照；Run/Session的子任务通过真实parent_run_id关系递归选择，不累加父终态。usage先从全部调用事实完成新旧事件去重，再按同一尝试集合或历史调用开始时间筛选，跨午夜不会把legacy response再计一次。Session不受导航列表页数限制；Project包含其全部不可变执行副本。历史调用没有预算事实时保留在usage及historical_unreserved_attempt_ids中，费用计未知；旧项目归属优先使用已有Run事实，否则沿用迁移后的不可变Session/Workspace关系，不补造价格。
 
-未知处理需model.attempt_finished或Run终态证据，不能在途结算。record_known经既有budget.resolved记录用户总量和理由，且不得低于已报告部分；keep_unknown追加budget.unknown_acknowledged审计，保留预留及未知状态，不进入消费投影。二者都不修改模型用量事实或旧cost.estimated，避免人工总量伪装Provider输入/输出精度。价格注册不会隐式重估；查询各币种独立、estimated来源单列、缺失显示未知。Vue预算/费用控制面已接入；持久调度、交付页面及输入组成仍待后续步骤，连接探测已按下述控制Run接线；API embedding仍待C。
+未知处理需model.attempt_finished或Run终态证据，不能在途结算。record_known经既有budget.resolved记录用户总量和理由，且不得低于已报告部分；keep_unknown追加budget.unknown_acknowledged审计，保留预留及未知状态，不进入消费投影。二者都不修改模型用量事实或旧cost.estimated，避免人工总量伪装Provider输入/输出精度。价格注册不会隐式重估；查询各币种独立、estimated来源单列、缺失显示未知。Vue预算/费用、交付用量导航、持久调度和输入组成已接入，连接探测按下述控制Run接线；API embedding已接Host检索与索引构建。
 
 ## Vue预算与快照控制面
 
@@ -490,4 +490,14 @@ retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime�
 
 `ModelBudgetController`在主请求和embedding预留前检查 `delivery_limits`。以可信预算context.delivery_id筛选独占attempt，跨Writer根Run及其子任务累计；无await的检查/预留保持单进程串行原子边界。36次上限包含失败尝试和辅助模型请求，embedding只进Token总量。控制Run终止或交付结束后，不允许通过Writer Continue再派发。独立验收不占模型槽；Writer共用原根队列，交付管理Run不重复占根名额。
 
-每轮先复核源码/保护范围与patch，和上一轮完全相同即停止；失败签名对测试耗时文本做归一化，重复失败停止。最多3次候选验收，成功才开放显式采纳。超时/取消只发一次子任务取消并等待收尾；真实未知工具结果停驻副本。此流程没有恢复自动重放，失败产物保留用于检查；Web接收/页面验收由D6完成。
+每轮先复核源码/保护范围与patch，和上一轮完全相同即停止；失败签名对测试耗时文本做归一化，重复失败停止。最多3次候选验收，成功才开放显式采纳。超时/取消只发一次子任务取消并等待收尾；真实未知工具结果停驻副本。此流程没有恢复自动重放，失败产物保留用于检查；Web接收与所有权见下节。
+
+### Web 交付所有权
+
+`WebDeliveryController`将prepare/repair/apply作为同一个Root调度器的持久控制Run接收；归档control Session不能作为普通聊天使用。prepare以项目Session串行，后续操作按delivery Session串行，执行锁与源checkout锁分开。事件`delivery.operation_accepted`冻结操作正文；历史从canonical事实按提交顺序重建，跨Session的delivery事实不能按各自session_seq混排。
+
+Web repair持有一个根名额，Writer通过受信控制Run的parent_run_id借用此名额，仍独立拥有Session及checkout并经过Host原主链。派发前检查父控制Run仍持有根lease、operation=repair、delivery身份与checkout一致；没有第二调度器。四个修复控制Run不会各占根名额后再等待四个Writer根名额。模型槽仍全局最多两个。预算根为控制Run，主Writer/摘要/子任务消费按同一交付累计；管理终态投影不重复记账。取消等待Writer实际收尾再释放根。
+
+HTTP显式采纳冻结用户已查看的patch_sha256；队列执行前再次检查当前验收摘要，既有apply仍复验双方源码。产物路径比较使用规范化state根，兼容macOS的/var→/private/var别名，state根内部符号链接仍拒绝。补丁读取最多10MiB且重验hash。Vue请求未知时保留同一请求内容和身份；项目切换的旧响应丢弃，刷新通过URL/后台历史恢复，不重放写入。
+
+交付控制Run的execution_config仅用于归属其子请求，不是源Workspace的执行配置；workspace_execution_config排除source=delivery控制事实，防止后续普通对话继承交付预算身份。快照admission保留内部生成的execution_binding路径/hash清单，避免将test_tokens.py等文件名误作凭据键破坏manifest；提示、工具输入等用户内容仍沿用原脱敏。

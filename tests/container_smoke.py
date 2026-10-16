@@ -245,8 +245,38 @@ def verify(image: str) -> dict[str, object]:
         assert "index-fixture.txt" in indexed_files
         index_usage = json.loads(request(f"/api/runs/{index_receipt['run_id']}/usage"))
         assert index_usage["attempt_count"] == 0
+        docker("exec", name, "python", "-c", (
+            "import subprocess; "
+            "subprocess.run(['git','add','-A'],check=True,capture_output=True); "
+            "subprocess.run(['git','-c','user.name=Fixture','-c',"
+            "'user.email=fixture@example.invalid','commit','-m','fixture'],"
+            "check=True,capture_output=True)"
+        ))
+        delivery_endpoint = f"/api/projects/{workspace['project_id']}/deliveries"
+        delivery_headers = {**origin, "Idempotency-Key": name + "-delivery"}
+        delivery_body = {"name": "container-delivery"}
+        delivery_receipt = json.loads(request(delivery_endpoint, delivery_body, "POST",
+                                             **delivery_headers))
+        deadline = time.monotonic() + 30
+        while True:
+            operation = json.loads(request(delivery_receipt["status_url"]))
+            if operation["status"] not in {"queued", "running"}:
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError("Container delivery prepare did not finish")
+            time.sleep(0.1)
+        assert operation["status"] == "completed", operation
+        delivery_path = f"/api/deliveries/{delivery_receipt['delivery_id']}"
+        delivery_detail = json.loads(request(delivery_path))
+        assert delivery_detail["applied"] is False and delivery_detail["repair"] is None
+        assert json.loads(request(delivery_endpoint, delivery_body, "POST",
+                                  **delivery_headers)) == delivery_receipt
         docker("rm", "--force", name)
         boot(peer)
+        delivery_headers["Origin"] = address
+        assert json.loads(request(delivery_path)) == delivery_detail
+        assert json.loads(request(delivery_endpoint, delivery_body, "POST",
+                                  **delivery_headers)) == delivery_receipt
         index_headers["Origin"] = address
         assert json.loads(request(index_path)) == index_detail
         assert json.loads(request(index_endpoint, index_body, "POST", **index_headers)) == (
@@ -272,6 +302,7 @@ def verify(image: str) -> dict[str, object]:
             "restart_persistence": "passed",
             "external_model_requests": 0,
             "index_publication_restart_replay": "passed",
+            "delivery_prepare_restart_replay": "passed",
             "queue_limits": queue["limits"],
             "queue_after_restart": "idle",
             "offline_evaluation": {

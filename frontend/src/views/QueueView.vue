@@ -58,6 +58,13 @@ async function open(entry: QueueEntry) {
   try {
     if (store.selectedWorkspace !== entry.workspace_id)
       await store.selectWorkspace(entry.workspace_id);
+    if (entry.execution.kind === "delivery") {
+      await router.push({
+        path: "/deliveries",
+        query: { delivery: entry.execution.delivery_id },
+      });
+      return;
+    }
     if (entry.execution.kind === "index") {
       await router.push({ path: "/knowledge", query: { index: entry.run_id } });
       return;
@@ -84,6 +91,7 @@ function project(entry: QueueEntry) {
   );
 }
 function target(entry: QueueEntry) {
+  if (entry.execution.kind === "delivery") return "隔离修复交付";
   if (entry.execution.kind === "index") return "项目索引构建";
   if (entry.execution.kind === "evaluation") return "离线评测临时项目";
   return entry.execution.kind === "snapshot"
@@ -188,7 +196,9 @@ function target(entry: QueueEntry) {
                           ? "打开评测"
                           : entry.execution.kind === "index"
                             ? "打开索引"
-                            : "打开对话"
+                            : entry.execution.kind === "delivery"
+                              ? "打开交付"
+                              : "打开对话"
                       }}</button
                     ><button
                       :disabled="

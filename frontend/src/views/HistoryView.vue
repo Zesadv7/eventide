@@ -356,6 +356,15 @@ function toolLabel(value: unknown) {
           detail.tool_calls ?? "未记录"
         }}
       </p>
+      <p v-if="detail.execution?.kind === 'delivery'" class="evaluation-note">
+        这是交付控制记录。<RouterLink
+          :to="{
+            path: '/deliveries',
+            query: { delivery: detail.execution.delivery_id },
+          }"
+          >查看交付与验收</RouterLink
+        >
+      </p>
       <p v-if="detail.execution?.kind === 'index'" class="evaluation-note">
         这是索引构建记录。<RouterLink
           :to="{ path: '/knowledge', query: { index: detail.run_id } }"

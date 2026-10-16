@@ -93,7 +93,13 @@ class ModelBudgetController:
                 if source.project_id != project_id:
                     raise ValueError("Delivery project identity mismatch")
                 if prepared[0]["receipt"]["checkout"] != workspace.path:
-                    raise ValueError("Run does not own the delivery checkout")
+                    from eventide.delivery_control import is_delivery_control_run
+
+                    if (not is_delivery_control_run(self.store, ancestor)
+                            or not any(i.get("execution_binding", {}).get("operation") == "repair"
+                                       for i in intents)
+                            or source.workspace_id != workspace.workspace_id):
+                        raise ValueError("Run does not own the delivery checkout")
             return session_id, BudgetContext(project_id, ancestor, delivery_id)
 
     def begin(

@@ -2,7 +2,7 @@ import { createRouter, createWebHashHistory } from "vue-router";
 import ChatView from "./views/ChatView.vue";
 import SettingsView from "./views/SettingsView.vue";
 import UsageView from "./views/UsageView.vue";
-import CapabilitiesView from "./views/CapabilitiesView.vue";
+import DeliveriesView from "./views/DeliveriesView.vue";
 import SkillsView from "./views/SkillsView.vue";
 import QueueView from "./views/QueueView.vue";
 import EvaluationsView from "./views/EvaluationsView.vue";
@@ -28,8 +28,7 @@ export const router = createRouter({
     },
     {
       path: "/deliveries",
-      component: CapabilitiesView,
-      props: { area: "deliveries" },
+      component: DeliveriesView,
     },
     { path: "/:pathMatch(.*)*", redirect: "/chat" },
   ],

@@ -476,7 +476,7 @@ class RuntimeStore:
                 self._decode(row)
                 for row in self._connection.execute(
                     "SELECT * FROM runtime_events WHERE partial=0 AND type LIKE 'delivery.%' "
-                    "AND json_extract(payload_json, '$.delivery_id')=? ORDER BY session_seq",
+                    "AND json_extract(payload_json, '$.delivery_id')=? ORDER BY rowid",
                     (delivery_id,),
                 )
             ]
@@ -583,6 +583,7 @@ class RuntimeStore:
             row = self._connection.execute(
                 "SELECT payload_json FROM runtime_events e JOIN sessions s ON s.id=e.session_id "
                 "WHERE s.workspace_id=? AND e.type IN ('run.admitted','run.started') "
+                "AND COALESCE(json_extract(e.payload_json,'$.source'),'') != 'delivery' "
                 "AND json_extract(e.payload_json,'$.execution_config.writer_delivery_id') "
                 "IS NOT NULL "
                 "ORDER BY e.rowid DESC LIMIT 1",

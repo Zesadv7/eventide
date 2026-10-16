@@ -1052,6 +1052,8 @@ class RuntimeHost:
     @staticmethod
     def _execution_key(run_id: str, intent: dict[str, Any]) -> str:
         binding = intent.get("execution_binding", {})
+        if binding.get("kind") == "delivery":
+            return f"delivery_operation:{binding['delivery_id']}"
         if binding.get("kind") in {"evaluation", "index"}:
             return f"{binding['kind']}_run:{run_id}"
         if binding.get("kind") == "snapshot":
@@ -1078,6 +1080,8 @@ class RuntimeHost:
         binding = self._execution_binding(run_id)
         if not binding:
             return {"kind": "source"}
+        if binding["kind"] == "delivery":
+            return dict(binding)
         if binding["kind"] in {"evaluation", "index"}:
             identifier = "evaluation_id" if binding["kind"] == "evaluation" else "index_run_id"
             return {key: binding[key] for key in ("kind", "workspace_id", identifier)}
@@ -1574,6 +1578,7 @@ class RuntimeHost:
         execution_config: dict[str, Any] | None = None,
         request_fingerprint: str | None = None,
         require_checkpoint: bool = False,
+        parent_run_id: str | None = None,
     ) -> str:
         """Own a Workspace and atomically persist the request before transport acceptance."""
         await self.initialize()
@@ -1583,6 +1588,13 @@ class RuntimeHost:
                 or self._configuration_uncertain):
             raise ValueError("Provider configuration is changing or requires recovery")
         workspace = self.sessions.workspace(session_id)
+        if parent_run_id:
+            from eventide.delivery_control import validate_writer_parent
+
+            validate_writer_parent(self, parent_run_id, workspace.workspace_id,
+                                   execution_config or {})
+            if request is None or request.execution_target != "source":
+                raise ValueError("Owned Writer must use its captured checkout")
         if self.state_dir.resolve() == Path(workspace.path):
             raise ValueError("State directory must not be the Workspace root")
         if run_id in self._admission_done or self.store.get_run_identity(run_id):
@@ -1626,6 +1638,8 @@ class RuntimeHost:
                         raise ValueError("Session is parked; use Continue")
                     source_id = previous["id"] if request is None and previous else None
                     intent = self._run_intent(request, source_id, session_id)
+                    if parent_run_id:
+                        intent["parent_run_id"] = parent_run_id
                     if "skill_snapshot" not in intent:
                         intent["skill_snapshot"] = await self._freeze_skills(workspace, request)
                     if execution_config:
@@ -1800,7 +1814,12 @@ class RuntimeHost:
                         "request_fingerprint": request.request_fingerprint
                         if request else request_fingerprint,
                     }
-                    facts = [("run.admitted", self._semantic(payload), "system", "user")]
+                    persisted = self._semantic(payload)
+                    # This binding is generated and validated internally, with paths,
+                    # hashes and counts only. Filename keys such as test_tokens.py
+                    # are not credential fields; redacting them breaks its identity.
+                    persisted["execution_binding"] = binding
+                    facts = [("run.admitted", persisted, "system", "user")]
                     if previous and request is None:
                         facts.extend(self._recovery_facts(previous))
                     if request:
@@ -2147,6 +2166,7 @@ class RuntimeHost:
         it cannot justify one, record which paths changed instead, so the user can see
         what to check before deciding to abandon.
         """
+        from eventide.delivery_control import is_delivery_control_run
         from eventide.evaluation_control import is_evaluation_run
         from eventide.index_control import is_index_run
 
@@ -2159,6 +2179,7 @@ class RuntimeHost:
             queued = not started and self._admitted_intent(run_id) is not None
             evidence = (None if queued or is_service_probe_run(self.store, run_id)
                         or is_evaluation_run(self.store, run_id) or is_index_run(self.store, run_id)
+                        or is_delivery_control_run(self.store, run_id)
                         else self._crash_gap_evidence(run_id))
             if queued:
                 payload["reason"] = "host_stopped_before_dispatch"

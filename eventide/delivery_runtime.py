@@ -75,7 +75,7 @@ class DeliveryController:
             if current.is_symlink():
                 raise ValueError("Delivery artifact cannot traverse symbolic links")
             current = current.parent
-        if not path.resolve().is_relative_to(self.host.state_dir):
+        if not path.resolve().is_relative_to(self.host.state_dir.resolve()):
             raise ValueError("Delivery artifact escapes state root")
         return path
 
@@ -101,6 +101,7 @@ class DeliveryController:
         image: str | None = None,
         protected_patterns: tuple[str, ...] = (),
         max_rounds: int = 3,
+        _control_run_id: str | None = None,
     ) -> dict[str, Any]:
         host = self.host
         await host.initialize()
@@ -108,6 +109,16 @@ class DeliveryController:
             raise ValueError("Container image cannot be empty")
         if action not in {"prepare", "run", "verify", "apply", "show", "repair"}:
             raise ValueError("Unknown delivery action")
+        control_intent = host._admitted_intent(_control_run_id) if _control_run_id else None
+        if _control_run_id:
+            from eventide.delivery_control import is_delivery_control_run
+
+            if (not is_delivery_control_run(host.store, _control_run_id) or not control_intent
+                    or control_intent["execution_binding"]["operation"] != action
+                    or (action != "prepare" and
+                        control_intent["execution_binding"]["delivery_id"] != delivery_id)
+                    or host.store.run_is_terminal(_control_run_id)):
+                raise ValueError("Invalid delivery control owner")
         value = self.load(delivery_id) if delivery_id else None
         if action == "show":
             if value is None:
@@ -117,7 +128,8 @@ class DeliveryController:
             workspace = host.resolve_or_register_workspace(
                 target or host.default_workspace.workspace_id
             )
-            delivery_id = f"delivery_{uuid.uuid4().hex[:16]}"
+            delivery_id = (control_intent["execution_binding"]["delivery_id"] if control_intent
+                           else f"delivery_{uuid.uuid4().hex[:16]}")
         else:
             if value is None:
                 raise ValueError("Delivery identity is required")
@@ -138,12 +150,20 @@ class DeliveryController:
                     value = self.load(delivery_id)
                     if value["applied"]:
                         raise ValueError("Delivery was already applied")
-                session = host.create_session(
-                    f"deliveries_{delivery_id}", workspace_id=workspace.workspace_id
-                )
-                host.store.update_session(session, title="Delivery 管理", archived=True)
-                run_id = f"run_{uuid.uuid4().hex[:16]}"
-                host.store.create_run(run_id, session)
+                if _control_run_id:
+                    identity = host.store.get_run_identity(_control_run_id)
+                    assert identity is not None
+                    session = identity["session_id"]
+                    if host.sessions.workspace(session).workspace_id != workspace.workspace_id:
+                        raise ValueError("Delivery control Workspace mismatch")
+                    run_id = _control_run_id
+                else:
+                    session = host.create_session(
+                        f"deliveries_{delivery_id}", workspace_id=workspace.workspace_id,
+                    )
+                    host.store.update_session(session, title="Delivery 管理", archived=True)
+                    run_id = f"run_{uuid.uuid4().hex[:16]}"
+                    host.store.create_run(run_id, session)
                 host._run_tasks[run_id] = task
                 await host._emit(
                     run_id,
@@ -310,12 +330,15 @@ class DeliveryController:
             "writer_delivery_id": delivery_id,
             **({"image": image} if image is not None else {}),
         }
-        await host._reserve_run(
-            child_session,
-            child_id,
-            RunRequest(goal, child_session, child_id),
-            execution_config=config,
-        )
+        from eventide.delivery_control import is_delivery_control_run, start_owned_writer
+
+        owned = is_delivery_control_run(host.store, run_id)
+        request = RunRequest(goal, child_session, child_id)
+        if owned:
+            child = await start_owned_writer(host, run_id, child_session, child_id, request, config)
+        else:
+            await host._reserve_run(child_session, child_id, request, execution_config=config)
+            child = host.start_admitted_run(child_id)
         await host._emit(
             run_id,
             "worker.started",
@@ -327,7 +350,6 @@ class DeliveryController:
             },
             None,
         )
-        child = host.start_admitted_run(child_id)
         try:
             completed = await child
         finally:
