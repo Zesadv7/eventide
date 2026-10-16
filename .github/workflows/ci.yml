@@ -19,8 +19,9 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --extra dev
       - run: uv run python -m eventide --help
+      - run: uv run python tests/check_service.py
       - run: uv run pytest -q
-      - run: uv run eventide eval evals/smoke.yaml
+      - run: uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
   quality:
     runs-on: ubuntu-latest
@@ -44,9 +45,9 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       # Local model inference is a separate opt-in check with explicitly prepared models.
-      - run: uv sync --locked --extra code --extra telemetry
-      - run: uv run --extra code --extra telemetry pytest -q tests/test_code_structure.py tests/test_telemetry.py tests/test_delivery_runtime.py tests/test_delivery_lifecycle.py
-      - run: uv run --extra code --extra telemetry eventide eval evals/engineering.yaml
+      - run: uv sync --locked --extra dev --extra code --extra telemetry
+      - run: uv run --extra dev --extra code --extra telemetry pytest -q tests/test_code_structure.py tests/test_telemetry.py tests/test_delivery_runtime.py tests/test_delivery_lifecycle.py
+      - run: uv run --extra dev --extra code --extra telemetry python -m tests.check_offline_evaluations evals/engineering.yaml
 
   container:
     runs-on: ubuntu-latest
@@ -98,27 +99,3 @@ jobs:
       - run: uv run pytest -q tests/test_bundled_evaluations.py::test_installed_wheel_contains_all_resources_and_loads_without_checkout
         env:
           EVENTIDE_TEST_EVAL_WHEEL: ${{ github.workspace }}/.task_outputs/dist/eventide-0.4.0-py3-none-any.whl
-
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.12"
-          enable-cache: true
-      - run: uv sync --locked --extra dev
-      - run: node --test tests/web.test.mjs
-      - run: npm install --prefix .task_outputs/browser-tools --no-audit --no-fund playwright@1.62.1
-      - run: node .task_outputs/browser-tools/node_modules/playwright/cli.js install chromium --only-shell --with-deps
-      - run: node tests/web_browser.cjs
-        env:
-          EVENTIDE_PLAYWRIGHT_MODULE: ${{ github.workspace }}/.task_outputs/browser-tools/node_modules/playwright
-      - run: node tests/web_e2e.cjs
-        env:
-          EVENTIDE_E2E_STRICT_V2: "1"
-          EVENTIDE_PLAYWRIGHT_MODULE: ${{ github.workspace }}/.task_outputs/browser-tools/node_modules/playwright
-          EVENTIDE_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python

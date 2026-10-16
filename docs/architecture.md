@@ -13,7 +13,7 @@ RuntimeHost
                   └─ ContextBuilder
 ```
 
-RuntimeHost 是进程内唯一执行 Owner，持有状态根的 OS 文件锁、RuntimeStore、Provider 配置、SessionManager 和 Workspace 锁。CLI、FastAPI 和 Eval 直接复用 `RuntimeHost`；不再保留旧 Python 门面。首版不含后台 daemon 或 IPC client：同状态根已有 Host 时第二个进程失败。进程终止由 OS 释放文件锁。
+RuntimeHost 是进程内唯一执行 Owner，持有状态根的 OS 文件锁、RuntimeStore、Provider 配置、SessionManager 和 Workspace 锁。FastAPI 与 Python 开发/评测接口直接复用 `RuntimeHost`；不再保留旧 Python 门面。首版不含后台 daemon 或 IPC client：同状态根已有 Host 时第二个进程失败。进程终止由 OS 释放文件锁。
 
 Workspace 保存稳定 ID、规范路径、Git 根、名称和创建时间；Git 子目录统一绑定仓库根。Session 的 Workspace 绑定不可改变；直接源运行按该绑定解析 cwd，显式快照或 worktree 运行按 canonical admission 固定的执行副本解析。同 Session 串行，直接源 Workspace 运行串行，独立 Plan 快照和写入 worktree 可以并发。Host 以 run_id 索引活跃执行，服务关闭或用户取消时先停止异步 Provider、MCP 与 Shell 子进程；同步线程工具结束后才释放 Workspace 所有权。
 
@@ -23,7 +23,7 @@ Project 身份由 RuntimeStore 在 SQLite 事务内建立，按已验证的本�
 
 v4 迁移遍历原 Workspace，补齐一次性项目关系，保留 Workspace/Session/Run 身份、cwd 与历史事件字节。缺失或无法验证的历史路径保留独立身份，不在后续打开时偷偷重组。新 run.admitted/run.started 保存 project_id/source_workspace_id；交付 checkout 自动归属同项目，只读 worker 保留源 Workspace 绑定并使用已有 snapshot_id，不注册会消失的快照目录。Continue 从固定 Session 绑定得到同一项目；旧事件不补造字段。
 
-Project 查询聚合所有副本 Session，不改变原 Workspace API 的过滤语义。源 Workspace 有其他执行副本时拒绝删除，任何含 Session 或 canonical admission 执行引用的副本仍受历史保护。Project 身份不是调度器或锁；U2按该身份共享预算。直接源运行使用 Workspace 锁，Plan 快照及写 worktree 使用下述独立执行所有权，P3调度继续实施。
+Project 查询聚合所有副本 Session，不改变原 Workspace API 的过滤语义。源 Workspace 有其他执行副本时拒绝删除，任何含 Session 或 canonical admission 执行引用的副本仍受历史保护。Project 身份不是调度器或锁；U2按该身份共享预算。直接源运行使用 Workspace 锁，Plan 快照及写 worktree 使用下述独立执行所有权，P3以同一事实链实现4根/2模型/20等待的持久调度。
 
 ## 根 Run 执行副本与所有权（P2）
 
@@ -121,11 +121,11 @@ Continue 从来源 `run.admitted` / `run.started` 继承 Plan 的只读限制与
 
 `api.py` 是 FastAPI 组装入口，保留 `create_app(runtime=None)`；现有 HTTP 路由按工作区、Session、Run、模型生成参数、Provider 配置、附件及 SSE/导出拆入 `http_api/`。请求模型集中声明；每个 router factory 接收同一应用的 `ApiContext`，其中只保存 Host 引用、审批 Future、暂存 reservation 与 Task 集合，不是新的运行状态库。每个应用独立创建上下文，禁止模块级共享可变状态。Host/Store 仍管理接收、执行和全部事实；应用 lifespan 在退出时取消并等待自己跟踪的 Task 后再关闭 Host。
 
-容器部署的本机转发可通过启动配置 `EVENTIDE_LOCAL_PROXY_PEERS` 指定最多32个精确IP，默认空。Settings启动时校验并规范化，ApiContext创建时固定副本；API及模型设置不能修改该信任边界。管理守卫仅在socket peer精确匹配时追加放行，并始终检查回环Host和匹配Origin（包括使用该守卫的GET）；缺少Origin或cross-site仍拒绝。`serve`禁用Uvicorn代理头解析，不信任请求中的转发地址。部署必须保持宿主回环发布；这不提供公网身份认证，也不自动信任私网段或Docker网关。
+容器部署的本机转发可通过启动配置 `EVENTIDE_LOCAL_PROXY_PEERS` 指定最多32个精确IP，默认空。Settings启动时校验并规范化，ApiContext创建时固定副本；API及模型设置不能修改该信任边界。管理守卫仅在socket peer精确匹配时追加放行，并始终检查回环Host和匹配Origin（包括使用该守卫的GET）；缺少Origin或cross-site仍拒绝。`eventide-server`禁用Uvicorn代理头解析，不信任请求中的转发地址。部署必须保持宿主回环发布；这不提供公网身份认证，也不自动信任私网段或Docker网关。
 
-同源写入守卫仍在应用级，领域路由继续执行原本的回环、身份和权限检查。统一 HTTP 错误包含 code/message/detail，保留状态码、HTTP 异常响应头以及字符串或列表 detail；RequestValidationError 不返回原始 input/ctx，内部异常仅返回通用错误。OpenAPI 使用共同 ErrorResponse 描述该契约；模型连接探测的 HTTP 200 失败结果不改为协议错误。38 条现有路由全部保留，用量查询仍覆盖完整历史，SSE 持久游标及 opt-in 临时预览语义不变。Skills、索引、离线评测及交付管理已有专用领域路由；真实模型评测等剩余管理能力继续实施，A1尚未整体完成。
+同源写入守卫仍在应用级，领域路由继续执行原本的回环、身份和权限检查。统一 HTTP 错误包含 code/message/detail，保留状态码、HTTP 异常响应头以及字符串或列表 detail；RequestValidationError 不返回原始 input/ctx，内部异常仅返回通用错误。OpenAPI 使用共同 ErrorResponse 描述该契约；模型连接探测的 HTTP 200 失败结果不改为协议错误。当前领域HTTP路由统一注册，用量查询仍覆盖完整历史，SSE 持久游标及 opt-in 临时预览语义不变。Skills、索引、离线评测及交付管理已有专用领域路由；真实模型评测也已接规划确认和共享模型账本；真实效果另按B3/U5验收。
 
-HTTP写请求先校验浏览器同源与本机Origin；无Origin的可信非浏览器路径沿用现有权限边界。Run/Continue可用Idempotency-Key生成操作/Session隔离的确定性Run身份，在admission原子保存内容指纹；重复提交先查持久接收事实，再检查busy/parked，不重新启动已接收任务。未落库接收竞争仍拒绝为busy，不通过内存缓存伪造持久成功。
+HTTP写请求先校验浏览器同源与本机Origin；无Origin的可信非浏览器路径沿用现有权限边界。Run/Continue必须用Idempotency-Key生成操作/Session隔离的确定性Run身份，在admission原子保存内容指纹；重复提交先查持久接收事实，再检查busy/parked，不重新启动已接收任务。未落库接收竞争仍拒绝为busy，不通过内存缓存伪造持久成功。
 
 生成参数使用 `generation.py` 严格校验和能力描述。模型默认/会话覆盖保存在 `generation.configured` 追加事实中，通过 Provider、endpoint、model 的哈希隔离；模型默认管理使用归档 Session，不新增独立可变配置表。省略继承、null清除、0有效，`run.admitted/started.generation` 保存有效请求快照。Continue在原接入下继承并重验，切换接入则重新解析；摘要/只读子Run不隐式继承用户采样覆盖。`ModelRequest.generation` 由adapter映射到SDK参数，最大输出仍受现有请求字段约束。
 
@@ -143,7 +143,9 @@ Responses 终态为 incomplete 时，即使带有格式正确的 function_call�
 
 `RuntimeHost.run(RunRequest)`、create_session、Provider 配置和 RunResult 原字段保持当前契约；RunResult 新增带默认值的 turn_id、continuation_of。RuntimeHost 还提供 resolve_or_register_workspace、continue_session、session_status。
 
-CLI 提供 run/chat/serve 的 --workspace、run/chat 的 --cwd、workspace add/list/show/remove、continue、abandon、export 和 plan show。`plan show <session_id>` 读取 session_status 中已有的计划事实，默认人类可读输出，`--json` 返回与 HTTP 同构的 `task_plan`、`active_task_id` 和 `task_state`；CLI 不重算投影，也不提供任何计划写入口。无指定 Workspace 时使用启动 cwd；Git 子目录可作为 Session cwd，同时 Workspace 身份仍归一到仓库根。HTTP 保留原路由，新增 /api/workspaces、/api/workspaces/{id}/sessions、/api/sessions/{id}、/messages、/runs、/continue、/abandon、按 run_id 取消和 canonical JSONL export。Session POST 可传 working_directory，PATCH 可设置标题或归档；列表默认隐藏归档记录；DELETE 只允许没有运行历史的空 Session。普通 Run 与 Continue 都返回 202；Continue 在响应前完成安全校验并持久化 continuation Run 身份，执行结果通过 Run 查询与 SSE 获取。Export 按 session_seq 分页读取 canonical Event 并以 NDJSON 流响应，不使用 SSE 兼容别名；CLI 写文件默认不覆盖。轻量事实接口包括：`GET /api/workspaces/{id}/capabilities` 用纯文件解析返回 Workspace 的 Skill 名称/简介、MCP 服务名/transport 与配置路径提示，不连接 MCP 服务，也不返回 command/env/密钥，坏配置写入 `notes` 而非 500；`GET /api/runtime/settings` 透出 `context_limit`、`approval_timeout`、`max_steps`、`task_max_steps`、`run_token_limit`；Run 摘要（`list_runs` 与 latest run summary）随状态字段透出 RuntimeStateProjection 已派生的 `usage`（input/output tokens）。这些只是字段透出，不新增事实源。模型列表辅助位于 `model_catalog.py`，`GET /api/models` 探测当前 Provider 的列表端点，失败返回空列表与说明而不抛错。Web 观察 Session/Run Projection 发现执行并消费同一 SSE，运行中可请求停止。同Session或直接源执行忙时Python/HTTP均拒绝；只有完成冻结的接收才能进入P3队列。
+部署入口为eventide.server.main，console script为eventide-server，python -m eventide调用同一服务启动实现；仅解析host/port/初始项目目录，不保留chat/run/eval/rag等子命令或CLI转发层。帮助在读取Settings、创建Host或连接网络之前结束。服务关闭由FastAPI lifespan执行，启动失败也释放Host状态根所有权。CI通过tests/check_service.py实际启动一次性服务检查健康、Vue跳转、项目身份与零模型调用；离线评测直接调用Python接口。
+
+HTTP提供项目/会话管理、固定cwd、普通Run/Continue、精确停止/审批/放弃恢复、canonical JSONL及trace。普通接收返回202，执行结果经Run查询和SSE读取；会话归档与空会话删除继续受版本与历史门禁保护。源码和任务状态仍由同一Runtime投影，不因退役终端而删除检索、评测、交付、导入或观测底层接口。
 
 历史导入统一使用 migration 的有界只读事务，包含已提交WAL；限制源库与WAL合计64MiB、5万行、32MiB文本、单字段1MiB、JSON深度32和读取10秒。导入前验证引用与类型并脱敏，不读取Provider配置。旧消息保留为 message.imported，原始事件一律封装为 legacy.event，旧总量放在 legacy.run_summary；只生成服务自己的历史run.started/终态。会话归档且带受信任legacy_history控制标记，不能作为Agent或Continue入口；旧事件不能伪造执行授权或现代调用账本。源文件不写入，目标身份冲突或完成回执失败回滚整批。Web可用固定预检命名空间稳定映射身份，防止与运行控制身份冲突；Web通过HistoryImportController接收预检/确认操作，使用共享根任务队列和单一控制Run；预检生成受管脱敏JSON，事件固定hash/大小/计数，确认只接受相同项目的已完成预检。原路径仅在在途内存中传递，事件不保存原路径。导入会话/运行/历史事实及控制成功回执/终态在同一目标事务提交；取消等待SQLite线程结束，已提交结果保持completed。重启停驻未完成任务，不自动重放。旧消息使用session_seq游标分页读取，内容仅作为文本展示。
 
@@ -165,7 +167,7 @@ RunBody 支持每次 Run 的 `mode`（auto/plan/agent，未知值按 auto 处理
 
 ## Workspace 知识检索
 
-RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户显式运行 `eventide rag build` 后，Git Workspace 内 `.eventide/index.sqlite` 保存 `files`、带文件/行号/标题路径的 `chunks`、float32 embedding BLOB、FTS5 trigram 索引和 embedding fingerprint；数据库可随时删除重建，不进入 canonical Runtime schema 或 Event Log。v0.4 只枚举 `git ls-files --cached --others --exclude-standard` 可见的 UTF-8 文本，跳过 symlink、二进制、超过 1 MiB 的文件以及 `.git/`、`.eventide/`。增量判断以内容 SHA-256 为准；构建在写事务外完成读取、切块和 embedding，提交时重新核对语料与 index generation，并以单个 SQLite 事务替换文件、chunk、FTS 和 meta，因此查询只看到旧或新完整快照。
+RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户从知识索引页显式构建后，Git Workspace 内 `.eventide/index.sqlite` 保存 `files`、带文件/行号/标题路径的 `chunks`、float32 embedding BLOB、FTS5 trigram 索引和 embedding fingerprint；数据库可随时删除重建，不进入 canonical Runtime schema 或 Event Log。v0.4 只枚举 `git ls-files --cached --others --exclude-standard` 可见的 UTF-8 文本，跳过 symlink、二进制、超过 1 MiB 的文件以及 `.git/`、`.eventide/`。增量判断以内容 SHA-256 为准；构建在写事务外完成读取、切块和 embedding，提交时重新核对语料与 index generation，并以单个 SQLite 事务替换文件、chunk、FTS 和 meta，因此查询只看到旧或新完整快照。
 
 C1 进一步固定 `IndexStore` 的 Workspace 目录身份。扫描拒绝非规范相对路径及任何祖先链接，打开文件后检查常规文件类型与身份，读取最多 1 MiB 加一个检测字节。索引只允许固定 `.eventide/index.sqlite` 路径；父目录、数据库与三个 SQLite 附属文件检查真实路径、文件类型与链接，数据库和附属文件拒绝硬链接。新建数据库先以独占创建取得已知文件身份，SQLite 打开后复核，失败关闭连接；构建在 embedding 完成后及提交扫描后再核对索引目录/数据库身份。链接与目录重定向拒绝，不改变 Runtime 的状态根配置或预算事实。
 
@@ -177,9 +179,9 @@ Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源
 
 查询同时执行全量 float32 余弦 Top-2k 与 FTS5 BM25 Top-2k，再用一基排名、常量 60 的 Reciprocal Rank Fusion 合并。BM25 与余弦只贡献各自排名，不直接相加不同量纲的原始分数。Host 在**每次 Run**按当前 Session 的 Workspace 检查索引及 fingerprint；有效时动态加入 `search_knowledge(query, k)`，无效或不存在时不向模型暴露。该工具属于 Plan 可见的只读集合，仍由 `ToolExecutor` 和 `PolicyEngine` 执行，调用事实继续使用既有 `tool.prepared` / `tool.completed`，不新增事件类型或副作用 checkpoint。
 
-`eventide rag eval` 将标注语料复制到临时 Git Workspace，强制使用 HashEmbedder 建索引，按 query→期望文件计算 macro recall@5 与 MRR；普通 scripted smoke 通过显式 case 级 `rag_index: true` 在既有 Git sandbox 中预建索引。两条离线路径都不读取真实 embedding 配置、不访问网络，也不会在真实 checkout 写索引。
+`run_retrieval_evaluation` Python接口 将标注语料复制到临时 Git Workspace，强制使用 HashEmbedder 建索引，按 query→期望文件计算 macro recall@5 与 MRR；普通 scripted smoke 通过显式 case 级 `rag_index: true` 在既有 Git sandbox 中预建索引。两条离线路径都不读取真实 embedding 配置、不访问网络，也不会在真实 checkout 写索引。
 
-检索评测在同一索引、同一组 query/标签上依次执行 sparse、dense 和 hybrid。文件召回以去重的相关文件数计算；MRR 以第一条相关 passage 的排名计算，`expect_contains` 可进一步限制相关 passage。聚合前不舍入。顶层指标和 CLI 退出码保持 hybrid 语义，`comparisons` 保留三路完整结果。JSON 还记录复制后语料 SHA-256、套件 SHA-256、embedding fingerprint、索引规模，以及每题耗时和 nearest-rank p50/p95；耗时是单次本机观测，不是性能基准。复制排除 `.git` / `.eventide`，拒绝 symlink，并拒绝不存在的期望文件标签。
+检索评测在同一索引、同一组 query/标签上依次执行 sparse、dense 和 hybrid。文件召回以去重的相关文件数计算；MRR 以第一条相关 passage 的排名计算，`expect_contains` 可进一步限制相关 passage。聚合前不舍入。顶层指标保持 hybrid 语义，`comparisons` 保留三路完整结果。JSON 还记录复制后语料 SHA-256、套件 SHA-256、embedding fingerprint、索引规模，以及每题耗时和 nearest-rank p50/p95；耗时是单次本机观测，不是性能基准。复制排除 `.git` / `.eventide`，拒绝 symlink，并拒绝不存在的期望文件标签。
 
 ## 评测
 
@@ -187,35 +189,25 @@ Markdown 按 fenced code block 外的 H1～H3 切 section，超长 section、源
 
 live 在更换状态根之前调用共享 `resolve_provider_configuration`；其使用 `mode=ro` SQLite 读事务读取已提交 Provider 配置（包括活跃 WAL），不初始化 schema、不获取 HostLease、不恢复历史 Run。Host 与 live 共用 `apply_provider_configuration` 的已保存配置优先级；没有保存配置时保持启动配置，密文不可解密时禁止环境密钥回退。SecretBox 解密不创建密钥，缺失/无效/不可读密钥分别明确报告；凭据只留内存，评测使用注入 Provider，不向临时库保存连接凭据。离线路径不调用 resolver，并移除启动 API Key 与真实 embedding 凭据。
 
-判分（`_judge`）是确定性的 fs/git 证据检查，零模型调用：既有 `status`、`final_contains`、`required_tools`、`permission_denied`，任务级另有 `file_exists`、`file_absent`、`file_contains`（大小写不敏感子串）和 `git_committed`（初始提交之外存在新提交且 `git status --porcelain` 为空；非 Git 沙箱报 `git evidence unavailable`）。模型最终输出只参与 `final_contains`，从不作为完成证据。报告在 `mode/suite/passed/total/pass_rate/average_duration_ms/tool_success_rate/safety_blocks/duration_ms/results` 之外提供 `task_completion_rate`、`failure_reasons` 分布和 `average_steps`；live 模式另计 `total_input_tokens` / `total_output_tokens`，offline 模式带 `regression_smoke: true` 标记。CLI 默认打印人类可读摘要（完成率、失败原因分布、失败用例），`--json` 输出完整报告；退出码保持"全部通过才为 0"。每条 `EvalCaseResult` 透传 RunResult 的 `steps`、`usage`、`status`。
+判分（`_judge`）是确定性的 fs/git 证据检查，零模型调用：既有 `status`、`final_contains`、`required_tools`、`permission_denied`，任务级另有 `file_exists`、`file_absent`、`file_contains`（大小写不敏感子串）和 `git_committed`（初始提交之外存在新提交且 `git status --porcelain` 为空；非 Git 沙箱报 `git evidence unavailable`）。模型最终输出只参与 `final_contains`，从不作为完成证据。报告在 `mode/suite/passed/total/pass_rate/average_duration_ms/tool_success_rate/safety_blocks/duration_ms/results` 之外提供 `task_completion_rate`、`failure_reasons` 分布和 `average_steps`；live 模式另计 `total_input_tokens` / `total_output_tokens`，offline 模式带 `regression_smoke: true` 标记。Web报告和Python返回值保留完成率、失败原因和所有逐例结果；tests.check_offline_evaluations只做离线CI断言，全通过才返回成功。每条 `EvalCaseResult` 透传 RunResult 的 `steps`、`usage`、`status`。
 
 评测的 `expected.successful_tools` 要求对应 `tool.result` 的 `is_error` 明确为 false；`required_tools` 仍仅检查调用是否发生，供拒绝策略测试使用。注意工具成功标志并不代替子进程退出码或文件内容验收。
 
 `examples/rag_repair.py` 是独立离线工程闭环：临时 Git fixture → 索引 → `search_knowledge` / `read_file` → 步数上限停驻 → 重开 Host → Continue → `edit_file` / 越界拒绝 / `bash` 测试。使用真实文件工具、策略、持久化与本地子进程，但 Provider 决策是 scripted。独立 verifier 通过当前 Python 的 unittest 退出码和测试源码完整性判定修复证据，不信任最终回复或 Shell 工具的成功标志；不修改生产 Shell 返回协议，也不新增事件。
 
-## Web 展示投影与交互
+## Web 工作台与展示投影
 
-Web 是原生 ES modules，无构建步骤。`index.html` 定义两栏外壳：左侧导航（Workspace 切换与 Session 列表）与工作区（topbar、正文与 composer）；topbar 的任务计划、工具、详情、用量四个胶囊按钮各自弹出悬浮详情卡，替代原右侧常驻工作面板；`app.js` 协调 Workspace 注册、Workspace/Session 选择与管理、API 状态、审批、Continue、四个胶囊对应的浮层与 composer；`projection.js` 提供纯展示投影；`transport.js` 消费同一 SSE 路由；`view.js` 处理稳定 DOM 与安全 Markdown 子集；`config.js` 管理 Host 模型配置。composer 的模型下拉读取 `/api/models`，每次提交把非默认选择写入 RunBody；旁边“配置”按钮继续打开 Host 连接弹窗。添加工作区对话框调用仅限本机的 Workspace POST，成功后刷新内存目录并直接切换，不自动创建空 Session。Session 行的可见“⋯”与 contextmenu 打开同一管理对话框；归档列表显式切换，删除冲突保留服务端说明。左侧会话列表按“今天 / 7 天内 / 更早”分组，状态点来自 Session 投影，计划进度徽标复用 `planGroups` 计数。
+Vue 3/TypeScript/Vite、Vue Router和Pinia提供唯一用户界面，Hash路由保留 `/workbench/` 地址。服务根地址307重定向该路径；旧原生前端、静态 `/assets` 挂载和用户终端产品已退役。FastAPI只托管构建产物，Node只用于维护构建，安装包与运行容器无需Node。
 
-传输层将兼容 tool.request/result 名称归一化，按 event_id 或 run/seq 去重、按 session_seq 排序；流断开后从最后已消费游标补齐，即使 Run 已终止也不跳过尾部事件。Event cursor 在 SQLite 查询中直接过滤，不先重放旧事件。导航与历史索引只投影状态、审批和终态等轻量事实，Run History 按稳定 run_id cursor 分页；展开章节时才读取该 Run 的事件。最新 Run 摘要另用 SQL 聚合步骤、工具数和最后事件时间；`get_run_summary` 与 `list_runs` 还把 RuntimeStateProjection 已派生的终态 `reason` 与 status/error 一并返回，供前端解释停驻原因，这只是字段透出，不新增事实源。Web 将摘要与已收到的 SSE 合并，状态 pill 显示会话状态、已观察步数、正在执行的任务和运行时长。运行状态和 pending approval 始终查询服务端 Runtime Projection，事件通知触发状态协调，周期查询发现其他入口启动的 Run。异步结果按所属 Workspace/Session 缓存，不写入当前选中 Session 的其他记录。
+`frontend/src/api`按领域调用同源HTTP/SSE，OpenAPI生成接口类型。`stores/workbench.ts`保存当前选择、按Session隔离的状态与草稿、持久接收身份和运行观察器。切页不取消后台任务，跨项目迟到结果只更新所属缓存；未知写入保留原键，明确拒绝才允许新意图。事件客户端分别管理持久游标和临时预览，刷新从后端事实恢复；用量不按SSE接收次数累计。
 
-Semantic Work Projection 从 canonical 事件证据与 Run 关联生成只读工作片段：工具 prepared/completed 按 run_id/call_id 配对，保留请求参数与结果；Continue 的 abandoned 沿 continuation_of 找到原操作，未派发调用可关联原 model.response。调用状态区分等待结果、中断时结果未确认、完成、失败、拒绝和 abandoned。Continue 的接续说明块在 `run.started.resumed_task_id` 命中当前计划时写明“继续执行任务 tX：<内容>”，任务内容取自 `session_status` 的 `task_state`；查不到该任务时保持“未重发原始指令”的原句。普通 checkpoint 不切分阶段，也不在主视图占一行；null 不被描述成有效证据。有限的命令分类只识别明确调用，未知 Bash/MCP 保持中性措辞；操作完成不推导未记录的验证结论。
+项目、对话、会话管理、Skills、索引、评测、交付、副本、历史导入、历史、用量、队列及设置均由领域页面承接。历史运行按稳定身份分页，不替换当前对话；JSONL与有界Trace从后端事实导出。计划展示读取session_status，不复制服务端任务身份、依赖与证据规则；模型标记completed不等于独立验收。
 
-每条用户意图和其 Continue 链组成一个章节；最新章节默认展开，旧章节的终态事件按需加载，工具详情默认折叠。首章识别不到意图时标签回退为“最初的目标”，后续章节为“后续工作”。Execution Block 包含稳定 ID、来源事件、Run、操作状态和可读描述，不写 SQLite；只有 attention 与 approval 类块保留独立“查看详情”按钮，continuation、context 等说明块不再各带按钮。用户消息以右对齐气泡完整展示原文；每章渲染一行由 `toolStats` 聚合的执行统计，点击后调用 `openToolsForChapter` 打开工具浮层并定位本章明细；章节之间的 Run 谱系徽标展示该章各 Run 的状态与 continuation 链，失败/中断且没有结果的 run 仍以 run 徽章行展示。原始事件、模型协议与 checkpoint 的详情通过「详情」胶囊打开的浮层的时间线与过滤查看。每轮的最终输出作为回复卡内联在该轮末尾，每轮最多一次；回复卡头部标注 run 编号（点击打开详情浮层）、步数、时长与时间。界面显示的“本次执行结束”区别于 Session 生命周期结束。
-
-「计划」胶囊弹出的任务计划浮层是 `session_status` 中 `task_state` 的纯展示投影：`projection.js` 的 `planGroups` 只做分组与计数（“N / M 已完成”总进度，非零时追加进行中、受阻数量，不单独显示待开始；active 高亮，completed 折叠进“已完成的任务”分组，summary 与证据展开），不复制 TaskPlanProjection 的身份与窗口规则；`planRevisions` 按 `task.plan_updated` 事件顺序折叠修订历史，只保留带稳定 `id` 的条目。证据条目点击后通过 `openToolAt` 定位到工具浮层中的对应调用。Session 状态行在运行中复用同一投影显示“正在做：<active 任务内容>”。收到 `task.plan_updated` SSE 时与状态类事件一样触发 `session_status` 重新查询，浮层随之刷新；证据措辞与 CLI 相同，只描述发生过的调用，不推导验证结论，也不提供任何编辑入口。
-
-停驻原因由 `projection.js` 的 `parkLabel`/`parkSummary` 做纯展示翻译：状态行短语与恢复区首句按终态结构化 `reason` 映射为用户可读中文（`step_budget`、`task_step_budget`、`cancelled` 各有措辞，无 `reason` 且错误为 "Host stopped before terminal fact" 时按服务中断处理）。`cancelled` 同时覆盖用户停止与 Host 关停引发的后台取消，措辞不指明是谁停止；未识别的 `reason` 回退显示原始错误文本，原始错误文本也始终可通过“查看中断详情”在详情浮层查看。
-
-Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订阅，包括处理新审批。仅最新 parked Session 提供 Continue；409 留在恢复区，不发普通 Prompt 绕过。审批按钮提交前检查服务端 pending 状态。历史展开、草稿、阅读位置按 Session/章节保存于页面内存；选择项、主题与 composer 模式保存在 localStorage。按稳定 key 更新发生变化的 DOM，详情内容以 ID 获取最新投影后渲染在对应悬浮卡；原生 dialog 继续承载工作区管理、模型配置和能力面板，支持 Escape 和焦点返回。Markdown 通过 DOM 文本构造，禁用原始 HTML 和非 HTTP(S)/mailto 链接协议。
-
-顶栏四个胶囊各自弹出悬浮卡，承载任务计划、工具活动、详情、用量四个只读投影分区；渲染函数与投影事实不变，只是承载容器从常驻右栏改为按需浮层：工具活动浮层用 `toolStats` 汇总调用统计并按章节折叠分组列出明细与耗时，失败与未确认调用高亮；详情浮层用 `timeline` 折叠事件时间线、提供事件过滤并承载审计导出按钮（复用按 Run 的 NDJSON export 接口）；用量浮层读取 Run 摘要与详情的 `usage`、步数和 `request_chars`，展示最新 run 与会话累计。composer 是交互中枢：附件“＋”上传后以 chips 展示，附件接口缺失时按钮置灰；模式选择是下拉菜单，Auto/Plan/Agent 三个选项各带一行说明，Plan/Agent 语义由后端 `run_policy` 决定，前端不复制白名单；发送按钮空闲时为圆形 ↑、运行中原位变为 ■ 停止；上下文占用以小进度条显示，以最新 `model.request` 的 `request_chars` 除以 `GET /api/runtime/settings` 的 `context_limit` 计算百分比，超过 80% 变为警示色，字段缺失时显示 `--`。请求失败通过右下角 toast 提示，error toast 带重试按钮；空状态按“无工作区 → 无工作 → 无记录”分层引导。
-
-界面主题用 CSS 变量实现浅/深双模式：默认跟随 `prefers-color-scheme`，手动切换写入 localStorage，侧栏折叠状态同样持久化。性能上每秒 tick 只重绘状态 pill 文本（步骤/时长），不触发章节或浮层重建；每章投影按事件数量、Run 数量和 task_state 修订组成的 key 缓存（`projectCached`），未变化时直接复用渲染结果；任务计划浮层按投影版本 reconcile。与服务的连接断开时状态 pill 进入重连显示，轮询补齐后自动解除。
+`SafeContent.vue`仅将用户内容作为文本和围栏代码块渲染，不使用v-html、原始HTML或任意协议链接。审批、停止、Continue和补丁采纳始终以精确Run/Session/候选身份调用后端，界面状态不授予工具权限。
 
 ## 工程边界
 
-本轮演进以 Web 工作台、同项目隔离并发、正式 Skills 与 Token 成本治理为目标，编号步骤及验收证据见根目录 `AGENTS.md`。该清单是实施目标，未完成步骤不代表现有能力；直接源运行继续使用 Workspace 串行，显式 Plan 快照和独立 worktree 可并发，Vue逐步承接原生前端；用户 CLI 在页面/API 承接前保留。长期取舍见 ADR-048。
+本轮演进以 Web 工作台、同项目隔离并发、正式 Skills 与 Token 成本治理为目标，编号步骤及验收证据见根目录 `AGENTS.md`。该清单是实施目标，未完成步骤不代表现有能力；直接源运行继续使用 Workspace 串行，显式 Plan 快照和独立 worktree 可并发，Vue已承接用户控制面，旧原生前端和用户CLI已删除；服务部署与Python开发接口继续复用同一Host。长期取舍见 ADR-048。
 
 系统仍面向可信单机使用：没有账号、多租户、公网鉴权、分布式锁或 Agent Graph。可选 Docker 只隔离 Shell 命令，不是覆盖文件工具与 Provider 的完整 Agent 沙箱；默认 Local 使用本机权限。状态根锁不等于工具安全隔离。AGENTS.md 是模型指令，不会扩张 PolicyEngine 权限。生产代码的 import、--help、测试与离线评测不需要 API Key 或网络。
 
@@ -225,7 +217,7 @@ Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订�
 
 `todo_write` 的 `depends_on` 使用已有稳定 id，按完整原子快照检查存在性、重复、自引用、成环及依赖完成状态；旧事件无该字段时投影为空数组，不改写日志。省略依赖保留旧值，显式 `[]` 清除；不能删除仍被引用的项。依赖图是计划约束，尚未成为工具或子 Agent 调度器。
 
-`WorktreeService` 不在 import/构造时写文件。记录与 checkout 位于源 Workspace 外的状态根，校验注册路径、分支、base commit、git-common-dir 和 Workspace 身份；创建前持久化身份，缺口记录保留用于人工检查。Host 控制面 `manage_worktree()` 持有源 Workspace 和项目 Git 锁，写入专用管理 Session 的 `worktree.requested` / `worktree.completed` 与 Run 终态；Git 在线程中执行时，即使调用方取消也保留所有权直到结果已记录。CLI 是用户管理入口，未向模型注册 worktree 工具，不绕过模型的 ToolExecutor。删除期间关闭目标 checkout 的 Workspace/Session admission，成功后移除没有 Session 的 checkout 注册。删除拒绝文件变动、ignored 内容、base 之后的提交、隐藏文件变动的索引标记或关联 Session；保留分支，没有 force/discard 通道，不自动处理旧目录。
+`WorktreeService` 不在 import/构造时写文件。记录与 checkout 位于源 Workspace 外的状态根，校验注册路径、分支、base commit、git-common-dir 和 Workspace 身份；创建前持久化身份，缺口记录保留用于人工检查。Host 控制面 `manage_worktree()` 持有源 Workspace 和项目 Git 锁，写入专用管理 Session 的 `worktree.requested` / `worktree.completed` 与 Run 终态；Git 在线程中执行时，即使调用方取消也保留所有权直到结果已记录。Vue与受控HTTP是用户管理入口，未向模型注册 worktree 工具，不绕过模型的 ToolExecutor。删除期间关闭目标 checkout 的 Workspace/Session admission，成功后移除没有 Session 的 checkout 注册。删除拒绝文件变动、ignored 内容、base 之后的提交、隐藏文件变动的索引标记或关联 Session；保留分支，没有 force/discard 通道，不自动处理旧目录。
 
 `CommandExecutor` 返回 `CommandResult`，携带退出码、stdout、stderr、超时、耗时和精确省略字节计数；`ToolResult.metadata` 向 canonical `tool.completed` 透出这些字段。默认每流保留 25,000 字节头尾，实时消费 pipe，不先完整缓冲再截断。模型能看到退出状态，工具错误来自退出码/超时；注入返回字符串的自定义执行器继续可用。Shell 丢弃的中段不进入日志或分页存储；这与非 Shell 全量结果的请求侧预览不同。取消会等待进程树清理，不伪造完成结果。
 
@@ -243,7 +235,7 @@ Continue 使用异步 POST 契约；收到 202 后立即按返回的 run_id 订�
 
 显式 code_structure 模式通过懒加载 tree-sitter Python/JS/TS grammar 提取类、函数和嵌套符号，heading携带符号路径；装饰器/UTF-8/CRLF行号按真实源码保留。大符号继续窗口化，class骨架与方法分开避免复制整类。build统计报告解析文件数与fallback原因；窗口/结构模式、parser版本组成chunking_profile/fingerprint，在写事务内复核，变化必须force。缺依赖/不支持语言/解析损坏时回退窗口；默认不导入parser。检索eval可对相同复制语料分别运行两种切法，记录实际提交的chunking指纹和hit heading，不以机制测试声称质量提升。
 
-telemetry.py 的 build_run_trace 是纯日志派生；export_run_trace 只在显式调用时懒加载SDK，使用局部TracerProvider和官方IdGenerator/SpanProcessor，保留历史时刻与确定性哈希identity，不修改全局provider。HTTP/CLI共用collect_trace_events，按精确Run收集子任务及父级/Continue关系端点，最多64个相关Run；不扫描同Session的无关历史。Continue提供link，缺失来源标记unobserved。默认JSON无网络，OTLP endpoint必须显式。固定元数据allowlist阻止正文/参数/结果/密钥进入出口，exclusive模型用量避免父子doublecount；没有响应的重试消费和账单不推测。导出失败不改变执行事实。
+telemetry.py 的 build_run_trace 是纯日志派生；export_run_trace 只在显式调用时懒加载SDK，使用局部TracerProvider和官方IdGenerator/SpanProcessor，保留历史时刻与确定性哈希identity，不修改全局provider。HTTP/Python开发接口共用collect_trace_events，按精确Run收集子任务及父级/Continue关系端点，最多64个相关Run；不扫描同Session的无关历史。Continue提供link，缺失来源标记unobserved。默认JSON无网络，OTLP endpoint必须显式。固定元数据allowlist阻止正文/参数/结果/密钥进入出口，exclusive模型用量避免父子doublecount；没有响应的重试消费和账单不推测。导出失败不改变执行事实。
 
 ## 写入交付与独立验收
 
@@ -258,7 +250,7 @@ acceptance_tests工程评测使用一次性Git fixture，原测试复制到外�
 CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optional-extensions 安装全部 extras；container job 显式预拉测试镜像后开启真实 readonly boundary、Host Skill 脚本及取消/超时测试，再构建部署镜像、执行一次性卷上的服务分发检查；web job 固定 Playwright 版本并安装 headless Chromium，严格模式缺浏览器必须失败。默认离线门禁仍不依赖 Key 或 Docker；未执行的远程 CI 不能当成本机真实 Docker 验证证据。
 
 
-## 请求用量账本基础（U1 进行中）
+## 请求用量账本基础（U1）
 
 `usage.py` 提供纯供应商归一化和 `build_usage_ledger(events)`，不读数据库或网络。标准字段为 input_tokens/output_tokens，以及可选 cache_read_input_tokens/cache_creation_input_tokens/cache_miss_input_tokens/uncached_input_tokens/reasoning_tokens；缺失不补零，严格拒绝 bool、负数或字符串计数。OpenAI 缓存/推理字段为总量细项；Anthropic 的 input_tokens 先与缓存读取和创建求和为完整输入，另保留未缓存输入。该区别依据[Anthropic 提示缓存文档](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)。
 
@@ -316,7 +308,7 @@ SkillsView 区分用户安装、项目启用、主动选择和Run实际加载。
 
 ### Vue 静态分发与构建一致性
 
-Vite采用相对资源地址与Hash Router，FastAPI通过StaticFiles挂载/workbench/，HTTP/SSE继续使用同源/api路径。根地址旧页面保留；未找到index时只对工作台返回503，后端正常初始化。资源不存在返回404，不能把JS请求回退成HTML。
+Vite采用相对资源地址与Hash Router，FastAPI通过StaticFiles挂载/workbench/，HTTP/SSE继续使用同源/api路径。根地址307重定向/workbench/；未找到index时只对工作台返回503，后端正常初始化。资源不存在返回404，不能把JS请求回退成HTML。
 
 package_web.mjs在构建后替换专用eventide/workbench目录，写入每个产物的SHA-256与前端源码/锁文件/构建配置指纹。资源作为Python package-data提交和打包，源码安装与wheel使用者无需Node；维护者修改前端后必须重建。离线pytest校验源码指纹及全部资源，CI重建并比较版本库差异，再直接运行FastAPI静态页面浏览器旅程。
 
@@ -377,7 +369,7 @@ BudgetContext.project_id仅对此严格控制身份允许None：ModelBudgetContr
 
 候选配置与超时在检查前冻结；获得共享model_slot后才原子预留及写attempt_started，以候选Provider/model计价。请求只执行一次并由model_timeout约束，HTTP在30秒触发取消，但仍等待请求及客户端收尾后才返回，不承诺严格30秒总墙钟上限；收尾未结束时Run保持活跃。usage经既有ModelBudgetController结算，失败/取消/缺失usage未知不释放；候选密钥参与响应/元数据脱敏，异常只暴露稳定分类和可读说明，不保留原SDK异常链。
 
-HTTP接收复用control Session上的http.mutation事实，Idempotency-Key必填；候选请求只存摘要（包含显式密钥的指纹，不存原值），实际已保存密钥在首次调用前冻结。Run身份由控制Session/操作/键派生；相同请求回放持久结果，内容冲突及在途/未知返回409。崩溃发生在Run完成与HTTP回执之间时，只从原终态恢复回执，耗时/检查时间无法还原则null；已接收但无Run的中断证明未派发，补写明确失败回执。进程内active集合仅阻止在途接收被误判为崩溃，不是新的运行事实源。旧页sessionStorage仅存随机键和表单摘要，不存密钥；结果不明不换键，刷新后可重试原内容。
+HTTP接收复用control Session上的http.mutation事实，Idempotency-Key必填；候选请求只存摘要（包含显式密钥的指纹，不存原值），实际已保存密钥在首次调用前冻结。Run身份由控制Session/操作/键派生；相同请求回放持久结果，内容冲突及在途/未知返回409。崩溃发生在Run完成与HTTP回执之间时，只从原终态恢复回执，耗时/检查时间无法还原则null；已接收但无Run的中断证明未派发，补写明确失败回执。进程内active集合仅阻止在途接收被误判为崩溃，不是新的运行事实源。Vue的sessionStorage仅存随机键和表单摘要，不存密钥；结果不明不换键，刷新后可重试原内容。
 
 Vue SettingsView将候选草稿与store.provider分离，后者仍只由配置读取/保存/恢复结果更新；连接测试仅保留独立的ProbeResult。加载、保存及探测期间字段和冲突操作禁用，按钮没有自动触发路径。api/probe.ts复用durableMutation管理请求键，并保存单个候选摘要阻止未知结果被新表单替换；凭据留在组件内存，刷新后重新输入。同标签页的轻量内存观察器只共享在途请求状态及已返回结果，切页后仍锁定表单并接收原结果，避免旧请求清键后新页面把“重试”误变成新调用；它不保存凭据，也不替代持久Run事实。页面展示真实Run/usage、服务UTC日预算范围，未知Token与null耗时不转换为零。Playwright跨文件使用单worker，因为测试共用真实Host及全局队列；单场景内部继续验证并发窗口。
 
@@ -414,7 +406,7 @@ P3/P4/P5集成验收已完成：完整1180项通过、覆盖93.90%，默认7项D
 
 每例准备之后，剩余整例期限交给独立 asyncio Task；到期取消并等待清理，不把单请求超时等同整例上限。所有套件默认12步/20,000已观测Token/300秒，允许更严格配置；数据库、Git同步准备和实际副作用清理不能被描述成实时强制终止。保存初始running报告、每例结果和最终状态，写入采用同目录临时文件、fsync、replace。发生取消用独立清理Task和shield等待收尾，重复取消也不截断证据导出和部分报告，然后向调用者重新抛出CancelledError；剩余题不运行、不伪造用量。离线失败保留并继续，live失败/超时/未知终态停止扩大批次。报告total保留原定题数，attempted/remaining与终态分开；证据导出失败本身也是失败。
 
-冻结集live仍禁用，旧显式live接口只是独立开发实验入口，不等于Web共享预算评测已完成。B3重复实验、Web调度、价格成本对照及U5质量结论另行验收；本切片只保证证据与错误不被丢弃。
+冻结集live已通过受控Web规划确认及共享预算桥接开放；独立Python开发实验与Web机制、真实效果分别报告。B3重复实验、Web调度、价格成本对照及U5质量结论另行验收；本切片只保证证据与错误不被丢弃。
 
 ## 最终请求输入组成（U3）
 
@@ -512,7 +504,7 @@ Session 管理写入通过 session_management 的持久请求接收及 Store 原
 版本来自身份、创建时间、Workspace/目录、名称和归档状态；运行进度不使编辑版本失效。
 成功管理事实保存在 configuration_control 所有者下，避免给空会话添入历史后
 使其永远不能删除。控制会话用 SQL EXISTS 检查 control.session 或历史交付/
-验收来源，避免每次 Session 查询读取全部事件。Vue 和迁移期旧页面共用 HTTP
+验收来源，避免每次 Session 查询读取全部事件。Vue使用统一HTTP
 版本与重试契约；页面只管理元数据，不取得执行或取消权限。
 
 ### Web 工作副本维护
@@ -526,17 +518,17 @@ start只派发当前Host持有的接收身份。Host 验证控制标记、根租
 目录版本基于受管记录和记录文件身份；Git操作前重验，防止旧标签操作替换后的
 副本。源码锁仅覆盖该次管理操作，其他独立副本运行继续遵循原有隔离规则。
 取消等待已派发线程实际退出；未派发任务直接停驻。崩溃恢复不构造Agent恢复
-checkpoint、不重放创建或删除。CLI仍临时复用同一底层实现，待X统一退役。
+checkpoint、不重放创建或删除。Python开发接口继续复用同一底层实现。
 
 会话创建通过配置控制Session记录请求身份。RuntimeStore在同一SQLite事务提交Session、session.created和http.mutation_completed；回执失败整笔回滚，未知请求不自动重放。成功回执独立于目标Session保存，删除目标后重试只返回旧身份。前端创建和项目切换共享选择代次，迟到请求只更新对应项目缓存，不改变当前页面选择。
 
 项目注册/移除使用配置控制Session持久请求身份，身份关系变更、审计事件及成功回执在同一BEGIN IMMEDIATE事务提交。已有路径注册仍提交独立成功回执；旧注册回放不会重建已移除记录。移除按不可复用workspace_id定位，拒绝启动项目、会话历史、执行引用、源项目副本及活跃任务；不会触碰磁盘文件。浏览器只持久化待确认移除身份及请求摘要，不保存本机目录正文；移除后列表消失也保留原请求恢复入口。
 
-受控评测模型桥接：隔离Host保留执行、工具及验收事实，EvaluationCallBridge把模型请求交给主Host已有重试/调度/预算链。主控制Run上的attempt带case_id/case_index/local_run_id来源；本地observed Token检查按本地父子关系解析这些独占事实。普通响应及摘要用usage_authority指向权威账本，不触发legacy用量回退；未解析引用时complete=false。case_evidence同时导出本地执行与精确模型权威快照，缺少或不匹配的引用拒绝导出，价格仅导出实际使用版本。当前底座不开放Web live；离线控制任务拒绝使用桥接，嵌套桥接和本地有界repair批次明确拒绝，后者需先接完整交付累计归属。
+受控评测模型桥接：隔离Host保留执行、工具及验收事实，EvaluationCallBridge把模型请求交给主Host已有重试/调度/预算链。主控制Run上的attempt带case_id/case_index/local_run_id来源；本地observed Token检查按本地父子关系解析这些独占事实。普通响应及摘要用usage_authority指向权威账本，不触发legacy用量回退；未解析引用时complete=false。case_evidence同时导出本地执行与精确模型权威快照，缺少或不匹配的引用拒绝导出，价格仅导出实际使用版本。Web live通过固定规划确认开放；离线控制任务拒绝使用桥接，嵌套桥接和本地有界repair批次明确拒绝，后者需先接完整交付累计归属。
 
 受控评测执行器已接EvaluationCallBridge。live只接受与主控制Run冻结cases完全一致的输入，禁止另建Provider或重新读取连接配置；case使用拒绝直接调用的EvaluationLocalProvider。生成默认值/能力在接收时冻结，新默认不改变排队批次；Provider配置指纹改变则拒绝执行。每题保持12步/20k已观测Token/300秒，项目预算拒绝或未知模型故障终止剩余批次，主Run记interrupted。逐题报告同时保存本地执行和主账本权威快照；未完成批次重启停驻，无自动重放。Python及HTTP控制器须confirmed=True及quote_hash；摘要绑定任务、模型连接/默认配置、规划假设及有效价格版本。只读规划不创建Run、不发请求；按20k Token/题和90/10输入输出比例估算，缺价格明确未知，币种不混合。接收事件固定planning_quote，真实调用仍按请求时价格固定结算；规划不是账单硬上限。
 
-附件HTTP写入使用配置控制Session保存http.mutation_started/completed，只保存正文指纹和公开元数据，不将附件内容写入事件或浏览器存储。上传前校验输入，发布文件与SQLite回执无法同事务，发布或回执故障保留未知started，原键拒绝重复执行。删除继续复核canonical附件引用；成功回放不重读已删除文件。Vue和旧页均保留未知请求键，刷新重新选择同内容文件可复用身份。
+附件HTTP写入使用配置控制Session保存http.mutation_started/completed，只保存正文指纹和公开元数据，不将附件内容写入事件或浏览器存储。上传前校验输入，发布文件与SQLite回执无法同事务，发布或回执故障保留未知started，原键拒绝重复执行。删除继续复核canonical附件引用；成功回放不重读已删除文件。Vue均保留未知请求键，刷新重新选择同内容文件可复用身份。
 
 运行控制HTTP现在强制请求身份。Run/Continue在任何自动Session创建前检查键；停止/审批/放弃恢复由run_mutations记录内容绑定的请求开始和成功回执。已成功的决定在当前终态检查前回放；执行与回执之间发生故障保留未知，不重放。放弃恢复传expected_run_id并在Host会话/工作区锁内复核，防止旧标签页放弃新中断Run。审批严格布尔值，未来状态查询与原回执分离。所有路径继续经原Host/ApprovalBroker，不新建执行主链。
 

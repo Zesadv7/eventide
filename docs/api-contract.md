@@ -4,6 +4,10 @@
 
 ## 现有接口（前端已依赖）
 
+### Web 服务入口 —— 已实现
+
+`GET /`返回307，Location为`/workbench/`；Vue资源继续位于`/workbench/`，Hash路由与/api保持同源。旧`/assets/*`返回404。缺失Vue构建产物时`/workbench/`明确503，healthz和API仍可用。部署入口eventide-server和python -m eventide只启动同一FastAPI服务；不提供用户终端命令或兼容转发。
+
 ### HTTP 统一错误 —— 已实现
 
 HTTP 状态码保持原义，JSON 错误包含 `code`、可读 `message` 与兼容的 `detail`。例如不存在的 Run 返回 404 和 `{"code":"not_found","message":"Run not found","detail":"Run not found"}`。已有客户端可以继续读取 detail，新客户端优先用 code 判断类别并展示 message。405 保留 Allow 等协议响应头。
@@ -30,7 +34,7 @@ Vue设置页通过`durableMutation('probe', ...)`调用此接口，结果独立�
 
 下文“仅回环／仅本机”的管理权限默认仍只接受回环连接。容器部署可通过启动配置 `EVENTIDE_LOCAL_PROXY_PEERS` 显式追加精确 IP；这些额外连接必须同时携带匹配服务端回环 Host 的 Origin，缺失／不匹配返回403，不能利用伪造转发头获得权限。配置在应用创建时固定，不属于模型或运行配置 API。即使未来只读管理路由使用此守卫，额外连接也需满足同样来源检查；现有普通GET契约不变。宿主仅发布回环端口，服务入口禁用代理头解析，不提供公网认证。
 
-Run与Continue要求`Idempotency-Key`（1–128个可见ASCII字符）。同Session/操作/键确定一个持久Run身份，内容hash写入admission。重试相同内容返回原202接收凭据，不新增消息、调用或turn；相同键不同内容409。接收尚未持久化的竞争请求可返回busy，客户端保留相同键稍后重试。幂等接收不等于自动重放工具，未知结果仍停驻。Skills 导入和配置的幂等契约见下文；Delivery 随对应控制面接入。
+Run与Continue要求`Idempotency-Key`（1–128个可见ASCII字符）。同Session/操作/键确定一个持久Run身份，内容hash写入admission。重试相同内容返回原202接收凭据，不新增消息、调用或turn；相同键不同内容409。接收尚未持久化的竞争请求可返回busy，客户端保留相同键稍后重试。幂等接收不等于自动重放工具，未知结果仍停驻。Skills 导入和配置的幂等契约见下文；Delivery等长任务使用下述专用持久控制面。
 
 ### 模型生成参数 —— 后端及 Vue 已实现
 
@@ -166,7 +170,7 @@ Workspace capabilities 增加 readonly_workers（enabled/roles/max_concurrency/m
 
 ### 交付、执行配置与未知结果 —— 已实现
 
-交付首版由CLI deliver控制面提供prepare/run/verify/show/apply，暂不新增HTTP写入接口。原Run/Session/SSE/export可读取Writer与control Run证据；delivery事实与patch artifact hash存同一Event Log。Writer的execution_config在后续Run/Continue生效；图片/PDF契约不变。control Session归档且不能用于普通模型执行。
+交付由下述持久HTTP与Vue有界修复控制面提供准备、修复、查询、补丁核对和人工采纳；手动run/verify保留Python开发接口。原Run/Session/SSE/export可读取Writer与control Run证据；delivery事实与patch artifact hash存同一Event Log。Writer的execution_config在后续Run/Continue生效；图片/PDF契约不变。control Session归档且不能用于普通模型执行。
 
 新增canonical tool.outcome_unknown与终态reason=unknown_tool_outcome；它保留未确认调用，不伪装成tool.completed，相关Workspace阻止普通Run、Continue和交付写入。前端显示“工具结果未确认”，不能将其展示为已停止或允许继续。未知状态不因abandon或重启清除。导出仍包含完整canonical证据，默认脱敏Trace只派生安全元数据。
 
@@ -248,7 +252,7 @@ Run/Session现有usage接口仍只按model.attempt事实计费，不累加budget
 
 ## 根 Run 执行副本（P2）
 
-RunBody 新增 `execution_target: "source" | "snapshot" | "worktree"`，默认 source。snapshot 必须同时使用 mode=plan，否则422且不接收Run；未知target由请求schema拒绝。幂等指纹包括target，同键变更目标返回409。Python RunRequest提供同名字段，旧CLI仍使用source。
+RunBody 新增 `execution_target: "source" | "snapshot" | "worktree"`，默认 source。snapshot 必须同时使用 mode=plan，否则422且不接收Run；未知target由请求schema拒绝。幂等指纹包括target，同键变更目标返回409。Python RunRequest提供同名字段。
 
 `GET /api/runs/{id}` 与 `GET /api/sessions/{id}`、Session列表增加 execution：source为 `{"kind":"source"}`；snapshot为 `{"kind":"snapshot","workspace_id":"原逻辑WorkspaceID","snapshot_id":"64位摘要","working_directory":"相对cwd","skipped":0}`。Session顶层working_directory仍是逻辑源路径；execution明确实际副本，不返回内部绝对产物路径或重绑Session。完整manifest和源checkpoint保存在canonical run.admitted/run.started中，可由已有事件/export读取。
 
@@ -318,7 +322,7 @@ Provider PUT、Provider DELETE、模型默认参数 PUT、会话参数 PUT 均�
 
 Provider 状态新增 `client_status=ready|cleanup_required|restart_required`。关闭旧客户端失败保留旧配置并阻止普通运行，明确发起新的恢复配置操作可重试关闭；无法核实持久配置时要求重启。配置保存不发起模型请求。会话生成配置事实由内部配置控制 Session 保存，绑定会话创建时间，删掉空会话后重建同名会话不会继承旧覆盖。
 
-Vue和旧页仅在浏览器会话存储中保存随机请求键、版本和候选摘要，不保存候选密钥。未知结果后要求重填原候选重试；确定冲突需刷新后重新编辑。连接测试和配置修改互相阻止在途覆盖。
+Vue仅在浏览器会话存储中保存随机请求键、版本和候选摘要，不保存候选密钥。未知结果后要求重填原候选重试；确定冲突需刷新后重新编辑。连接测试和配置修改互相阻止在途覆盖。
 
 ### 本地检索诊断与工具证据
 
@@ -436,7 +440,7 @@ Session查询增加legacy_imported；导入会话归档且作为只读控制历�
 普通会话或不存在的身份404，非法分页422。历史页以纯文本展示消息，旧汇总用量
 保留在legacy.run_summary，原事件保留在legacy.event，不加入现代逐调用账本。
 
-POST /api/sessions 要求 Idempotency-Key（1–128可见ASCII），body严格只接受workspace_id/working_directory。缺键422，同键同内容回放201和原session_id，不同内容409；缺失body与空对象均规范化为默认字段。会话及成功回执原子提交，结果未知503或在途409保留原键；明确拒绝附X-Eventide-Mutation-Outcome: rejected。删除原会话后旧请求仍返回原身份，不重新创建。Vue和暂存旧页均保留未知请求身份，Python内部创建接口不受HTTP头约束。
+POST /api/sessions 要求 Idempotency-Key（1–128可见ASCII），body严格只接受workspace_id/working_directory。缺键422，同键同内容回放201和原session_id，不同内容409；缺失body与空对象均规范化为默认字段。会话及成功回执原子提交，结果未知503或在途409保留原键；明确拒绝附X-Eventide-Mutation-Outcome: rejected。删除原会话后旧请求仍返回原身份，不重新创建。Vue均保留未知请求身份，Python内部创建接口不受HTTP头约束。
 
 POST /api/workspaces 与 DELETE /api/workspaces/{id} 强制Idempotency-Key，缺失422，同键异内容409。注册body严格为path；注册201和移除200原结果持久回放，先检查回执再检查目标存在性，因此已移除目标仍可回放。路径重新注册得到新workspace_id，旧移除不会影响新记录。登记/关系变更与成功回执原子提交；未知503/未标记409保留键，明确拒绝带X-Eventide-Mutation-Outcome: rejected。工作区详情新增startup_workspace布尔值，启动工作区禁止移除409；已有会话/执行引用/副本/活跃操作也拒绝。磁盘目录不删除。
 

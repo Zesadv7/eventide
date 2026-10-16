@@ -1,6 +1,6 @@
-"""Entry point: python -m eventide"""
+"""Start the Web service with python -m eventide."""
 
-from eventide.cli import main
+from eventide.server import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

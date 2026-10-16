@@ -47,7 +47,7 @@ def handler(
 
     def search_knowledge(query: str, k: int = 5) -> str:
         if not (workspace / INDEX_RELATIVE_PATH).is_file():
-            return "Error: no knowledge index; run 'eventide rag build'"
+            return "Error: no knowledge index; build it in the Web knowledge index page"
         outcome = retrieve(
             workspace,
             query,

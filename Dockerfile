@@ -39,5 +39,5 @@ WORKDIR /workspaces/demo
 VOLUME /data/eventide
 EXPOSE 8000
 
-ENTRYPOINT ["eventide"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["eventide-server"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]

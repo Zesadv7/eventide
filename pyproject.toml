@@ -47,7 +47,7 @@ dev = [
 ]
 
 [project.scripts]
-eventide = "eventide.cli:main"
+eventide-server = "eventide.server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -55,7 +55,7 @@ include = ["eventide*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-eventide = ["web/*.html", "web/*.css", "web/*.js", "workbench/*.html", "workbench/*.json", "workbench/assets/*", "bundled_skills/*/SKILL.md", "bundled_skills/*/references/*.md", "bundled_evals/*/manifest.yaml", "bundled_evals/*/dataset.json", "bundled_evals/*/fixtures/benchmark/*.json"]
+eventide = ["workbench/*.html", "workbench/*.json", "workbench/assets/*", "bundled_skills/*/SKILL.md", "bundled_skills/*/references/*.md", "bundled_evals/*/manifest.yaml", "bundled_evals/*/dataset.json", "bundled_evals/*/fixtures/benchmark/*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

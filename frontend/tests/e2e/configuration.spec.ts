@@ -87,22 +87,6 @@ test("configuration save survives a lost response and reload, then rejects a sta
   await other.close();
 });
 
-test("legacy configuration dialog saves through the versioned endpoint", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "配置模型连接", exact: true }).click();
-  await expect(page.locator("#model")).not.toHaveValue("");
-  await page.locator("#model").fill("legacy-config-fixture");
-  await page.locator("#api-key").fill("legacy-config-secret");
-  await page.locator("#save-model-config").click();
-  await expect(page.locator("#config-message")).toContainText("配置操作已确认");
-  expect(
-    (await (await page.request.get("/api/config/provider")).json()).model,
-  ).toBe("legacy-config-fixture");
-  await expect(page.locator("#api-key")).toHaveValue("");
-});
-
 test("generation settings preserve zero and explicit default through the real API", async ({
   page,
 }) => {

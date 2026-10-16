@@ -94,7 +94,7 @@ def test_tool_defends_against_a_missing_or_invalid_index(isolated_workspace: Pat
     )
     assert index_available(repo, profile) is False
     result = handler(repo, HashEmbedder(), profile)("query")
-    assert result == "Error: no knowledge index; run 'eventide rag build'"
+    assert result == "Error: no knowledge index; build it in the Web knowledge index page"
 
 
 async def test_corrupt_index_does_not_break_an_unrelated_run(isolated_workspace: Path) -> None:

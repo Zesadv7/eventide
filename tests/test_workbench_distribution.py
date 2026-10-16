@@ -51,7 +51,10 @@ def test_fastapi_serves_workbench_and_all_referenced_assets(isolated_workspace):
         assert client.get("/workbench/assets/missing.js").status_code == 404
         assert client.get("/workbench/%2e%2e/host.py").status_code == 404
         assert client.get("/healthz").status_code == 200
-        assert client.get("/").status_code == 200  # Old entry remains until X.
+        redirect = client.get("/", follow_redirects=False)
+        assert redirect.status_code == 307
+        assert redirect.headers["location"] == "/workbench/"
+        assert client.get("/assets/app.js").status_code == 404
 
 
 def test_missing_bundle_is_explicit_and_does_not_break_api(isolated_workspace, monkeypatch):

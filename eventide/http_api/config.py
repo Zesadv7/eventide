@@ -10,7 +10,6 @@ from eventide.http_api.configuration import mutate_configuration
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.probe import connection_probe
 from eventide.http_api.schemas import ProviderConfigBody, ProviderResetBody, ProviderSaveBody
-from eventide.provider_probe import probe_error as probe_error
 
 
 def create_router(context: ApiContext) -> APIRouter:

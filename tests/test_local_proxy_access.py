@@ -7,11 +7,11 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from eventide.api import create_app
-from eventide.cli import main
 from eventide.config import Settings
 from eventide.host import RuntimeHost
 from eventide.http_api.context import require_local_request
 from eventide.providers import ScriptedProvider
+from eventide.server import main
 from tests.configuration_requests import put_configuration
 from tests.test_runtime import settings_for
 
@@ -140,5 +140,5 @@ def test_serve_does_not_allow_uvicorn_to_rewrite_socket_peer(isolated_workspace,
         observed.update(options)
 
     monkeypatch.setattr(uvicorn, "run", serve)
-    assert main(["serve", "--host", "0.0.0.0"]) == 0
+    assert main(["--host", "0.0.0.0"]) == 0
     assert observed["proxy_headers"] is False

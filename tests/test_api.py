@@ -7,10 +7,11 @@ import uuid
 
 from fastapi.testclient import TestClient
 
-from eventide.api import _probe_error, create_app
+from eventide.api import create_app
 from eventide.attachments import MAX_INLINE_BYTES, MAX_UPLOAD_BYTES
 from eventide.host import RuntimeHost
 from eventide.models import ModelResponse
+from eventide.provider_probe import probe_error as _probe_error
 from eventide.providers import ScriptedProvider
 from tests.configuration_requests import put_configuration, reset_provider
 from tests.test_runtime import settings_for
@@ -38,11 +39,11 @@ def test_api_run_and_console(isolated_workspace):
     )
     with TestClient(create_app(runtime)) as client:
         assert client.get("/healthz").json()["status"] == "ok"
-        console = client.get("/").text
-        assert "EVENTIDE" in console
-        assert "配置大模型" in console
-        assert 'value="openai_responses"' in console
-        assert "检查连接" in console
+        redirect = client.get("/", follow_redirects=False)
+        assert redirect.status_code == 307
+        assert redirect.headers["location"] == "/workbench/"
+        assert '<div id="app">' in client.get("/").text
+        assert client.get("/assets/app.js").status_code == 404
         session = client.post(
             "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
         ).json()["session_id"]

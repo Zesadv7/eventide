@@ -12,6 +12,13 @@ from pathlib import Path, PurePosixPath
 def main() -> None:
     wheel = Path(sys.argv[1]).resolve()
     with zipfile.ZipFile(wheel) as archive, tempfile.TemporaryDirectory() as temporary:
+        names = archive.namelist()
+        assert "eventide/cli.py" not in names
+        assert not any(name.startswith("eventide/web/") for name in names)
+        entrypoints = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
+        scripts = archive.read(entrypoints).decode()
+        assert "eventide-server = eventide.server:main" in scripts
+        assert "\neventide =" not in scripts
         manifest = json.loads(archive.read("eventide/workbench/manifest.json"))
         for path, expected in manifest["files"].items():
             content = archive.read("eventide/workbench/" + path)
@@ -42,6 +49,9 @@ with tempfile.TemporaryDirectory() as directory:
     host = RuntimeHost(settings, ScriptedProvider([]))
     with TestClient(create_app(host)) as client:
         assert client.get('/workbench/').status_code == 200
+        redirect = client.get('/', follow_redirects=False)
+        assert redirect.status_code == 307 and redirect.headers['location'] == '/workbench/'
+        assert client.get('/assets/app.js').status_code == 404
         manifest = client.get('/workbench/manifest.json').json()
         for asset in manifest['files']:
             assert client.get('/workbench/' + asset).status_code == 200

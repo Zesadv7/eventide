@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from eventide.config import Settings
@@ -32,40 +32,11 @@ from eventide.http_api import (
     workspaces,
     worktrees,
 )
-from eventide.http_api.context import ApiContext, ApprovalBroker
+from eventide.http_api.context import ApiContext
 from eventide.http_api.errors import ERROR_RESPONSES, error_response, register_error_handlers
-from eventide.http_api.schemas import (
-    ApprovalBody,
-    AttachmentBody,
-    GenerationBody,
-    ProviderConfigBody,
-    RunBody,
-    SessionBody,
-    SessionUpdateBody,
-    WorkspaceBody,
-)
 from eventide.http_control import check_mutation_origin
 
-# Existing imports remain available while requests are owned by their domain.
-__all__ = [
-    "ApprovalBody",
-    "ApprovalBroker",
-    "AttachmentBody",
-    "GenerationBody",
-    "ProviderConfigBody",
-    "RunBody",
-    "SessionBody",
-    "SessionUpdateBody",
-    "WorkspaceBody",
-    "create_app",
-]
-
-WEB_DIR = Path(__file__).with_name("web")
 WORKBENCH_DIR = Path(__file__).with_name("workbench")
-
-
-def _probe_error(exc: Exception) -> tuple[str, str]:
-    return config.probe_error(exc)
 
 
 def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
@@ -103,7 +74,6 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
             )
         return await call_next(request)
 
-    app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
     if (WORKBENCH_DIR / "index.html").is_file():
         app.mount("/workbench", StaticFiles(directory=WORKBENCH_DIR, html=True), name="workbench")
     else:
@@ -113,9 +83,9 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
                 503, "Workbench assets missing; install a complete Eventide package"
             )
 
-    @app.get("/", response_class=HTMLResponse)
-    async def console() -> str:
-        return (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    @app.get("/", include_in_schema=False)
+    async def workbench() -> RedirectResponse:
+        return RedirectResponse("/workbench/", status_code=307)
 
     @app.get("/healthz")
     async def health() -> dict[str, str]:

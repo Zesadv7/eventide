@@ -190,7 +190,7 @@ class IndexStore:
         if create:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         elif not self.path.is_file():
-            raise ValueError("No knowledge index; run 'eventide rag build'")
+            raise ValueError("No knowledge index; build it in the Web knowledge index page")
         self._validate_index_path()
         # Create an empty regular file first so even a new SQLite connection can
         # be checked against a known inode before its first SQL statement.
@@ -672,7 +672,9 @@ class IndexStore:
         """Read and verify the vector identity stored with the index."""
         with self._reader() as connection:
             if int(connection.execute("PRAGMA user_version").fetchone()[0]) != 2:
-                raise ValueError("Knowledge index has no vectors; run 'eventide rag build'")
+                raise ValueError(
+                    "Knowledge index has no vectors; build it in the Web knowledge index page"
+                )
             meta = self._meta(connection)
         return self._validated_embedding_profile(meta)
 

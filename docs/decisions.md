@@ -92,7 +92,7 @@
 
 ## ADR-009：Web UI 使用 FastAPI 托管的原生前端
 
-**状态：Accepted**
+**状态：Superseded，由 ADR-055 的 Vue 工作台及[ADR-085](#adr-085web唯一入口与用户终端退役)替代。**
 
 **背景：** 当前产品面向单机调试和演示，不需要独立前端构建链或复杂状态管理。
 
@@ -948,3 +948,13 @@ ADR-025 接收边界补充（2026-10-16）：HTTP接收是否成功由持久Run�
   延迟变化一并输出。scripted 机制通过、样本缺失和未知消费不能充当真实节省证据。
 - 边界：本机声明和导出报告不是远程预注册或供应商账单。统计不补造缺失字段；缺失
   费用或零成功时 cost/success 不可计算。没有改变留出判分，也没有发起付费模型请求。
+
+## ADR-085：Web唯一入口与用户终端退役
+
+日期：2026-10-16，落实ADR-048/055。
+
+- 状态：Accepted。
+- 决定：用户操作统一Vue/HTTP，删除cli.py、原生前端和UI专属测试，不保留转发空壳。部署只提供eventide-server及python -m eventide，两者启动同一FastAPI/RuntimeHost；根地址重定向/workbench/。
+- 保留：任意suite评测、检索、手动交付验收、历史导入、JSONL/Trace/OTLP等Python开发接口。原终端测试中的底层验收先迁移到这些接口及HTTP，再删除终端展示/解析检查。
+- 维护：CI使用真实服务启动冒烟和Python离线评测；Vue组件及真实API浏览器检查继续覆盖用户流程。wheel拒绝旧CLI/原生资源并检查新console entry point，Docker运行阶段不依赖Node。
+- 证据：详细检查与集成分发证据见AGENTS的X1–X3；质量效果与最终R验收继续单列，不由入口退役推定完成。

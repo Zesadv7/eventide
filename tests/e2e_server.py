@@ -1,61 +1,16 @@
-"""Standalone real-server harness for the Web E2E suite.
-
-Boots the production FastAPI app (``eventide.api.create_app``) on uvicorn with a
-content-routed fake provider, so ``tests/web_e2e.cjs`` can drive real HTTP
-sessions without any model API key or network access.
-
-Usage::
-
-    python tests/e2e_server.py [--port 0]
-
-Lifecycle contract with the Node driver:
-
-- Once the HTTP socket is bound, stdout receives ``E2E_WORKSPACE=<path>``
-  (the main Git fixture) followed by ``E2E_PORT=<port>``.
-- ``POST /__e2e/shutdown`` asks the server to exit gracefully; SIGINT/SIGTERM
-  do the same. Temporary state and workspace fixtures are removed on exit.
-
-FakeProvider routing table (matched against the last string user message):
-
-- ``多步任务``: todo_write(3 items, 1 in_progress) -> read_file(README.md) ->
-  bash(echo ok) -> todo_write(all completed with summaries) -> final text
-  ``多步任务已完成``.
-- ``审批场景``: bash that triggers the ASK policy (``del scratch.txt`` on
-  Windows / ``rm scratch.txt`` elsewhere) -> after the decision, final text
-  ``审批场景已完成``.
-- ``停驻场景``: read_file forever; the run parks on the step budget, and the
-  first request of a Continue run (per-session counter) returns ``已恢复完成``.
-- ``附件场景``: final text ``附件已读取`` (used by attachment assertions).
-- anything else: plain text reply.
-
-EVENTIDE_MAX_STEPS is 6, not 2: the five-step multi-step scenario must fit
-inside one run budget, and the park scenario still parks on ``step_budget``
-after six read_file steps. Keep the texts in sync with tests/web_e2e.cjs.
-"""
+"""Shared deterministic providers, Git fixtures and port reporting for Vue E2E."""
 
 from __future__ import annotations
 
-import argparse
 import asyncio
-import atexit
 import json
 import os
-import shutil
-import stat
 import subprocess
-import sys
-import tempfile
-import time
 import uuid
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 import uvicorn
-
-MAX_STEPS = 6
-APPROVAL_TIMEOUT = 60.0
-STATE_ROOT_PREFIX = "eventide-e2e-"
 
 PLAN_INITIAL = (
     {"content": "阅读 README 了解项目", "status": "in_progress"},
@@ -260,36 +215,6 @@ def build_fixtures(base: Path, python_exe: str) -> dict[str, Path]:
     return {"main": main, "plain": plain, "caps": caps}
 
 
-def _remove_tree(root: Path, *, deadline_s: float = 4.0) -> None:
-    """rmtree that survives Windows read-only files and late-closing handles."""
-    if not root.exists():
-        return
-    limit = time.monotonic() + deadline_s
-    while True:
-        try:
-            shutil.rmtree(root)
-            return
-        except (PermissionError, OSError):
-            if time.monotonic() >= limit:
-                break
-            time.sleep(0.25)
-    for path in sorted(root.rglob("*"), reverse=True):
-        with suppress(OSError):
-            path.chmod(stat.S_IWRITE)
-    shutil.rmtree(root, ignore_errors=True)
-
-
-def _sweep_stale_roots(max_age_hours: float = 6.0) -> None:
-    """Clean roots left behind by force-killed earlier harness runs."""
-    cutoff = time.time() - max_age_hours * 3600
-    for candidate in Path(tempfile.gettempdir()).glob(f"{STATE_ROOT_PREFIX}*"):
-        try:
-            if candidate.stat().st_mtime < cutoff:
-                _remove_tree(candidate)
-        except OSError:
-            continue
-
-
 class E2EUvicornServer(uvicorn.Server):
     """uvicorn.Server that announces its bound port once startup finishes."""
 
@@ -297,75 +222,3 @@ class E2EUvicornServer(uvicorn.Server):
         await super().startup(*args, **kwargs)
         sock = self.servers[0].sockets[0]
         print(f"E2E_PORT={sock.getsockname()[1]}", flush=True)
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Eventide Web E2E server harness")
-    parser.add_argument("--port", type=int, default=0, help="bind port; 0 picks a free port")
-    args = parser.parse_args(argv)
-
-    _sweep_stale_roots()
-    temp_root = Path(tempfile.mkdtemp(prefix=STATE_ROOT_PREFIX)).resolve()
-    atexit.register(_remove_tree, temp_root)
-    original_cwd = Path.cwd()
-    # Keep python-dotenv discovery and any relative writes inside the sandbox.
-    os.chdir(temp_root)
-
-    fixtures = build_fixtures(temp_root / "workspaces", sys.executable)
-    os.environ["EVENTIDE_STATE_DIR"] = str(temp_root / "state")
-    os.environ["EVENTIDE_MAX_STEPS"] = str(MAX_STEPS)
-    os.environ["EVENTIDE_APPROVAL_TIMEOUT"] = str(APPROVAL_TIMEOUT)
-    for name in (
-        "EVENTIDE_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "EVENTIDE_BASE_URL",
-        "ANTHROPIC_BASE_URL",
-    ):
-        os.environ.pop(name, None)
-
-    # Imported after the environment above is in place (config reads env vars
-    # and any .env at import time).
-    from eventide.api import create_app
-    from eventide.config import Settings
-    from eventide.host import RuntimeHost
-
-    settings = Settings.from_env(workdir=fixtures["main"])
-    provider = FakeProvider(max_steps=settings.max_steps)
-    runtime = RuntimeHost(settings, provider)
-    provider.attach(runtime)
-    # The UI refuses to submit while no model is configured; seed a dummy
-    # configuration so the journey passes the isConfigured gate, then put the
-    # fake provider back (configure_provider clears the live provider).
-    asyncio.run(
-        runtime.configure_provider(
-            provider="openai_responses",
-            model="e2e-fake-model",
-            api_key="dummy-key",
-            base_url=None,
-            persist=True,
-        )
-    )
-    runtime.provider = provider
-    app = create_app(runtime)
-
-    server = E2EUvicornServer(
-        uvicorn.Config(app, host="127.0.0.1", port=args.port, log_level="warning")
-    )
-
-    @app.post("/__e2e/shutdown")
-    async def shutdown() -> dict[str, bool]:
-        server.should_exit = True
-        return {"ok": True}
-
-    print(f"E2E_WORKSPACE={fixtures['main']}", flush=True)
-    try:
-        server.run()
-    finally:
-        # Windows cannot delete a directory that is any process's CWD.
-        os.chdir(original_cwd)
-        _remove_tree(temp_root)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

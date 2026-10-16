@@ -6,11 +6,12 @@ import sqlite3
 import time
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 from eventide.api import create_app
-from eventide.cli import main
 from eventide.host import RuntimeHost
+from eventide.migration import import_v02_database
 from eventide.models import RunRequest
 from eventide.providers import ScriptedProvider
 from eventide.store import RuntimeStore
@@ -285,64 +286,47 @@ def test_http_session_working_directory_scopes_execution(isolated_workspace):
         )
 
 
-def test_cli_workspace_and_runs(isolated_workspace, monkeypatch, capsys):
-    import eventide.cli as cli
-
-    settings = settings_for(isolated_workspace)
-    monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
-    monkeypatch.setattr(
-        cli,
-        "RuntimeHost",
-        lambda settings: RuntimeHost(
-            settings,
-            ScriptedProvider([{"text": "cli done"}]),
-        ),
+async def test_python_workspace_and_run_interfaces(isolated_workspace):
+    host = RuntimeHost(
+        settings_for(isolated_workspace), ScriptedProvider([{"text": "python done"}])
     )
-    other = isolated_workspace / "other"
-    other.mkdir()
-    assert main(["workspace", "add", str(other)]) == 0
-    workspace_id = json.loads(capsys.readouterr().out)["workspace_id"]
-    assert main(["workspace", "list"]) == 0
-    assert len(json.loads(capsys.readouterr().out)) == 2
-    assert main(["workspace", "show", workspace_id]) == 0
-    assert json.loads(capsys.readouterr().out)["path"] == str(other)
-    assert main(["workspace", "remove", workspace_id]) == 0
-    capsys.readouterr()
-    assert other.is_dir()
-    assert main(["workspace", "show", "missing"]) == 1
-    capsys.readouterr()
-    assert main(["run", "hello", "--workspace", str(other), "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["output"] == "cli done"
-    answers = iter(["hello", "q"])
-    monkeypatch.setattr("builtins.input", lambda _: next(answers))
-    assert main(["chat", "--workspace", str(other)]) == 0
-    assert "cli done" in capsys.readouterr().out
-    assert main(["continue", "missing"]) == 1
+    try:
+        other = isolated_workspace / "other"
+        other.mkdir()
+        workspace = host.resolve_or_register_workspace(other)
+        assert len(host.store.list_workspaces()) == 2
+        assert host.workspace_status(workspace.workspace_id)["path"] == str(other)
+        host.store.remove_workspace(workspace.workspace_id)
+        assert other.is_dir()
+        with pytest.raises(ValueError, match="Workspace not found"):
+            host.workspace_status("missing")
+        workspace = host.resolve_or_register_workspace(other)
+        session = host.create_session(workspace_id=workspace.workspace_id)
+        result = await host.run(RunRequest("hello", session))
+        assert result.output == "python done"
+        with pytest.raises(ValueError, match="existing Session"):
+            await host.continue_session("missing")
+    finally:
+        await host.close()
 
 
-def test_cli_continue(isolated_workspace, monkeypatch, capsys):
-    import eventide.cli as cli
-
-    host, session, _ = asyncio.run(interrupted_host(isolated_workspace))
-    monkeypatch.setattr(cli, "RuntimeHost", lambda _: host)
-    assert main(["continue", session, "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["continuation_of"] == "crashed"
-
-
-def test_cli_abandon(isolated_workspace, monkeypatch, capsys):
-    import eventide.cli as cli
-
-    host, session, _ = asyncio.run(interrupted_host(isolated_workspace, "bash"))
-    monkeypatch.setattr(cli, "RuntimeHost", lambda _: host)
-    assert main(["abandon", session, "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["continuation_of"] == "crashed"
+async def test_python_continue(isolated_workspace):
+    host, session, _ = await interrupted_host(isolated_workspace)
+    try:
+        assert (await host.continue_session(session)).continuation_of == "crashed"
+    finally:
+        await host.close()
 
 
-def test_cli_imports_v02_history_without_changing_source(
-    isolated_workspace, monkeypatch, capsys
-):
-    import eventide.cli as cli
+async def test_python_abandon(isolated_workspace):
+    host, session, _ = await interrupted_host(isolated_workspace, "bash")
+    try:
+        assert (await host.abandon_interruption(session)).continuation_of == "crashed"
+    finally:
+        await host.close()
 
+
+def test_python_imports_v02_history_without_changing_source(isolated_workspace):
     source = isolated_workspace / "nexus.db"
     connection = sqlite3.connect(source)
     connection.executescript("""
@@ -389,50 +373,38 @@ def test_cli_imports_v02_history_without_changing_source(
     original = source.read_bytes()
 
     settings = settings_for(isolated_workspace)
-    monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
-    monkeypatch.setattr(
-        cli,
-        "RuntimeHost",
-        lambda value: RuntimeHost(value, ScriptedProvider([{"text": "unused"}])),
-    )
-    assert main(["migrate-v02", str(source)]) == 0
-    result = json.loads(capsys.readouterr().out)
-    assert result["sessions"] == 1
-    assert result["api_key_imported"] is False
-    assert source.read_bytes() == original
-
+    host = RuntimeHost(settings, ScriptedProvider([]))
+    workspace_id = host.default_workspace.workspace_id
+    try:
+        result = import_v02_database(host.store, source, workspace_id)
+        assert result["sessions"] == 1 and result["api_key_imported"] is False
+        assert source.read_bytes() == original
+    finally:
+        asyncio.run(host.close())
     store = RuntimeStore(settings.state_dir / "runtime.sqlite")
-    assert store.load_messages("old-session") == [
-        {"role": "user", "content": "old prompt"},
-        {"role": "assistant", "content": "old answer"},
-    ]
-    assert store.get_run("old-run")["output"] == "old answer"
-    assert store.get_provider_config() is None
-    assert bool(store.get_session("old-session")["archived"])
-    assert sum(event["type"] == "run.completed" for event in store.run_events("old-run")) == 1
-    store.close()
+    try:
+        assert store.load_messages("old-session") == [
+            {"role": "user", "content": "old prompt"},
+            {"role": "assistant", "content": "old answer"},
+        ]
+        assert store.get_run("old-run")["output"] == "old answer"
+        assert store.get_provider_config() is None
+        assert bool(store.get_session("old-session")["archived"])
+        assert sum(event["type"] == "run.completed" for event in store.run_events("old-run")) == 1
+        with pytest.raises(ValueError, match="already exists"):
+            import_v02_database(store, source, workspace_id)
+    finally:
+        store.close()
 
-    assert main(["migrate-v02", str(source)]) == 1
-    assert "already exists" in capsys.readouterr().out
 
-
-def test_cli_exports_canonical_jsonl_without_accidental_overwrite(
-    isolated_workspace, monkeypatch, capsys
-):
-    import eventide.cli as cli
-
-    settings = settings_for(isolated_workspace)
-    host = RuntimeHost(settings, ScriptedProvider([{"text": "exported"}]))
-    result = asyncio.run(host.run(RunRequest("keep history")))
-    asyncio.run(host.close())
-    monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
-    destination = isolated_workspace / "audit.jsonl"
-
-    assert main(["export", result.run_id, str(destination)]) == 0
-    response = json.loads(capsys.readouterr().out)
-    assert response["destination"] == str(destination)
-    events = [json.loads(line) for line in destination.read_text(encoding="utf-8").splitlines()]
-    assert events[-1]["type"] == "run.completed"
-    assert main(["export", result.run_id, str(destination)]) == 1
-    assert "use --force" in capsys.readouterr().out
-    assert main(["export", result.run_id, str(destination), "--force"]) == 0
+async def test_python_exports_canonical_jsonl(isolated_workspace):
+    host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "exported"}]))
+    try:
+        result = await host.run(RunRequest("keep history"))
+        destination = isolated_workspace / "audit.jsonl"
+        host.store.export_jsonl(result.run_id, destination)
+        events = [json.loads(line) for line in destination.read_text().splitlines()]
+        assert events[-1]["type"] == "run.completed"
+        assert events == host.store.run_events(result.run_id)
+    finally:
+        await host.close()

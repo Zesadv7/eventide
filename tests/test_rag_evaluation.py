@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from eventide.cli import main
 from eventide.rag.evaluation import (
     _grade_hits,
     format_retrieval_report,
@@ -88,11 +87,10 @@ def test_corpus_hash_changes_and_missing_labels_fail(isolated_workspace):
         run_retrieval_evaluation(suite)
 
 
-def test_retrieval_eval_cli_json(isolated_workspace: Path, capsys) -> None:
+def test_retrieval_eval_python_json(isolated_workspace: Path) -> None:
     suite = _suite(isolated_workspace)
 
-    assert main(["rag", "eval", str(suite), "--json"]) == 0
-    report = json.loads(capsys.readouterr().out)
+    report = json.loads(report_json(run_retrieval_evaluation(suite)))
     assert report["suite"] == "tiny-retrieval"
     assert report["mode"] == "offline-hash"
 

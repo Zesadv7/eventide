@@ -1,13 +1,11 @@
-"""Worktree control-plane ownership, audit and CLI integration."""
+"""Worktree control-plane ownership, audit and Python integration."""
 
 import asyncio
-import json
 import threading
 from dataclasses import replace
 
 import pytest
 
-from eventide import cli
 from eventide.host import RuntimeHost
 from eventide.providers import ScriptedProvider
 from eventide.worktrees import WorktreeService
@@ -133,18 +131,3 @@ async def test_removal_closes_checkout_admission_until_git_finishes(
     finally:
         released.set()
         await host.close()
-
-
-def test_worktree_cli_uses_host_control_plane(isolated_workspace, monkeypatch, capsys):
-    repo = make_repo(isolated_workspace / "repo")
-    settings = replace(settings_for(repo), state_dir=isolated_workspace / "state")
-    monkeypatch.setattr(cli.Settings, "from_env", lambda: settings)
-    assert cli.main(["worktree", "--workspace", str(repo), "create", "cli-check"]) == 0
-    record = json.loads(capsys.readouterr().out)
-    assert record["name"] == "cli-check"
-    assert cli.main(["worktree", "--workspace", str(repo), "list"]) == 0
-    assert json.loads(capsys.readouterr().out) == [record]
-    assert cli.main(["worktree", "--workspace", str(repo), "remove", "cli-check"]) == 0
-    capsys.readouterr()
-    assert cli.main(["worktree", "--workspace", str(repo), "create", "../escape"]) == 1
-    assert "Worktree name" in capsys.readouterr().out

@@ -121,6 +121,13 @@ def verify(image: str) -> dict[str, object]:
             "from pathlib import Path; Path('writable-check').write_text('retained')",
         )
         assert b"<html" in request("/workbench/")
+        assert b"<html" in request("/")
+        docker(
+            "exec", name, "python", "-c",
+            "import importlib.util; from pathlib import Path; import eventide; "
+            "assert importlib.util.find_spec('eventide.cli') is None; "
+            "assert not Path(eventide.__file__).with_name('web').exists()",
+        )
         manifest = json.loads(request("/workbench/manifest.json"))
         for path, checksum in manifest["files"].items():
             assert hashlib.sha256(request("/workbench/" + path)).hexdigest() == checksum, path

@@ -2,7 +2,7 @@ services:
   eventide:
     build: .
     ports:
-      # 宿主侧保持回环边界（ADR-012）；容器内 serve 绑定 0.0.0.0
+      # 宿主侧保持回环边界（ADR-012）；容器内服务绑定 0.0.0.0
       - "127.0.0.1:8000:8000"
     environment:
       EVENTIDE_STATE_DIR: /data/eventide
