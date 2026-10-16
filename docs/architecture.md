@@ -72,7 +72,7 @@ RuntimeEvent 包含 event_id、session_id、严格递增 session_seq、turn_id�
 - run.admitted、run.started、message.user、model.request、model.response、model.retry；
 - tool.prepared、tool.completed、tool.abandoned；
 - approval.required、approval.resolved；
-- workspace.checkpoint、context.configured、context.compacted、context.trimmed、context.summary_requested、context.summary_generated；
+- workspace.checkpoint、context.configured、context.compacted、context.trimmed、context.summary_requested、context.summary_generated、context.summary_claimed；
 - task.plan_updated（payload 为 `{todos, next_task_seq, step}`，每个 todo 含 `id`、`content`、`status`）；
 - run.completed、run.failed、run.interrupted（终态 payload 另带 `reason`：`step_budget`、`task_step_budget`、`token_budget`、`unknown_tool_outcome`、`cancelled` 或 `null`）。
 
@@ -93,6 +93,10 @@ TaskPlanProjection 折叠 `task.plan_updated` 快照，得到 Session 的任务�
 ContextBuilder 每次读取日志，构造模型输入；根 AGENTS.md 最多读取 4,000 字符，拒绝指向 Workspace 外的链接。每次 Run 还在 Workspace 根目录快照 `skills/*/SKILL.md`：system prompt 只加入名称和简介，完整内容由动态只读工具 `load_skill` 按需返回。Skill 路径必须留在 Workspace 内，运行中修改只影响下一次 Run。每轮 run 记录指令 hash、Skill 目录 hash 和工具目录 hash；实际 Skill 加载沿用 canonical tool prepared/completed 事件。消息与工具结果进入语义记录时会脱敏，但正文不静默截断；下一模型请求读取同一记录。Provider 返回的原始工具参数用于实际执行，持久事件中的敏感字段使用脱敏副本，避免审计规则改变工具行为。已知模型 API Key 在文本中也会替换。Host 每个 step 从最新 `task.plan_updated` 投影当前计划：system 只包含未完成项、它们的稳定 `id` 和完成数量；历史 `todo_write` 的完整参数在 ContextBuilder 请求投影中替换为合法空清单，默认 MessagesProjection 和 Event Log 不变。计划项身份由 Runtime 在写入时分配（`t1`、`t2`……），序号单调且不回收；模型回传已知 `id` 即保留身份，省略时按内容匹配复用，引用未知 `id` 或重复使用同一 `id` 则拒绝该次更新。旧事件缺少 `id` 与 `next_task_seq` 时按已见序号兜底，只读投影，不回写日志。单条工具结果超过 12,000 字符时，ContextBuilder 在所有模型请求（包括摘要请求）中只投影头尾预览，并写明稳定的 run_id/call_id；模型通过 session-scoped 的只读 `read_tool_result` 按字符 offset/limit 回读原结果。预算仍不足时，当前 turn 内较早的结果进一步折叠为占位串，保留最近三条预览或原文及 tool_use/tool_result 配对。请求侧省略与两层结果裁剪都记录 `context.trimmed`，Event Log、MessagesProjection 默认输出和审计导出保持完整。read_file 自行分页并报告文件总行数与下一页 offset。UI 可以独立裁剪展示。
 
 持久 checkpoint 保存 covered_seq、source_digest、summary、policy_version、provider、model。摘要只覆盖结束 turn 的完整前缀；模型调用使用 summary + 未覆盖 raw tail。checkpoint 来源 digest、策略和模型身份不符时忽略；空摘要、工具调用或达到 Provider 输出上限的残缺摘要都视为生成失败。摘要生成失败且旧投影仍在预算内时使用旧投影；摘要之后仍超预算时先折叠当前 turn 的旧工具结果，仍不够才返回 context_overflow。压缩与折叠都不改变原始事件。context_limit 计算 system、messages 和完整工具目录的 provider-neutral 序列化请求，仍以字符数近似，不宣称 token 精确计量。ContextBuilder 抽出模块级 `request_size()` 与 `tool_catalog_size()` 作为唯一序列化度量；Host 发出的 `model.request` payload 复用同一函数记录 `request_chars` 与 `tool_catalog_chars`，composer 的上下文指示器和用量分析因此与预算使用同一口径。
+
+摘要资格由 `ContextBuilder` 在调用 completion callback 前，通过 `RuntimeStore.transact_facts` 原子读取并追加 Session 级 `context.summary_claimed`，沿用唯一追加式 Event Log，不新建节流表。事实只含策略版本、provider/model、完成边界、摘要输入历史 hash 与认领时间，不复制正文或 usage，不进入 MessagesProjection。相同完成内容不再次认领；后续完整 turn 的投影新增至少 4,000 个序列化 Unicode 字符且距上次认领至少 60 秒才可重试。首次无此门槛，force 不绕过；时钟倒退保守保持冷却，没有 sleep。Session/模型分别计数，SQLite 事务防止两个 Store 同时认领。
+
+认领在模型槽和预算派发之前，因此取消、预算拒绝、未采用、摘要无效或崩溃都可能留下没有真实消费的认领；它不是模型 attempt，也不代表 checkpoint 或预算结算。实际返回、失败和取消继续由原 Host completion callback 记账。重启不清空认领；有效 checkpoint 直接复用，失效 checkpoint 不能绕过节流重新花费。跳过原因随 `context.trimmed.summary_skipped` 记录；既有工具结果折叠后仍超限，沿用 `context_overflow` 失败，不发送主模型请求。这里的 4,000 字符和 60 秒是保守机制参数，尚无真实任务成本改善结论。
 
 Host 的两阶段接收由 `admit_run` / `admit_continue` 和 `start_admitted_run` 组成：先在 Workspace 锁内预留精确 Run/Session 身份，通过可取消但会等待线程结束的恢复和 checkpoint 检查，再由 `RuntimeStore.admit_run()` 在一个 SQLite 事务中写入 turn/run、`run.admitted`、用户消息或恢复事实和 checkpoint。附件验证、事务提交与 used 缓存写入之间没有 await；跨文件和 SQLite 仍不是共同事务，因此附件 API 同时查询 canonical 引用来保护生命周期。202 前同步登记执行 Task，使立即取消、关闭和配置切换都能找到所有者。Python直接调用与HTTP共用持久队列，忙源在接收前拒绝；临时ticket/lease只管理进程内所有权，重启事实仍以Event Log为准。
 

@@ -465,3 +465,7 @@ Run、Continue、cancel、approvals、abandon全部要求本机来源和Idempote
 生成参数capabilities增加向后兼容字段：`thinking_modes`（默认enabled/disabled，仍受thinking开关限制）、`top_p_min`（默认0）、`sampling_precision`（默认null）、`max_output_tokens`（默认null）。已确认GLM-5.3-Flash Chat端点返回仅enabled、top_p下限0.01、两位小数、输出上限131072；非法值接收前422，不静默修正。已有存量能力声明不补造新约束。
 
 Run／Continue接收补充：已经存在canonical接收身份时，后续附件缓存或派发故障仍返回202和该run_id/session_id；accepted不表示执行成功，需查询Run终态。未创建Run的已知前置拒绝附`X-Eventide-Mutation-Outcome: rejected`，未分类故障返回503、保留原键。客户端不得将未标记409当作允许重发的新意图。Skill导入预检错误可明确拒绝；进入实际发布或成功回执阶段后失败返回503，不附rejected，原键后续返回409未知且不重新发布。
+
+### 摘要节流诊断
+
+`context.trimmed`可附带`summary_skipped`，取值为`same_completed_prefix`、`summary_cooldown`、`insufficient_completed_content`或`newer_completed_prefix_already_claimed`。它表示未新建逻辑摘要请求，不代表Token为零或预算已结算；现有请求内的有限重试仍逐尝试记账。Session级`context.summary_claimed`只保存摘要资格依据，不绑定或伪造模型attempt，也不进入消息投影。节流后仍超出硬上下文上限时，沿用`context_overflow`失败，不派发主模型请求；错误说明中包含跳过原因。

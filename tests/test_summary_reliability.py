@@ -5,7 +5,12 @@ import json
 
 import pytest
 
-from eventide.context_builder import ContextBuilder, ContextOverflow, request_size
+from eventide.context_builder import (
+    SUMMARY_CLAIM,
+    ContextBuilder,
+    ContextOverflow,
+    request_size,
+)
 from eventide.models import ModelResponse, ToolCall
 from eventide.providers import ScriptedProvider
 from eventide.store import RuntimeStore
@@ -52,7 +57,9 @@ async def test_owner_completion_accounts_once_before_adopted_summary_is_cached(h
     assert "old goal" in requests[0].messages[0]["content"]
     assert "current goal" not in requests[0].messages[0]["content"]
     assert provider.requests == []
-    assert history.session_events("session") == before
+    after = history.session_events("session")
+    assert after[: len(before)] == before
+    assert [event["type"] for event in after[len(before) :]] == [SUMMARY_CLAIM]
 
     cached, compacted_again, _ = await builder.build(
         "session", provider=provider, provider_name="scripted", model="selected-model",
@@ -125,7 +132,17 @@ async def test_unadopted_summary_is_accounted_when_tool_folding_fits(history):
     assert trimmed["call_ids"] == ["call-0"]
     assert received_usage == [{"input_tokens": 19, "output_tokens": 2000}]
     assert history.checkpoints("session") == []
-    assert history.session_events("session") == before
+    after = history.session_events("session")
+    assert after[: len(before)] == before
+    assert [event["type"] for event in after[len(before) :]] == [SUMMARY_CLAIM]
+
+    repeated, _, repeated_trimmed = await ContextBuilder(history).build(
+        "session", provider=ScriptedProvider([]), provider_name="scripted", model="scripted",
+        budget=7500, complete_summary=complete_summary,
+    )
+    assert repeated == messages
+    assert repeated_trimmed["summary_skipped"] == "same_completed_prefix"
+    assert received_usage == [{"input_tokens": 19, "output_tokens": 2000}]
 
 
 async def test_owner_keeps_usage_when_context_overflows_after_summary(history):
@@ -145,7 +162,9 @@ async def test_owner_keeps_usage_when_context_overflows_after_summary(history):
         )
     assert received_usage == [{"input_tokens": 23, "output_tokens": 3}]
     assert history.checkpoints("session") == []
-    assert history.session_events("session") == before
+    after = history.session_events("session")
+    assert after[: len(before)] == before
+    assert [event["type"] for event in after[len(before) :]] == [SUMMARY_CLAIM]
 
 
 async def test_owner_failure_preserves_valid_checkpoint(history):

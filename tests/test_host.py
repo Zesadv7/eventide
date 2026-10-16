@@ -650,8 +650,10 @@ async def test_mcp_close_failure_does_not_overwrite_success(isolated_workspace, 
         await host.close()
 
 
-async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace):
-    provider = ScriptedProvider([{"text": "summary"}, {"text": "done"}])
+async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace, monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr("eventide.context_builder.time.time", lambda: clock[0])
+    provider = ScriptedProvider([{"text": "summary"}, {"text": "done" + "y" * 4000}])
     settings = settings_for(isolated_workspace, context_limit=COMPACTION_BUDGET)
     host = RuntimeHost(settings, provider)
     session = host.create_session()
@@ -665,6 +667,7 @@ async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace
     host.store._connection.execute("UPDATE context_checkpoints SET source_digest='invalid'")
     host.store._connection.commit()
     await host.close()
+    clock[0] += 60
     reopened = RuntimeHost(settings, ScriptedProvider([{"text": "new summary"}, {"text": "done"}]))
     try:
         assert (await reopened.run(RunRequest("again", session))).status == "completed"
