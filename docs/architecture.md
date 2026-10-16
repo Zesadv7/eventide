@@ -593,3 +593,6 @@ C4机制补充：`query_rewrite_outcome` 返回真实 `RetrievalOutcome`，原 `
 
 
 wheel分发检查同时要求workbench实际文件集合与manifest完全相等，拒绝已退役cli.py/web目录及重复ZIP路径。setuptools增量build缓存可能包含已删除源码或旧哈希资源；发布采用确认可丢弃后的干净构建，并以安装包隔离验证决定通过，不能把源码树的干净状态当作包内容证据。
+
+
+实验稳定身份排除交付随机writer_delivery_id，仅该定位字段不参与对照；本地/容器执行配置等实际条件仍严格比较，原始交付身份完整保留在逐题报告与事件中。重复运行不能因为新建交付UUID被判为改变实验条件。

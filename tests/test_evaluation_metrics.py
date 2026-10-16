@@ -17,6 +17,18 @@ from eventide.providers import ScriptedProvider
 from tests.test_runtime import settings_for
 
 
+def test_experiment_identity_excludes_delivery_uuid_but_keeps_execution_backend():
+    left = _report(run="left")
+    right = _report(run="right")
+    left_run = left["results"][0]["evidence"]["runs"][0]
+    right_run = right["results"][0]["evidence"]["runs"][0]
+    left_run["execution_config"] = {"kind": "local", "writer_delivery_id": "delivery_left"}
+    right_run["execution_config"] = {"kind": "local", "writer_delivery_id": "delivery_right"}
+    assert experiment_identity(left) == experiment_identity(right)
+    right_run["execution_config"]["kind"] = "docker"
+    assert experiment_identity(left) != experiment_identity(right)
+
+
 def _call(number=1, *, run="run", usage=None, source="reported", kind="agent", **overrides):
     return {
         "run_id": run,

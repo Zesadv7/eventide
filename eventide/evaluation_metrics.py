@@ -485,7 +485,12 @@ def experiment_identity(report: Mapping[str, Any]) -> dict[str, Any]:
                 "catalog_hash": skills["catalog_hash"],
                 "selected": skills.get("selected", []),
             },
-            "execution_config": main.get("execution_config", {}),
+            # Delivery UUIDs locate evidence, not a reproducible execution setting.
+            # The original ID remains in the immutable case report and Event Log.
+            "execution_config": {
+                key: value for key, value in main.get("execution_config", {}).items()
+                if key != "writer_delivery_id"
+            },
             "requests": _request_profiles(evidence, configuration),
         }
     return {
