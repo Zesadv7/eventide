@@ -166,14 +166,17 @@ class WorktreeService:
             raise ValueError("Worktree checkout does not match its recorded path")
         return record
 
+    def resolve_ref(self, ref: str) -> str:
+        if not ref or ref.startswith("-") or any(char in ref for char in "\0\r\n"):
+            raise ValueError("Invalid worktree starting ref")
+        return self._git(
+            self.root, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"
+        )
+
     def create(self, name: str, ref: str = "HEAD") -> WorktreeRecord:
         record_path = self._record_path(name)
         common = self._repository()
-        if not ref or ref.startswith("-") or any(char in ref for char in "\0\r\n"):
-            raise ValueError("Invalid worktree starting ref")
-        base = self._git(
-            self.root, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"
-        )
+        base = self.resolve_ref(ref)
         tree = self._git(self.root, "ls-tree", "-r", base)
         if any(line.startswith("160000 ") for line in tree.splitlines()):
             raise ValueError("Worktree starting ref contains unsupported submodules")

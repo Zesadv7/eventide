@@ -154,14 +154,12 @@ it("does not refresh another project's conversation after a late mutation list",
 it("clears pending intent only on a definite rejected receipt", async () => {
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ detail: "stale" }), {
-          status: 409,
-          headers: { "X-Eventide-Mutation-Outcome": "rejected" },
-        }),
-      ),
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: "stale" }), {
+        status: 409,
+        headers: { "X-Eventide-Mutation-Outcome": "rejected" },
+      }),
+    ),
   );
   const intent: SessionIntent = {
     session: item.session_id,

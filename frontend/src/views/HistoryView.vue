@@ -357,6 +357,12 @@ function toolLabel(value: unknown) {
           detail.tool_calls ?? "未记录"
         }}
       </p>
+      <p v-if="detail.execution?.kind === 'worktree_control'">
+        <RouterLink
+          :to="{ path: '/worktrees', query: { operation: detail.run_id } }"
+          >查看副本操作</RouterLink
+        >
+      </p>
       <p v-if="detail.execution?.kind === 'delivery'" class="evaluation-note">
         这是交付控制记录。<RouterLink
           :to="{

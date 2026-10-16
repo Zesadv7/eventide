@@ -335,6 +335,8 @@ class RuntimeHost:
         *,
         name: str | None = None,
         ref: str = "HEAD",
+        _run_id: str | None = None,
+        _catalog_hash: str | None = None,
     ) -> dict[str, Any] | list[dict[str, Any]]:
         """User control-plane operations; never advertised as model tools."""
         if self._closed:
@@ -345,6 +347,22 @@ class RuntimeHost:
             raise ValueError("Worktree name is required")
         workspace = self.resolve_or_register_workspace(target)
         service = WorktreeService(Path(workspace.path), self.state_dir, workspace.workspace_id)
+        if _run_id is not None:
+            from eventide.worktree_control import is_worktree_control_run
+
+            if (not is_worktree_control_run(self.store, _run_id)
+                    or _run_id not in self.dispatch._leases
+                    or self._run_tasks.get(_run_id) is not asyncio.current_task()):
+                raise ValueError("Worktree control execution is not owned")
+            accepted = next(e["payload"] for e in self.store.run_events(_run_id)
+                            if e["type"] == "worktree.accepted")
+            identity = self.store.get_run_identity(_run_id)
+            assert identity is not None
+            if (self.sessions.workspace(identity["session_id"]).workspace_id
+                    != workspace.workspace_id
+                    or accepted != {"action": action, "name": name, "ref": ref,
+                                    "expected_catalog_hash": _catalog_hash}):
+                raise ValueError("Worktree operation differs from accepted intent")
         task = asyncio.current_task()
         assert task is not None
         self._active_tasks.add(task)
@@ -359,6 +377,11 @@ class RuntimeHost:
                 ):
                     raise ValueError("Workspace has an unresolved tool outcome")
                 records = await asyncio.to_thread(service.list)
+                if _catalog_hash is not None:
+                    from eventide.worktree_control import catalog_hash
+
+                    if catalog_hash(service, records) != _catalog_hash:
+                        raise ValueError("Worktree catalog changed; refresh before managing")
                 if action == "list":
                     return [record.to_dict() for record in records]
                 if action == "remove":
@@ -378,12 +401,15 @@ class RuntimeHost:
                     # Admission is synchronous, so reserve before the next await.
                     removal_path = Path(record.path)
                     self._worktree_removals.add(removal_path)
-                session_id = self.create_session(
-                    f"worktrees_{workspace.workspace_id}", workspace_id=workspace.workspace_id
-                )
-                self.store.update_session(session_id, title="Worktree 管理")
-                run_id = f"run_{uuid.uuid4().hex[:16]}"
-                self.store.create_run(run_id, session_id)
+                if _run_id is None:
+                    session_id = self.create_session(
+                        f"worktrees_{workspace.workspace_id}", workspace_id=workspace.workspace_id
+                    )
+                    self.store.update_session(session_id, title="Worktree 管理")
+                    run_id = f"run_{uuid.uuid4().hex[:16]}"
+                    self.store.create_run(run_id, session_id)
+                else:
+                    run_id = _run_id
                 intent = {"action": action, "name": name, "ref": ref}
                 await self._emit(
                     run_id,
@@ -1056,7 +1082,7 @@ class RuntimeHost:
         binding = intent.get("execution_binding", {})
         if binding.get("kind") == "delivery":
             return f"delivery_operation:{binding['delivery_id']}"
-        if binding.get("kind") in {"evaluation", "index"}:
+        if binding.get("kind") in {"evaluation", "index", "worktree_control"}:
             return f"{binding['kind']}_run:{run_id}"
         if binding.get("kind") == "snapshot":
             return f"snapshot_run:{run_id}"
@@ -1084,8 +1110,9 @@ class RuntimeHost:
             return {"kind": "source"}
         if binding["kind"] == "delivery":
             return dict(binding)
-        if binding["kind"] in {"evaluation", "index"}:
-            identifier = "evaluation_id" if binding["kind"] == "evaluation" else "index_run_id"
+        if binding["kind"] in {"evaluation", "index", "worktree_control"}:
+            identifier = {"evaluation": "evaluation_id", "index": "index_run_id",
+                          "worktree_control": "operation_id"}[binding["kind"]]
             return {key: binding[key] for key in ("kind", "workspace_id", identifier)}
         if binding["kind"] == "worktree":
             return {key: binding[key] for key in (
@@ -2165,6 +2192,7 @@ class RuntimeHost:
         from eventide.delivery_control import is_delivery_control_run
         from eventide.evaluation_control import is_evaluation_run
         from eventide.index_control import is_index_run
+        from eventide.worktree_control import is_worktree_control_run
 
         for run_id in self.store.unfinished_runs():
             payload: dict[str, Any] = {"error": "Host stopped before terminal fact"}
@@ -2176,6 +2204,7 @@ class RuntimeHost:
             evidence = (None if queued or is_service_probe_run(self.store, run_id)
                         or is_evaluation_run(self.store, run_id) or is_index_run(self.store, run_id)
                         or is_delivery_control_run(self.store, run_id)
+                        or is_worktree_control_run(self.store, run_id)
                         else self._crash_gap_evidence(run_id))
             if queued:
                 payload["reason"] = "host_stopped_before_dispatch"

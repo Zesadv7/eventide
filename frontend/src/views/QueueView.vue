@@ -58,6 +58,13 @@ async function open(entry: QueueEntry) {
   try {
     if (store.selectedWorkspace !== entry.workspace_id)
       await store.selectWorkspace(entry.workspace_id);
+    if (entry.execution.kind === "worktree_control") {
+      await router.push({
+        path: "/worktrees",
+        query: { operation: entry.run_id },
+      });
+      return;
+    }
     if (entry.execution.kind === "delivery") {
       await router.push({
         path: "/deliveries",
@@ -91,6 +98,7 @@ function project(entry: QueueEntry) {
   );
 }
 function target(entry: QueueEntry) {
+  if (entry.execution.kind === "worktree_control") return "工作副本管理";
   if (entry.execution.kind === "delivery") return "隔离修复交付";
   if (entry.execution.kind === "index") return "项目索引构建";
   if (entry.execution.kind === "evaluation") return "离线评测临时项目";

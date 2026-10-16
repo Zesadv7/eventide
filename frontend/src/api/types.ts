@@ -29,7 +29,14 @@ export interface Run {
 }
 export interface Execution {
   kind:
-    "source" | "snapshot" | "worktree" | "evaluation" | "index" | "delivery";
+    | "source"
+    | "snapshot"
+    | "worktree"
+    | "evaluation"
+    | "index"
+    | "delivery"
+    | "worktree_control";
+  operation_id?: string;
   evaluation_id?: string;
   index_run_id?: string;
   delivery_id?: string;

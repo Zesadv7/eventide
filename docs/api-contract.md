@@ -385,3 +385,25 @@ Session 查询增加 `metadata_hash` 和 `managed`。PATCH/DELETE
 Vue `#/sessions?session=<id>` 承接改名、归档、恢复和确认删除空会话。
 编辑固定选中时的版本，冲突后须显式刷新；未知请求跨刷新保留原正文与身份。
 归档不取消后台 Run，切换项目不接受旧列表或旧修改请求的迟到响应。
+
+### 工作副本控制面
+
+- GET `/api/projects/{id}/worktrees` 返回 catalog_hash 和受管记录，包括
+  history_protected（有会话、运行历史或正在使用，禁止清理）。
+- POST 同一路径要求 Idempotency-Key 与严格正文：
+  action=create/keep/remove、name、ref（默认 HEAD）、expected_catalog_hash。
+  持久接收返回 202、run_id/session_id、status_url/events_url。
+- GET `/api/projects/{id}/worktree-operations?limit=20&before=<run_id>` 返回
+  操作历史，GET `/api/worktree-operations/{run_id}` 查询精确状态。
+- POST `/api/worktree-operations/{run_id}/cancel` 要求幂等键，
+  同一停止身份只记一次请求；重复停止终态返回现状。
+
+写入要求本机同源。版本过期、名称冲突、无效引用拒绝接收；满队列429。
+创建接收时固定完整 commit，keep/remove 执行前在源码/Git 锁内再次复核目录
+版本；目录版本含记录文件身份，名称复用不能满足旧请求。清理继续执行原有
+干净检查、Session/Run引用检查，不提供force选项。清理保留Git分支。
+
+Run execution.kind=worktree_control，含 operation_id/workspace_id，使用同一
+持久队列、Run/SSE/精确取消。服务控制会话不能作为普通Agent对话或Continue。
+停止派发后的Git操作会等待结果；已完成的操作仍记录completed，不能解读为撤销。
+进程退出的未完成操作标为interrupted，不自动重放。页面通过目录与历史查看结果。

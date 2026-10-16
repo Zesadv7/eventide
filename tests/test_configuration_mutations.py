@@ -196,7 +196,12 @@ def test_generation_receipts_preserve_unset_null_and_empty_session_deletion(isol
         assert conflict.status_code == 409 and "different content" in conflict.text
         assert host.store.session_events(sid) == []
         assert host.is_control_session("configuration_control")
-        assert client.delete(f"/api/sessions/{sid}").status_code == 200
+        assert client.request(
+            "DELETE", f"/api/sessions/{sid}",
+            json={"expected_metadata_hash":
+                  client.get(f"/api/sessions/{sid}").json()["metadata_hash"]},
+            headers={"Idempotency-Key": "delete-empty"},
+        ).status_code == 200
         host.create_session(sid)
         assert host.generation_settings("test-model", sid)["session"] == {}
         assert write(client, path, body).status_code == 409
@@ -211,7 +216,12 @@ def test_generation_saved_session_identity_does_not_survive_recreation(isolated_
         path = f"/api/sessions/{sid}/generation"
         body = generation_body(client, path)
         assert write(client, path, body).json()["session"] == {"max_output_tokens": 128}
-        assert client.delete(f"/api/sessions/{sid}").status_code == 200
+        assert client.request(
+            "DELETE", f"/api/sessions/{sid}",
+            json={"expected_metadata_hash":
+                  client.get(f"/api/sessions/{sid}").json()["metadata_hash"]},
+            headers={"Idempotency-Key": "delete-empty"},
+        ).status_code == 200
         host.create_session(sid)
         assert host.generation_settings("test-model", sid)["session"] == {}
 

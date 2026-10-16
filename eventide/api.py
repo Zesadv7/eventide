@@ -29,6 +29,7 @@ from eventide.http_api import (
     streams,
     traces,
     workspaces,
+    worktrees,
 )
 from eventide.http_api.context import ApiContext, ApprovalBroker
 from eventide.http_api.errors import ERROR_RESPONSES, error_response, register_error_handlers
@@ -121,7 +122,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
 
     for domain in (
         projects, workspaces, sessions, runs, models, config, attachments, streams, skills, budgets,
-        queue, evaluations, indexes, deliveries, traces,
+        queue, evaluations, indexes, deliveries, traces, worktrees,
     ):
         app.include_router(domain.create_router(context))
     return app
