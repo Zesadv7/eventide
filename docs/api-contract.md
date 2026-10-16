@@ -461,3 +461,5 @@ Vue显式读取估算并确认后才可发起live；未知结果保留原确认�
 Run、Continue、cancel、approvals、abandon全部要求本机来源和Idempotency-Key，无键422且不创建Session/Run。Run及Continue继续通过admission回放原接收；停止/审批/放弃恢复使用控制Session的持久回执，成功回放在检查当前终态之前进行。同键不同目标或审批决定409，操作或回执结果未知503并保留原键，不能通过自动换键重做。
 
 `POST /api/sessions/{id}/abandon`严格正文为`{expected_run_id: <页面看到的中断Run>}`；接收前及Host执行锁内再次检查，过期身份409，不处理后来产生的中断任务。审批approved必须为JSON布尔值，拒绝字符串/数值；审批结果仅针对指定Run/approval。重复成功回放只确认原决定，不表示最新Run仍处于原状态，应再次查询。
+
+生成参数capabilities增加向后兼容字段：`thinking_modes`（默认enabled/disabled，仍受thinking开关限制）、`top_p_min`（默认0）、`sampling_precision`（默认null）、`max_output_tokens`（默认null）。已确认GLM-5.3-Flash Chat端点返回仅enabled、top_p下限0.01、两位小数、输出上限131072；非法值接收前422，不静默修正。已有存量能力声明不补造新约束。

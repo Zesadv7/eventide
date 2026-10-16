@@ -14482,6 +14482,48 @@
             "type": "boolean",
             "title": "Thinking",
             "default": false
+          },
+          "thinking_modes": {
+            "items": {
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "type": "array",
+            "title": "Thinking Modes",
+            "default": ["enabled", "disabled"]
+          },
+          "top_p_min": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Top P Min",
+            "default": 0
+          },
+          "sampling_precision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 6.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sampling Precision"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
           }
         },
         "additionalProperties": false,

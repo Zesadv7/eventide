@@ -535,3 +535,5 @@ checkpoint、不重放创建或删除。CLI仍临时复用同一底层实现，�
 附件HTTP写入使用配置控制Session保存http.mutation_started/completed，只保存正文指纹和公开元数据，不将附件内容写入事件或浏览器存储。上传前校验输入，发布文件与SQLite回执无法同事务，发布或回执故障保留未知started，原键拒绝重复执行。删除继续复核canonical附件引用；成功回放不重读已删除文件。Vue和旧页均保留未知请求键，刷新重新选择同内容文件可复用身份。
 
 运行控制HTTP现在强制请求身份。Run/Continue在任何自动Session创建前检查键；停止/审批/放弃恢复由run_mutations记录内容绑定的请求开始和成功回执。已成功的决定在当前终态检查前回放；执行与回执之间发生故障保留未知，不重放。放弃恢复传expected_run_id并在Host会话/工作区锁内复核，防止旧标签页放弃新中断Run。审批严格布尔值，未来状态查询与原回执分离。所有路径继续经原Host/ApprovalBroker，不新建执行主链。
+
+GLM Chat能力声明以供应商、HTTPS精确主机/路径和模型ID共同匹配，普通`/api/paas/v4`及套餐`/api/coding/paas/v4`只确认`glm-5.3-flash`；其他路径或未来模型不推断。GenerationCapabilities补充thinking_modes、top_p_min、sampling_precision与max_output_tokens，Vue按能力显示可用范围。服务默认输出上限也参与最终冻结校验；null仍恢复服务默认。SDK Chat与Responses分别映射推理字段，stream/complete共用同一参数生成器，工具续轮的reasoning_content仍保留为Provider私有状态。

@@ -114,6 +114,10 @@ export interface GenerationState {
     top_p: boolean;
     reasoning_efforts: string[];
     thinking: boolean;
+    thinking_modes?: string[];
+    top_p_min?: number;
+    sampling_precision?: number | null;
+    max_output_tokens?: number | null;
   };
 }
 export interface InputComposition {

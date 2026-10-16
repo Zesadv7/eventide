@@ -7,13 +7,16 @@ not enough — these tests capture the real JSON body on the wire.
 
 import json
 import threading
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 from eventide.config import Settings
+from eventide.generation import resolve_generation
 from eventide.models import ModelRequest
 from eventide.providers.openai_compatible import OpenAICompatibleProvider
+from tests.test_runtime import settings_for
 
 MINIMAL_COMPLETION = {
     "id": "x",
@@ -96,3 +99,25 @@ async def test_openai_wire_includes_tools_when_present(openai_wire, isolated_wor
     await provider.complete(_request(tools))
     await provider.close()
     assert captured["body"]["tools"][0]["function"]["name"] == "read_file"
+
+
+async def test_glm_chat_reasoning_uses_actual_chat_wire(openai_wire, isolated_workspace):
+    url, captured = openai_wire
+    settings = replace(settings_for(isolated_workspace), provider="openai_compatible",
+                       api_key="test-key", base_url=url)
+    provider = OpenAICompatibleProvider(settings)
+    generation = resolve_generation([{
+        "temperature": 0, "reasoning_effort": "low", "thinking": "enabled",
+        "max_output_tokens": 4096,
+    }], provider="openai_compatible", base_url="https://open.bigmodel.cn/api/coding/paas/v4/",
+    model="glm-5.3-flash")
+    try:
+        await provider.complete(ModelRequest("system", [{"role": "user", "content": "hi"}],
+                                             [], "glm-5.3-flash", generation=generation))
+    finally:
+        await provider.close()
+    assert captured["body"]["reasoning_effort"] == "low"
+    assert captured["body"]["thinking"] == {"type": "enabled"}
+    assert captured["body"]["max_tokens"] == 4096
+    assert captured["body"]["temperature"] == 0
+    assert "reasoning" not in captured["body"]

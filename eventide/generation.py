@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -31,10 +32,32 @@ class GenerationCapabilities(BaseModel):
     top_p: bool = False
     reasoning_efforts: tuple[str, ...] = ()
     thinking: bool = False
+    thinking_modes: tuple[Literal["enabled", "disabled"], ...] = ("enabled", "disabled")
+    top_p_min: float = Field(default=0, ge=0, le=1)
+    sampling_precision: int | None = Field(default=None, ge=0, le=6)
+    max_output_tokens: int | None = Field(default=None, gt=0, le=1_000_000)
+
+
+def _bigmodel_chat(provider: str, base_url: str | None, model: str) -> bool:
+    endpoint = urlparse(base_url or "")
+    return (
+        provider == "openai_compatible" and endpoint.scheme == "https"
+        and endpoint.hostname == "open.bigmodel.cn" and endpoint.port in {None, 443}
+        and endpoint.username is None and endpoint.password is None
+        and not endpoint.query and not endpoint.fragment
+        and endpoint.path.rstrip("/") in {"/api/paas/v4", "/api/coding/paas/v4"}
+        and model == "glm-5.3-flash"
+    )
 
 
 def capabilities(provider: str, base_url: str | None, model: str) -> GenerationCapabilities:
     """Recognize exact service/model families, never all compatible endpoints."""
+    if _bigmodel_chat(provider, base_url, model):
+        return GenerationCapabilities(
+            source="documented", temperature_max=1, top_p=True, top_p_min=0.01,
+            reasoning_efforts=("low", "high", "max"), thinking=True,
+            thinking_modes=("enabled",), sampling_precision=2, max_output_tokens=131_072,
+        )
     hostname = urlparse(base_url or "").hostname
     if hostname == "api.deepseek.com" and model in {"deepseek-flash", "deepseek-v4-pro"}:
         return GenerationCapabilities(
@@ -54,11 +77,14 @@ def resolve_generation(
     base_url: str | None,
     model: str,
     declared: GenerationCapabilities | None = None,
+    default_max_output_tokens: int | None = None,
 ) -> dict[str, Any]:
     values: dict[str, Any] = {}
     for layer in layers:
         values.update(GenerationPatch.model_validate(layer).patch())
     values = {key: value for key, value in values.items() if value is not None}
+    if default_max_output_tokens is not None:
+        values.setdefault("max_output_tokens", default_max_output_tokens)
     supported = declared or capabilities(provider, base_url, model)
     if "temperature" in values:
         if supported.temperature_max is None:
@@ -68,12 +94,25 @@ def resolve_generation(
     if "top_p" in values and not supported.top_p:
         raise ValueError("top_p is unsupported or unconfirmed for this model")
     if "reasoning_effort" in values and (
-        provider != "openai_responses"
+        (provider != "openai_responses" and not _bigmodel_chat(provider, base_url, model))
         or values["reasoning_effort"] not in supported.reasoning_efforts
     ):
         raise ValueError("Reasoning effort is unsupported for this model/API")
     if "thinking" in values and (not supported.thinking or provider != "openai_compatible"):
         raise ValueError("Thinking mode selection is unsupported for this model/API")
+    if "thinking" in values and values["thinking"] not in supported.thinking_modes:
+        raise ValueError("This model does not support the selected thinking mode")
+    if "top_p" in values and values["top_p"] < supported.top_p_min:
+        raise ValueError("top_p is below this model's supported range")
+    if supported.max_output_tokens is not None and values.get(
+        "max_output_tokens", 0
+    ) > supported.max_output_tokens:
+        raise ValueError("Maximum output exceeds this model's supported range")
+    for key in ("temperature", "top_p"):
+        if key in values and supported.sampling_precision is not None:
+            decimal = Decimal(str(values[key]))
+            if decimal != decimal.quantize(Decimal(1).scaleb(-supported.sampling_precision)):
+                raise ValueError(f"{key} supports at most {supported.sampling_precision} decimals")
     deepseek = urlparse(base_url or "").hostname == "api.deepseek.com"
     thinking = values.get("thinking") != "disabled" and values.get("reasoning_effort") != "none"
     if deepseek and thinking and "temperature" in values:
@@ -89,7 +128,10 @@ def resolve_generation(
 def wire_parameters(provider: str, generation: dict[str, Any]) -> dict[str, Any]:
     result = {key: generation[key] for key in ("temperature", "top_p") if key in generation}
     if "reasoning_effort" in generation:
-        result["reasoning"] = {"effort": generation["reasoning_effort"]}
+        if provider == "openai_compatible":
+            result["reasoning_effort"] = generation["reasoning_effort"]
+        else:
+            result["reasoning"] = {"effort": generation["reasoning_effort"]}
     if "thinking" in generation:
         result["extra_body"] = {"thinking": {"type": generation["thinking"]}}
     if "max_output_tokens" in generation:

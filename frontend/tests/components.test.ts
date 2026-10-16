@@ -27,6 +27,47 @@ describe("content and generation controls", () => {
     expect(wrapper.text()).toContain("<img");
     expect(wrapper.find("code").text()).toContain("<b>literal</b>");
   });
+  it("uses GLM declared sampling and thinking limits in the form", async () => {
+    vi.spyOn(api, "generation").mockResolvedValue({
+      ...generation,
+      capabilities: {
+        source: "documented",
+        temperature_max: 1,
+        top_p: true,
+        reasoning_efforts: ["low", "high", "max"],
+        thinking: true,
+        thinking_modes: ["enabled"],
+        top_p_min: 0.01,
+        sampling_precision: 2,
+        max_output_tokens: 131072,
+      },
+    });
+    const wrapper = mount(GenerationEditor, {
+      props: { model: "glm-5.3-flash" },
+    });
+    await flushPromises();
+    await wrapper.find("#mode-run-thinking").setValue("value");
+    expect(
+      wrapper
+        .find('select[aria-label="思考模式值"] option[value="disabled"]')
+        .exists(),
+    ).toBe(false);
+    await wrapper.find("#mode-run-temperature").setValue("value");
+    expect(wrapper.find('input[aria-label="温度"]').attributes("max")).toBe(
+      "1",
+    );
+    expect(wrapper.find('input[aria-label="温度"]').attributes("step")).toBe(
+      "0.01",
+    );
+    await wrapper.find("#mode-run-top_p").setValue("value");
+    expect(wrapper.find('input[aria-label="Top P"]').attributes("min")).toBe(
+      "0.01",
+    );
+    await wrapper.find("#mode-run-max_output_tokens").setValue("value");
+    expect(
+      wrapper.find('input[aria-label="最大输出 Token"]').attributes("max"),
+    ).toBe("131072");
+  });
   it("preserves explicit numeric zero and explicit null reset", async () => {
     vi.spyOn(api, "generation").mockResolvedValue(generation);
     const wrapper = mount(GenerationEditor, {

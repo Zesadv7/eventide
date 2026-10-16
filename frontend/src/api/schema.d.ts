@@ -1681,6 +1681,23 @@ export interface components {
        * @default false
        */
       thinking: boolean;
+      /**
+       * Thinking Modes
+       * @default [
+       *       "enabled",
+       *       "disabled"
+       *     ]
+       */
+      thinking_modes: ("enabled" | "disabled")[];
+      /**
+       * Top P Min
+       * @default 0
+       */
+      top_p_min: number;
+      /** Sampling Precision */
+      sampling_precision?: number | null;
+      /** Max Output Tokens */
+      max_output_tokens?: number | null;
     };
     /**
      * GenerationPatch

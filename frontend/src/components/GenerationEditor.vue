@@ -246,14 +246,26 @@ const labels: Record<string, string> = {
           v-model="values[key]"
           :aria-label="labels[key]"
           type="number"
-          :step="key === 'max_output_tokens' ? 1 : 0.05"
-          :min="key === 'temperature' ? 0 : key === 'top_p' ? 0.00001 : 1"
+          :step="
+            key === 'max_output_tokens'
+              ? 1
+              : state?.capabilities.sampling_precision != null
+                ? 10 ** -state.capabilities.sampling_precision
+                : 0.05
+          "
+          :min="
+            key === 'temperature'
+              ? 0
+              : key === 'top_p'
+                ? state?.capabilities.top_p_min || 0.00001
+                : 1
+          "
           :max="
             key === 'temperature'
               ? (state?.capabilities.temperature_max ?? 2)
               : key === 'top_p'
                 ? 1
-                : 1000000
+                : (state?.capabilities.max_output_tokens ?? 1000000)
           "
           @input="changed"
         />
@@ -277,8 +289,16 @@ const labels: Record<string, string> = {
           aria-label="思考模式值"
           @change="changed"
         >
-          <option value="enabled">开启</option>
-          <option value="disabled">关闭</option>
+          <option
+            v-for="mode in state?.capabilities.thinking_modes ?? [
+              'enabled',
+              'disabled',
+            ]"
+            :key="mode"
+            :value="mode"
+          >
+            {{ mode === "enabled" ? "开启" : "关闭" }}
+          </option>
         </select>
       </div>
     </fieldset>

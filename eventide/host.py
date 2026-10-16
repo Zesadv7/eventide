@@ -1557,8 +1557,8 @@ class RuntimeHost:
         generation = resolve_generation(
             layers, provider=self.settings.provider, base_url=self.settings.base_url, model=model,
             declared=GenerationCapabilities.model_validate(state["capabilities"]),
+            default_max_output_tokens=self.settings.max_tokens,
         )
-        generation.setdefault("max_output_tokens", self.settings.max_tokens)
         return {
             "mode": mode,
             "model": model,

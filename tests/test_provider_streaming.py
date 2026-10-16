@@ -501,3 +501,21 @@ async def test_responses_malformed_terminal_calls_retain_usage_without_dispatch(
     else:
         assert "_invalid_json" in result.tool_calls[0].arguments
     assert stream.closed
+
+
+async def test_glm_stream_uses_same_chat_generation_and_preserves_thoughts():
+    instance, stream, calls = provider("chat", [
+        chat_chunk(reasoning="private continuation"),
+        chat_chunk(content="ok", finish="stop"),
+        {"choices": [], "usage": {"prompt_tokens": 7, "completion_tokens": 4}},
+    ])
+    generation = {"reasoning_effort": "low", "thinking": "enabled", "temperature": 0}
+    request = ModelRequest("system", [{"role": "user", "content": "hi"}], [],
+                           "glm-5.3-flash", 4096, generation)
+    events = [event async for event in instance.stream(request)]
+    assert calls[0]["reasoning_effort"] == "low"
+    assert calls[0]["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert "reasoning" not in calls[0]
+    assert events[-1].response.provider_items == ({"reasoning_content": "private continuation"},)
+    assert events[-1].response.usage["input_tokens"] == 7
+    assert stream.closed
