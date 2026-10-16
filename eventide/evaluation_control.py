@@ -8,6 +8,7 @@ import json
 import re
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -72,6 +73,7 @@ class EvaluationController:
     async def admit(
         self, project_id: str, run_id: str, *, suite_id: str, suite_sha256: str,
         split: str = "development", request_fingerprint: str | None = None,
+        mode: str = "offline", generation_hash: str | None = None, confirmed: bool = False,
     ) -> str:
         from eventide.bundled_evaluations import load_builtin_suite
         from eventide.host import _Admission
@@ -81,6 +83,17 @@ class EvaluationController:
             raise ValueError("Invalid evaluation identity")
         if split not in {"development", "holdout", "all"}:
             raise ValueError("Invalid evaluation split")
+        if mode not in {"offline", "live"}:
+            raise ValueError("Invalid evaluation mode")
+        generation = None
+        provider_config_hash = None
+        if mode == "live":
+            if confirmed is not True:
+                raise ValueError("Live evaluation requires explicit confirmation")
+            generation = self.host.generation_settings(self.host.settings.model)
+            if generation_hash != generation["config_hash"]:
+                raise ValueError("Model configuration changed; review before starting")
+            provider_config_hash = self.host.provider_config_status()["config_hash"]
         selected: Split | None = ("development" if split == "development" else
                                   "holdout" if split == "holdout" else None)
         suite = load_builtin_suite(suite_id, split=selected)
@@ -100,8 +113,12 @@ class EvaluationController:
             "request_fingerprint": request_fingerprint,
         }
         accepted = {
-            "suite": suite, "split": split, "mode": "offline",
-            "measurement_kind": "scripted_mechanism_validation", "billing_applicable": False,
+            "suite": suite, "split": split, "mode": mode,
+            "measurement_kind": ("provider_experiment" if mode == "live"
+                                 else "scripted_mechanism_validation"),
+            "billing_applicable": mode == "live",
+            **({"generation": generation, "provider_config_hash": provider_config_hash}
+               if mode == "live" else {}),
             "limits": {"steps": 12, "observed_tokens": 20_000, "case_seconds": 300},
             "runtime": runtime_revision(),
         }
@@ -168,7 +185,9 @@ class EvaluationController:
         start = time.perf_counter()
         async with self.host._session_execution(owner, run_id):
             self.store.append_event(run_id, "run.started", {
-                **intent, "provider": "scripted", "model": "scripted", "mode": "offline",
+                **intent, "provider": self.host.settings.provider if accepted["mode"] == "live"
+                else "scripted", "model": self.host.settings.model if accepted["mode"] == "live"
+                else "scripted", "mode": accepted["mode"],
             })
             try:
                 directory = self._directory(run_id, create=True)
@@ -205,8 +224,23 @@ class EvaluationController:
                     provider="scripted", api_key=None, base_url=None, model="scripted",
                     max_steps=12, run_token_limit=20_000,
                 )
+                call_authority = None
+                if accepted["mode"] == "live":
+                    if self.host.provider_config_status()["config_hash"] != accepted[
+                        "provider_config_hash"
+                    ]:
+                        raise ValueError("Frozen evaluation provider configuration changed")
+                    settings = replace(
+                        self.host.settings, workdir=directory,
+                        state_dir=directory / "unused-state",
+                        max_steps=12, run_token_limit=20_000,
+                        embedding_provider="hash", embedding_model=None,
+                        embedding_api_key=None, embedding_base_url=None,
+                    )
+                    call_authority = (self.host, run_id)
                 report = await run_evaluations(
                     Path(f"builtin:{suite['id']}"), settings=settings,
+                    live=accepted["mode"] == "live", call_authority=call_authority,
                     cases_snapshot=cases,
                     suite_metadata={
                         **{key: value for key, value in suite.items() if key != "cases"},
@@ -222,16 +256,19 @@ class EvaluationController:
                     "reason": "cancelled" if cancelled else "evaluation_failed",
                 })
                 raise
-            output = f"Offline mechanisms: {report['passed']}/{report['total']} passed"
+            label = "Live experiment" if accepted["mode"] == "live" else "Offline mechanisms"
+            output = f"{label}: {report['passed']}/{report['total']} passed"
+            terminal = "completed" if report["status"] == "completed" else "interrupted"
             duration = (time.perf_counter() - start) * 1000
             self.store.append_event(run_id, "evaluation.finished", {
                 "passed": report["passed"], "total": report["total"],
             })
-            self.store.append_event(run_id, "run.completed", {
+            self.store.append_event(run_id, "run." + terminal, {
                 "output": output, "steps": 0, "tool_calls": 0, "usage": {},
+                **({"reason": "evaluation_aborted"} if terminal != "completed" else {}),
                 "duration_ms": duration,
             })
-            return RunResult(run_id, owner, "completed", output, 0, 0, duration,
+            return RunResult(run_id, owner, terminal, output, 0, 0, duration,
                              turn_id=identity["turn_id"])
 
     def detail(self, run_id: str) -> dict[str, Any]:
@@ -266,8 +303,8 @@ class EvaluationController:
             "evaluation_id": run_id, "run_id": run_id, "session_id": run["session_id"],
             "project_id": project_id, "suite_id": suite["id"], "suite_version": suite["version"],
             "suite_sha256": suite["suite_sha256"], "split": accepted["split"],
-            "mode": "offline", "measurement_kind": "scripted_mechanism_validation",
-            "billing_applicable": False, "status": run["status"],
+            "mode": accepted["mode"], "measurement_kind": accepted["measurement_kind"],
+            "billing_applicable": accepted["billing_applicable"], "status": run["status"],
             "dispatch_state": entry["dispatch_state"] if entry else None,
             "queue_position": entry["position"] if entry else None,
             "total": len(cases), "attempted": len(completed),

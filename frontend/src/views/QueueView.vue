@@ -109,7 +109,7 @@ function target(entry: QueueEntry) {
   if (entry.execution.kind === "worktree_control") return "工作副本管理";
   if (entry.execution.kind === "delivery") return "隔离修复交付";
   if (entry.execution.kind === "index") return "项目索引构建";
-  if (entry.execution.kind === "evaluation") return "离线评测临时项目";
+  if (entry.execution.kind === "evaluation") return "评测隔离临时项目";
   return entry.execution.kind === "snapshot"
     ? "固定只读快照"
     : entry.execution.kind === "worktree"

@@ -30,7 +30,8 @@ from eventide.eval_evidence import (
 )
 from eventide.eval_grading import _tests_run, run_benchmark_case
 from eventide.eval_suite import load_benchmark
-from eventide.generation import GenerationPatch
+from eventide.evaluation_calls import EvaluationCallBridge, EvaluationLocalProvider
+from eventide.generation import GenerationCapabilities, GenerationPatch
 from eventide.host import RuntimeHost
 from eventide.models import RunRequest, RunResult
 from eventide.normalization import normalize
@@ -332,6 +333,8 @@ async def _bounded_case(
 async def _evaluate_case(
     case: dict[str, Any], index: int, settings: Settings, directory: Path, *,
     live: bool, prices: tuple[PriceVersion, ...], case_timeout: float,
+    call_authority: tuple[RuntimeHost, str] | None = None,
+    generation_snapshot: dict[str, Any] | None = None,
 ) -> tuple[EvalCaseResult, bool]:
     mode = "live" if live else "offline"
     started = time.perf_counter()
@@ -370,12 +373,24 @@ async def _evaluate_case(
             )
             IndexStore(sandbox).build()
         stage = "runtime"
-        provider = (build_provider(case_settings) if live
-                    else ScriptedProvider(case.get("script", [])))
+        provider = (
+            EvaluationLocalProvider() if call_authority is not None
+            else build_provider(case_settings) if live
+            else ScriptedProvider(case.get("script", []))
+        )
         store = RuntimeStore(case_settings.state_dir / "evals" / f"{mode}.db")
         runtime = RuntimeHost(
             settings=case_settings, provider=provider, store=store, enable_mcp=False,
         )
+        if call_authority is not None:
+            runtime._evaluation_bridge = EvaluationCallBridge(
+                call_authority[0], call_authority[1], str(case["id"]), index,
+            )
+            assert generation_snapshot is not None
+            runtime.configure_generation(
+                case_settings.model, generation_snapshot["defaults"],
+                declared=GenerationCapabilities.model_validate(generation_snapshot["capabilities"]),
+            )
         for price in prices:
             runtime.register_price(price)
         session_id = f"eval_{mode}_{index}"
@@ -417,6 +432,7 @@ async def _evaluate_case(
             try:
                 evidence = case_evidence(
                     store, directory, main_run_id=result.run_id if result else None,
+                    model_authority=runtime._evaluation_bridge if runtime is not None else None,
                 )
             except Exception as exc:
                 failure = failure or safe_failure(exc, "evidence", settings)
@@ -512,12 +528,13 @@ async def run_evaluations(
     suite_metadata: dict[str, Any] | None = None,
     artifact_parent: Path | None = None,
     progress: Callable[[str, dict[str, Any]], None] | None = None,
+    call_authority: tuple[RuntimeHost, str] | None = None,
 ) -> dict[str, Any]:
     """Run isolated cases; retain canonical evidence and incremental reports on every outcome.
 
-    Frozen benchmark live is deliberately unavailable until shared scheduling and
-    budget ownership are integrated. Prices are explicit immutable experiment inputs;
-    this function never reads or copies a caller's budget/price ledger.
+    Frozen live benchmarks require a trusted main-service call authority and frozen
+    admission. Uncontrolled live benchmark execution remains unavailable. Standalone
+    prices are immutable experiment inputs; controlled calls use the service ledger.
     """
     if isinstance(case_timeout, bool) or not 0 < case_timeout <= 300:
         raise ValueError("case_timeout must be positive and at most 300 seconds")
@@ -525,10 +542,12 @@ async def run_evaluations(
     # mutable path when dispatching a queued batch. This is not an HTTP input.
     cases = (load_suite(path) if cases_snapshot is None
              else json.loads(json.dumps(cases_snapshot)))
-    if cases_snapshot is not None and (live or settings is None or suite_metadata is None):
+    if cases_snapshot is not None and (
+        (live and call_authority is None) or settings is None or suite_metadata is None
+    ):
         raise ValueError("Frozen controlled evaluation requires explicit offline settings/metadata")
     benchmark = any("benchmark" in case for case in cases)
-    if live and benchmark:
+    if live and benchmark and call_authority is None:
         raise ValueError(
             "Frozen benchmark live experiments are not enabled; use offline validation"
         )
@@ -538,10 +557,32 @@ async def run_evaluations(
         cases = [case for case in cases if case["benchmark"]["split"] == split]
     for price in prices:
         price.payload()
+    generation_snapshot = None
+    if call_authority is not None:
+        if not live or prices:
+            raise ValueError("Controlled model authority requires live mode and service prices")
+        authority, authority_run = call_authority
+        bridge = EvaluationCallBridge(authority, authority_run, "validation", 1)
+        bridge._validate()
+        accepted = next(e["payload"] for e in authority.store.run_events(authority_run)
+                        if e["type"] == "evaluation.accepted")
+        if accepted.get("suite", {}).get("cases") != cases:
+            raise ValueError("Controlled evaluation cases differ from frozen admission")
+        settings = settings or authority.settings
+        if (settings.provider, settings.model, settings.base_url, settings.api_key) != (
+            authority.settings.provider, authority.settings.model,
+            authority.settings.base_url, authority.settings.api_key,
+        ):
+            raise ValueError("Controlled evaluation provider differs from service")
+        generation_snapshot = accepted.get("generation")
+        if not isinstance(generation_snapshot, dict):
+            raise ValueError("Controlled evaluation has no frozen generation configuration")
+        GenerationPatch.model_validate(generation_snapshot["defaults"])
+        GenerationCapabilities.model_validate(generation_snapshot["capabilities"])
     settings = settings or Settings.from_env()
-    if live:
+    if live and call_authority is None:
         settings = resolve_provider_configuration(settings)
-    else:
+    elif not live:
         settings = replace(
             settings, api_key=None, embedding_provider="hash", embedding_model=None,
             embedding_base_url=None, embedding_api_key=None, embedding_dim=256,
@@ -582,6 +623,7 @@ async def run_evaluations(
         entry, cancelled = await _evaluate_case(
             case, index, settings, directory / f"case-{index:03d}",
             live=live, prices=prices, case_timeout=case_timeout,
+            call_authority=call_authority, generation_snapshot=generation_snapshot,
         )
         results.append(entry)
         if progress is not None:
@@ -589,6 +631,11 @@ async def run_evaluations(
         if cancelled:
             save("cancelled")
             raise asyncio.CancelledError
+        if call_authority is not None and any(
+            e["type"] == "budget.blocked"
+            for e in call_authority[0].store.run_events(call_authority[1])
+        ):
+            return save("aborted")
         if live and entry.status in {"failed", "timed_out", "unknown"}:
             # Stop enlarging a paid batch after an unclassified provider/protocol failure.
             return save("aborted")

@@ -13967,17 +13967,16 @@
           },
           "mode": {
             "type": "string",
-            "const": "offline",
+            "enum": ["offline", "live"],
             "title": "Mode"
           },
           "measurement_kind": {
             "type": "string",
-            "const": "scripted_mechanism_validation",
+            "enum": ["scripted_mechanism_validation", "provider_experiment"],
             "title": "Measurement Kind"
           },
           "billing_applicable": {
             "type": "boolean",
-            "const": false,
             "title": "Billing Applicable"
           },
           "status": {

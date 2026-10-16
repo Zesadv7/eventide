@@ -17,7 +17,7 @@ from tests.test_model_budget import admitted
 from tests.test_runtime import settings_for
 
 
-async def authority(tmp_path, provider, *, mode="live"):
+async def authority(tmp_path, provider, *, mode="live", cases=None):
     root = tmp_path / "authority"
     root.mkdir()
     host = RuntimeHost(settings_for(root), provider, enable_mcp=False)
@@ -32,7 +32,10 @@ async def authority(tmp_path, provider, *, mode="live"):
     }
     host.store.admit_run("evaluation", owner, [
         ("run.admitted", intent, "system", "runtime"),
-        ("evaluation.accepted", {"mode": mode}, "system", "runtime"),
+        ("evaluation.accepted", {
+            "mode": mode, "suite": {"cases": cases},
+            "generation": host.generation_settings(host.settings.model),
+        }, "system", "runtime"),
     ])
     host.store.append_event("evaluation", "run.started", intent)
     return host

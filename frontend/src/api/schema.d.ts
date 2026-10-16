@@ -1516,19 +1516,16 @@ export interface components {
       split: "development" | "holdout" | "all";
       /**
        * Mode
-       * @constant
+       * @enum {string}
        */
-      mode: "offline";
+      mode: "offline" | "live";
       /**
        * Measurement Kind
-       * @constant
+       * @enum {string}
        */
-      measurement_kind: "scripted_mechanism_validation";
-      /**
-       * Billing Applicable
-       * @constant
-       */
-      billing_applicable: false;
+      measurement_kind: "scripted_mechanism_validation" | "provider_experiment";
+      /** Billing Applicable */
+      billing_applicable: boolean;
       /**
        * Status
        * @enum {string}

@@ -11,8 +11,8 @@ export type EvaluationDetail = components["schemas"]["EvaluationDetail"];
 export interface EvaluationReport {
   schema_version: number;
   status: string;
-  measurement_kind: "scripted_mechanism_validation";
-  billing_applicable: false;
+  measurement_kind: "scripted_mechanism_validation" | "provider_experiment";
+  billing_applicable: boolean;
   passed: number;
   total: number;
   attempted: number;

@@ -435,7 +435,8 @@ function downloadReport() {
             >{{
               statusLabels[entry.dispatch_state || entry.status] || entry.status
             }}
-            · {{ splitLabels[entry.split] }}</strong
+            · {{ splitLabels[entry.split] }} ·
+            {{ entry.mode === "live" ? "真实模型" : "离线机制" }}</strong
           ><span
             >{{ entry.attempted }} / {{ entry.total }} 已尝试 ·
             {{ entry.passed }} 通过</span
@@ -460,6 +461,18 @@ function downloadReport() {
             }}
           </h2>
           <p class="mono">{{ detail.evaluation_id }}</p>
+          <p>
+            {{
+              detail.mode === "live"
+                ? "真实模型实验 · 共享主服务预算"
+                : "离线机制自检 · 无付费调用"
+            }}
+          </p>
+          <RouterLink
+            v-if="detail.mode === 'live'"
+            :to="{ path: '/usage', query: { run: detail.run_id } }"
+            >查看实际调用用量</RouterLink
+          >
         </div>
         <button
           v-if="activeDetail"
@@ -486,7 +499,10 @@ function downloadReport() {
           ><strong>{{ detail.attempted }} / {{ detail.total }}</strong>
         </article>
         <article>
-          <small>机制通过</small><strong>{{ detail.passed }}</strong>
+          <small>{{
+            detail.mode === "live" ? "独立验收通过" : "机制通过"
+          }}</small
+          ><strong>{{ detail.passed }}</strong>
         </article>
         <article>
           <small>未通过</small><strong>{{ detail.failed }}</strong>
@@ -568,10 +584,16 @@ function downloadReport() {
         {{ reportError }}
       </p>
       <details v-if="report" class="report">
-        <summary>完整离线报告 · schema {{ report.schema_version }}</summary>
+        <summary>
+          完整{{ report.billing_applicable ? "模型实验" : "离线" }}报告 · schema
+          {{ report.schema_version }}
+        </summary>
         <p class="muted">
-          这是读取时的报告快照，可再次读取以更新。保留原始失败、未知用量与逐题证据。这里的
-          scripted 结果不能作为真实模型质量或费用结论。
+          这是读取时的报告快照，可再次读取以更新。保留原始失败、未知用量与逐题证据。{{
+            report.billing_applicable
+              ? "模型用量来自主服务唯一调用账本，费用未知部分单独保留。"
+              : "scripted 结果不能作为真实模型质量或费用结论。"
+          }}
         </p>
         <pre>{{ JSON.stringify(report, null, 2) }}</pre>
       </details>

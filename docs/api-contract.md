@@ -441,3 +441,5 @@ POST /api/sessions 要求 Idempotency-Key（1–128可见ASCII），body严格�
 POST /api/workspaces 与 DELETE /api/workspaces/{id} 强制Idempotency-Key，缺失422，同键异内容409。注册body严格为path；注册201和移除200原结果持久回放，先检查回执再检查目标存在性，因此已移除目标仍可回放。路径重新注册得到新workspace_id，旧移除不会影响新记录。登记/关系变更与成功回执原子提交；未知503/未标记409保留键，明确拒绝带X-Eventide-Mutation-Outcome: rejected。工作区详情新增startup_workspace布尔值，启动工作区禁止移除409；已有会话/执行引用/副本/活跃操作也拒绝。磁盘目录不删除。
 
 用量投影可返回authority_references（kind=evaluation、run_id、case_id、case_index）。这是隔离评测执行日志对主服务调用账本的引用，不是一笔新消费；尚未解析引用时complete=false，不能把空calls解释为免费。现有公开服务Run仍直接展示主账本事实；评测Web仍仅接受offline，live接入另行验收。
+
+EvaluationDetail.mode现在为offline|live，measurement_kind为scripted_mechanism_validation|provider_experiment，billing_applicable为布尔值，供受控Python实验历史查询。POST创建body仍只允许offline；真实Web接收须待预估/确认契约完成。批次遇共享预算拒绝或模型故障时主Run interrupted、报告status=aborted；remaining仍保留，不能把批次结束等同全题通过。

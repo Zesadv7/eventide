@@ -67,9 +67,9 @@ class EvaluationDetail(BaseModel):
     suite_version: int
     suite_sha256: str
     split: Literal["development", "holdout", "all"]
-    mode: Literal["offline"]
-    measurement_kind: Literal["scripted_mechanism_validation"]
-    billing_applicable: Literal[False]
+    mode: Literal["offline", "live"]
+    measurement_kind: Literal["scripted_mechanism_validation", "provider_experiment"]
+    billing_applicable: bool
     status: Literal["queued", "running", "completed", "failed", "interrupted"]
     dispatch_state: Literal["queued", "starting", "running", "finishing"] | None
     queue_position: int | None

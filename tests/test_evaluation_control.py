@@ -240,7 +240,7 @@ async def test_report_hash_missing_and_symlink_never_change_canonical_outcome(
     controller = EvaluationController(host)
 
     async def fake_run(path, **kwargs):
-        report = {"passed": 0, "total": 12, "billing_applicable": False}
+        report = {"passed": 0, "total": 12, "billing_applicable": False, "status": "completed"}
         kwargs["progress"]("report_saved", report)
         return report
 
@@ -276,7 +276,7 @@ def test_http_contract_rejections_idempotency_report_and_sse(tmp_path, monkeypat
     project = host.default_workspace.project_id
 
     async def fake_run(path, **kwargs):
-        report = {"passed": 0, "total": 12, "billing_applicable": False}
+        report = {"passed": 0, "total": 12, "billing_applicable": False, "status": "completed"}
         kwargs["progress"]("report_saved", report)
         return report
 

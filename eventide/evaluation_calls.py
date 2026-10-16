@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, Any
 
 from eventide.budget_prices import summarize_cost_events
 from eventide.eval_evidence import atomic_json
+from eventide.models import ModelRequest, ModelResponse
 from eventide.usage import build_usage_ledger
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from eventide.host import EventSink, RuntimeHost
-    from eventide.models import ModelRequest, ModelResponse
 
 
 class EvaluationCallBridge:
@@ -128,3 +128,10 @@ class EvaluationCallBridge:
                                if e["type"] == "model.attempt_started"],
             "costs": summarize_cost_events(costs), "price_versions": prices,
         }
+
+
+class EvaluationLocalProvider:
+    """A case cannot accidentally bypass its owning service provider."""
+
+    async def complete(self, request: ModelRequest) -> ModelResponse:
+        raise RuntimeError("Evaluation model dispatch requires the main Runtime authority")

@@ -385,3 +385,22 @@ describe("offline evaluation page", () => {
     wrapper.unmount();
   });
 });
+
+it("labels a controlled live history as model evidence and links its sole usage owner", async () => {
+  mockReads([
+    detail("live-case", {
+      mode: "live",
+      measurement_kind: "provider_experiment",
+      billing_applicable: true,
+    }),
+  ]);
+  const { wrapper } = await render("?evaluation=live-case");
+  await flushPromises();
+  expect(wrapper.text()).toContain("真实模型实验 · 共享主服务预算");
+  expect(wrapper.text()).toContain("独立验收通过");
+  const usage = wrapper
+    .findAll("a")
+    .find((link) => link.text() === "查看实际调用用量");
+  expect(usage?.attributes("href")).toContain("run=live-case");
+  wrapper.unmount();
+});

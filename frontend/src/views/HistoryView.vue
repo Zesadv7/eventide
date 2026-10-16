@@ -390,7 +390,7 @@ function toolLabel(value: unknown) {
         >
       </p>
       <p v-if="evaluationId" class="evaluation-note">
-        这是离线评测控制记录。<RouterLink
+        这是评测控制记录。<RouterLink
           :to="{ path: '/evaluations', query: { evaluation: evaluationId } }"
           >查看评测进度与报告</RouterLink
         >

@@ -138,7 +138,7 @@ describe("global persistent task queue", () => {
       .mockResolvedValue(undefined);
     const { wrapper, router } = await render();
     await flushPromises();
-    expect(wrapper.text()).toContain("离线评测临时项目");
+    expect(wrapper.text()).toContain("评测隔离临时项目");
     await wrapper
       .findAll("button")
       .find((button) => button.text() === "打开评测")!
