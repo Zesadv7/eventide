@@ -207,14 +207,19 @@ def test_project_api_aggregates_and_keeps_workspace_contract(isolated_workspace)
             s["session_id"] for s in client.get(f"/api/projects/{project_id}/sessions").json()
         } == set(sessions)
         assert client.get(f"/api/sessions/{sessions[1]}").json()["project_id"] == project_id
-        client.patch(f"/api/sessions/{sessions[1]}", json={"archived": True})
+        client.patch(f"/api/sessions/{sessions[1]}", json={"archived": True,
+                     "expected_metadata_hash":
+                     client.get(f"/api/sessions/{sessions[1]}").json()["metadata_hash"]},
+                     headers={"Idempotency-Key": "archive"})
         assert len(client.get(f"/api/projects/{project_id}/sessions").json()) == 1
         assert (
-            len(client.get(f"/api/projects/{project_id}/sessions?include_archived=true").json())
+            len([s for s in client.get(
+                f"/api/projects/{project_id}/sessions?include_archived=true").json()
+                 if not s["managed"]])
             == 2
         )
         assert client.get(f"/api/projects/{project_id}").json()["workspace_count"] == 2
-        assert client.get(f"/api/projects/{project_id}").json()["session_count"] == 2
+        assert client.get(f"/api/projects/{project_id}").json()["session_count"] == 3
         assert len(client.get("/api/projects").json()) == 1
         assert len(client.get(f"/api/projects/{project_id}/workspaces").json()) == 2
         for path in ("", "/sessions", "/workspaces"):

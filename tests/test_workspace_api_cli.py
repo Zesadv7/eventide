@@ -110,23 +110,28 @@ def test_http_session_metadata_archive_and_delete(isolated_workspace):
         ]
         renamed = client.patch(
             f"/api/sessions/{empty}",
-            json={"title": "Named work"},
+            json={"title": "Named work", "expected_metadata_hash":
+                  client.get(f"/api/sessions/{empty}").json()["metadata_hash"]},
+            headers={"Idempotency-Key": "rename"},
         )
         assert renamed.status_code == 200
         assert renamed.json()["title"] == "Named work"
 
         archived = client.patch(
             f"/api/sessions/{empty}",
-            json={"archived": True},
+            json={"archived": True, "expected_metadata_hash": renamed.json()["metadata_hash"]},
+            headers={"Idempotency-Key": "archive"},
         )
         assert archived.json()["archived"] is True
         assert client.get(f"/api/workspaces/{workspace_id}/sessions").json() == []
         assert len(
-            client.get(
+            [s for s in client.get(
                 f"/api/workspaces/{workspace_id}/sessions?include_archived=true"
-            ).json()
+            ).json() if not s["managed"]]
         ) == 1
-        assert client.delete(f"/api/sessions/{empty}").status_code == 200
+        assert client.request("DELETE", f"/api/sessions/{empty}",
+                              json={"expected_metadata_hash": archived.json()["metadata_hash"]},
+                              headers={"Idempotency-Key": "delete-empty"}).status_code == 200
 
         history = client.post(
             "/api/sessions", json={"workspace_id": workspace_id}
@@ -135,7 +140,10 @@ def test_http_session_metadata_archive_and_delete(isolated_workspace):
             f"/api/sessions/{history}/runs", json={"prompt": "work"}
         )
         wait_for_run(client, accepted.json()["run_id"])
-        assert client.delete(f"/api/sessions/{history}").status_code == 409
+        assert client.request("DELETE", f"/api/sessions/{history}",
+                              json={"expected_metadata_hash":
+                                    client.get(f"/api/sessions/{history}").json()["metadata_hash"]},
+                              headers={"Idempotency-Key": "delete-history"}).status_code == 409
 
 
 def test_http_session_working_directory_scopes_execution(isolated_workspace):

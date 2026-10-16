@@ -1,5 +1,6 @@
 import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=15";
 import {EventFeed, request} from "./transport.js?v=12";
+import {mutateSession} from "./session-management.js?v=1";
 import {el, button, icon, reconcile, markdown} from "./view.js?v=14";
 
 // config.js is null-safe for nodes the v2 console dropped, so a failed import is
@@ -317,7 +318,7 @@ async function saveSessionTitle(event) {
   if (!session || !value) return;
   $("#save-session").disabled = true;
   try {
-    await request(`/api/sessions/${session.session_id}`, {method: "PATCH", body: JSON.stringify({title: value})});
+    await mutateSession(session, "update", {title: value});
     $("#session-dialog").close();
     await refreshWorkspace(session.workspace_id);
     if (state.session === session.session_id) await refreshSession(session.session_id);
@@ -330,7 +331,7 @@ async function toggleSessionArchive() {
   if (!session) return;
   $("#archive-session").disabled = true;
   try {
-    await request(`/api/sessions/${session.session_id}`, {method: "PATCH", body: JSON.stringify({archived: !session.archived})});
+    await mutateSession(session, "update", {archived: !session.archived});
     $("#session-dialog").close();
     await refreshWorkspace(session.workspace_id);
     if (!session.archived && state.session === session.session_id && !state.showArchived.has(session.workspace_id)) {
@@ -346,7 +347,7 @@ async function deleteEmptySession() {
   if (!session || !confirm("删除这条空工作记录吗？有运行历史的记录不会被删除。")) return;
   $("#delete-session").disabled = true;
   try {
-    await request(`/api/sessions/${session.session_id}`, {method: "DELETE"});
+    await mutateSession(session, "delete");
     state.runs.delete(session.session_id);
     state.hasOlder.delete(session.session_id);
     $("#session-dialog").close();

@@ -2152,6 +2152,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionDeleteBody"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2159,9 +2169,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
+                  "additionalProperties": true,
                   "title": "Response Delete Session Api Sessions  Session Id  Delete"
                 }
               }
@@ -13290,8 +13298,26 @@
         "type": "object",
         "title": "SessionBody"
       },
+      "SessionDeleteBody": {
+        "properties": {
+          "expected_metadata_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expected Metadata Hash"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["expected_metadata_hash"],
+        "title": "SessionDeleteBody"
+      },
       "SessionUpdateBody": {
         "properties": {
+          "expected_metadata_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Expected Metadata Hash"
+          },
           "title": {
             "anyOf": [
               {
@@ -13317,7 +13343,9 @@
             "title": "Archived"
           }
         },
+        "additionalProperties": false,
         "type": "object",
+        "required": ["expected_metadata_hash"],
         "title": "SessionUpdateBody"
       },
       "SkillConfigurationBody": {

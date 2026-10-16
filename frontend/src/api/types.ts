@@ -51,6 +51,8 @@ export interface Approval {
   [key: string]: unknown;
 }
 export interface Session {
+  metadata_hash?: string;
+  managed?: boolean;
   session_id: string;
   workspace_id: string;
   title: string;

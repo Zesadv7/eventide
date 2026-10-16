@@ -15,7 +15,7 @@ from typing import Any, TypeVar
 from eventide.models import ProjectRecord, RuntimeEvent, WorkspaceRecord
 from eventide.normalization import redact
 from eventide.projections import TERMINALS, MessagesProjection, RuntimeStateProjection
-from eventide.workspace import project_source
+from eventide.workspace import digest, project_source
 
 _FactResult = TypeVar("_FactResult")
 
@@ -410,6 +410,69 @@ class RuntimeStore:
             if has_history:
                 raise ValueError("Session has history; archive it instead of deleting")
             self._connection.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+
+    def session_is_control(self, session_id: str) -> bool:
+        with self._lock:
+            return bool(self._connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE session_id=? AND "
+                "(type='control.session' OR (type='run.started' AND "
+                "json_extract(payload_json,'$.source') IN ('delivery','verification'))))",
+                (session_id,),
+            ).fetchone()[0])
+
+    def session_metadata_hash(self, session_id: str) -> str:
+        record = self.get_session(session_id)
+        if record is None:
+            raise ValueError("Session not found")
+        return digest({key: record[key] for key in (
+            "id", "workspace_id", "created_at", "working_directory", "title", "archived",
+        )})
+
+    def commit_session_metadata(
+        self, owner: str, session_id: str, expected_hash: str, *,
+        mutation_id: str, delete: bool = False, title: str | None = None,
+        archived: bool | None = None, result: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """A metadata write and its successful transport receipt commit together."""
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            if self.session_metadata_hash(session_id) != expected_hash:
+                raise ValueError("Session metadata changed; refresh before editing")
+            record = self.get_session(session_id)
+            assert record is not None
+            if delete:
+                exists = self._connection.execute(
+                    "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE session_id=? "
+                    "UNION SELECT 1 FROM runs WHERE session_id=?)", (session_id, session_id),
+                ).fetchone()[0]
+                if exists:
+                    raise ValueError("Session has history; archive it instead of deleting")
+                self._connection.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+                kind, metadata = "session.deleted", {}
+            else:
+                if title is None and archived is None:
+                    raise ValueError("No session changes supplied")
+                cleaned = title.replace("\n", " ").strip() if title is not None else record["title"]
+                if title is not None and not cleaned:
+                    raise ValueError("Session title cannot be empty")
+                self._connection.execute(
+                    "UPDATE sessions SET title=?, archived=? WHERE id=?",
+                    (cleaned, int(archived) if archived is not None else record["archived"],
+                     session_id),
+                )
+                kind = "session.metadata_changed"
+                metadata = {"title": cleaned,
+                            "archived": (archived if archived is not None
+                                         else bool(record["archived"]))}
+            self._append_fact_locked(owner, kind, {
+                "target_session_id": session_id, "created_at": record["created_at"],
+                "workspace_id": record["workspace_id"], "metadata": metadata,
+            }, author="user")
+            response = result()
+            self._append_fact_locked(owner, "http.mutation_completed", {
+                "identity": mutation_id, "result": response,
+            }, author="user")
+            return response
 
     def create_run(
         self, run_id: str, session_id: str, *, continuation_of: str | None = None

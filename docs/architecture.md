@@ -501,3 +501,12 @@ Web repair持有一个根名额，Writer通过受信控制Run的parent_run_id借
 HTTP显式采纳冻结用户已查看的patch_sha256；队列执行前再次检查当前验收摘要，既有apply仍复验双方源码。产物路径比较使用规范化state根，兼容macOS的/var→/private/var别名，state根内部符号链接仍拒绝。补丁读取最多10MiB且重验hash。Vue请求未知时保留同一请求内容和身份；项目切换的旧响应丢弃，刷新通过URL/后台历史恢复，不重放写入。
 
 交付控制Run的execution_config仅用于归属其子请求，不是源Workspace的执行配置；workspace_execution_config排除source=delivery控制事实，防止后续普通对话继承交付预算身份。快照admission保留内部生成的execution_binding路径/hash清单，避免将test_tokens.py等文件名误作凭据键破坏manifest；提示、工具输入等用户内容仍沿用原脱敏。
+
+### 会话元数据事务
+
+Session 管理写入通过 session_management 的持久请求接收及 Store 原子事务。
+版本来自身份、创建时间、Workspace/目录、名称和归档状态；运行进度不使编辑版本失效。
+成功管理事实保存在 configuration_control 所有者下，避免给空会话添入历史后
+使其永远不能删除。控制会话用 SQL EXISTS 检查 control.session 或历史交付/
+验收来源，避免每次 Session 查询读取全部事件。Vue 和迁移期旧页面共用 HTTP
+版本与重试契约；页面只管理元数据，不取得执行或取消权限。

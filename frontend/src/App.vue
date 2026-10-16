@@ -125,6 +125,7 @@ async function add() {
       <nav class="product-nav" aria-label="工作台导航">
         <RouterLink to="/chat">◌ 对话</RouterLink
         ><RouterLink to="/queue">≋ 任务队列</RouterLink
+        ><RouterLink to="/sessions">☷ 会话管理</RouterLink
         ><RouterLink to="/history">↶ 历史运行</RouterLink
         ><RouterLink to="/skills">◇ Skills</RouterLink
         ><RouterLink to="/knowledge">⌕ 知识索引</RouterLink

@@ -7,7 +7,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from eventide.http_api.context import ApiContext, require_local_request
-from eventide.http_api.schemas import SessionBody, SessionUpdateBody
+from eventide.http_api.schemas import SessionBody, SessionDeleteBody, SessionUpdateBody
+from eventide.http_api.session_management import mutate_session
 from eventide.usage import build_usage_ledger
 
 
@@ -54,26 +55,14 @@ def create_router(context: ApiContext) -> APIRouter:
         session_id: str, body: SessionUpdateBody, request: Request
     ) -> dict[str, Any]:
         require_local_request(request)
-        await get_session(session_id)
-        try:
-            agent_runtime.store.update_session(
-                session_id,
-                title=body.title,
-                archived=body.archived,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return agent_runtime.session_status(session_id)
+        return mutate_session(agent_runtime, request, session_id, body.model_dump())
 
     @router.delete("/api/sessions/{session_id}")
-    async def delete_session(session_id: str, request: Request) -> dict[str, str]:
+    async def delete_session(
+        session_id: str, body: SessionDeleteBody, request: Request,
+    ) -> dict[str, Any]:
         require_local_request(request)
-        await get_session(session_id)
-        try:
-            agent_runtime.store.delete_session(session_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"deleted": session_id}
+        return mutate_session(agent_runtime, request, session_id, body.model_dump(), delete=True)
 
     @router.get("/api/sessions/{session_id}/messages")
     async def get_messages(session_id: str) -> list[dict[str, Any]]:

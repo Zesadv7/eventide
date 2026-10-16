@@ -175,7 +175,7 @@ Workspace capabilities 增加 readonly_workers（enabled/roles/max_concurrency/m
 
 Vue HTTP 客户端规范化列表/详情返回的 Run `id` 为内部 `run_id`；202 接收凭据仍直接使用 `run_id`。Run 列表是最近一页按追加顺序排列，最新项位于末尾。工具待审批期间，`/messages` 可能因工具历史尚未配对返回 409；客户端暂留上次可见消息，继续查询 Run/Session，不能因此隐藏审批或停止按钮。
 
-历史页 `#/history?session=<session_id>&run=<run_id>` 使用 `GET /api/projects/{id}/sessions?include_archived=true` 确认当前项目归属，再调用既有 Session Run 列表、精确 Run 详情及 export。列表请求固定 `limit=100`；下一页 `before` 使用当前已加载最旧 Run 的身份，服务端按追加 rowid 排序且排除游标本身，不使用时间戳翻页。每页仍按旧到新返回，Vue 反向展示；`hasOlder` 仅由满页推断，没有伪造总数。精确详情验证 `run_id` 和 `session_id` 后才显示导出入口；URL 恢复不要求先拉取全部中间页。JSONL 返回 canonical 事件，工具详情投影不是独立 trace 导出。本页没有写请求，不更改当前执行会话；会话管理、历史导入及独立 trace 控制面仍待后续迁移。
+历史页 `#/history?session=<session_id>&run=<run_id>` 使用 `GET /api/projects/{id}/sessions?include_archived=true` 确认当前项目归属，再调用既有 Session Run 列表、精确 Run 详情及 export。列表请求固定 `limit=100`；下一页 `before` 使用当前已加载最旧 Run 的身份，服务端按追加 rowid 排序且排除游标本身，不使用时间戳翻页。每页仍按旧到新返回，Vue 反向展示；`hasOlder` 仅由满页推断，没有伪造总数。精确详情验证 `run_id` 和 `session_id` 后才显示导出入口；URL 恢复不要求先拉取全部中间页。JSONL 返回 canonical 事件，工具详情投影不是独立 trace 导出。本页没有写请求，不更改当前执行会话；会话管理与独立 trace 已分别由专页及历史详情承接，历史导入仍待迁移。
 
 Vue 使用 `include_preview=true` 订阅流式临时预览。`model.preview` 无 seq/id，不推进持久游标、不写入消息历史；`model.response` 与终态触发真实消息刷新并清除预览。客户端保留原提交键处理网络/超时/5xx 下的不确定接收，明确参数拒绝后允许编辑。开发代理保留原 Host，使浏览器 Origin 与 API 的请求源相符。
 
@@ -370,3 +370,18 @@ Python `RuntimeHost.manage_delivery("repair", delivery_id, goal, checks, image?,
 `GET /api/runs/{run_id}/trace`返回schema_version/source/spans。span包含name、trace_id/span_id/parent_span_id、纳秒时间范围、status、固定allowlist属性与links；不包含原Run/Session身份、提示、任意模型/工具名称、参数/结果、路径或凭据。模型用量沿用独占attempt口径，不能把父子区间的时长或计数直接累加成总成本。
 
 `?download=true`返回相同JSON并设置attachment文件名与Cache-Control:no-store。不存在Run为404，超过64个相关Run或canonical关系无效为409。只读取所选Run及子任务；祖先和Continue来源用于关系定位，不额外展示无关运行。缺失来源保留unobserved语义。读取和下载不修改事件、不启动全局TracerProvider，也不向OTLP发送数据；显式外部导出仍由Python开发接口负责。
+
+### Session 元数据管理与重试
+
+Session 查询增加 `metadata_hash` 和 `managed`。PATCH/DELETE
+`/api/sessions/{id}` 都要求本机同源、`Idempotency-Key`，以及 JSON 中的
+`expected_metadata_hash`。PATCH 只接收严格类型的 title/archived；DELETE
+仅删除无 Run、无 Session 事件历史且不忙的普通会话。服务控制会话拒绝修改。
+版本过期返回带 rejected 标记的 409；同键不同内容拒绝，同键成功重试返回原回执。
+元数据、管理审计和成功回执在同一 SQLite 事务提交，响应丢失不会重复执行。
+未知结果保留原身份，不自动生成新键。哈希包含创建时间，已删除后同名重建的
+会话不能被旧删除请求再次删除。
+
+Vue `#/sessions?session=<id>` 承接改名、归档、恢复和确认删除空会话。
+编辑固定选中时的版本，冲突后须显式刷新；未知请求跨刷新保留原正文与身份。
+归档不取消后台 Run，切换项目不接受旧列表或旧修改请求的迟到响应。

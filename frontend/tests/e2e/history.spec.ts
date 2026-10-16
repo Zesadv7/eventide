@@ -49,7 +49,14 @@ test("real run history: archived evidence, exact JSONL and reload without replac
     expect(
       (
         await page.request.patch(`/api/sessions/${session}`, {
-          data: { title: "浏览器历史归档", archived: true },
+          headers: { "Idempotency-Key": crypto.randomUUID() },
+          data: {
+            title: "浏览器历史归档",
+            archived: true,
+            expected_metadata_hash: (
+              await (await page.request.get(`/api/sessions/${session}`)).json()
+            ).metadata_hash,
+          },
         })
       ).ok(),
     ).toBe(true);

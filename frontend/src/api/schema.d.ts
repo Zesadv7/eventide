@@ -1754,8 +1754,15 @@ export interface components {
       /** Working Directory */
       working_directory?: string | null;
     };
+    /** SessionDeleteBody */
+    SessionDeleteBody: {
+      /** Expected Metadata Hash */
+      expected_metadata_hash: string;
+    };
     /** SessionUpdateBody */
     SessionUpdateBody: {
+      /** Expected Metadata Hash */
+      expected_metadata_hash: string;
       /** Title */
       title?: string | null;
       /** Archived */
@@ -3563,7 +3570,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SessionDeleteBody"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
@@ -3572,7 +3583,7 @@ export interface operations {
         };
         content: {
           "application/json": {
-            [key: string]: string;
+            [key: string]: unknown;
           };
         };
       };

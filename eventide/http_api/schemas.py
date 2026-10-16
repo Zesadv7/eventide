@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from eventide.generation import GenerationCapabilities, GenerationPatch
 
@@ -38,8 +38,15 @@ class SessionBody(BaseModel):
 
 
 class SessionUpdateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_metadata_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     title: str | None = Field(default=None, min_length=1, max_length=96)
     archived: bool | None = None
+
+
+class SessionDeleteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_metadata_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class WorkspaceBody(BaseModel):

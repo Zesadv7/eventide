@@ -8,6 +8,7 @@ import QueueView from "./views/QueueView.vue";
 import EvaluationsView from "./views/EvaluationsView.vue";
 import IndexesView from "./views/IndexesView.vue";
 import HistoryView from "./views/HistoryView.vue";
+import SessionsView from "./views/SessionsView.vue";
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
@@ -18,6 +19,7 @@ export const router = createRouter({
     { path: "/skills", component: SkillsView },
     { path: "/queue", component: QueueView },
     { path: "/history", component: HistoryView },
+    { path: "/sessions", component: SessionsView },
     {
       path: "/knowledge",
       component: IndexesView,

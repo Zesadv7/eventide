@@ -472,6 +472,8 @@ class RuntimeHost:
             "created_at": session["created_at"],
             "updated_at": activity["updated_at"],
             "title": title[:96],
+            "metadata_hash": self.store.session_metadata_hash(session_id),
+            "managed": self.store.session_is_control(session_id),
             "archived": bool(session.get("archived", False)),
             "status": "parked"
             if run and run["status"] == "interrupted"
@@ -1246,13 +1248,7 @@ class RuntimeHost:
         )
 
     def is_control_session(self, session_id: str) -> bool:
-        return any(
-            e["type"] == "control.session" or (
-                e["type"] == "run.started"
-                and e["payload"].get("source") in {"delivery", "verification"}
-            )
-            for e in self.store.session_events(session_id)
-        )
+        return self.store.session_is_control(session_id)
 
     @asynccontextmanager
     async def _workspace_execution(
