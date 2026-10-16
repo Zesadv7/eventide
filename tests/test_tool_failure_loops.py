@@ -144,12 +144,9 @@ async def test_successful_repeated_reads_never_create_extra_progress_scans(
         assert not loop_events(host, result.run_id)
         actual = [event["payload"] for event in events if event["type"] == "tool.completed"]
         assert len(actual) == 4
-        assert all(event["content"] == body for event in actual)
-        if body.startswith("Error:"):
-            # Preserve the old display contract without treating its string
-            # heuristic as proof of an actual failed filesystem operation.
-            assert all(event["is_error"] for event in actual)
-            assert all("failure_fingerprint" not in event for event in actual)
+        assert all(event["content"] == f"1: {body}" for event in actual)
+        assert all(not event["is_error"] for event in actual)
+        assert all("failure_fingerprint" not in event for event in actual)
     finally:
         await host.close()
 

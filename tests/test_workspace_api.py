@@ -274,7 +274,7 @@ def test_http_session_working_directory_scopes_execution(isolated_workspace):
         result = next(
             event for event in host.store.run_events(run_id) if event["type"] == "tool.completed"
         )
-        assert result["payload"]["content"] == "from package"
+        assert result["payload"]["content"] == "1: from package"
         assert f"Working directory: {package}" in provider.requests[0].system
         assert (
             client.post(
