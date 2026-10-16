@@ -473,3 +473,11 @@ Run／Continue接收补充：已经存在canonical接收身份时，后续附件
 ### 摘要节流诊断
 
 `context.trimmed`可附带`summary_skipped`，取值为`same_completed_prefix`、`summary_cooldown`、`insufficient_completed_content`或`newer_completed_prefix_already_claimed`。它表示未新建逻辑摘要请求，不代表Token为零或预算已结算；现有请求内的有限重试仍逐尝试记账。Session级`context.summary_claimed`只保存摘要资格依据，不绑定或伪造模型attempt，也不进入消息投影。节流后仍超出硬上下文上限时，沿用`context_overflow`失败，不派发主模型请求；错误说明中包含跳过原因。
+
+### 重复失败工具的停驻
+
+`run.interrupted.reason`新增`repeated_tool_failure`。对应`tool.failure_loop_detected`保存`threshold=3`、`matching_failure_window=3`、`tool`、`failure_fingerprint`、`checkpoint_hash`、`calls[{run_id,call_id}]`和`continued_failure_chain`。这些字段描述三次已发生结果和源码证据，不表示工具缓存命中或验收通过。`tool.completed`可附带`failure_fingerprint`；真实用量继续只从model.attempt事实派生。
+
+Executor捕获真实异常时，metadata可带`exception_type`类名。新窗口只接受实际异常、timeout或非零exit_code依据；仅有字符串`Error:`前缀的旧execution_failed不纳入，保留原is_error呈现和步数控制。
+
+同批剩余调用以`tool.abandoned(reason=repeated_tool_failure,dispatched=false)`补齐，不产生`tool.prepared`或执行。Continue仍须通过现有恢复检查和显式请求，保留原失败窗口；若再次同样失败，可立即再次停驻。没有可验证源码checkpoint时不生成此停驻理由，沿用原步数上限。预算拒绝、未知结果、参数纠错和取消不改变为该理由。

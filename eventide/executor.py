@@ -376,7 +376,10 @@ class ToolExecutor:
             return ToolResult(call.id, call.name, str(exc), True,
                               {"code": "budget_exceeded", "violations": exc.violations})
         except Exception as exc:
-            metadata = {"code": "timeout" if isinstance(exc, TimeoutError) else "execution_failed"}
+            metadata = {
+                "code": "timeout" if isinstance(exc, TimeoutError) else "execution_failed",
+                "exception_type": type(exc).__name__,
+            }
             if getattr(exc, "outcome_unknown", False):
                 metadata.update({"outcome_unknown": True, "code": "outcome_unknown"})
             return ToolResult(

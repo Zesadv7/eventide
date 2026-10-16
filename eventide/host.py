@@ -77,6 +77,7 @@ from eventide.task_plan import plan_update
 from eventide.task_plan import prompt as task_plan_prompt
 from eventide.task_plan import summary as plan_summary
 from eventide.tool_contracts import production_tool_catalog
+from eventide.tool_loops import failure_fingerprint, failure_loop_candidate
 from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
 from eventide.tool_results import reader as tool_result_reader
 from eventide.tools.runtime_catalog import HANDLERS, TOOLS
@@ -3044,6 +3045,7 @@ class RuntimeHost:
             step_budget_exhausted = False
             # The run budget stays the hard ceiling; this only stops one task from eating it.
             task_park: str | None = None
+            failure_park: str | None = None
             active_task_id: str | None = None
             active_since_step = 1
             parameter_repair_used = False
@@ -3196,7 +3198,7 @@ class RuntimeHost:
                     output = self._semantic(response.text)
                     break
                 invalid_arguments = False
-                for call in calls:
+                for call_index, call in enumerate(calls):
                     tool_count += 1
                     # MCP and unknown/custom tools are always conservative recovery boundaries.
                     readonly = call.name in runtime_readonly_tools
@@ -3234,6 +3236,7 @@ class RuntimeHost:
                             if settled.metadata.get("outcome_unknown"):
                                 await record_unknown(call, settled.content)
                             else:
+                                fingerprint = failure_fingerprint(call, settled)
                                 await self._emit(
                                     run_id,
                                     "tool.completed",
@@ -3243,6 +3246,8 @@ class RuntimeHost:
                                         "content": self._semantic(settled.content),
                                         "is_error": settled.is_error,
                                         "metadata": self._semantic(settled.metadata),
+                                        **({"failure_fingerprint": fingerprint}
+                                           if fingerprint else {}),
                                     },
                                     sink,
                                 )
@@ -3252,6 +3257,7 @@ class RuntimeHost:
                         raise _UnknownToolOutcome(result.content)
                     if result.metadata.get("code") == "invalid_arguments":
                         invalid_arguments = True
+                    fingerprint = failure_fingerprint(call, result)
                     await self._emit(
                         run_id,
                         "tool.completed",
@@ -3261,6 +3267,7 @@ class RuntimeHost:
                             "content": self._semantic(result.content),
                             "is_error": result.is_error,
                             "metadata": self._semantic(result.metadata),
+                            **({"failure_fingerprint": fingerprint} if fingerprint else {}),
                         },
                         sink,
                     )
@@ -3279,6 +3286,35 @@ class RuntimeHost:
                             },
                             sink,
                         )
+                    candidate = failure_loop_candidate(self.store, run_id) if fingerprint else None
+                    if candidate and readonly:
+                        # Successful reads never scan again; only a proposed failure
+                        # stop needs fresh proof that external edits made no progress.
+                        await self._emit(
+                            run_id, "workspace.checkpoint", {
+                                "checkpoint": await asyncio.to_thread(
+                                    execution_checkpoint, workspace_root,
+                                ),
+                            }, sink,
+                        )
+                        candidate = failure_loop_candidate(self.store, run_id)
+                    if candidate:
+                        await self._emit(run_id, "tool.failure_loop_detected", candidate, sink)
+                        for remaining in calls[call_index + 1:]:
+                            await self._emit(run_id, "tool.abandoned", {
+                                "call_id": remaining.id, "name": remaining.name,
+                                "is_error": True, "content": (
+                                    "Tool not dispatched: repeated failure without source progress"
+                                ),
+                                "reason": "repeated_tool_failure", "dispatched": False,
+                            }, sink)
+                        failure_park = self._clean(
+                            f"Tool {call.name} failed identically three times without source "
+                            "progress; session parked for an explicit decision"
+                        )
+                        break
+                if failure_park:
+                    break
                 if invalid_arguments:
                     if parameter_repair_used:
                         raise RuntimeError(
@@ -3290,6 +3326,8 @@ class RuntimeHost:
             if step_budget_exhausted:
                 park_kind = "step_budget"
                 park_message = self._clean(f"Maximum agent steps exceeded ({max_steps})")
+            elif failure_park:
+                park_kind, park_message = "repeated_tool_failure", failure_park
             else:
                 park_kind = "task_step_budget" if task_park else None
                 park_message = task_park

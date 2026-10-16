@@ -25,6 +25,14 @@ v4 迁移遍历原 Workspace，补齐一次性项目关系，保留 Workspace/Se
 
 Project 查询聚合所有副本 Session，不改变原 Workspace API 的过滤语义。源 Workspace 有其他执行副本时拒绝删除，任何含 Session 或 canonical admission 执行引用的副本仍受历史保护。Project 身份不是调度器或锁；U2按该身份共享预算。直接源运行使用 Workspace 锁，Plan 快照及写 worktree 使用下述独立执行所有权，P3以同一事实链实现4根/2模型/20等待的持久调度。
 
+## 普通 Run 的重复失败窗口
+
+`tool_loops.py`从当前 Run 及其显式 `continuation_of` 链的 canonical 工具结果与 checkpoint 重建最近三次实际结果，不保存计数表或缓存。普通新 Run 不继承窗口；Continue 和服务重启不清除证据。只对有非零exit_code、timeout或Executor捕获真实异常时记录的exception_type依据的 `execution_failed`／`timeout` 结果计数；成功、不同参数／错误或不同源码 checkpoint 打断窗口。仅凭字符串`Error:`前缀的旧判错不纳入窗口，避免文件正文误触发；旧is_error呈现不在此重构。预算、未知结果、无效参数／契约和权限拒绝不会被改成普通执行失败。未派发的 `tool.abandoned` 只补齐协议配对，不算已执行结果，也不抹掉失败证据。
+
+`tool.completed.failure_fingerprint`由工具名、实际参数、错误正文及稳定错误字段在脱敏前计算，仅保存hash，避免两个不同秘密参数被脱敏成同一个值后误合并。耗时等易变元数据不参与，错误正文不做模糊匹配。旧事件缺少指纹时不补造历史精度；相同错误只是保守的字面证据，不代表语义判断。写工具复用已有post-tool checkpoint；只读工具出现候选窗口时才额外复核一次源码，避免每步扫描全仓。没有有效checkpoint时退回原步数上限。
+
+窗口满足阈值并复核无源码进展后，保存`tool.failure_loop_detected`，包含threshold、matching_failure_window、三条call引用、checkpoint_hash及continued_failure_chain，终态为`interrupted/repeated_tool_failure`。计数明确表示最近三条匹配窗口，不冒充整个历史失败次数。已发生的结果和唯一模型账本保留；模型同批剩余工具追加`tool.abandoned(dispatched=false)`，不伪造prepared或执行副作用。取消、异常和未知结果保持原有优先语义；停止前按原路径保存恢复checkpoint。证据范围沿用Git可见源码或固定快照，忽略文件和外部服务状态不包含在内。外部进程仍可能在检查之间编辑文件，此机制不是文件系统隔离或测试通过证明。
+
 ## 根 Run 执行副本与所有权（P2）
 
 `RunRequest.execution_target` 默认 source，可显式选择 snapshot 或 worktree；snapshot 仅允许 Plan。Host 接收快照时同时冻结模型配置、Skills、源 checkpoint、完整源码 manifest、相对 cwd 与 snapshot_id，写入同一个 run.admitted 事务；Session/Workspace/Project 的身份和绑定不改。execution_snapshots.py 将 SourceSnapshot 的有界文本复制持久化到状态根 execution-snapshots/<摘要>，只保存内容产物，不创建第二个运行事实源。相同源码可复用只读内容，但每个 Run 仍有独立执行所有权和取消身份。
