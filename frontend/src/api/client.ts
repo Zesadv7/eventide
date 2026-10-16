@@ -86,7 +86,13 @@ function normalizeSession(value: RawSession): Session {
 }
 export const api = {
   workspaces: () => request<Workspace[]>(workspacePath),
-  addWorkspace: (path: string) => post<Workspace>("/api/workspaces", { path }),
+  addWorkspace: (path: string) =>
+    durableMutation<Workspace>(
+      "workspace-register",
+      "/api/workspaces",
+      "POST",
+      { path },
+    ),
   sessions: (workspace: string, archived = false) =>
     request<RawSession[]>(
       `/api/workspaces/${id(workspace)}/sessions?include_archived=${archived}`,

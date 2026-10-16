@@ -24,7 +24,11 @@ def test_workspace_http_catalog_and_session_binding(isolated_workspace):
     other.mkdir()
     host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
     with TestClient(create_app(host)) as client:
-        response = client.post("/api/workspaces", json={"path": str(other)})
+        response = client.post(
+            "/api/workspaces",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+            json={"path": str(other)},
+        )
         assert response.status_code == 201
         workspace_id = response.json()["workspace_id"]
         assert "git_branch" in response.json()
@@ -50,7 +54,12 @@ def test_workspace_http_catalog_and_session_binding(isolated_workspace):
             client.get(f"/api/workspaces/{workspace_id}/sessions").json()[0]["session_id"]
             == session
         )
-        assert client.delete(f"/api/workspaces/{workspace_id}").status_code == 409
+        assert (
+            client.delete(
+                f"/api/workspaces/{workspace_id}", headers={"Idempotency-Key": uuid.uuid4().hex}
+            ).status_code
+            == 409
+        )
         assert client.get("/api/sessions/missing").status_code == 404
         assert client.get("/api/workspaces/missing").status_code == 404
         assert (
@@ -62,7 +71,12 @@ def test_workspace_http_catalog_and_session_binding(isolated_workspace):
             == 404
         )
         assert (
-            client.post("/api/workspaces", json={"path": str(other / "absent")}).status_code == 422
+            client.post(
+                "/api/workspaces",
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+                json={"path": str(other / "absent")},
+            ).status_code
+            == 422
         )
         assert client.post(f"/api/sessions/{session}/continue").status_code == 409
 

@@ -1,6 +1,6 @@
 import {chapters, contextPct, eventType, labels, mergeEvents, operationText, parkSummary, planGroups, projectWork, runActivity, runId, short, terminal, timeline, toolStats} from "./projection.js?v=15";
 import {EventFeed, request} from "./transport.js?v=12";
-import {mutateSession, createSession as createSessionRequest} from "./session-management.js?v=2";
+import {mutateSession, mutateWorkspace, createSession as createSessionRequest} from "./session-management.js?v=3";
 import {el, button, icon, reconcile, markdown} from "./view.js?v=14";
 
 // config.js is null-safe for nodes the v2 console dropped, so a failed import is
@@ -259,7 +259,7 @@ async function addWorkspace(event) {
   $("#save-workspace").disabled = true;
   $("#workspace-message").textContent = "";
   try {
-    const workspace = await request("/api/workspaces", {method: "POST", body: JSON.stringify({path})});
+    const workspace = await mutateWorkspace("/api/workspaces", "POST", {path});
     state.workspaces = [...state.workspaces.filter((item) => item.workspace_id !== workspace.workspace_id), workspace];
     $("#workspace-dialog").close();
     $("#workspace-input").value = "";
@@ -288,7 +288,7 @@ async function removeCurrentWorkspace() {
   closeWorkspaceMenu();
   state.busy.add(`remove:${id}`);
   try {
-    await request(`/api/workspaces/${id}`, {method: "DELETE"});
+    await mutateWorkspace(`/api/workspaces/${id}`, "DELETE");
     state.workspaces = state.workspaces.filter((w) => w.workspace_id !== id);
     showToast("info", "工作区已移除。");
     const next = state.workspaces[0]?.workspace_id;

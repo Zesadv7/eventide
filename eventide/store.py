@@ -216,14 +216,22 @@ class RuntimeStore:
             (row["workspace_id"], project["project_id"], kind),
         )
 
-    def register_workspace(self, path: Path, git_root: str | None) -> WorkspaceRecord:
+    def register_workspace(
+        self, path: Path, git_root: str | None, *,
+        on_registered: Callable[[WorkspaceRecord], None] | None = None,
+    ) -> WorkspaceRecord:
         path = path.expanduser().resolve()
         with self._lock, self._connection:
+            if on_registered:
+                self._connection.execute("BEGIN IMMEDIATE")
             existing = self._connection.execute(
                 "SELECT workspace_id FROM workspaces WHERE path=?", (str(path),)
             ).fetchone()
             if existing is not None:
-                return self.get_workspace(existing["workspace_id"])
+                record = self.get_workspace(existing["workspace_id"])
+                if on_registered:
+                    on_registered(record)
+                return record
             source, common = project_source(path, git_root)
             self._connection.execute(
                 "INSERT OR IGNORE INTO workspaces VALUES (?, ?, ?, ?, ?)",
@@ -233,7 +241,10 @@ class RuntimeStore:
                 "SELECT * FROM workspaces WHERE path=?", (str(path),)
             ).fetchone()
             self._bind_project(dict(row), source, common)
-            return self.get_workspace(row["workspace_id"])
+            record = self.get_workspace(row["workspace_id"])
+            if on_registered:
+                on_registered(record)
+            return record
 
     def get_workspace(self, workspace_id: str) -> WorkspaceRecord:
         with self._lock:
@@ -268,9 +279,13 @@ class RuntimeStore:
                 (workspace_id,),
             ).fetchone()[0])
 
-    def remove_workspace(self, workspace_id: str) -> None:
-        workspace = self.get_workspace(workspace_id)
+    def remove_workspace(
+        self, workspace_id: str, *, on_removed: Callable[[], None] | None = None,
+    ) -> None:
         with self._lock, self._connection:
+            if on_removed:
+                self._connection.execute("BEGIN IMMEDIATE")
+            workspace = self.get_workspace(workspace_id)
             if (self.list_sessions(workspace_id)
                     or self.workspace_has_execution_history(workspace_id)):
                 raise ValueError("Workspace has sessions; removal would orphan history")
@@ -286,6 +301,8 @@ class RuntimeStore:
                     "DELETE FROM projects WHERE project_id=?", (workspace.project_id,)
                 )
             self._connection.execute("DELETE FROM workspaces WHERE workspace_id=?", (workspace_id,))
+            if on_removed:
+                on_removed()
 
     def get_project(self, project_id: str) -> ProjectRecord:
         with self._lock:

@@ -135,7 +135,7 @@ def verify(image: str) -> dict[str, object]:
                 "/api/workspaces",
                 {"path": "/workspaces/demo"},
                 "POST",
-                **origin,
+                **{**origin, "Idempotency-Key": "container-register"},
             )
         )
         session = json.loads(

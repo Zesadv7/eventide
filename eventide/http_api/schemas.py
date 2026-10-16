@@ -51,6 +51,7 @@ class SessionDeleteBody(BaseModel):
 
 
 class WorkspaceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     path: str = Field(min_length=1)
 
 

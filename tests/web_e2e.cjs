@@ -89,7 +89,7 @@ async function api(method, pathName, body) {
   const resp = await fetch(`${state.BASE}${pathName}`, {
     method,
     headers: {...(hasBody ? {"Content-Type": "application/json"} : {}),
-      ...(method === "POST" && pathName === "/api/sessions" ? {"Idempotency-Key": require("node:crypto").randomUUID()} : {})},
+      ...((method === "POST" && ["/api/sessions", "/api/workspaces"].includes(pathName)) || (method === "DELETE" && pathName.startsWith("/api/workspaces/")) ? {"Idempotency-Key": require("node:crypto").randomUUID()} : {})},
     body: hasBody ? JSON.stringify(body) : undefined,
   });
   const text = await resp.text();

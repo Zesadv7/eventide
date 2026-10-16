@@ -521,7 +521,10 @@ class RuntimeHost:
     def workspace_status(self, workspace_id: str) -> dict[str, Any]:
         workspace = self.store.get_workspace(workspace_id)
         metadata = git_metadata(Path(workspace.path))
-        return {**asdict(workspace), **metadata}
+        return {
+            **asdict(workspace), **metadata,
+            "startup_workspace": workspace_id == self.default_workspace.workspace_id,
+        }
 
     def project_status(self, project_id: str) -> dict[str, Any]:
         project = self.store.get_project(project_id)

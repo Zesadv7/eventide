@@ -369,6 +369,7 @@ export const useWorkbench = defineStore("workbench", () => {
     initialize,
     startPolling,
     dispose,
+    loadWorkspaces,
     selectWorkspace,
     selectSession,
     createSession,

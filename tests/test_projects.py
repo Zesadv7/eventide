@@ -194,12 +194,23 @@ def test_project_api_aggregates_and_keeps_workspace_contract(isolated_workspace)
     source, copy = linked_repo(isolated_workspace)
     host = RuntimeHost(replace(settings_for(source), state_dir=isolated_workspace / "state"))
     with TestClient(create_app(host)) as client:
-        result = client.post("/api/workspaces", json={"path": str(copy)})
+        result = client.post(
+            "/api/workspaces",
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+            json={"path": str(copy)},
+        )
         assert result.status_code == 201
         execution = result.json()
         project_id = execution["project_id"]
         assert execution["kind"] == "worktree"
-        assert client.post("/api/workspaces", json={"path": str(copy)}).json() == execution
+        assert (
+            client.post(
+                "/api/workspaces",
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+                json={"path": str(copy)},
+            ).json()
+            == execution
+        )
         sessions = [
             client.post(
                 "/api/sessions",
@@ -242,7 +253,11 @@ def test_project_api_aggregates_and_keeps_workspace_contract(isolated_workspace)
         for path in ("", "/sessions", "/workspaces"):
             assert client.get(f"/api/projects/missing{path}").status_code == 404
         assert (
-            client.delete(f"/api/workspaces/{execution['source_workspace_id']}").status_code == 409
+            client.delete(
+                f"/api/workspaces/{execution['source_workspace_id']}",
+                headers={"Idempotency-Key": uuid.uuid4().hex},
+            ).status_code
+            == 409
         )
 
 

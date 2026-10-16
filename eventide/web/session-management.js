@@ -51,3 +51,21 @@ export async function createSession(workspace) {
     throw error;
   }
 }
+
+export async function mutateWorkspace(path, method, body) {
+  const fingerprint = JSON.stringify([path, method, body]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fingerprint));
+  const storage = "eventide.legacy-workspace." + Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+  const key = sessionStorage.getItem(storage) || crypto.randomUUID();
+  sessionStorage.setItem(storage, key);
+  try {
+    const response = await request(path, {method, headers: {"Idempotency-Key": key},
+      ...(body ? {body: JSON.stringify(body)} : {})});
+    sessionStorage.removeItem(storage);
+    return response;
+  } catch (error) {
+    if ([403,404,422].includes(error.status) || error.mutationOutcome === "rejected")
+      sessionStorage.removeItem(storage);
+    throw error;
+  }
+}

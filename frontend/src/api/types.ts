@@ -3,6 +3,7 @@ export type Generation = components["schemas"]["GenerationPatch"];
 export type RunInput = components["schemas"]["RunBody"];
 export type ProviderInput = components["schemas"]["ProviderConfigBody"];
 export interface Workspace {
+  startup_workspace?: boolean;
   workspace_id: string;
   project_id?: string;
   source_workspace_id?: string;

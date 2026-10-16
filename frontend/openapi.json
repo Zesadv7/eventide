@@ -15501,6 +15501,7 @@
             "title": "Path"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": ["path"],
         "title": "WorkspaceBody"
