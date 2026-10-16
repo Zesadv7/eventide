@@ -66,7 +66,7 @@ export const useWorkbench = defineStore("workbench", () => {
     currentSessions.value.some(
       (s) =>
         ["running", "waiting_for_user"].includes(s.status) &&
-        !["snapshot", "worktree", "evaluation"].includes(
+        !["snapshot", "worktree", "evaluation", "index"].includes(
           (s.execution || s.latest_run?.execution)?.kind || "source",
         ),
     ),

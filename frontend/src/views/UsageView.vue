@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { budgetsApi, type Costs, type Scope } from "../api/budgets";
 import type { UsageLedger } from "../api/types";
 import { useWorkbench } from "../stores/workbench";
@@ -8,8 +9,14 @@ import CostSummary from "../components/CostSummary.vue";
 import PriceEditor from "../components/PriceEditor.vue";
 import InputComposition from "../components/InputComposition.vue";
 import UsageInsights from "../components/UsageInsights.vue";
+const route = useRoute();
+const linkedRun = computed(() =>
+  typeof route?.query.run === "string" ? route.query.run : "",
+);
 const store = useWorkbench(),
-  scope = ref<"session" | "run" | "project" | "day">("session"),
+  scope = ref<"session" | "run" | "project" | "day">(
+    linkedRun.value ? "run" : "session",
+  ),
   day = ref(new Date().toISOString().slice(0, 10)),
   ledger = ref<UsageLedger | null>(null),
   costs = ref<Costs | null>(null),
@@ -20,7 +27,7 @@ let version = 0,
   timer: ReturnType<typeof setInterval> | undefined;
 const identity = computed(() => {
   if (scope.value === "session") return store.selectedSession;
-  if (scope.value === "run") return store.currentRun?.run_id;
+  if (scope.value === "run") return linkedRun.value || store.currentRun?.run_id;
   if (scope.value === "day") return day.value;
   return store.workspaces.find(
     (item) => item.workspace_id === store.selectedWorkspace,
@@ -55,6 +62,9 @@ async function load() {
     if (current === version) loading.value = false;
   }
 }
+watch(linkedRun, (value) => {
+  if (value) scope.value = "run";
+});
 watch(
   [identity, scope],
   () => {
@@ -130,7 +140,7 @@ const grouped = computed(() => {
       >
         当前会话全部历史</button
       ><button :class="{ selected: scope === 'run' }" @click="scope = 'run'">
-        最近运行
+        {{ linkedRun ? "指定运行" : "最近运行" }}
       </button>
       <button
         :class="{ selected: scope === 'project' }"
@@ -145,6 +155,13 @@ const grouped = computed(() => {
     <label v-if="scope === 'day'" class="button-row"
       >统计日期（UTC）<input v-model="day" type="date" required
     /></label>
+    <p
+      v-if="linkedRun && scope === 'run'"
+      class="muted"
+      style="overflow-wrap: anywhere"
+    >
+      运行：{{ linkedRun }}
+    </p>
     <p v-if="!identity" class="empty-state">
       先选择一个项目对话，运行后即可查看用量。
     </p>

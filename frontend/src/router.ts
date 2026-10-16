@@ -6,6 +6,7 @@ import CapabilitiesView from "./views/CapabilitiesView.vue";
 import SkillsView from "./views/SkillsView.vue";
 import QueueView from "./views/QueueView.vue";
 import EvaluationsView from "./views/EvaluationsView.vue";
+import IndexesView from "./views/IndexesView.vue";
 import HistoryView from "./views/HistoryView.vue";
 export const router = createRouter({
   history: createWebHashHistory(),
@@ -19,8 +20,7 @@ export const router = createRouter({
     { path: "/history", component: HistoryView },
     {
       path: "/knowledge",
-      component: CapabilitiesView,
-      props: { area: "knowledge" },
+      component: IndexesView,
     },
     {
       path: "/evaluations",

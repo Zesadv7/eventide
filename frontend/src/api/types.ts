@@ -28,8 +28,9 @@ export interface Run {
   execution?: Execution;
 }
 export interface Execution {
-  kind: "source" | "snapshot" | "worktree" | "evaluation";
+  kind: "source" | "snapshot" | "worktree" | "evaluation" | "index";
   evaluation_id?: string;
+  index_run_id?: string;
   execution_workspace_id?: string;
   name?: string;
   base_commit?: string;

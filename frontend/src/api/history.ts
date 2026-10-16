@@ -9,7 +9,8 @@ export type HistorySession = Omit<Session, "execution"> & {
 export type HistoryRun = Omit<Run, "execution"> & {
   execution?:
     | Execution
-    | { kind: "evaluation"; workspace_id: string; evaluation_id: string };
+    | { kind: "evaluation"; workspace_id: string; evaluation_id: string }
+    | { kind: "index"; workspace_id: string; index_run_id: string };
   completed_at?: number;
   duration_ms?: number;
   continuation_of?: string | null;

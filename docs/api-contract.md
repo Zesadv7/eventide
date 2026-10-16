@@ -335,3 +335,12 @@ Host检索新增kind=embedding、usage_basis=input_only的调用事实，复用�
 部署开关 `EVENTIDE_RETRIEVAL_QUERY_REWRITE=1` 允许每根Run及子任务共用一次改写。持久事件 `retrieval.rewrite_claimed`、`retrieval.supplement_requested`、`retrieval.rewrite_finished` 归属根Run，payload含 `requesting_run_id`，查询仅保存hash。完成状态包括completed、rewrite_invalid_or_unchanged、rewrite_index_changed、failed、cancelled、budget_blocked。请求失败也消耗次数，恢复不重放；请求用量以实际调用Run的 `query_rewrite` attempt计入原账本，根汇总不重复计费。
 
 search_knowledge在启用时最多返回5条，附原查询/改写来源；失败及次数耗尽诊断随工具结果返回。改写不会派发返回文本内的工具指令，预算拒绝仍停驻Run。该开关不是默认收益承诺，也不增加另一套HTTP模型调用入口。
+
+### 索引构建控制面
+
+- `GET /api/indexes/configuration`：返回provider/model/algorithm_version/dimension/config_hash，不返回凭据或endpoint原文。服务端模型资源缺失时409。
+- `POST /api/projects/{project_id}/indexes`：严格body为`config_hash`、`force=false`、`code_structure=false`；必须本机同源及`Idempotency-Key`。持久接收后202，返回run_id/session_id/project_id/status_url/events_url。同键同内容回放，内容冲突409，配置变化或项目构建繁忙409，队列满429。确定未接收的失败附`X-Eventide-Mutation-Outcome: rejected`，未知保持原身份重试。
+- `GET /api/projects/{project_id}/indexes?limit=20&before=<run_id>`：按身份分页，limit最大100。`GET /api/indexes/{run_id}`：运行状态、固定配置/选项、发布证据及错误；`published=null`表示本次无已保存发布证据，不能伪造为0个文件。
+- `POST /api/indexes/{run_id}/cancel`：同源及幂等键，等待精确任务清理；重复停止或终态调用返回同一任务现状。取消排队任务不请求模型、不生成索引。
+
+持久`index.accepted`、`index.published`、`index.cancel_requested`沿用Run SSE；没有逐片段伪进度或第二日志源。重启未完成任务为interrupted，普通Continue不适用于索引控制Session。发布证据含generation和files/rebuilt_files/deleted_files/chunks/skipped/duration_ms/structured_files/structure_fallbacks/chunking_fingerprint；代次与统计同事务绑定。远程embedding用量通过既有Run/project成本接口查询，索引终态不重复累计。

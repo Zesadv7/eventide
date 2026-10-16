@@ -84,6 +84,7 @@ class BuildStats:
     structured_files: int = 0
     structure_fallbacks: dict[str, int] = field(default_factory=dict)
     chunking_fingerprint: str = ""
+    generation: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -606,11 +607,13 @@ class IndexStore:
                     (str(generation + 1),),
                 )
                 connection.execute("PRAGMA user_version = 2")
+                chunk_count = int(connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
+                if check_cancelled:
+                    check_cancelled()
                 connection.execute("COMMIT")
             except BaseException:
                 connection.execute("ROLLBACK")
                 raise
-            chunk_count = int(connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
         finally:
             connection.close()
         return BuildStats(
@@ -623,6 +626,7 @@ class IndexStore:
             structured_files=scan.structured_files,
             structure_fallbacks=dict(scan.structure_fallbacks),
             chunking_fingerprint=chunking_digest,
+            generation=generation + 1,
         )
 
     def sparse_search(self, query: str, *, limit: int) -> list[SparseCandidate]:

@@ -1052,8 +1052,8 @@ class RuntimeHost:
     @staticmethod
     def _execution_key(run_id: str, intent: dict[str, Any]) -> str:
         binding = intent.get("execution_binding", {})
-        if binding.get("kind") == "evaluation":
-            return f"evaluation_run:{run_id}"
+        if binding.get("kind") in {"evaluation", "index"}:
+            return f"{binding['kind']}_run:{run_id}"
         if binding.get("kind") == "snapshot":
             return f"snapshot_run:{run_id}"
         if binding.get("kind") == "worktree":
@@ -1078,8 +1078,9 @@ class RuntimeHost:
         binding = self._execution_binding(run_id)
         if not binding:
             return {"kind": "source"}
-        if binding["kind"] == "evaluation":
-            return {key: binding[key] for key in ("kind", "workspace_id", "evaluation_id")}
+        if binding["kind"] in {"evaluation", "index"}:
+            identifier = "evaluation_id" if binding["kind"] == "evaluation" else "index_run_id"
+            return {key: binding[key] for key in ("kind", "workspace_id", identifier)}
         if binding["kind"] == "worktree":
             return {key: binding[key] for key in (
                 "kind", "workspace_id", "execution_workspace_id", "working_directory",
@@ -2147,6 +2148,7 @@ class RuntimeHost:
         what to check before deciding to abandon.
         """
         from eventide.evaluation_control import is_evaluation_run
+        from eventide.index_control import is_index_run
 
         for run_id in self.store.unfinished_runs():
             payload: dict[str, Any] = {"error": "Host stopped before terminal fact"}
@@ -2156,7 +2158,7 @@ class RuntimeHost:
             # Replacing it with the current filesystem would hide queue-time drift.
             queued = not started and self._admitted_intent(run_id) is not None
             evidence = (None if queued or is_service_probe_run(self.store, run_id)
-                        or is_evaluation_run(self.store, run_id)
+                        or is_evaluation_run(self.store, run_id) or is_index_run(self.store, run_id)
                         else self._crash_gap_evidence(run_id))
             if queued:
                 payload["reason"] = "host_stopped_before_dispatch"

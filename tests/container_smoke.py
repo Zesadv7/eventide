@@ -211,8 +211,47 @@ def verify(image: str) -> dict[str, object]:
             "from pathlib import Path; "
             "print(sorted(p.as_posix() for p in Path('.').rglob('*')))"
         )) == source_listing, "Evaluation wrote into the selected project"
+        docker("exec", name, "python", "-c", (
+            "import subprocess; from pathlib import Path; "
+            "subprocess.run(['git','init','.'],check=True,capture_output=True); "
+            "Path('.git/info/exclude').write_text('.eventide/\\n'); "
+            "Path('index-fixture.txt').write_text('container retrieval validation')"
+        ))
+        index_config = json.loads(request("/api/indexes/configuration"))
+        index_body = {"config_hash": index_config["config_hash"]}
+        index_endpoint = f"/api/projects/{workspace['project_id']}/indexes"
+        index_headers = {**origin, "Idempotency-Key": name + "-index"}
+        index_receipt = json.loads(request(index_endpoint, index_body, "POST", **index_headers))
+        assert json.loads(request(index_endpoint, index_body, "POST", **index_headers)) == (
+            index_receipt
+        )
+        index_path = index_receipt["status_url"]
+        deadline = time.monotonic() + 30
+        while True:
+            index_detail = json.loads(request(index_path))
+            if index_detail["status"] not in {"queued", "running"}:
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError("Container index build did not finish")
+            time.sleep(0.1)
+        assert index_detail["status"] == "completed", index_detail
+        assert index_detail["published"]["stats"]["files"] >= 1
+        indexed_files = json.loads(docker("exec", name, "python", "-c", (
+            "import json; from pathlib import Path; "
+            "from eventide.rag.search import sparse_search; "
+            "print(json.dumps([h.chunk.file for h in "
+            "sparse_search(Path.cwd(), 'container retrieval validation')]))"
+        )))
+        assert "index-fixture.txt" in indexed_files
+        index_usage = json.loads(request(f"/api/runs/{index_receipt['run_id']}/usage"))
+        assert index_usage["attempt_count"] == 0
         docker("rm", "--force", name)
         boot(peer)
+        index_headers["Origin"] = address
+        assert json.loads(request(index_path)) == index_detail
+        assert json.loads(request(index_endpoint, index_body, "POST", **index_headers)) == (
+            index_receipt
+        )
         assert json.loads(request("/api/sessions/" + session))["session_id"] == session
         provider = json.loads(request("/api/config/provider"))
         assert provider["model"] == "verification-only"
@@ -232,6 +271,7 @@ def verify(image: str) -> dict[str, object]:
             "management_origin_checks": "passed",
             "restart_persistence": "passed",
             "external_model_requests": 0,
+            "index_publication_restart_replay": "passed",
             "queue_limits": queue["limits"],
             "queue_after_restart": "idle",
             "offline_evaluation": {

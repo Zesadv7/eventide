@@ -477,3 +477,9 @@ retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime�
 本地实验报告不创建生产模型调用事实、不声称零费用等于整体成本免费；同步入口拒绝远程profile。额外改写方法必须自行复用Run预算与账本。`promotion_decision`要求质量一升另一不降、p95不超过两倍，并且显式下游成功数不下降；缺少下游证据永不晋升。当前四路真实本地对照未满足条件，C4/C5仍有改写和下游实验未完成。
 
 索引CPU线程通过 `index_runtime` 将远程embedding交回拥有Run的事件循环，共用既有模型槽、原子预算与attempt账本；不创建辅助Host或第二Store。IndexStore的128片段内部批次再拆为最多64，线程等待实际请求完成。取消标记同时禁止后续批次和索引发布；主任务等待在途请求清理及线程退出，重复取消不提前释放所有权。已完成批次的消费保留，后续失败不发布新代次。发布事务已经结束后到达的取消不能回滚既成事实，控制面应读取实际代次而非猜测文件状态。
+
+### 索引控制Run
+
+`IndexController`为每个项目建立归档的受信任control Session，拒绝普通Agent消息/Continue。HTTP以同源幂等键持久接收 `run.admitted` 与 `index.accepted`，随后由原Root调度器执行；同项目索引串行，索引控制身份独立于源码会话，不长期占住源码执行锁。Run冻结配置指纹与构建选项，凭据仅在内存的Settings中传递。恢复仅停驻，不根据旧事实重发外部请求。
+
+执行使用 `index_runtime.build_index`，全部远程批次归属该Run/项目/UTC日预算。发布统计与generation从同一SQLite提交事务返回，避免提交后另读索引误绑定其他构建的代次。`index.published`仅存摘要，运行详情/分页历史从主Event Log重建；取消及失败保留既有attempt、未知预留和旧索引。队列、历史页跳转专门索引页，用量页接受明确Run身份，控制Session不进入普通聊天执行。
