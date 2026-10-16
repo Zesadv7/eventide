@@ -119,20 +119,23 @@ async def test_invalid_final_json_is_preserved_then_fails_without_retry(isolated
         settings_for(isolated_workspace), provider="openai_compatible",
         base_url=ENDPOINT, model="glm-5.3-flash",
     )
-    provider = ScriptedProvider([{"text": text, "usage": {"input_tokens": 4, "output_tokens": 3}}])
+    provider = ScriptedProvider([
+        {"text": "draft", "usage": {"input_tokens": 1, "output_tokens": 1}},
+        {"text": text, "usage": {"input_tokens": 4, "output_tokens": 3}},
+    ])
     host = RuntimeHost(settings, provider, enable_mcp=False)
     try:
         result = await host.run(RunRequest("Answer", generation={"response_format": "json_object"}))
         assert result.status == "failed" and "response_format=json_object" in result.output
-        assert len(provider.requests) == 1
-        assert "one JSON object" in provider.requests[0].system
+        assert len(provider.requests) == 2
+        assert "one JSON object" in provider.requests[1].system
         events = host.store.run_events(result.run_id)
-        response = next(event for event in events if event["type"] == "model.response")
+        response = [event for event in events if event["type"] == "model.response"][-1]
         assert response["payload"]["text"] == text
         assert events.index(response) < len(events) - 1
         assert events[-1]["type"] == "run.failed"
         assert not any(event["type"] == "model.retry" for event in events)
-        assert result.usage == {"input_tokens": 4, "output_tokens": 3}
+        assert result.usage == {"input_tokens": 5, "output_tokens": 4}
     finally:
         await host.close()
 
@@ -141,13 +144,14 @@ async def test_json_freezes_for_tool_rounds_continue_and_null_reset(isolated_wor
     source = make_repo(isolated_workspace / "source")
     settings = replace(
         settings_for(source), provider="openai_compatible", base_url=ENDPOINT,
-        model="glm-5.3-flash", max_steps=1, state_dir=isolated_workspace / "state",
+        model="glm-5.3-flash", max_steps=2, state_dir=isolated_workspace / "state",
     )
     (source / "code.py").write_text("value = 1\n")
     provider = ScriptedProvider([
         {"text": "I will inspect first", "tool_calls": [
             {"id": "read", "name": "read_file", "arguments": {"path": "code.py"}},
         ]},
+        {"text": ' {"ok":true} '},
         {"text": ' {"ok":true} '},
         {"text": "ordinary text"},
     ])
@@ -159,11 +163,12 @@ async def test_json_freezes_for_tool_rounds_continue_and_null_reset(isolated_wor
         host.configure_generation(settings.model, {"response_format": "text"})
         continued = await host.continue_session(first.session_id)
         assert continued.status == "completed" and continued.output == ' {"ok":true} '
-        assert all(request.generation["response_format"] == "json_object"
+        assert all("response_format" not in request.generation
                    for request in provider.requests[:2])
+        assert provider.requests[2].generation["response_format"] == "json_object"
         plain = await host.run(RunRequest("Answer", generation={"response_format": None}))
         assert plain.status == "completed"
-        assert "response_format" not in provider.requests[2].generation
+        assert "response_format" not in provider.requests[3].generation
     finally:
         await host.close()
 
@@ -173,7 +178,9 @@ async def test_controlled_facts_quote_and_calls_freeze_json_without_changing_rep
 ):
     source = make_repo(isolated_workspace / "source")
     suite = load_builtin_suite("engineering-v1", split="development")
-    script = [entry for case in suite["cases"] for entry in case["script"]]
+    script = [entry for case in suite["cases"] for entry in (
+        case["script"] + ([case["script"][-1]] if case["grade"]["kind"] == "facts" else [])
+    )]
     settings = replace(
         settings_for(source), provider="openai_compatible", base_url=ENDPOINT,
         model="glm-5.3-flash", state_dir=isolated_workspace / "state",
@@ -208,7 +215,8 @@ async def test_controlled_facts_quote_and_calls_freeze_json_without_changing_rep
         for attempt in attempts:
             category = categories[attempt["evaluation_origin"]["case_id"]]
             assert attempt["generation"].get("response_format") == (
-                "json_object" if category in {"understanding", "diagnosis"} else None
+                "json_object" if category in {"understanding", "diagnosis"}
+                and attempt["phase"] == "finalization" else None
             )
     finally:
         await host.close()
@@ -219,7 +227,7 @@ def test_json_http_requires_chat_capability_and_accepts_explicit_declaration(iso
         settings_for(isolated_workspace), provider="openai_compatible",
         base_url="https://custom.invalid/v1", model="custom",
     )
-    provider = ScriptedProvider([{"text": '{"ok":true}'}])
+    provider = ScriptedProvider([{"text": "draft"}, {"text": '{"ok":true}'}])
     host = RuntimeHost(settings, provider, enable_mcp=False)
     session = host.create_session()
     with TestClient(create_app(host)) as client:
@@ -239,4 +247,5 @@ def test_json_http_requires_chat_capability_and_accepts_explicit_declaration(iso
         accepted = client.post(path, json={"prompt": "Answer"}, headers={"Idempotency-Key": "json"})
         assert accepted.status_code == 202
         assert wait_for_run(client, accepted.json()["run_id"])["status"] == "completed"
-        assert provider.requests[0].generation["response_format"] == "json_object"
+        assert "response_format" not in provider.requests[0].generation
+        assert provider.requests[1].generation["response_format"] == "json_object"

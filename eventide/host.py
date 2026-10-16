@@ -932,6 +932,7 @@ class RuntimeHost:
                     "kind": call_kind, "model": request.model, "generation": request.generation,
                     "max_output_tokens": request.max_tokens,
                     "provider": self.settings.provider,
+                    **({"phase": request.phase} if request.phase else {}),
                     **({"evaluation_origin": dict(_evaluation_origin)}
                        if _evaluation_origin is not None else {}),
                 }
@@ -2637,6 +2638,20 @@ class RuntimeHost:
                 )
             mode, selected_model = intent["mode"], intent["model"]
             generation = {} if readonly_profile else intent.get("generation", {})
+            json_output = generation.get("response_format") == "json_object"
+            finalizing = False
+            previous_id = continuation_of
+            while json_output and previous_id and not finalizing:
+                previous = self.store.get_run(previous_id)
+                assert previous is not None
+                if previous["session_id"] != session_id:
+                    raise ValueError("JSON finalization continuation crosses Session boundary")
+                finalizing = any(
+                    event["type"] == "model.response"
+                    and event["payload"].get("draft_for") == "json_object"
+                    for event in self.store.run_events(previous_id)
+                )
+                previous_id = previous["continuation_of"]
             max_tokens = generation.get("max_output_tokens", max_tokens)
             if readonly_profile:
                 mode = "plan"
@@ -3121,11 +3136,6 @@ class RuntimeHost:
                 + (f"\n\n{skill_prompt}" if skill_prompt else "")
                 + (f"\n\n{mode_note}" if mode_note else "")
             )
-            if generation.get("response_format") == "json_object":
-                base_system += (
-                    "\n\nReturn the final response as one JSON object, without Markdown "
-                    "fences or surrounding prose. Preserve the user's requested fields."
-                )
             catalog_hash = digest(tools)
             tool_catalog_chars = tool_catalog_size(tools)
             await self._emit(
@@ -3268,6 +3278,13 @@ class RuntimeHost:
             ), None) if delivery_id else None
             for steps in range(1, max_steps + 1):
                 ensure_token_budget()
+                phase = "finalization" if finalizing else "tools" if json_output else "agent"
+                request_tools = [] if finalizing else tools
+                request_generation = dict(generation)
+                if json_output and not finalizing:
+                    request_generation.pop("response_format")
+                request_catalog_hash = digest([]) if finalizing else catalog_hash
+                request_catalog_chars = tool_catalog_size([]) if finalizing else tool_catalog_chars
                 plan_state = self.store.task_plan_state(session_id)
                 plan_todos = (plan_state["todos"] if plan_state else None) or None
                 current_task = task_plan_active(plan_todos)
@@ -3287,6 +3304,17 @@ class RuntimeHost:
                 if resume_note:
                     plan_context = f"{resume_note}\n\n{plan_context}"
                 system = base_system + (f"\n\n{plan_context}" if plan_context else "")
+                if json_output:
+                    system += (
+                        "\n\nTool investigation is complete. Return the final response as one "
+                        "JSON object, without Markdown fences or surrounding prose. Preserve "
+                        "the user's requested fields and ground facts in the recorded tool "
+                        "results. Tools are unavailable in this final response."
+                        if finalizing else
+                        "\n\nInvestigate using tools before answering. Final JSON formatting "
+                        "happens in a separate response. When the investigation is complete, "
+                        "return a factual draft for that response; do not invent evidence."
+                    )
                 if delivery_contract:
                     ledger = delivery_usage(self.store, delivery_contract["delivery_id"])
                     limits = delivery_contract["limits"]
@@ -3316,7 +3344,7 @@ class RuntimeHost:
                     force=force_compact,
                     secrets=(self.settings.api_key or "",),
                     system=system,
-                    tools=tools,
+                    tools=request_tools,
                     complete_summary=complete_summary,
                 )
                 force_compact = False
@@ -3335,12 +3363,13 @@ class RuntimeHost:
                     {
                         "step": steps,
                         "message_count": len(messages),
-                        "tool_count": len(tools),
+                        "tool_count": len(request_tools),
                         "context_hash": digest(messages),
-                        "tool_catalog_hash": catalog_hash,
+                        "tool_catalog_hash": request_catalog_hash,
                         "model": selected_model,
-                        "request_chars": request_size(system, messages, tools),
-                        "tool_catalog_chars": tool_catalog_chars,
+                        "request_chars": request_size(system, messages, request_tools),
+                        "tool_catalog_chars": request_catalog_chars,
+                        "phase": phase, "generation": request_generation,
                     },
                     sink,
                 )
@@ -3352,13 +3381,15 @@ class RuntimeHost:
                     ModelRequest(
                         system,
                         provider_messages,
-                        tools,
+                        request_tools,
                         selected_model,
                         max_tokens,
-                        dict(generation),
+                        request_generation,
+                        phase=phase,
                     ),
                     run_id,
                     sink,
+                    max_attempts=1 if finalizing else 3,
                 )
                 record_usage(response)
                 # Persist exactly the normalized response that the next model request sees.
@@ -3388,6 +3419,11 @@ class RuntimeHost:
                         "stop_reason": response.stop_reason,
                         "tool_calls": len(calls),
                         "usage": response.usage,
+                        "phase": phase,
+                        **({"draft_for": "json_object"} if (
+                            json_output and not finalizing and not calls
+                            and response.stop_reason not in TRUNCATION_REASONS
+                        ) else {}),
                     },
                     sink,
                     role="assistant",
@@ -3406,8 +3442,19 @@ class RuntimeHost:
                         f"Model output truncated ({response.stop_reason}); raise "
                         f"max_output_tokens / EVENTIDE_MAX_TOKENS (currently {max_tokens})"
                     )
+                if finalizing and calls:
+                    for call in calls:
+                        await self._emit(run_id, "tool.abandoned", {
+                            "call_id": call.id, "name": call.name, "is_error": True,
+                            "content": "Tool not dispatched: JSON finalization has no tools",
+                            "reason": "finalization_tools_disabled", "dispatched": False,
+                        }, sink)
+                    raise RuntimeError("JSON finalization cannot invoke tools")
                 if not calls:
-                    if generation.get("response_format") == "json_object":
+                    if json_output and not finalizing:
+                        finalizing = True
+                        continue
+                    if finalizing:
                         try:
                             structured = json.loads(response.text)
                             if not isinstance(structured, dict):

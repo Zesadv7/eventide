@@ -152,7 +152,7 @@ def case_evidence(
             attempts.append({"run_id": event["run_id"], **{
                 key: event["payload"].get(key) for key in (
                     "attempt_id", "request_id", "attempt", "provider", "model", "kind",
-                    "generation", "max_output_tokens",
+                    "generation", "max_output_tokens", "phase",
                 )
             }})
     tool_results = [event for event in events if event["type"] == "tool.completed"]

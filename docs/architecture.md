@@ -143,7 +143,11 @@ HTTP写请求先校验浏览器同源与本机Origin；无Origin的可信非浏�
 
 生成参数使用 `generation.py` 严格校验和能力描述。模型默认/会话覆盖保存在 `generation.configured` 追加事实中，通过 Provider、endpoint、model 的哈希隔离；模型默认管理使用归档 Session，不新增独立可变配置表。省略继承、null清除、0有效，`run.admitted/started.generation` 保存有效请求快照。Continue在原接入下继承并重验，切换接入则重新解析；摘要/只读子Run不隐式继承用户采样覆盖。`ModelRequest.generation` 由adapter映射到SDK参数，最大输出仍受现有请求字段约束。
 
-`response_format=text|json_object`沿同一生成配置链冻结，省略不发送，null恢复未设置；`capabilities.response_formats`默认空。已核实的精确BigModel GLM-5.3-Flash Chat端点声明两种格式，其他Chat需显式能力声明；未知能力、Anthropic和Responses拒绝该参数。Chat的完整响应和流式共用`response_format={type: ...}`映射。JSON模式在系统指令中要求单一JSON对象；工具轮和截断仍沿原逻辑处理。最终无工具且未截断的响应先保存原`model.response`及用量，再检查JSON对象语法和非有限数值；非法时Run失败，不剥围栏、不重发、不增加纠错轮次。语法通过不证明字段、事实或引用正确。
+`response_format=text|json_object`沿同一生成配置链冻结，省略不发送，null恢复未设置；`capabilities.response_formats`默认空。已核实的精确BigModel GLM-5.3-Flash Chat端点声明两种格式，其他Chat需显式能力声明；未知能力、Anthropic和Responses拒绝该参数。json_object是最终输出契约：同一个主循环先以phase=tools调查，保留工具目录而不下发原生response_format；第一次完整且无工具的响应仅为草稿，在同一model.response事实标记draft_for=json_object。无论草稿是否已经是合法JSON，下一步都统一进行一次phase=finalization，无工具目录并下发原生json_object。最终化不再进入工具执行；供应商幻觉工具调用记录abandoned完成配对后失败。text保持原请求次数，修复和辅助调用不自动进入两阶段。
+
+两阶段共用原_complete_with_retry、模型槽、预算、Token和步数上限；最终化只允许一次真实尝试，失败不自动重发。最后一步才产生草稿时按step_budget停驻，不在循环外追加调用；Continue仅沿自身同Session continuation链恢复draft标记，普通新Run重新调查。取消恰好落在草稿落库后也能恢复阶段，重启只停驻、不自动派发；显式Continue不重放已完成工具，旧未知用量和预留继续保留。model.request记录phase、真实generation和工具目录hash/count/字符数，attempt和用量/评测导出保留phase；admission中的generation仍保存最终输出契约，不能将它解释为工具阶段的实际SDK参数。Chat完整及流式共用现有映射，最终完整响应保存原model.response及用量后才严格校验JSON对象及非有限数值；非法时失败，不剥围栏、不修正。语法通过不证明事实正确。
+
+本机GLM当前配置的两个JSON加工具probe均未调用工具、仅返回占位JSON，而同任务text探测实际完成read_file；这是本机该配置的实测，不推断供应商全部组合互斥。两阶段将工具调查与原生JSON最终输出分开，真实效果继续单独验证。
 
 真实工程评测规划显式返回`fact_response_format`，只在该Chat模型已声明支持时选择json_object，并固定到`evaluation.accepted`及报告provenance；事实任务按类型将其作为本次生成覆盖。修复任务不自动启用，摘要及只读worker保持独立参数，Scripted离线仍使用原脚本且不冒造JSON能力。旧接收事实未配置此协议时保持原行为；新协议的实际调用参数进入原attempt证据，不重写历史报告或放宽事实grader。JSON、思考和工具的供应商组合支持仍须以实际调用另验收。
 

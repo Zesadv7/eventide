@@ -35,10 +35,10 @@ def _read_report(report):
 async def test_failure_kept_and_next_offline_case_runs(isolated_workspace, monkeypatch):
     original = evaluation._run_case
 
-    async def fail_first(runtime, case, *args):
+    async def fail_first(runtime, case, *args, **kwargs):
         if case["id"] == "broken":
             raise RuntimeError("synthetic grading failure")
-        return await original(runtime, case, *args)
+        return await original(runtime, case, *args, **kwargs)
 
     monkeypatch.setattr(evaluation, "_run_case", fail_first)
     report = await run_evaluations(

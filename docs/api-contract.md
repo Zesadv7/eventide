@@ -44,7 +44,9 @@ Run与Continue要求`Idempotency-Key`（1–128个可见ASCII字符）。同Sess
 - `POST /api/sessions/{id}/runs` 新增 `generation`：temperature、top_p、max_output_tokens、reasoning_effort、thinking、response_format。省略继承，null恢复默认，0有效；额外字段/非有限值/范围错误422。
 - 写配置仅本机来源；支持情况未知时拒绝显式采样参数。接收时冻结，Continue相同接入继承；已有调用不受后续设置影响。尚无自动运行探测或按任务预设。
 
-`response_format`取text或json_object；`capabilities.response_formats`默认空，只有已确认的精确GLM-5.3-Flash Chat或显式声明的Chat能力接受，其他接口/未知能力在接收前422。省略不发SDK字段，null恢复未设置。JSON模式的最终无工具、未截断响应若不是合法单个JSON对象（包括非有限数值），保存原model.response后Run明确failed，错误含response_format=json_object；不剥围栏、不重发。该契约不保证事实、字段或引用通过验收。
+`response_format`取text或json_object；`capabilities.response_formats`默认空，只有已确认的精确GLM-5.3-Flash Chat或显式声明的Chat能力接受，其他接口/未知能力在接收前422。省略不发SDK字段，null恢复未设置。json_object为最终输出契约：调查请求phase=tools保留工具并不下发原生response_format；首次完整无工具响应标draft_for=json_object，下一步统一一次phase=finalization，以空工具目录和原生JSON生成最终对象。草稿本身合法也不能省略该步骤。两阶段共享原Run步数/模型请求/预算，步数末轮的草稿停驻后由显式Continue恢复，不额外绕过上限；普通新Run不继承阶段。
+
+model.request/response和实际attempt记录phase，request另含真实generation与工具目录hash/count；冻结admission.generation表示最终契约，不能据此宣称全程原生JSON。最终化的工具幻觉只记录abandoned配对并failed，不执行；断流、取消和未知沿原规则保存事实。最终化最多一次真实尝试；完整终态保存原model.response及用量后才验证单个JSON对象（包括非有限数值），非法时failed且错误含response_format=json_object，不剥围栏、不纠错、不重发。该契约不保证事实、字段或引用通过验收。
 
 ### 请求用量账本 —— 后端及 Vue 已实现，费用控制面见 U2/U3
 

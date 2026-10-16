@@ -24,6 +24,7 @@ class ModelRequest:
     model: str
     max_tokens: int = 8_000
     generation: dict[str, Any] = field(default_factory=dict)
+    phase: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

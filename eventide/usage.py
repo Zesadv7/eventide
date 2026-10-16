@@ -252,6 +252,7 @@ def _attempt_row(
             "attempt_id": key[1],
             "attempt": _count(payload.get("attempt")),
             "kind": payload.get("kind", "agent"),
+            **({"phase": payload["phase"]} if "phase" in payload else {}),
             "model": payload.get("model"),
             "status": payload.get("status", "unknown") if finish else "unknown",
             "request_observed": start is not None,
