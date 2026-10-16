@@ -41,8 +41,10 @@ Run与Continue要求`Idempotency-Key`（1–128个可见ASCII字符）。同Sess
 - `GET /api/generation/defaults?model=...` 返回 `model_identity/defaults/session/capabilities/config_hash`，身份绑定Provider、endpoint和模型。
 - `PUT /api/generation/defaults` 接受 `{model, generation, capabilities?, expected_config_hash}`；显式能力声明标为declared，不冒充已验证。
 - `GET/PUT /api/sessions/{id}/generation` 读取/替换该模型下的会话覆盖，PUT不允许重新声明模型能力。
-- `POST /api/sessions/{id}/runs` 新增 `generation`：temperature、top_p、max_output_tokens、reasoning_effort、thinking。省略继承，null恢复默认，0有效；额外字段/非有限值/范围错误422。
+- `POST /api/sessions/{id}/runs` 新增 `generation`：temperature、top_p、max_output_tokens、reasoning_effort、thinking、response_format。省略继承，null恢复默认，0有效；额外字段/非有限值/范围错误422。
 - 写配置仅本机来源；支持情况未知时拒绝显式采样参数。接收时冻结，Continue相同接入继承；已有调用不受后续设置影响。尚无自动运行探测或按任务预设。
+
+`response_format`取text或json_object；`capabilities.response_formats`默认空，只有已确认的精确GLM-5.3-Flash Chat或显式声明的Chat能力接受，其他接口/未知能力在接收前422。省略不发SDK字段，null恢复未设置。JSON模式的最终无工具、未截断响应若不是合法单个JSON对象（包括非有限数值），保存原model.response后Run明确failed，错误含response_format=json_object；不剥围栏、不重发。该契约不保证事实、字段或引用通过验收。
 
 ### 请求用量账本 —— 后端及 Vue 已实现，费用控制面见 U2/U3
 
@@ -452,7 +454,7 @@ EvaluationDetail.mode现在为offline|live，measurement_kind为scripted_mechani
 
 ### 真实评测规划与确认
 
-`GET /api/projects/{project_id}/evaluations/quote?split=development|holdout|all`只读返回quote_hash、任务指纹/数量、provider/model/generation、planning_tokens、estimate_method、assumptions、limits和按币种分列的estimates。每币种包含known_amount、complete、unknown_categories及固定price_version的lines；缺价格返回空estimates且complete=false。规划不是实测或账单上限。
+`GET /api/projects/{project_id}/evaluations/quote?split=development|holdout|all`只读返回quote_hash、任务指纹/数量、provider/model/generation、fact_response_format、planning_tokens、estimate_method、assumptions、limits和按币种分列的estimates。fact_response_format为json_object或null，仅已声明支持的Chat事实任务启用；随规划固定到evaluation.accepted及报告provenance，各次实际参数仍记录在原attempt账本。修复及辅助调用不自动继承，offline不冒造能力。每币种包含known_amount、complete、unknown_categories及固定price_version的lines；缺价格返回空estimates且complete=false。规划不是实测或账单上限。
 
 创建评测支持mode=offline|live（默认offline）。live额外要求confirmed=true和64位quote_hash；模型配置、任务、有效价格或划分变化导致409 rejected。首次持久接收冻结规划；同键同正文重放在重新核对规划之前返回原身份。offline仍使用原四字段请求指纹，不因新增默认字段破坏旧请求恢复。目录用supported_modes/default_mode描述支持能力；measurement_kind/billing_applicable由具体批次决定，不能将目录解释为免费声明。
 

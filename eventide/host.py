@@ -3121,6 +3121,11 @@ class RuntimeHost:
                 + (f"\n\n{skill_prompt}" if skill_prompt else "")
                 + (f"\n\n{mode_note}" if mode_note else "")
             )
+            if generation.get("response_format") == "json_object":
+                base_system += (
+                    "\n\nReturn the final response as one JSON object, without Markdown "
+                    "fences or surrounding prose. Preserve the user's requested fields."
+                )
             catalog_hash = digest(tools)
             tool_catalog_chars = tool_catalog_size(tools)
             await self._emit(
@@ -3402,6 +3407,16 @@ class RuntimeHost:
                         f"max_output_tokens / EVENTIDE_MAX_TOKENS (currently {max_tokens})"
                     )
                 if not calls:
+                    if generation.get("response_format") == "json_object":
+                        try:
+                            structured = json.loads(response.text)
+                            if not isinstance(structured, dict):
+                                raise ValueError("Expected a JSON object")
+                            json.dumps(structured, allow_nan=False)
+                        except (ValueError, RecursionError) as exc:
+                            raise ValueError(
+                                "Final model response violates response_format=json_object"
+                            ) from exc
                     output = self._semantic(response.text)
                     break
                 invalid_arguments = False

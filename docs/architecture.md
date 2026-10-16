@@ -143,6 +143,10 @@ HTTP写请求先校验浏览器同源与本机Origin；无Origin的可信非浏�
 
 生成参数使用 `generation.py` 严格校验和能力描述。模型默认/会话覆盖保存在 `generation.configured` 追加事实中，通过 Provider、endpoint、model 的哈希隔离；模型默认管理使用归档 Session，不新增独立可变配置表。省略继承、null清除、0有效，`run.admitted/started.generation` 保存有效请求快照。Continue在原接入下继承并重验，切换接入则重新解析；摘要/只读子Run不隐式继承用户采样覆盖。`ModelRequest.generation` 由adapter映射到SDK参数，最大输出仍受现有请求字段约束。
 
+`response_format=text|json_object`沿同一生成配置链冻结，省略不发送，null恢复未设置；`capabilities.response_formats`默认空。已核实的精确BigModel GLM-5.3-Flash Chat端点声明两种格式，其他Chat需显式能力声明；未知能力、Anthropic和Responses拒绝该参数。Chat的完整响应和流式共用`response_format={type: ...}`映射。JSON模式在系统指令中要求单一JSON对象；工具轮和截断仍沿原逻辑处理。最终无工具且未截断的响应先保存原`model.response`及用量，再检查JSON对象语法和非有限数值；非法时Run失败，不剥围栏、不重发、不增加纠错轮次。语法通过不证明字段、事实或引用正确。
+
+真实工程评测规划显式返回`fact_response_format`，只在该Chat模型已声明支持时选择json_object，并固定到`evaluation.accepted`及报告provenance；事实任务按类型将其作为本次生成覆盖。修复任务不自动启用，摘要及只读worker保持独立参数，Scripted离线仍使用原脚本且不冒造JSON能力。旧接收事实未配置此协议时保持原行为；新协议的实际调用参数进入原attempt证据，不重写历史报告或放宽事实grader。JSON、思考和工具的供应商组合支持仍须以实际调用另验收。
+
 每次模型调用记录 `model.attempt_started/finished`，同重试组共享request_id，每次真实尝试有独立attempt_id。成功保存报告usage，失败/取消无usage记unknown；事件不记录请求正文。原model.response和summary事件继续提供上下文事实，后续用量账本只以attempt事实计算，避免重复计数。
 
 SDK内部重试显式关闭，Host统一重试，因此每条attempt对应一次SDK请求。默认最大输出也纳入有效参数快照，重启改变启动默认不会改变Continue。Session覆盖查询同时绑定模型身份，切换模型再切回仍可恢复各自设置。Chat兼容adapter保留并回传其reasoning_content私有状态，不泄漏到其他Provider格式。

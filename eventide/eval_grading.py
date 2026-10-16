@@ -116,12 +116,14 @@ async def _baseline(
 
 async def run_benchmark_case(
     host: RuntimeHost, case: dict[str, Any], source: Path, session: str,
+    *, fact_response_format: str | None = None,
 ) -> tuple[RunResult, dict[str, Any], tuple[str, ...]]:
     original = _fixture_hashes(case, source)
     checkpoint = workspace_checkpoint(source)
     if case["grade"]["kind"] == "facts":
         result = await host.run(RunRequest(
             case["prompt"], session, mode="plan", execution_target="snapshot",
+            generation=({"response_format": fact_response_format} if fact_response_format else {}),
         ))
         reasons = grade_facts(case, result.output)
         source_unchanged = workspace_checkpoint(source) == checkpoint

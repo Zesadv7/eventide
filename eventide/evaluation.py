@@ -171,10 +171,13 @@ async def _run_case(
     case: dict[str, Any],
     sandbox: Path | None,
     session_id: str,
+    *, fact_response_format: str | None = None,
 ) -> tuple[RunResult, dict[str, Any], tuple[str, ...]]:
     if "benchmark" in case:
         assert sandbox is not None
-        return await run_benchmark_case(runtime, case, sandbox, session_id)
+        return await run_benchmark_case(
+            runtime, case, sandbox, session_id, fact_response_format=fact_response_format,
+        )
     request = RunRequest(
         prompt=str(case["prompt"]), session_id=session_id,
         generation=GenerationPatch.model_validate(case.get("generation", {})).patch(),
@@ -313,8 +316,11 @@ def _judge(
 async def _bounded_case(
     runtime: RuntimeHost, case: dict[str, Any], sandbox: Path, session_id: str,
     timeout: float,
+    *, fact_response_format: str | None = None,
 ) -> tuple[RunResult, dict[str, Any], tuple[str, ...]]:
-    task = asyncio.create_task(_run_case(runtime, case, sandbox, session_id))
+    task = asyncio.create_task(_run_case(
+        runtime, case, sandbox, session_id, fact_response_format=fact_response_format,
+    ))
     try:
         done, _ = await asyncio.wait({task}, timeout=timeout)
         if not done:
@@ -336,6 +342,7 @@ async def _evaluate_case(
     live: bool, prices: tuple[PriceVersion, ...], case_timeout: float,
     call_authority: tuple[RuntimeHost, str] | None = None,
     generation_snapshot: dict[str, Any] | None = None,
+    fact_response_format: str | None = None,
     profile: EvaluationProfile | None = None,
 ) -> tuple[EvalCaseResult, bool]:
     mode = "live" if live else "offline"
@@ -402,6 +409,7 @@ async def _evaluate_case(
             raise TimeoutError("Evaluation fixture preparation exceeded its wall-clock limit")
         result, verification, acceptance_reasons = await _bounded_case(
             runtime, case, sandbox, session_id, remaining,
+            fact_response_format=fact_response_format,
         )
         stage = "grading"
         _, reasons = _judge(case, result.output, store.get_events(result.run_id),
@@ -562,6 +570,7 @@ async def run_evaluations(
     for price in prices:
         price.payload()
     generation_snapshot = None
+    fact_response_format = None
     profile = profile or evaluation_profile(preset)
     if call_authority is not None:
         if not live or prices:
@@ -587,6 +596,7 @@ async def run_evaluations(
             raise ValueError("Controlled evaluation has no frozen generation configuration")
         GenerationPatch.model_validate(generation_snapshot["defaults"])
         GenerationCapabilities.model_validate(generation_snapshot["capabilities"])
+        fact_response_format = accepted.get("fact_response_format")
     settings = settings or Settings.from_env()
     if live and call_authority is None:
         settings = resolve_provider_configuration(settings)
@@ -609,6 +619,7 @@ async def run_evaluations(
         "inputs": inputs, "split": split, "prices": [price.payload() for price in prices],
         "case_timeout": case_timeout,
         "profile": profile.snapshot(),
+        "fact_response_format": fact_response_format,
         **({"builtin_suite": suite_metadata} if suite_metadata is not None else {}),
     }
     results: list[EvalCaseResult] = []
@@ -633,6 +644,7 @@ async def run_evaluations(
             case, index, settings, directory / f"case-{index:03d}",
             live=live, prices=prices, case_timeout=case_timeout,
             call_authority=call_authority, generation_snapshot=generation_snapshot,
+            fact_response_format=fact_response_format,
             profile=profile,
         )
         results.append(entry)

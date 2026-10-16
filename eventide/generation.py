@@ -20,6 +20,7 @@ class GenerationPatch(BaseModel):
         Literal["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] | None
     ) = None
     thinking: Literal["enabled", "disabled"] | None = None
+    response_format: Literal["text", "json_object"] | None = None
 
     def patch(self) -> dict[str, Any]:
         return self.model_dump(exclude_unset=True)
@@ -36,6 +37,7 @@ class GenerationCapabilities(BaseModel):
     top_p_min: float = Field(default=0, ge=0, le=1)
     sampling_precision: int | None = Field(default=None, ge=0, le=6)
     max_output_tokens: int | None = Field(default=None, gt=0, le=1_000_000)
+    response_formats: tuple[Literal["text", "json_object"], ...] = ()
 
 
 def _bigmodel_chat(provider: str, base_url: str | None, model: str) -> bool:
@@ -57,6 +59,7 @@ def capabilities(provider: str, base_url: str | None, model: str) -> GenerationC
             source="documented", temperature_max=1, top_p=True, top_p_min=0.01,
             reasoning_efforts=("low", "high", "max"), thinking=True,
             thinking_modes=("enabled",), sampling_precision=2, max_output_tokens=131_072,
+            response_formats=("text", "json_object"),
         )
     hostname = urlparse(base_url or "").hostname
     if hostname == "api.deepseek.com" and model in {"deepseek-flash", "deepseek-v4-pro"}:
@@ -86,6 +89,11 @@ def resolve_generation(
     if default_max_output_tokens is not None:
         values.setdefault("max_output_tokens", default_max_output_tokens)
     supported = declared or capabilities(provider, base_url, model)
+    if "response_format" in values and (
+        provider != "openai_compatible"
+        or values["response_format"] not in supported.response_formats
+    ):
+        raise ValueError("Response format is unsupported or unconfirmed for this model/API")
     if "temperature" in values:
         if supported.temperature_max is None:
             raise ValueError("Temperature support is unknown; declare model capabilities first")
@@ -127,6 +135,10 @@ def resolve_generation(
 
 def wire_parameters(provider: str, generation: dict[str, Any]) -> dict[str, Any]:
     result = {key: generation[key] for key in ("temperature", "top_p") if key in generation}
+    if "response_format" in generation:
+        if provider != "openai_compatible":
+            raise ValueError("Response format is unsupported for this API")
+        result["response_format"] = {"type": generation["response_format"]}
     if "reasoning_effort" in generation:
         if provider == "openai_compatible":
             result["reasoning_effort"] = generation["reasoning_effort"]

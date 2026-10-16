@@ -31,6 +31,10 @@ def evaluation_quote(
     if profile.preset != preset:
         raise ValueError("Evaluation Skill preset does not match its profile")
     generation = host.generation_settings(host.settings.model)
+    fact_response_format = (
+        "json_object" if host.settings.provider == "openai_compatible"
+        and "json_object" in generation["capabilities"]["response_formats"] else None
+    )
     # A reproducible planning scenario, not a prediction or provider billing bound.
     total = len(suite["cases"]) * 20_000
     planning = {"input_tokens": total * 9 // 10, "output_tokens": total // 10}
@@ -70,6 +74,7 @@ def evaluation_quote(
         "split": split, "case_count": len(suite["cases"]),
         "provider": host.settings.provider, "model": host.settings.model,
         "generation": generation, "planning_tokens": planning,
+        "fact_response_format": fact_response_format,
         "profile": profile.snapshot(),
         "estimate_method": "observed_case_budget_90_10_v1",
         "assumptions": (

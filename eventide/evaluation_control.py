@@ -89,6 +89,7 @@ class EvaluationController:
         if mode not in {"offline", "live"}:
             raise ValueError("Invalid evaluation mode")
         generation = None
+        fact_response_format = None
         provider_config_hash = None
         quote = None
         profile = evaluation_profile(preset)
@@ -100,6 +101,7 @@ class EvaluationController:
             if quote_hash != quote["quote_hash"]:
                 raise ValueError("Evaluation estimate or model configuration changed; review again")
             generation = quote["generation"]
+            fact_response_format = quote["fact_response_format"]
             provider_config_hash = self.host.provider_config_status()["config_hash"]
         selected: Split | None = ("development" if split == "development" else
                                   "holdout" if split == "holdout" else None)
@@ -126,7 +128,7 @@ class EvaluationController:
             "billing_applicable": mode == "live",
             "profile": profile.snapshot(),
             **({"generation": generation, "provider_config_hash": provider_config_hash,
-                "planning_quote": quote}
+                "planning_quote": quote, "fact_response_format": fact_response_format}
                if mode == "live" else {}),
             "limits": {"steps": 12, "observed_tokens": 20_000, "case_seconds": 300},
             "runtime": runtime_revision(),
