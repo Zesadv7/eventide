@@ -136,6 +136,8 @@ def _costs(
         estimated = Decimal(0)
         reported_seen = covered = 0
         versions = set()
+        pricing = set()
+        pricing_complete = True
         for call in calls:
             cost = costs.get((call["run_id"], call["attempt_id"]))
             item = cost["estimates"].get(currency) if cost else None
@@ -153,6 +155,31 @@ def _costs(
                         reported_seen += 1
             for line in item.get("lines", []):
                 versions.add(line["price_version"])
+                rate, category = line.get("price_per_million"), line.get("category")
+                if (
+                    not isinstance(rate, str)
+                    or not isinstance(category, str)
+                    or not isinstance(call.get("provider"), str)
+                    or not isinstance(call.get("model"), str)
+                ):
+                    pricing_complete = False
+                else:
+                    _amount(rate)
+                    pricing.add(
+                        json.dumps(
+                            {
+                                "provider": call["provider"],
+                                "model": call["model"],
+                                "category": category,
+                                "currency": currency,
+                                "price_version": line["price_version"],
+                                "price_per_million": rate,
+                            },
+                            sort_keys=True,
+                        )
+                    )
+            if not item.get("lines"):
+                pricing_complete = False
             if (
                 item.get("complete") is True
                 and cost["usage_source"] == "reported"
@@ -173,6 +200,9 @@ def _costs(
             "covered_attempts": covered,
             "unknown_attempts": len(calls) - covered,
             "price_versions": sorted(versions),
+            "pricing_fingerprint": _digest(sorted(pricing))
+            if pricing_complete and pricing
+            else None,
             "all_attempts_cost_per_success": str(known / successes)
             if complete and successes
             else None,
@@ -486,10 +516,11 @@ def _differences(left: Any, right: Any, path: str = "") -> dict[str, tuple[Any, 
 
 @dataclass(frozen=True)
 class ExperimentVariant:
-    """Persist this declaration before the first model dispatch, outside this read-only API.
+    """Persist before the first candidate dispatch, outside this read-only API.
 
     Exact before/after values prevent a broad wildcard from hiding unrelated changes.
-    recorded_at is Unix seconds, checked against all observed request start times.
+    recorded_at is Unix seconds, checked against all candidate request start times.
+    An existing development baseline may inform this declaration; holdout must not.
     """
 
     name: str
@@ -507,7 +538,7 @@ def compare_experiments(
     if not baseline or len(baseline) != len(candidate):
         raise ValueError("Comparison requires equal nonzero repetition counts")
     # The two arms must contain disjoint real attempts, even if snapshots differ.
-    _, all_calls, _, _ = _read_reports([*baseline, *candidate])
+    _read_reports([*baseline, *candidate])
     left = [experiment_identity(r) for r in baseline]
     right = [experiment_identity(r) for r in candidate]
     if any(identity != left[0] for identity in left) or any(
@@ -553,12 +584,13 @@ def compare_experiments(
                 )
             ):
                 raise ValueError("Frozen tasks, model and generation cannot be variant differences")
+        _, candidate_calls, _, _ = _read_reports(candidate)
         if (
-            not all_calls
-            or any(_number(c.get("started_at")) is None for c in all_calls)
-            or variant.recorded_at > min(c["started_at"] for c in all_calls)
+            not candidate_calls
+            or any(_number(c.get("started_at")) is None for c in candidate_calls)
+            or variant.recorded_at > min(c["started_at"] for c in candidate_calls)
         ):
-            raise ValueError("Variant must be recorded before all observed model requests")
+            raise ValueError("Variant must be recorded before all candidate model requests")
     elif variant is not None and variant.differences:
         raise ValueError("Declared variant differences do not match observed identities")
     before, after = summarize_experiment(baseline), summarize_experiment(candidate)
@@ -593,6 +625,8 @@ def compare_experiments(
             and b["complete"]
             and a["complete"]
             and b["price_versions"] == a["price_versions"]
+            and b["pricing_fingerprint"] is not None
+            and b["pricing_fingerprint"] == a["pricing_fingerprint"]
         )
         currencies[currency] = {
             "comparable": comparable,

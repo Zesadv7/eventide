@@ -762,10 +762,11 @@ GLM补验使用low推理、温度1、输出上限8,000：普通响应及只读�
 `compare_experiments(baseline_reports, candidate_reports)` 要求相同冻结任务、重复次数、
 模型、根Run及逐用途请求参数、工具/Skill 身份和实验输入。运行代码或上下文等优化差异须提前保存
 `ExperimentVariant(name, recorded_at, differences)`；`differences` 使用精确 JSON pointer
-和前后值，不接受通配豁免，声明时间不得晚于任一已观测模型请求。任务和模型生成
+和前后值，不接受通配豁免，声明时间不得晚于任一候选模型请求。已有开发基线可先
+采集，再据开发结果预声明优化；留出结果不能用于选择优化或调参。任务和模型生成
 参数不允许以 variant 名义更换。比较会公开平均/p50/p95 延迟变化，逐题通过次数下降
 不能被其他题增益掩盖。只有完整真实模型批次的通过数不降、没有逐题退化，且完整
-Token 或同币种、同价格版本的完整费用下降，才给出 `improvement_demonstrated=true`。
+Token 或同币种、同价格版本及费率依据的完整费用下降，才给出 `improvement_demonstrated=true`。
 离线脚本始终只证明机制，不能据此宣称成本优化有效。该接口不发起模型调用，不写
 数据库，也不增加另一份账本；真实消融实验仍按 AGENTS.md 的 B3/U5 验收。
 

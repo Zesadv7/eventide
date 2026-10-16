@@ -46,7 +46,9 @@ def _cost(call, *, currency="CNY", amount="0.1", complete=True, version="price-v
             currency: {
                 "known_amount": amount,
                 "complete": complete,
-                "lines": [{"price_version": version}],
+                "lines": [
+                    {"price_version": version, "category": "input_tokens", "price_per_million": "1"}
+                ],
             }
         },
     }
@@ -347,6 +349,20 @@ def test_non_runtime_commit_changes_do_not_invalidate_same_executed_code():
     assert compare_experiments([baseline], [candidate])["quality_preserved"]
 
 
+@pytest.mark.parametrize("changed_rate", [True, False])
+def test_same_price_name_cannot_hide_different_or_missing_rate_basis(changed_rate):
+    baseline = _report()
+    candidate = _report(run="candidate", costs=[_cost(_call(run="candidate"), amount="0.01")])
+    line = candidate["results"][0]["evidence"]["costs"]["latest"][0]["estimates"]["CNY"]["lines"][0]
+    if changed_rate:
+        line["price_per_million"] = "0.1"
+    else:
+        del line["price_per_million"]
+    result = compare_experiments([baseline], [candidate])
+    assert not result["improvement_demonstrated"]
+    assert not result["cost_comparison"]["CNY"]["comparable"]
+
+
 def test_actual_helper_request_generation_cannot_change_behind_unchanged_run_config():
     baseline, candidate = _report(), _report(run="candidate")
     candidate["results"][0]["evidence"]["model_attempts"][0]["max_output_tokens"] = 8
@@ -435,6 +451,25 @@ def test_variant_declaration_is_exact_early_and_cannot_exempt_frozen_generation(
                     "/cases/fix-it/generation/max_output_tokens": (512, 32),
                 },
             ),
+        )
+
+
+def test_development_baseline_may_precede_variant_but_candidate_may_not():
+    baseline, candidate = _report(), _report(run="candidate")
+    baseline["results"][0]["evidence"]["usage"]["calls"][0]["started_at"] = 10
+    candidate["results"][0]["configuration"]["context_limit"] = 4000
+    differences = {"/cases/fix-it/configuration/context_limit": (5000, 4000)}
+    result = compare_experiments(
+        [baseline],
+        [candidate],
+        variant=ExperimentVariant("from-development", 50, differences),
+    )
+    assert result["quality_preserved"]
+    with pytest.raises(ValueError, match="before all candidate"):
+        compare_experiments(
+            [baseline],
+            [candidate],
+            variant=ExperimentVariant("after-candidate", 102, differences),
         )
 
 
