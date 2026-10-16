@@ -11,6 +11,7 @@
 - 状态统一为：待开始、进行中、受阻、待外部验证、已完成。原始日志和 live 产物留在忽略目录，文档只放摘要。
 - 维护代理须完整阅读本文件；Runtime 当前只加载前 4,000 字符，不能将其截取范围等同维护范围。
 - 2026-10-16 追加质量改进：用户暂缓 Token/费用优化，保留用量事实及原有预算控制；优先修复读取证据、答案正确性和真实项目交付。历史实验不改判，不放宽冻结验收，不把试验执行完等同效果达标；当前步骤见 Q1–Q3。
+- 验证按“受影响定向测试 → 一次全量收口”。一次全量可同时检查功能和覆盖率；无实现变化不重复全量，失败先复验受影响范围。固定模型评测的三次重复不套用于离线门禁；确需再次全量时记录具体原因，不靠扩大批次替代定位。
 
 ## 固定技术边界
 
@@ -71,8 +72,7 @@
 ```bash
 uv run python -m eventide --help
 uv run python tests/check_service.py
-uv run pytest -q
-uv run pytest --cov=eventide --cov-fail-under=85
+uv run pytest -q --cov=eventide --cov-fail-under=85
 uv run ruff check eventide tests examples
 uv run mypy eventide
 uv run python -m tests.check_offline_evaluations evals/smoke.yaml
@@ -158,7 +158,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 |---|---|---|
 | Q1 | 已完成 | 2026-10-16：read_file显示一基行号并保留空行/CRLF/Unicode；10k字符默认页减少中等文件拆页；glob补recursive=True，新增9项先8失败后全通过。JSON能力/冻结协议/Chat映射及Web选择已接通；同一循环先工具调查、再一次无工具最终化，实际phase/参数/目录和唯一账本可追溯，计入原步数/预算。末步、取消、断流、重启Continue不重放和未知保留等140项联合回归通过，Ruff/Mypy117通过；128项前端及24条真实API/布局浏览器检查、typecheck/build/格式通过。3调用真实组合探针完成read_file与正确JSON，unknown0。新独立8题三轮22/24；旧20题三轮42/60（14/15/13），353唯一请求且unknown0，独立审计完成；理解5/12、定位4/12、单文件16/18、跨文件11/12、恢复6/6。较旧34/60总数增加8、跨文件少1次预算停驻，24事实全为裸JSON但内容仍有15次失败，不宣称各类无回归或模型完全正确；原任务/grader不变，不据新题调优。README/architecture/api-contract/ADR050同步；Token/费用优化暂缓。 |
 | Q2 | 已完成 | 2026-10-16：Writer开轮固定checks/轮次、Host每步刷新权威剩余额度，未完成Writer不验收、不自动采纳。Web/Python新增用户接收前observed_token_limit（默认60k，严格1–1,000,000），固定到原事件/幂等/预算链，原36次/900秒不变；41项机制及128前端/24浏览器通过。200k+Writer30两题原冻结测试各一轮通过（HTTP2项/15请求、GLM8项/14请求），但独立源码复核HTTP仍缺6分支，未称完整修复。另冻结v2 11检查（hash e4e60881e680dd7b1a2bc2fcc721e8b29797917b3e46a297e298c35572caf061），原历史11失败/前候选5过6败/当前11通过；400k+30、36次/900秒原目标新回放21请求、一轮独立11项通过，复核6缺口均已处理。两种预算条件分列；原60k四批8次失败/69请求（unknown1）保留，未覆盖。50次新高额度请求unknown0，源checkpoint/250保护文件/冻结验收和补丁一致、未采纳或提交；Writer管道自检曾失败，最终无管道独立检查才作通过依据。README/architecture/api-contract/ADR-076同步；不外推一般项目成功率，完整门禁另见Q3。 |
-| Q3 | 进行中 | 2026-10-16：独立8题输入hash 328a5bd450acd5b00abd4ef0e451e86af06914eaa2a0afa4ba50098383104e54，4理解/4诊断且每题2事实；17项标注/前提和共51项离线回归通过。真实三轮8/8、6/8、8/8，严格22/24；失败及原输出保留，未据新题改实现，终态独立审计通过，24结构/ID正确、46/48事实字段严格一致、98唯一请求且unknown0，源码/预算/phase/账本完整。128前端/24浏览器/54真实Docker、Ruff/Mypy117、服务启动与smoke12、wheel隔离资源通过；初次全量1817通过/3处旧文件展示断言失败/10跳过，覆盖93.64%；断言按新行号契约修正后18项定向通过，正在按文件分4组复验全部1830收集项并合并85%覆盖门槛。旧20题三轮42/60及独立审计完成，生产hash d98ee14810d2753fae262a2dba00c4c8c2be59a5f9e35c77cc9ede76657f2834不变；并行两处3秒等待失败全保留，待其余组退去后顺序全量pytest复验，以独立覆盖率门槛配合最终exit0判定。原Docker标签构建网络超时，固定上轮基镜像digest后完整多阶段构建成功，最终分发复验通过（3资源/非root/无需Node/同源/重启与12题离线报告）；未把现有基础镜像刷新与完整构建混称。对应README/architecture/api-contract，成本收益实验暂缓。 |
+| Q3 | 已完成 | 2026-10-16：独立8题三轮22/24，24结构/ID正确、46/48事实字段严格一致、98唯一请求unknown0；旧20题三轮42/60（14/15/13）、353唯一请求unknown0，输入/源码/phase/账本均已独立审计，未据新8题调优。最终顺序全量1820通过/10可选跳过、exit0；独立覆盖率14036/14988=93.65%、85%门槛exit0。128前端/24浏览器/54真实Docker、Ruff/Mypy117、typecheck/build/格式、服务启动/smoke12和wheel资源隔离通过。原Docker浮动标签拉取网络失败，固定上轮已验证digest后完整多阶段构建及3资源/非root/无需Node/同源/重启/12题离线通过，未改Dockerfile。初次3旧读取断言、四组并发2处3秒等待失败及最终原样顺序全量全部保留，不放宽时限或模型判分；并行首跑不称全通过。README/architecture/api-contract与步骤状态同步，本地提交；Token/费用优化按用户意愿暂缓，模型仍有内容错误和一次跨文件预算退步。 |
 
 ## 用量、预算与实验细则
 
