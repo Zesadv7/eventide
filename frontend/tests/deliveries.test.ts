@@ -242,3 +242,59 @@ it("shows the frozen queued limit after refresh before the writer starts", async
   ).toBeDefined();
   wrapper.unmount();
 });
+
+it("clears accepted repair fields when switching to another delivery", async () => {
+  reads();
+  const pending = {
+    ...detail(),
+    repair: null,
+    repair_result: null,
+    repair_status: null,
+    verification: null,
+  };
+  vi.mocked(deliveriesApi.list).mockResolvedValue([
+    pending,
+    {
+      ...pending,
+      delivery_id: "delivery_bbbbbbbbbbbbbbbb",
+      name: "second-delivery",
+    },
+  ]);
+  vi.spyOn(deliveriesApi, "submit").mockResolvedValue({
+    run_id: "accepted",
+    delivery_id: id,
+    project_id: project,
+    status_url: "/status",
+    events_url: "/events",
+  });
+  const confirm = vi.fn().mockReturnValue(false);
+  vi.stubGlobal("confirm", confirm);
+  const wrapper = await render();
+  await wrapper.findAll("textarea")[0]!.setValue("accepted first target");
+  await wrapper.findAll("textarea")[1]!.setValue("first-target-test");
+  await wrapper
+    .get('article input:not([type="number"])')
+    .setValue("first-image");
+  await wrapper.get('article input[type="number"]').setValue(150000);
+  await wrapper.get("article select").setValue(2);
+  await wrapper.get("article form").trigger("submit");
+  await flushPromises();
+  await wrapper.findAll(".delivery-list button")[1]!.trigger("click");
+  await flushPromises();
+  expect(wrapper.get("article h3").text()).toBe("second-delivery");
+  expect(
+    wrapper.findAll("textarea").map((field) => field.element.value),
+  ).toEqual(["", ""]);
+  expect(
+    wrapper.get<HTMLInputElement>('article input:not([type="number"])').element
+      .value,
+  ).toBe("");
+  expect(
+    wrapper.get<HTMLInputElement>('article input[type="number"]').element.value,
+  ).toBe("60000");
+  expect(wrapper.get<HTMLSelectElement>("article select").element.value).toBe(
+    "3",
+  );
+  expect(confirm).not.toHaveBeenCalled();
+  wrapper.unmount();
+});

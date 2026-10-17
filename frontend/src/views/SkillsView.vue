@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PanelClose from "../components/PanelClose.vue";
+import { useUnsavedChanges } from "../composables/useUnsavedChanges";
 import { computed, ref, watch, onUnmounted } from "vue";
 import {
   skillsApi,
@@ -22,6 +24,16 @@ const config = ref<SkillConfiguration>({
   disabled_project: [],
   selected: [],
 });
+const canDiscard = useUnsavedChanges(
+  () =>
+    !!state.value &&
+    JSON.stringify(config.value) !==
+      JSON.stringify({
+        enabled_user: state.value.configuration.enabled_user,
+        disabled_project: state.value.configuration.disabled_project || [],
+        selected: state.value.configuration.selected || [],
+      }),
+);
 const source = ref("bundled"),
   bundled = ref("code-review"),
   directory = ref(""),
@@ -278,7 +290,10 @@ async function compare(p: SkillPackage) {
         <h1>Skills 扩展</h1>
         <p class="muted">按项目启用与选择，运行时按需加载固定版本。</p>
       </div>
-      <button :disabled="busy || !store.selectedWorkspace" @click="refresh()">
+      <button
+        :disabled="busy || !store.selectedWorkspace"
+        @click="canDiscard() && refresh()"
+      >
         刷新状态
       </button>
     </header>
@@ -330,6 +345,13 @@ async function compare(p: SkillPackage) {
           <button @click="review">检查导入内容</button>
         </fieldset>
         <div v-if="preview" class="skill-preview">
+          <PanelClose
+            label="关闭安装预览"
+            @close="
+              inputRevision++;
+              preview = null;
+            "
+          />
           <h3>{{ preview.name || "无效包" }}</h3>
           <p>{{ preview.description }}</p>
           <code>{{ preview.version }}</code>
@@ -445,6 +467,15 @@ async function compare(p: SkillPackage) {
           </div>
         </article>
         <div v-if="inspected" class="skill-preview">
+          <PanelClose
+            label="关闭 Skill 详情"
+            @close="
+              resourceRevision++;
+              inspected = null;
+              diff = null;
+              content = '';
+            "
+          />
           <h3>{{ inspected.name }} · {{ inspected.version.slice(0, 12) }}</h3>
           <template v-if="diff"
             ><p>

@@ -7,6 +7,11 @@ import {
   type Scope,
 } from "../api/budgets";
 
+import {
+  useUnsavedChanges,
+  confirmDiscard,
+} from "../composables/useUnsavedChanges";
+import PanelClose from "./PanelClose.vue";
 const props = defineProps<{ scope: Scope }>();
 const state = ref<BudgetStatus | null>(null),
   error = ref(""),
@@ -21,6 +26,17 @@ const draftHash = ref(""),
   action = ref<"keep_unknown" | "record_known">("keep_unknown");
 const actual = ref<string | number>(""),
   reason = ref("");
+const canLeave = useUnsavedChanges(
+  () => dirty.value || !!reason.value || !!String(actual.value),
+  { guardQueryChanges: true },
+);
+defineExpose({ confirmLeave: canLeave });
+function closeResolution() {
+  if (!confirmDiscard(!!reason.value || !!String(actual.value))) return;
+  selected.value = "";
+  reason.value = "";
+  actual.value = "";
+}
 let epoch = 0,
   loadingKey = "",
   timer: ReturnType<typeof setInterval> | undefined;
@@ -123,6 +139,7 @@ async function save() {
   }
 }
 function choose(item: Reservation) {
+  if (!confirmDiscard(!!reason.value || !!String(actual.value))) return;
   selected.value = item.attempt_id;
   action.value = "keep_unknown";
   actual.value = reason.value = "";
@@ -150,6 +167,8 @@ async function resolve() {
     });
     if (key !== scopeKey.value) return;
     selected.value = "";
+    reason.value = "";
+    actual.value = "";
     message.value = "核对记录已保存；没有精确用量的消费继续保留额度。";
     await load();
   } catch (e) {
@@ -220,7 +239,7 @@ async function resolve() {
           ><button
             type="button"
             :disabled="saving || loading"
-            @click="load(true)"
+            @click="confirmDiscard(dirty) && load(true)"
           >
             重新读取配置
           </button>
@@ -267,6 +286,7 @@ async function resolve() {
         </table>
       </div>
       <form v-if="target" class="form-stack" @submit.prevent="resolve">
+        <PanelClose label="关闭用量核对" @close="closeResolution" />
         <p class="mono">{{ target.attempt_id }}</p>
         <label
           >核对方式<select v-model="action" :disabled="saving">

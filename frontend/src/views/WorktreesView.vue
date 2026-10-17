@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useUnsavedChanges } from "../composables/useUnsavedChanges";
+import PanelClose from "../components/PanelClose.vue";
+const detailClosed = ref(false);
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -25,6 +28,9 @@ const name = ref(""),
   gitRef = ref("HEAD"),
   error = ref(""),
   confirmRemove = ref("");
+const formSnapshot = () => JSON.stringify([name.value, gitRef.value]);
+const cleanForm = ref(formSnapshot());
+useUnsavedChanges(() => formSnapshot() !== cleanForm.value);
 const state = ref(worktreeRequestState(project.value)),
   more = ref(false),
   loadingMore = ref(false);
@@ -85,7 +91,8 @@ async function loadHistory(older = false) {
       ];
     }
     if (older || entries.value.length <= 20) more.value = values.length === 20;
-    if (!selected.value && values[0]) choose(values[0].run_id);
+    if (!detailClosed.value && !selected.value && values[0])
+      choose(values[0].run_id);
   } catch (e) {
     if (mounted && version === revision) error.value = message(e);
   } finally {
@@ -96,6 +103,7 @@ async function loadHistory(older = false) {
   }
 }
 function choose(id: string) {
+  detailClosed.value = !id;
   if (selected.value !== id) {
     selected.value = id;
     detail.value = null;
@@ -132,12 +140,14 @@ async function loadDetail() {
   }
 }
 async function submit(body: WorktreeInput) {
-  const version = revision;
+  const version = revision,
+    savedForm = formSnapshot();
   error.value = "";
   try {
     const receipt = await worktreesApi.create(project.value, body);
     if (!mounted || version !== revision) return;
-    choose(receipt.run_id);
+    if (body.action === "create") cleanForm.value = savedForm;
+    if (!detailClosed.value) choose(receipt.run_id);
     await loadHistory();
     await loadCatalog();
   } catch (e) {
@@ -174,6 +184,7 @@ function reset() {
   detail.value = null;
   name.value = "";
   gitRef.value = "HEAD";
+  cleanForm.value = formSnapshot();
   confirmRemove.value = "";
   error.value = "";
   more.value = false;
@@ -189,6 +200,7 @@ watch(
   () => route.query.operation,
   (id) => {
     if (typeof id === "string" && id !== selected.value) choose(id);
+    else if (!id && selected.value) closeDetail();
   },
 );
 onMounted(() => {
@@ -210,6 +222,13 @@ const labels: Record<string, string> = {
   failed: "失败",
   interrupted: "已中断",
 };
+function closeDetail() {
+  detailClosed.value = true;
+  selected.value = "";
+  detail.value = null;
+  revision++;
+  void router.replace({ query: { ...route.query, operation: undefined } });
+}
 </script>
 <template>
   <section class="page worktrees-page">
@@ -293,6 +312,7 @@ const labels: Record<string, string> = {
       加载更早操作
     </button>
     <article v-if="detail" aria-label="副本操作详情">
+      <PanelClose @close="closeDetail" />
       <h3>{{ labels[detail.status] }} · {{ detail.name }}</h3>
       <p>{{ detail.run_id }}</p>
       <p v-if="detail.ref">固定提交：{{ detail.ref }}</p>

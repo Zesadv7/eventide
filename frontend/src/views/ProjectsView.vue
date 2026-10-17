@@ -1,14 +1,19 @@
 <script setup lang="ts">
+import ProjectFolderPicker from "../components/ProjectFolderPicker.vue";
+import PanelClose from "../components/PanelClose.vue";
+import { useUnsavedChanges } from "../composables/useUnsavedChanges";
 import { onMounted, ref } from "vue";
 import { ApiError, api } from "../api/client";
 import { durableMutation } from "../api/mutations";
 import { useWorkbench } from "../stores/workbench";
 import type { Workspace } from "../api/types";
 const store = useWorkbench();
+const pickerOpen = ref(false);
 const path = ref(""),
   busy = ref(false),
   error = ref(""),
   message = ref("");
+useUnsavedChanges(() => !!path.value);
 const pendingKey = "eventide.pending-workspace-removal";
 const pending = ref(sessionStorage.getItem(pendingKey));
 const selected = ref<Workspace | null>(
@@ -31,7 +36,7 @@ async function add() {
   error.value = "";
   message.value = "";
   try {
-    const result = await api.addWorkspace(path.value.trim());
+    const result = await api.addWorkspace(path.value);
     await refresh();
     message.value = "已注册项目：" + result.name;
     path.value = "";
@@ -94,6 +99,19 @@ async function remove() {
     </p>
     <p v-if="error" role="alert" class="alert error">{{ error }}</p>
     <p v-if="message" role="status" class="alert">{{ message }}</p>
+    <button
+      v-if="pending && !selected"
+      @click="selected = { workspace_id: pending, name: pending, path: '' }"
+    >
+      继续核对原移除请求
+    </button>
+    <button type="button" @click="pickerOpen = true">选择项目文件夹</button>
+    <ProjectFolderPicker
+      v-if="pickerOpen"
+      v-model="path"
+      :initially-open="true"
+      @close="pickerOpen = false"
+    />
     <form @submit.prevent="add">
       <label
         >项目目录<input
@@ -118,6 +136,13 @@ async function remove() {
       </button>
     </article>
     <section v-if="selected" class="project-record" aria-label="移除项目确认">
+      <PanelClose
+        label="关闭项目移除确认"
+        @close="
+          selected = null;
+          confirmed = false;
+        "
+      />
       <h2>移除 {{ selected.name }}</h2>
       <p>{{ selected.path }}</p>
       <label

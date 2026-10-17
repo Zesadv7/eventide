@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useUnsavedChanges } from "../composables/useUnsavedChanges";
+import PanelClose from "../components/PanelClose.vue";
+const detailClosed = ref(false);
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -25,6 +28,8 @@ const error = ref(""),
   confirmed = ref(false),
   more = ref(false),
   loadingMore = ref(false);
+const cleanSource = ref("");
+useUnsavedChanges(() => source.value !== cleanSource.value);
 const state = ref(importState(project.value));
 const locked = computed(() => state.value.active || !!state.value.pending);
 const busy = computed(() =>
@@ -42,6 +47,7 @@ function message(e: unknown) {
   return e instanceof Error ? e.message : "请求失败";
 }
 function choose(id: string) {
+  detailClosed.value = !id;
   if (selected.value !== id) {
     selected.value = id;
     detail.value = null;
@@ -74,7 +80,8 @@ async function loadList(older = false) {
       ];
     }
     if (older || entries.value.length <= 20) more.value = values.length === 20;
-    if (!selected.value && values[0]) choose(values[0].run_id);
+    if (!detailClosed.value && !selected.value && values[0])
+      choose(values[0].run_id);
   } catch (e) {
     if (mounted && version === revision) error.value = message(e);
   } finally {
@@ -106,12 +113,14 @@ async function loadDetail() {
   }
 }
 async function submit(intent: ImportIntent) {
-  const version = revision;
+  const version = revision,
+    savedSource = source.value;
   error.value = "";
   try {
     const receipt = await importsApi.submit(project.value, intent);
     if (!mounted || version !== revision) return;
-    choose(receipt.run_id);
+    if (intent.action === "preview") cleanSource.value = savedSource;
+    if (!detailClosed.value) choose(receipt.run_id);
     await loadList();
   } catch (e) {
     if (mounted && version === revision) error.value = message(e);
@@ -158,6 +167,7 @@ function reset() {
   entries.value = [];
   detail.value = null;
   source.value = "";
+  cleanSource.value = "";
   confirmed.value = false;
   more.value = false;
   error.value = "";
@@ -172,6 +182,7 @@ watch(
   () => route.query.operation,
   (id) => {
     if (typeof id === "string" && id !== selected.value) choose(id);
+    else if (!id && selected.value) closeDetail();
   },
 );
 onMounted(() => {
@@ -193,6 +204,13 @@ const labels: Record<string, string> = {
   failed: "失败",
   interrupted: "已中断",
 };
+function closeDetail() {
+  detailClosed.value = true;
+  selected.value = "";
+  detail.value = null;
+  revision++;
+  void router.replace({ query: { ...route.query, operation: undefined } });
+}
 </script>
 <template>
   <section class="page import-page">
@@ -240,6 +258,7 @@ const labels: Record<string, string> = {
       加载更早操作
     </button>
     <article v-if="detail" aria-label="历史导入详情">
+      <PanelClose @close="closeDetail" />
       <h3>
         {{ detail.action === "preview" ? "预检" : "导入" }} ·
         {{ labels[detail.status] }}

@@ -55,7 +55,7 @@ class RuntimeStore:
                 version = self._connection.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
-                if version not in {1, 2, 3, 4}:
+                if version not in {1, 2, 3, 4, 5}:
                     raise ValueError(f"Unsupported runtime schema version: {version}")
             self._connection.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -153,6 +153,16 @@ class RuntimeStore:
                     self._bind_project(dict(row), source, common)
                 self._connection.execute(
                     "INSERT OR IGNORE INTO schema_migrations VALUES (4, unixepoch())"
+                )
+            if version < 5:
+                # Memory remains canonical events; only add a read-acceleration index.
+                self._connection.execute(
+                    "CREATE INDEX IF NOT EXISTS memory_fact_types ON runtime_events(type) "
+                    "WHERE partial=0 AND type IN "
+                    "('memory.record','memory.suggestion','memory.settings','memory.observed')"
+                )
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations VALUES (5, unixepoch())"
                 )
 
     def _bind_project(

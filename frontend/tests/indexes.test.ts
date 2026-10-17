@@ -185,3 +185,33 @@ it("exact stop updates status without cancelling an Agent conversation", async (
   expect(wrapper.text()).toContain("已中断");
   wrapper.unmount();
 });
+
+it("keeps closed index details closed across polling and a late response without stopping the task", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(indexesApi, "configuration").mockResolvedValue(config);
+  vi.spyOn(indexesApi, "list").mockResolvedValue([detail()]);
+  let finish!: (value: IndexDetail) => void;
+  const read = vi.spyOn(indexesApi, "detail").mockResolvedValue(detail());
+  const cancel = vi.spyOn(indexesApi, "cancel");
+  const { wrapper } = await render();
+  await flushPromises();
+  expect(wrapper.find("article").exists()).toBe(true);
+  read.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  // An explicit refresh starts a read while the panel is still visible.
+  await vi.advanceTimersByTimeAsync(3000);
+  await wrapper.get('[aria-label="关闭详情"]').trigger("click");
+  await flushPromises();
+  finish?.(detail());
+  await flushPromises();
+  await vi.advanceTimersByTimeAsync(3000);
+  await flushPromises();
+  expect(wrapper.find("article").exists()).toBe(false);
+  expect(cancel).not.toHaveBeenCalled();
+  wrapper.unmount();
+  vi.useRealTimers();
+});

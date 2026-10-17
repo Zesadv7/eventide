@@ -53,6 +53,7 @@ from eventide.models import (
 )
 from eventide.normalization import normalize, redact
 from eventide.policy import PolicyEngine
+from eventide.preference_memory import PreferenceMemory
 from eventide.previews import PreviewStore, SafeTextBuffer
 from eventide.projections import TaskPlanProjection
 from eventide.provider_config import apply_provider_configuration
@@ -188,6 +189,7 @@ class RuntimeHost:
         handlers: dict[str, Any] | None = None,
         *,
         enable_mcp: bool = True,
+        enable_memory: bool = True,
     ):
         self.settings = settings or Settings.from_env()
         self._startup_settings = self.settings
@@ -243,6 +245,7 @@ class RuntimeHost:
         self.skills = SkillRuntime(self.store, self.state_dir)
         self.model_budget = ModelBudgetController(self.store)
         self.dispatch = RunDispatch(self)
+        self.memory = PreferenceMemory(self, enabled=enable_memory)
 
     def _budget_control_session(self) -> str:
         session_id = self.create_session(f"budgets_{self.default_workspace.workspace_id}")
@@ -906,6 +909,8 @@ class RuntimeHost:
         kind: str = "agent",
         max_attempts: int = 3,
         _evaluation_origin: dict[str, Any] | None = None,
+        _memory_base_system: str | None = None,
+        _memory_allowed: set[str] | None = None,
     ) -> ModelResponse:
         if self._evaluation_bridge is not None:
             if _evaluation_origin is not None:
@@ -936,8 +941,13 @@ class RuntimeHost:
                     **({"evaluation_origin": dict(_evaluation_origin)}
                        if _evaluation_origin is not None else {}),
                 }
+                attempt_request = request
+                memory_refs: list[dict[str, Any]] = []
+                if _memory_base_system is not None:
+                    memory_prompt, memory_refs = self.memory.context(run_id, _memory_allowed)
+                    attempt_request = replace(request, system=_memory_base_system + memory_prompt)
                 try:
-                    receipt = self.model_budget.begin(run_id, request, identity)
+                    receipt = self.model_budget.begin(run_id, attempt_request, identity)
                 except BudgetExceeded as exc:
                     await self._emit(run_id, "budget.blocked", {
                         "request_id": request_id, "violations": exc.violations,
@@ -950,7 +960,12 @@ class RuntimeHost:
                             "attempt_id": attempt_id, "budgets": receipt.warnings,
                         }, sink)
                     response = await asyncio.wait_for(
-                        self._complete_request(request, run_id, request_id, kind),
+                        self._complete_request(
+                            attempt_request, run_id, request_id, kind,
+                            memory_base=_memory_base_system,
+                            memory_allowed={r["id"] for r in memory_refs},
+                            memory_attempt=attempt_id,
+                        ),
                         timeout=self.settings.model_timeout,
                     )
                 except BaseException as exc:
@@ -1010,7 +1025,21 @@ class RuntimeHost:
 
     async def _complete_request(
         self, request: ModelRequest, run_id: str, request_id: str, kind: str,
+        *, memory_base: str | None = None, memory_allowed: set[str] | None = None,
+        memory_attempt: str | None = None,
     ) -> ModelResponse:
+        # No await between eligibility check, dispatch receipt and provider entry.
+        if memory_base is not None and self.memory.enabled:
+            prompt, refs = self.memory.context(run_id, memory_allowed)
+            request = replace(request, system=memory_base + prompt)
+            identity = self.store.get_run_identity(run_id)
+            if identity and any(
+                e["type"] == "memory.snapshot" for e in self.store.run_events(run_id)
+            ):
+                self.store.append_fact(identity["session_id"], "memory.injected", {
+                    "request_id": request_id, "attempt_id": memory_attempt,
+                    "memories": refs, "digest": digest([refs, prompt]),
+                }, run_id=run_id)
         stream = getattr(self._provider(), "stream", None)
         if not callable(stream) or kind != "agent":
             return await self._provider().complete(request)
@@ -2718,6 +2747,11 @@ class RuntimeHost:
                 attachments.mark_attachments_used(
                     self.settings.state_dir, session_id, attachment_ids
                 )
+            if not readonly_profile:
+                for memory_receipt in self.memory.observe_run(run_id):
+                    await self._emit(run_id, memory_receipt["type"],
+                                     {k: v for k, v in memory_receipt.items() if k != "type"}, sink)
+                self.memory.snapshot(run_id)
             await self._emit(
                 run_id,
                 "workspace.checkpoint",
@@ -3335,6 +3369,8 @@ class RuntimeHost:
                         + "\nFinish coherent source edits and return for independent acceptance "
                         "before these limits are reached."
                     )
+                memory_base_system = system
+                system, context_memory_refs = self.memory.request_system(run_id, system)
                 messages, compacted, trimmed = await self.context_builder.build(
                     session_id,
                     provider=self._provider(),
@@ -3390,6 +3426,8 @@ class RuntimeHost:
                     run_id,
                     sink,
                     max_attempts=1 if finalizing else 3,
+                    _memory_base_system=memory_base_system if not readonly_profile else None,
+                    _memory_allowed={r["id"] for r in context_memory_refs},
                 )
                 record_usage(response)
                 # Persist exactly the normalized response that the next model request sees.

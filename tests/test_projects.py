@@ -122,7 +122,7 @@ def test_schema_three_migration_preserves_ids_binding_and_event_bytes(isolated_w
     with sqlite3.connect(database) as connection:
         connection.execute("DROP TABLE workspace_projects")
         connection.execute("DROP TABLE projects")
-        connection.execute("DELETE FROM schema_migrations WHERE version=4")
+        connection.execute("DELETE FROM schema_migrations WHERE version>=4")
     migrated = RuntimeStore(database)
     assert migrated.get_session("old-session") == old_session
     assert (
@@ -147,7 +147,7 @@ def test_missing_historical_path_migrates_without_rebinding(isolated_workspace):
     with sqlite3.connect(database) as connection:
         connection.execute("DROP TABLE workspace_projects")
         connection.execute("DROP TABLE projects")
-        connection.execute("DELETE FROM schema_migrations WHERE version=4")
+        connection.execute("DELETE FROM schema_migrations WHERE version>=4")
     migrated = RuntimeStore(database)
     saved = migrated.get_workspace(missing.workspace_id)
     assert saved.path == missing.path and saved.kind == "source"

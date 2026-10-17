@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PanelClose from "../components/PanelClose.vue";
+const detailClosed = ref(false);
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -67,6 +69,7 @@ function query(name: string) {
   return typeof value === "string" ? value : "";
 }
 function selection(session: string, run = "") {
+  if (run || session !== sessionId.value) detailClosed.value = false;
   void router.replace({
     query: { session: session || undefined, run: run || undefined },
   });
@@ -119,7 +122,7 @@ function applyQuery() {
     detailError.value = "";
     if (selected) void loadDetail();
   }
-  if (!selected && runs.value.length)
+  if (!detailClosed.value && !selected && runs.value.length)
     selection(owner, runs.value.at(-1)!.run_id);
 }
 async function loadSessions() {
@@ -168,7 +171,8 @@ async function loadRuns(older = false) {
       : values;
     hasOlder.value = values.length === 100;
     runsError.value = "";
-    if (!runId.value && values.length) selection(owner, values.at(-1)!.run_id);
+    if (!detailClosed.value && !runId.value && values.length)
+      selection(owner, values.at(-1)!.run_id);
   } catch (e) {
     if (mounted && current === projectRevision && revision === sessionRevision)
       runsError.value = e instanceof Error ? e.message : "运行历史读取失败";
@@ -259,6 +263,13 @@ function toolLabel(value: unknown) {
   const tool = value as Record<string, unknown>;
   return `${typeof tool.name === "string" ? tool.name : "工具"} · ${typeof tool.status === "string" ? labels[tool.status] || tool.status : "状态未记录"}`;
 }
+function closeDetail() {
+  detailClosed.value = true;
+  runRevision++;
+  runId.value = "";
+  detail.value = null;
+  selection(sessionId.value);
+}
 </script>
 
 <template>
@@ -346,6 +357,7 @@ function toolLabel(value: unknown) {
       class="panel history-detail"
       aria-label="历史运行详情"
     >
+      <PanelClose @close="closeDetail" />
       <header class="page-heading">
         <div>
           <h2>{{ labels[detail.status] || detail.status }}</h2>

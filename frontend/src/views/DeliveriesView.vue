@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import PanelClose from "../components/PanelClose.vue";
+import {
+  useUnsavedChanges,
+  confirmDiscard,
+} from "../composables/useUnsavedChanges";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -25,6 +30,8 @@ const entries = ref<Delivery[]>([]),
 const detail = computed(() =>
   entries.value.find((e) => e.delivery_id === selected.value),
 );
+const detailClosed = ref(false);
+let patchRevision = 0;
 const state = ref(deliveryState(project.value));
 const name = ref(""),
   goal = ref(""),
@@ -32,6 +39,19 @@ const name = ref(""),
   image = ref(""),
   rounds = ref(3),
   tokenLimit = ref(60_000);
+const repairSnapshot = () =>
+  JSON.stringify([
+    goal.value,
+    checks.value,
+    image.value,
+    rounds.value,
+    tokenLimit.value,
+  ]);
+const cleanRepair = ref(repairSnapshot()),
+  cleanName = ref("");
+const repairDirty = () => repairSnapshot() !== cleanRepair.value;
+useUnsavedChanges(repairDirty, { guardQueryChanges: true });
+useUnsavedChanges(() => name.value !== cleanName.value);
 const error = ref(""),
   loading = ref(false),
   stopping = ref(""),
@@ -65,12 +85,20 @@ function sync() {
   const receipt = state.value.receipt;
   if (receipt && seen.get(project.value) !== receipt.run_id) {
     seen.set(project.value, receipt.run_id);
-    choose(receipt.delivery_id);
+    if (!detailClosed.value) choose(receipt.delivery_id);
     void refresh();
   }
 }
 const unsubscribe = observeDeliveries(sync);
-function choose(id: string) {
+function choose(id: string, discardConfirmed = false) {
+  if (selected.value !== id) {
+    if (!discardConfirmed && !confirmDiscard(repairDirty())) return;
+    goal.value = checks.value = image.value = "";
+    rounds.value = 3;
+    tokenLimit.value = 60_000;
+    cleanRepair.value = repairSnapshot();
+  }
+  detailClosed.value = !id;
   if (!mounted) return;
   if (selected.value !== id) {
     selected.value = id;
@@ -108,7 +136,8 @@ async function refresh(older = false) {
         ]
       : [...ops, ...operations.value.filter((o) => !ids.has(o.run_id))];
     if (older || operations.value.length <= 20) more.value = ops.length === 20;
-    if (!selected.value && values.length) choose(values.at(-1)!.delivery_id);
+    if (!detailClosed.value && !selected.value && values.length)
+      choose(values.at(-1)!.delivery_id);
     if (
       patch.value &&
       detail.value?.verification?.patch_sha256 !== patch.value.patch_sha256
@@ -127,10 +156,16 @@ async function refresh(older = false) {
   }
 }
 async function submit(intent: Intent) {
-  const version = revision;
+  const version = revision,
+    savedRepair = repairSnapshot(),
+    savedName = name.value;
   error.value = "";
   try {
     await deliveriesApi.submit(project.value, intent);
+    if (mounted && version === revision) {
+      if (intent.action === "prepare") cleanName.value = savedName;
+      if (intent.action === "repair") cleanRepair.value = savedRepair;
+    }
   } catch (e) {
     if (mounted && version === revision)
       error.value = e instanceof Error ? e.message : "接收失败";
@@ -166,15 +201,26 @@ function apply() {
     });
 }
 async function inspectPatch() {
+  const patchVersion = ++patchRevision;
   const version = revision,
     identity = selected.value;
   reviewed.value = false;
   try {
     const value = await deliveriesApi.patch(identity);
-    if (mounted && version === revision && identity === selected.value)
+    if (
+      patchVersion === patchRevision &&
+      mounted &&
+      version === revision &&
+      identity === selected.value
+    )
       patch.value = value;
   } catch (e) {
-    if (mounted && version === revision && identity === selected.value)
+    if (
+      patchVersion === patchRevision &&
+      mounted &&
+      version === revision &&
+      identity === selected.value
+    )
       error.value = e instanceof Error ? e.message : "补丁读取失败";
   }
 }
@@ -208,6 +254,8 @@ function reset() {
   image.value = "";
   rounds.value = 3;
   tokenLimit.value = 60_000;
+  cleanRepair.value = repairSnapshot();
+  cleanName.value = "";
   sync();
   void refresh();
 }
@@ -216,7 +264,7 @@ watch(
   () => route.query.delivery,
   (value) => {
     const id = typeof value === "string" ? value : "";
-    if (id !== selected.value) choose(id);
+    if (id !== selected.value) choose(id, true);
   },
 );
 onMounted(() => {
@@ -239,6 +287,23 @@ const status: Record<string, string> = {
   passed: "验收通过",
   stopped: "已停止",
 };
+function closePatch() {
+  patchRevision++;
+  patch.value = null;
+  reviewed.value = false;
+}
+function closeDetail() {
+  if (!confirmDiscard(repairDirty())) return;
+  detailClosed.value = true;
+  selected.value = "";
+  goal.value = checks.value = "";
+  image.value = "";
+  rounds.value = 3;
+  tokenLimit.value = 60_000;
+  cleanRepair.value = repairSnapshot();
+  closePatch();
+  void router.replace({ query: { ...route.query, delivery: undefined } });
+}
 </script>
 <template>
   <section class="page deliveries">
@@ -289,6 +354,7 @@ const status: Record<string, string> = {
       </button>
     </div>
     <article v-if="detail">
+      <PanelClose @close="closeDetail" />
       <h3>{{ detail.name }}</h3>
       <p>{{ detail.delivery_id }}</p>
       <p>执行副本：{{ detail.receipt.checkout }}</p>
@@ -395,6 +461,7 @@ const status: Record<string, string> = {
         查看验收补丁
       </button>
       <template v-if="patch">
+        <PanelClose label="关闭补丁预览" @close="closePatch" />
         <pre class="patch">{{ patch.patch }}</pre>
         <p>补丁 SHA-256：{{ patch.patch_sha256 }}</p>
         <label v-if="!detail.applied && detail.repair_status === 'passed'"

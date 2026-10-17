@@ -10,6 +10,15 @@ import PriceEditor from "../components/PriceEditor.vue";
 import InputComposition from "../components/InputComposition.vue";
 import UsageInsights from "../components/UsageInsights.vue";
 const route = useRoute();
+const budgetPanel = ref<InstanceType<typeof BudgetPanel> | null>(null);
+function selectScope(value: Scope["kind"]) {
+  if (budgetPanel.value?.confirmLeave() !== false) scope.value = value;
+}
+function selectDay(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (budgetPanel.value?.confirmLeave() !== false) day.value = input.value;
+  else input.value = day.value;
+}
 const linkedRun = computed(() =>
   typeof route?.query.run === "string" ? route.query.run : "",
 );
@@ -143,25 +152,31 @@ const grouped = computed(() => {
       <button
         v-if="linkedDelivery"
         :class="{ selected: scope === 'delivery' }"
-        @click="scope = 'delivery'"
+        @click="selectScope('delivery')"
       >
         指定交付全部轮次
       </button>
       <button
         :class="{ selected: scope === 'session' }"
-        @click="scope = 'session'"
+        @click="selectScope('session')"
       >
         当前会话全部历史</button
-      ><button :class="{ selected: scope === 'run' }" @click="scope = 'run'">
+      ><button
+        :class="{ selected: scope === 'run' }"
+        @click="selectScope('run')"
+      >
         {{ linkedRun ? "指定运行" : "最近运行" }}
       </button>
       <button
         :class="{ selected: scope === 'project' }"
-        @click="scope = 'project'"
+        @click="selectScope('project')"
       >
         当前项目全部对话
       </button>
-      <button :class="{ selected: scope === 'day' }" @click="scope = 'day'">
+      <button
+        :class="{ selected: scope === 'day' }"
+        @click="selectScope('day')"
+      >
         每日（UTC）
       </button>
     </div>
@@ -172,7 +187,11 @@ const grouped = computed(() => {
       }}：包含所有轮次、摘要和子任务的真实尝试；关闭或重启交付不会清零累计用量。
     </p>
     <label v-if="scope === 'day'" class="button-row"
-      >统计日期（UTC）<input v-model="day" type="date" required
+      >统计日期（UTC）<input
+        :value="day"
+        @change="selectDay"
+        type="date"
+        required
     /></label>
     <p
       v-if="linkedRun && scope === 'run'"
@@ -208,6 +227,7 @@ const grouped = computed(() => {
       </div>
       <CostSummary v-if="costs" :costs="costs" />
       <BudgetPanel
+        ref="budgetPanel"
         v-if="selectedScope && scope !== 'session'"
         :scope="selectedScope" />
       <p v-else class="muted">

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PanelClose from "../components/PanelClose.vue";
+const detailClosed = ref(false);
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -136,7 +138,7 @@ function syncRequest() {
     observedReceipts.get(project.value) !== receipt.evaluation_id
   ) {
     observedReceipts.set(project.value, receipt.evaluation_id);
-    choose(receipt.evaluation_id);
+    if (!detailClosed.value) choose(receipt.evaluation_id);
     void loadList();
   }
 }
@@ -146,6 +148,7 @@ function queryId() {
     : "";
 }
 function choose(id: string) {
+  detailClosed.value = !id;
   if (!mounted) return;
   if (selected.value !== id) {
     selected.value = id;
@@ -178,7 +181,8 @@ async function loadList() {
     ];
     if (entries.value.length <= 20) hasMore.value = values.length === 20;
     listError.value = "";
-    if (!selected.value && values[0]) choose(values[0].evaluation_id);
+    if (!detailClosed.value && !selected.value && values[0])
+      choose(values[0].evaluation_id);
   } catch (e) {
     if (mounted && current === projectRevision)
       listError.value = e instanceof Error ? e.message : "评测历史读取失败";
@@ -319,7 +323,7 @@ async function start() {
     if (mounted && current === projectRevision) {
       quote.value = null;
       confirmed.value = false;
-      choose(receipt.evaluation_id);
+      if (!detailClosed.value) choose(receipt.evaluation_id);
       await loadList();
     }
   } catch (e) {
@@ -388,6 +392,14 @@ function downloadReport() {
   link.download = `evaluation-${selected.value}.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function closeDetail() {
+  detailClosed.value = true;
+  selected.value = "";
+  detail.value = null;
+  detailRevision++;
+  report.value = null;
+  void router.replace({ query: { ...route.query, evaluation: undefined } });
 }
 </script>
 
@@ -499,6 +511,15 @@ function downloadReport() {
           {{ quoting ? "正在读取估算…" : "读取模型与费用估算" }}
         </button>
         <template v-if="quote">
+          <PanelClose
+            label="关闭评测计划"
+            @close="
+              quoteRevision++;
+              quote = null;
+              confirmed = false;
+              quoting = false;
+            "
+          />
           <p>
             {{ quote.provider }} / {{ quote.model }} · {{ quote.case_count }} 题
           </p>
@@ -594,6 +615,7 @@ function downloadReport() {
       class="panel evaluation-detail"
       aria-label="评测运行详情"
     >
+      <PanelClose @close="closeDetail" />
       <div class="page-heading">
         <div>
           <h2>
@@ -735,6 +757,14 @@ function downloadReport() {
           完整{{ report.billing_applicable ? "模型实验" : "离线" }}报告 · schema
           {{ report.schema_version }}
         </summary>
+        <PanelClose
+          label="关闭评测报告"
+          @close="
+            report = null;
+            detailRevision++;
+            reportLoading = false;
+          "
+        />
         <p class="muted">
           这是读取时的报告快照，可再次读取以更新。保留原始失败、未知用量与逐题证据。{{
             report.billing_applicable

@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useWorkbench } from "../stores/workbench";
 import { api } from "../api/client";
 import type { Generation, Message } from "../api/types";
 import GenerationEditor from "../components/GenerationEditor.vue";
 import SafeContent from "../components/SafeContent.vue";
+import RunMemoryPanel from "../components/RunMemoryPanel.vue";
+import EventideLogo from "../components/EventideLogo.vue";
+import ToolActivity from "../components/ToolActivity.vue";
+import ComposerMenu from "../components/ComposerMenu.vue";
+import { skillsApi, type SkillStatus } from "../api/skills";
 const store = useWorkbench(),
   route = useRoute(),
   mode = ref("auto"),
@@ -105,8 +110,89 @@ function content(message: Message) {
     .map((b) => b.text)
     .join("\n");
 }
+const canSubmit = computed(
+  () =>
+    !!draft.value.trim() &&
+    !!session.value &&
+    !evaluationRun.value &&
+    !isActive.value &&
+    !busyOther.value &&
+    session.value.status !== "parked" &&
+    run.value?.status !== "interrupted" &&
+    !pending.value &&
+    !store.sending[store.selectedSession] &&
+    !store.creating &&
+    !uploading.value &&
+    !!store.provider?.api_key_configured,
+);
+const composing = ref(false),
+  inspector = ref(false),
+  conversation = ref<HTMLElement | null>(null),
+  readingOlder = ref(false);
+const skills = ref<SkillStatus | null>(null),
+  skillsError = ref("");
+async function loadSkills() {
+  const workspace = store.selectedWorkspace;
+  if (!workspace) return;
+  skillsError.value = "";
+  try {
+    const result = await skillsApi.status(workspace);
+    if (workspace === store.selectedWorkspace) skills.value = result;
+  } catch (e) {
+    skillsError.value = e instanceof Error ? e.message : "无法读取 Skills";
+  }
+}
+watch(
+  () => store.selectedWorkspace,
+  () => {
+    skills.value = null;
+    skillsError.value = "";
+  },
+);
+function onKeydown(event: KeyboardEvent) {
+  if (
+    event.key === "Enter" &&
+    (event.ctrlKey || event.metaKey) &&
+    !event.isComposing &&
+    !composing.value &&
+    event.keyCode !== 229
+  ) {
+    event.preventDefault();
+    void submit();
+  }
+}
+function onScroll() {
+  const el = conversation.value;
+  if (el)
+    readingOlder.value = el.scrollHeight - el.scrollTop - el.clientHeight > 80;
+}
+async function jumpLatest() {
+  readingOlder.value = false;
+  await nextTick();
+  const el = conversation.value;
+  if (el) el.scrollTop = el.scrollHeight;
+}
+watch(
+  () => store.selectedSession,
+  () => {
+    readingOlder.value = false;
+    void jumpLatest();
+  },
+);
+watch(
+  () => [
+    store.messages[store.selectedSession],
+    preview.value?.text,
+    run.value?.tools,
+    run.value?.status,
+  ],
+  async () => {
+    if (!readingOlder.value) await jumpLatest();
+  },
+  { deep: true, flush: "post" },
+);
 async function submit() {
-  if (!draft.value.trim() || evaluationRun.value) return;
+  if (!canSubmit.value) return;
   try {
     await store.submit({
       prompt: draft.value,
@@ -174,10 +260,10 @@ async function abandon() {
 }
 </script>
 <template>
-  <section class="chat-page">
+  <section class="chat-page" :class="{ 'inspector-open': inspector }">
     <header class="page-heading">
       <div>
-        <p class="eyebrow">WORKSPACE / CONVERSATION</p>
+        <p class="eyebrow">CONVERSATION</p>
         <h1>
           {{
             session?.title === "New session"
@@ -199,24 +285,34 @@ async function abandon() {
           本轮使用固定只读快照 · 源码变化不影响在途读取
         </p>
       </div>
-      <span v-if="run" class="badge" :class="run.status">{{
-        run.status === "queued"
-          ? "排队中"
-          : run.status === "running"
-            ? "运行中"
-            : run.status === "waiting_for_user"
-              ? "等待审批"
-              : run.status === "completed"
-                ? "已完成"
-                : run.status === "interrupted"
-                  ? "已停驻"
-                  : run.status === "failed"
-                    ? "失败"
-                    : run.status
-      }}</span>
+      <div class="chat-heading-actions">
+        <button
+          v-if="session"
+          class="inspector-toggle"
+          type="button"
+          :aria-expanded="inspector"
+          @click="inspector = !inspector"
+        >
+          上下文 <span aria-hidden="true">☷</span></button
+        ><span v-if="run" class="badge" :class="run.status">{{
+          run.status === "queued"
+            ? "排队中"
+            : run.status === "running"
+              ? "运行中"
+              : run.status === "waiting_for_user"
+                ? "等待审批"
+                : run.status === "completed"
+                  ? "已完成"
+                  : run.status === "interrupted"
+                    ? "已停驻"
+                    : run.status === "failed"
+                      ? "失败"
+                      : run.status
+        }}</span>
+      </div>
     </header>
     <div v-if="!session" class="empty-state">
-      <div class="empty-symbol">◒</div>
+      <div class="empty-symbol"><EventideLogo /></div>
       <h2>把项目带进来，一起把问题解决</h2>
       <p>分析代码、定位故障、检查工具证据，最后由你决定采纳哪些修改。</p>
       <button
@@ -241,7 +337,13 @@ async function abandon() {
           >查看任务队列</RouterLink
         >
       </p>
-      <div class="conversation" aria-label="对话记录">
+      <div
+        ref="conversation"
+        class="conversation"
+        aria-label="对话记录"
+        tabindex="0"
+        @scroll="onScroll"
+      >
         <template
           v-for="(message, index) in store.messages[store.selectedSession] ||
           []"
@@ -266,9 +368,40 @@ async function abandon() {
           v-if="!store.messages[store.selectedSession]?.length"
           class="empty-state compact"
         >
+          <EventideLogo />
+          <p class="welcome-eyebrow">A LITTLE CLARITY. A LOT OF POSSIBILITY.</p>
           <h2>这次想完成什么？</h2>
           <p>可以先让 Agent 只读分析项目，再决定修改范围。</p>
         </div>
+        <ToolActivity
+          v-if="run"
+          :tools="run.tools || {}"
+          :count="run.tool_calls"
+          :active="isActive"
+        />
+        <p
+          v-if="isActive && !preview?.active"
+          class="working-narrative"
+          role="status"
+        >
+          <span class="working-dot"></span
+          >{{
+            run?.status === "queued"
+              ? "已接收，等待执行额度…"
+              : run?.status === "waiting_for_user"
+                ? "等待你的审批，确认后继续。"
+                : "正在处理任务，工具活动会显示在这里…"
+          }}
+        </p>
+        <section
+          v-if="run?.status === 'failed'"
+          class="run-failure"
+          role="status"
+        >
+          <strong>这次运行未能完成</strong>
+          <p>{{ run.error || run.reason || "打开运行证据查看失败详情。" }}</p>
+          <RouterLink to="/history">查看运行历史</RouterLink>
+        </section>
         <article v-if="preview?.active" class="message assistant preview">
           <div class="message-author">
             Eventide <span class="badge">生成中 · 尚未保存</span>
@@ -300,7 +433,12 @@ async function abandon() {
           </div>
         </section>
         <div v-if="run?.status === 'interrupted'" class="parked-card">
-          <strong>{{ unknown ? "工具结果未确认" : "本轮已停驻" }}</strong>
+          <span class="eyebrow">CHECKPOINT</span>
+          <h3>{{ unknown ? "工具结果未确认" : "已停驻，等待你决定下一步" }}</h3>
+          <p>
+            Continue
+            会重新检查源码与工具状态，并沿用本轮配置继续；不会自动恢复或重放未知操作。
+          </p>
           <p>
             {{ run.reason || "执行已中断" }} ·
             {{ run.error || "恢复前将重新检查源码及工具状态。" }}
@@ -310,7 +448,7 @@ async function abandon() {
               v-if="!unknown"
               @click="store.continueRun().catch(store.fail)"
             >
-              检查并继续</button
+              Continue · 检查并继续</button
             ><button v-if="!unknown" @click="abandon">放弃恢复</button
             ><span v-else
               >请检查原始工作副本；该状态不允许直接继续或采纳。</span
@@ -338,6 +476,14 @@ async function abandon() {
           </ul>
         </details>
       </div>
+      <button
+        v-if="readingOlder"
+        class="jump-latest"
+        type="button"
+        @click="jumpLatest"
+      >
+        ↓ 回到最新
+      </button>
       <form class="composer" @submit.prevent="submit">
         <div v-if="!store.provider?.api_key_configured" class="composer-notice">
           尚未配置模型连接。<RouterLink to="/settings">前往设置</RouterLink>
@@ -369,11 +515,12 @@ async function abandon() {
           placeholder="描述目标、需要检查的代码，或你遇到的问题…"
           rows="3"
           :disabled="!!pending || store.creating"
-          @keydown.ctrl.enter.prevent="submit"
-          @keydown.meta.enter.prevent="submit"
+          @keydown="onKeydown"
+          @compositionstart="composing = true"
+          @compositionend="composing = false"
         ></textarea>
         <div class="composer-toolbar">
-          <div class="button-row">
+          <div class="button-row composer-options">
             <select
               v-model="mode"
               :disabled="store.creating"
@@ -402,6 +549,28 @@ async function abandon() {
               <option v-for="item in models" :key="item" :value="item">
                 {{ item }}
               </option></select
+            ><ComposerMenu label="Skills"
+              ><div @vue:mounted="loadSkills">
+                <strong>项目 Skills</strong>
+                <p class="muted">已配置的技能由后端固定到本轮，按需加载。</p>
+                <p v-if="skillsError" class="inline-error">{{ skillsError }}</p>
+                <ul
+                  v-if="skills?.enabled.skills.length"
+                  class="composer-skill-list"
+                >
+                  <li
+                    v-for="skill in skills.enabled.skills"
+                    :key="skill.skill_id"
+                  >
+                    <strong>{{ skill.name }}</strong
+                    ><small>{{ skill.description }}</small>
+                  </li>
+                </ul>
+                <p v-else-if="skills" class="muted">当前没有启用的 Skills。</p>
+                <button v-else type="button" @click="loadSkills">
+                  读取 Skills</button
+                ><RouterLink to="/skills">管理 Skills →</RouterLink>
+              </div></ComposerMenu
             ><label class="file-button"
               >{{ uploading ? "上传中…" : "＋ 附件"
               }}<input
@@ -417,19 +586,7 @@ async function abandon() {
             @click="store.cancel().catch(store.fail)"
           >
             {{ run?.status === "queued" ? "取消排队" : "■ 停止" }}</button
-          ><button
-            v-else
-            class="primary"
-            type="submit"
-            :disabled="
-              !draft.trim() ||
-              busyOther ||
-              session.status === 'parked' ||
-              !!pending ||
-              store.sending[store.selectedSession] ||
-              !store.provider?.api_key_configured
-            "
-          >
+          ><button v-else class="primary" type="submit" :disabled="!canSubmit">
             {{ store.sending[store.selectedSession] ? "接收中…" : "发送 ↑" }}
           </button>
         </div>
@@ -470,10 +627,69 @@ async function abandon() {
           绑定后不会切回源目录，若要操作其他副本请新建对话。工作副本不是操作系统沙箱。
         </p>
         <small class="muted"
-          >⌘ / Ctrl + Enter 发送 · 切换页面不会停止运行 · 本地 Shell
+          >Enter 换行 · ⌘ / Ctrl + Enter 发送 · 草稿不会自动排队 · 本地 Shell
           不是安全沙箱</small
         >
       </form>
     </template>
+    <Transition name="inspector"
+      ><aside
+        v-if="inspector && session"
+        class="context-inspector"
+        aria-label="对话上下文"
+      >
+        <div class="inspector-heading">
+          <h2>上下文</h2>
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="关闭上下文"
+            @click="inspector = false"
+          >
+            ×
+          </button>
+        </div>
+        <section>
+          <h3>项目目录</h3>
+          <p class="mono">{{ session.working_directory }}</p>
+          <h3>执行位置</h3>
+          <p>{{ session.execution?.kind || "source" }}</p>
+          <p v-if="session.execution?.name">{{ session.execution.name }}</p>
+          <p v-if="boundWorktree" class="muted">
+            本对话沿用独立工作副本；不会自动提交或采纳。
+          </p>
+        </section>
+        <section v-if="session.task_plan?.length">
+          <h3>任务计划</h3>
+          <ol>
+            <li v-for="task in session.task_plan" :key="task.id">
+              {{ task.content
+              }}<small
+                >{{ task.status }} ·
+                {{ task.summary || "模型声明，非独立验收" }}</small
+              >
+            </li>
+          </ol>
+        </section>
+        <section v-if="run">
+          <h3>本轮运行</h3>
+          <p class="mono">{{ run.run_id }}</p>
+          <p>{{ run.steps || 0 }} 步 · {{ run.tool_calls || 0 }} 次工具调用</p>
+          <RouterLink :to="{ path: '/usage', query: { run: run.run_id } }"
+            >查看用量</RouterLink
+          ><br /><a
+            :href="`/api/runs/${encodeURIComponent(run.run_id)}/export`"
+            download
+            >下载事件记录</a
+          >
+        </section>
+        <RunMemoryPanel
+          v-if="run"
+          :run-id="run.run_id"
+          :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
+        />
+        <RouterLink to="/history">查看历史与证据 →</RouterLink>
+      </aside></Transition
+    >
   </section>
 </template>

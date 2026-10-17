@@ -389,7 +389,8 @@ async def _evaluate_case(
         )
         store = RuntimeStore(case_settings.state_dir / "evals" / f"{mode}.db")
         runtime = RuntimeHost(
-            settings=case_settings, provider=provider, store=store, enable_mcp=False,
+            settings=case_settings, provider=provider, store=store,
+            enable_mcp=False, enable_memory=False,
         )
         await (profile or EvaluationProfile()).install(runtime)
         if call_authority is not None:

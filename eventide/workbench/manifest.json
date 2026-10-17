@@ -1,9 +1,10 @@
 {
   "version": 1,
-  "source_sha256": "46f05dbdafd860a848664aae854293c0a27a27af8a65a56f384c8dbf45f8d5c9",
+  "source_sha256": "d3fe9a2fd5f5870b3691c1907662dc405e68043b1b57fee2e616ca0a38224292",
   "files": {
-    "assets/index-BH9Bw4Wr.css": "4a8db04225067388de06dd1713b5613d1894fa0fbe58d609f341f74e52141ac9",
-    "assets/index-EV1OUwB3.js": "034d29bcffe535f2306971a75ac040e45ace72d587afce80349a9750f0511ced",
-    "index.html": "9e15e968f64e8263ca5cbea58419364dd8111c9d4f20093c17d2dc8cc6f50e48"
+    "assets/favicon-CWOdeYzi.svg": "ad955d0d8fcf9fc8d9bab277a89144af9c2e167ce3c66f5e173a4932e65914a5",
+    "assets/index-3x7H7PTA.js": "72787ba7e33bcc98e9344969f9103cfa6b22f202cddb928afcb4d262d0fa8122",
+    "assets/index-BGlOyBRA.css": "2103b68d07c586e7365e49d9293ecc9eff5443aa877d00b8f3f0cd94e6c17f8d",
+    "index.html": "418fc473b4f59d0229e389fa3e365014e30073e372be4ad68611ce8d76b5edce"
   }
 }

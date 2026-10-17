@@ -6,6 +6,10 @@ import {
   observeConfiguration,
   rejectedConfiguration,
 } from "../api/configuration";
+import {
+  useUnsavedChanges,
+  confirmDiscard,
+} from "../composables/useUnsavedChanges";
 import { api } from "../api/client";
 import type { Generation, GenerationState } from "../api/types";
 const props = defineProps<{
@@ -23,6 +27,9 @@ const state = ref<GenerationState | null>(null),
   statusVersion = ref(0);
 const modes = ref<Record<string, string>>({}),
   values = ref<Record<string, string>>({});
+const draftDirty = ref(false);
+useUnsavedChanges(() => scope.value !== "run" && draftDirty.value);
+defineExpose({ confirmLeave: () => confirmDiscard(draftDirty.value) });
 let revision = 0,
   readRevision = 0,
   mounted = true;
@@ -70,6 +77,7 @@ onUnmounted(() => {
   stopObserving();
 });
 function usePatch(result: GenerationState) {
+  draftDirty.value = false;
   const value =
     scope.value === "model"
       ? result.defaults
@@ -165,6 +173,7 @@ function patch(): Generation {
   return result as Generation;
 }
 function changed() {
+  draftDirty.value = true;
   saved.value = "";
   emit("change", patch());
 }
@@ -187,6 +196,7 @@ async function save() {
   try {
     await api.saveGeneration(model, patch(), state.value.config_hash, session);
     if (!mounted || version !== revision) return;
+    draftDirty.value = false;
     const fresh = await refresh();
     saved.value = fresh
       ? "保存已确认，已读取当前生成设置；新运行生效。"
@@ -355,7 +365,11 @@ const labels: Record<string, string> = {
         saving ? "保存中…" : status.pending ? "重试原生成请求" : "保存生成设置"
       }}
     </button>
-    <button v-if="scope !== 'run'" :disabled="busy" @click="refresh()">
+    <button
+      v-if="scope !== 'run'"
+      :disabled="busy"
+      @click="confirmDiscard(draftDirty) && refresh()"
+    >
       刷新生成设置
     </button>
   </div>

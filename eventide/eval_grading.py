@@ -198,7 +198,9 @@ async def _delivery_case(
     )
     settings, store = host.settings, host.store
     await host.close()
-    reopened = RuntimeHost(settings, ScriptedProvider([]), store=store, enable_mcp=False)
+    reopened = RuntimeHost(
+        settings, ScriptedProvider([]), store=store, enable_mcp=False, enable_memory=False,
+    )
     try:
         recovered = await reopened.manage_delivery("show", delivery_id=delivery_id)
         candidate = Path(prepared["receipt"]["checkout"])

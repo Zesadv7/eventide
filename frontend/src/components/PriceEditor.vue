@@ -3,6 +3,8 @@ import { onMounted, ref } from "vue";
 import { budgetsApi, type Price } from "../api/budgets";
 import { useWorkbench } from "../stores/workbench";
 
+import PanelClose from "./PanelClose.vue";
+import { useUnsavedChanges } from "../composables/useUnsavedChanges";
 const store = useWorkbench();
 const prices = ref<Price[]>([]),
   provider = ref(store.provider?.provider || "openai_responses"),
@@ -14,6 +16,29 @@ const effective = ref(new Date().toISOString().slice(0, 19)),
   saving = ref(false),
   error = ref(""),
   message = ref("");
+const snapshot = () =>
+  JSON.stringify([
+    provider.value,
+    model.value,
+    category.value,
+    currency.value,
+    rate.value,
+    effective.value,
+  ]);
+const clean = ref(snapshot());
+const canDiscard = useUnsavedChanges(() => snapshot() !== clean.value);
+const panel = ref<HTMLDetailsElement | null>(null);
+function closeEditor() {
+  if (!canDiscard()) return;
+  const values = JSON.parse(clean.value) as string[];
+  provider.value = values[0]! as typeof provider.value;
+  model.value = values[1]!;
+  category.value = values[2]! as Price["category"];
+  currency.value = values[3]!;
+  rate.value = values[4]!;
+  effective.value = values[5]!;
+  if (panel.value) panel.value.open = false;
+}
 const labels: Record<Price["category"], string> = {
   input_tokens: "输入（扣除已单独计价的缓存）",
   output_tokens: "输出（扣除已单独计价的推理）",
@@ -30,6 +55,7 @@ async function load() {
 }
 onMounted(load);
 async function save() {
+  const savedSnapshot = snapshot();
   saving.value = true;
   error.value = message.value = "";
   try {
@@ -53,6 +79,7 @@ async function save() {
         b.toString(16).padStart(2, "0"),
       ).join("");
     await budgetsApi.registerPrice({ ...body, version_id: version });
+    clean.value = savedSnapshot;
     message.value =
       "价格版本已保存。历史费用快照保留原版本，新价格用于后续请求。";
     await load();
@@ -66,8 +93,9 @@ async function save() {
 
 <template>
   <section class="panel">
-    <details>
+    <details ref="panel">
       <summary>管理价格版本（{{ prices.length }} 条）</summary>
+      <PanelClose label="关闭价格编辑" @close="closeEditor" />
       <p class="muted">
         请按供应商正式价目填写每百万 Token
         的价格。无价格显示未知；不同币种分开统计，不自动换汇。缓存与推理属于总量的细项，不能再次加进总

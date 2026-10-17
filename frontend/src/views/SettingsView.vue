@@ -15,6 +15,11 @@ import {
   probeStatus,
   type ProbeResult,
 } from "../api/probe";
+import {
+  useUnsavedChanges,
+  confirmDiscard,
+} from "../composables/useUnsavedChanges";
+import PanelClose from "../components/PanelClose.vue";
 import GenerationEditor from "../components/GenerationEditor.vue";
 const store = useWorkbench(),
   provider = ref<ProviderInput["provider"]>("openai_responses"),
@@ -46,12 +51,13 @@ const busy = computed(
   () =>
     loading.value || saving.value || probing.value || configStatus.value.active,
 );
+const probeHidden = ref(false);
 function syncProbe() {
   const status = probeStatus();
   const wasActive = probing.value;
   probing.value = status.active;
   pendingProbe.value = status.pending;
-  probeResult.value = status.result;
+  if (!probeHidden.value) probeResult.value = status.result;
   if (status.active) probeError.value = "";
   if (wasActive && !status.active && loading.value && mounted)
     void refreshConfiguration();
@@ -64,6 +70,23 @@ onUnmounted(() => {
   stopObservingProbe();
   stopObservingConfiguration();
 });
+const generationEditor = ref<InstanceType<typeof GenerationEditor> | null>(
+  null,
+);
+function selectGenerationScope(value: "model" | "session") {
+  if (generationEditor.value?.confirmLeave?.() !== false)
+    generationScope.value = value;
+}
+const cleanConnection = ref("");
+const connectionSnapshot = () =>
+  JSON.stringify([provider.value, model.value, baseUrl.value]);
+const connectionDirty = () =>
+  !!apiKey.value ||
+  (!!cleanConnection.value && connectionSnapshot() !== cleanConnection.value);
+useUnsavedChanges(connectionDirty);
+function closeProbe() {
+  probeHidden.value = true;
+}
 const form = computed<ProviderInput>(() => ({
   clear_api_key: false,
   provider: provider.value,
@@ -85,6 +108,7 @@ async function refreshConfiguration(replace = true) {
       provider.value = value.provider;
       model.value = value.model;
       baseUrl.value = value.base_url || "";
+      cleanConnection.value = connectionSnapshot();
     }
     error.value = "";
     return true;
@@ -113,12 +137,14 @@ async function save() {
     (refreshRequired.value && !configStatus.value.pending)
   )
     return;
+  if (generationEditor.value?.confirmLeave?.() === false) return;
   saving.value = true;
   error.value = "";
   message.value = "";
   const candidate = { ...form.value };
   try {
     await api.saveProvider(candidate, configHash.value);
+    cleanConnection.value = connectionSnapshot();
     apiKey.value = "";
     const fresh = await refreshConfiguration();
     message.value = fresh
@@ -147,6 +173,7 @@ async function reset() {
     !confirm("恢复服务启动时的模型配置？已保存连接将被移除。")
   )
     return;
+  if (generationEditor.value?.confirmLeave?.() === false) return;
   saving.value = true;
   error.value = "";
   message.value = "";
@@ -165,6 +192,7 @@ async function reset() {
   }
 }
 async function testConnection() {
+  probeHidden.value = false;
   if (
     busy.value ||
     configStatus.value.pending ||
@@ -290,7 +318,15 @@ async function testConnection() {
             }}
           </button>
         </div>
-        <button type="button" :disabled="busy" @click="refreshConfiguration()">
+        <button
+          type="button"
+          :disabled="busy"
+          @click="
+            confirmDiscard(connectionDirty()) &&
+            generationEditor?.confirmLeave?.() !== false &&
+            refreshConfiguration()
+          "
+        >
           刷新当前配置
         </button>
         <p v-if="configStatus.pending" class="alert" role="status">
@@ -318,10 +354,11 @@ async function testConnection() {
         {{ probeError }}
       </p>
       <section
-        v-if="probeResult"
+        v-if="probeResult && !probeHidden"
         class="probe-result"
         aria-label="连接测试结果"
       >
+        <PanelClose label="关闭连接测试结果" @close="closeProbe" />
         <h3>{{ probeResult.success ? "连接测试成功" : "连接测试未成功" }}</h3>
         <p>{{ probeResult.message }}</p>
         <p>本次候选：{{ probeResult.provider }} / {{ probeResult.model }}</p>
@@ -383,18 +420,19 @@ async function testConnection() {
       <div class="segmented">
         <button
           :class="{ selected: generationScope === 'model' }"
-          @click="generationScope = 'model'"
+          @click="selectGenerationScope('model')"
         >
           模型默认</button
         ><button
           :disabled="!store.selectedSession"
           :class="{ selected: generationScope === 'session' }"
-          @click="generationScope = 'session'"
+          @click="selectGenerationScope('session')"
         >
           当前会话
         </button>
       </div>
       <GenerationEditor
+        ref="generationEditor"
         :model="store.provider.model"
         :scope="generationScope"
         :session="

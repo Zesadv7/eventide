@@ -56,7 +56,7 @@ execution_worktrees.py 用 WorktreeService 从干净源 HEAD 创建副本，Run 
 
 ## 存储与事件契约
 
-默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。EVENTIDE_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。当前 schema 版本为 4，版本 1/2/3 在同一 Runtime 数据模型内自动升级；未知版本和直接作为 RuntimeStore 打开的未版本化旧数据库明确拒绝，不自动删除。`migration` Python模块通过独立只读连接校验旧 TraceStore schema，再把数据以单个目标事务导入当前库。
+默认用户状态根中包含 `runtime.sqlite`、`host.lock` 和按需生成的 `secret.key`。EVENTIDE_STATE_DIR 优先；SQLite 使用 WAL、外键和 schema_migrations。当前 schema 版本为 5，版本 1/2/3/4 在同一 Runtime 数据模型内自动升级；未知版本和直接作为 RuntimeStore 打开的未版本化旧数据库明确拒绝，不自动删除。`migration` Python模块通过独立只读连接校验旧 TraceStore schema，再把数据以单个目标事务导入当前库。
 
 | 表 | 职责 |
 |---|---|
@@ -686,3 +686,40 @@ U4暴露与效果口径：按权威attempt及执行事件重建development暴露
 旧20题追加三轮回归42/60（14、15、13），未尝试/unknown均0；理解5/12、定位4/12、单文件16/18、跨文件11/12、恢复6/6。相比历史34/60，总数增加8但跨文件减少1，不能称所有类别无回归。24事实均合法裸JSON，15次内容/题目结构失败；3次20k预算停驻即使冻结测试通过仍判失败。353唯一attempt与各自开始/结束/预留/结算完全匹配，87工具调查/24最终化/242普通Agent阶段和120事件产物指纹一致，费用未知。生产实现及事实协议同时变化，只作组合观察；未据新8题调整实现，未把已分析旧留出重新称为未见数据。
 
 追加工程收口的生产Python指纹为d98ee14810d2753fae262a2dba00c4c8c2be59a5f9e35c77cc9ede76657f2834。最终原样顺序pytest 1820通过/10可选跳过、exit0；coverage四份执行行并集已按117模块逐项核对，14036/14988=93.64825193488124%，85%门槛exit0。初次三个旧显示断言修正、并行两项3秒等待失败及顺序复验日志均保留，没有改生产时限或模型grader。128前端/24浏览器/54真实Docker及打包资源通过；浮动标签网络失败与固定已验证digest的完整多阶段分发通过分列。后续遵循定向验证后一次全量收口，模型固定重复不扩大成离线门禁重复。
+
+
+## 本机系统目录选择
+
+`http_api/directories.py` 提供 POST `/api/directories/choose`，严格要求本机连接和匹配 Origin。`native_directories.py` 仅运行固定 `/usr/bin/osascript` 脚本或 `/usr/bin/python3 -I` GTK 3 FileChooserNative 脚本，没有用户命令参数、shell、包安装或目录枚举。子进程只接收桌面必需环境白名单，不继承 Provider 密钥、Python 或动态加载器注入变量。
+
+整个进程仅一个选择窗口；120 秒截止、客户端断开和取消都先终止进程组、等待、必要时 kill 并回收后才释放槽。请求任务与资源所有者分离并 shield，重复取消和启动中取消不能提前释放槽。只返回状态及选定的原始路径，不读取目录文件、不写 Store、不注册项目或派发 Run。Vue 组件只回填表单，取消不触发后备浏览；手动路径输入必须显式打开。
+## 页面导航与临时面板
+
+`PageBack` 独立跟踪 Router 成功导航的内部 history position；拒绝或取消的导航不进入记录，返回不会信任 referrer 或未知外站历史。直接入口退回 `/chat`。`PanelClose` 提供带名称的 44×44 非提交按钮，网格内使用 justify-self:end，避免关闭按钮拉伸。
+
+临时详情保留独立的关闭状态和异步读取代次。关闭使迟到响应失效，轮询列表不再自动选择记录；后台操作和持久未知 mutation 身份仍归原 API 模块所有。共享 `useUnsavedChanges` 注册当前组件草稿，跨页面路由只弹一次确认，beforeunload 使用浏览器原生提示。草稿/密钥不新增浏览器持久存储；`confirmUnsavedChanges(router)` 供外壳在切换项目等非路由上下文前检查。预算、交付和会话编辑通过 guardQueryChanges 也保护同一路径下的身份查询参数变化；显式刷新与重选先确认，确认已接收的表单才更新干净基线。
+### 偏好记忆前端控制面
+
+`MemoryView` 使用现有同源 `/api/memory` 与建议 resolve 接口，不另建状态服务。当前项目查询包含全局及项目记录，视图按明确范围过滤，并仅进行客户端字面搜索。所有编辑使用读取到的 revision，409 明确拒绝刷新权威记录但保留原草稿，不自动覆盖新版本。来源组件只链接真实 session，事件 ID 按原值展示，不构造未实现的消息定位链接。
+
+`api/memory.ts` 复用 durableMutation 的内容绑定幂等身份。未知响应保留原意图，阻止不同意图；sessionStorage 仅保存请求指纹、路径、方法与非正文参数，主题键和正文均置空。原内容可在当前内存中重试，刷新后需重新输入缺失内容；恢复必须匹配原指纹和版本，明确拒绝或成功才解除待确认状态。`RunMemoryPanel` 分别展示执行时快照、请求级注入引用及保存/建议/拒绝回执，不把历史版本当当前状态，不承诺模型实际遵循。全页与运行面板都有迟到响应版本检查。
+## 长期偏好记忆（ADR-092）
+
+`RuntimeHost.memory` 统一管理 `PreferenceMemory`，`RuntimeStore.transact_facts` 在 BEGIN IMMEDIATE 内折叠最新事实、检查版本/冲突并同时追加变更及 HTTP 成功回执。schema v5 只增加偏好事件的部分索引，不增加独立可变记忆表、不改历史事件。`memory.record`、`memory.suggestion`、`memory.settings`、`memory.observed` 都在既有配置控制 Session；管理写入由可信用户端发起。没有独立 Agent loop、模型抽取或远程 embedding 成本。
+
+记录含稳定 ID、revision、scope、project_id、主题 key、原文 content、状态、来源事件身份与时间。来源区分 manual/explicit/suggestion，更新和撤销保留旧版本；suggestion 是独立 pending/accepted/dismissed 对象，未接受不进入检索。settings 有独立 revision/enabled。manual 修改当前来源为人工操作，但阻止旧来源再建议时检查全部历史版本，不只检查最新投影。全局仅当前安装，项目身份由源/受管 worktree 的稳定 project_id 决定，非登录用户、多租户或远程 URL。
+
+对话识别严格有界：只读根用户 Run 的 canonical message.user（author/role=user），拒绝父任务委派、控制/Worker、附件、多行和引述；明确保存语法要求显式作用域及 key=value。普通 preference/偏好语句的相同内容在同 Session 两条独立消息中出现才生成待确认项目建议。建议接受时再次核对所有来源的 canonical 用户身份/Session；不能由模型返回值自证来源。禁用期间不采集普通偏好观察，不在重新开启后补挖旧消息；Continue 不重读旧用户命令，摘要与工具内容不参与识别。确定性语法以外不自动保存，UI 引导人工确认。
+
+请求开始执行时创建 `memory.snapshot`（不是持久接收/排队即已使用），按主题把项目覆盖全局、排除非 active，按否定优先/主题稳定排序限制 12 条。所有选中内容原样保留且单条限 500 字符。普通编辑仍使用原 revision，暂停/撤销或经历暂停后重新启用则本 Run 不再注入。Continue 新 Run 建新快照；原先 revoked 记录不可复活，用户主动新建是新 ID。每次上下文构建前增加 subordinate data 块，系统权限、当前请求和模式约束优先。
+
+ContextBuilder 之前固定本次请求可包含的 ID 集合；每次重试取得模型槽后只在此集合内重新计算有效集，用其实际 system 参与原预算预留；进入 provider 方法前再次无 await 复核，集合只允许缩小（不能超过预留时已包含 ID），然后记录 `memory.injected` 的 request_id/attempt_id、ID/revision/scope/key 和注入块 digest。没有模型调用时不产生该记录；记录只证明派发边界的上下文，不证明服务商收妥、模型采用或答案因果。`model.request.context_hash` 仍只对消息做 hash，不冒充 system 证明。原事件/SSE 重连和 Run 详情可读这些证据。
+
+原主链实际请求用量、重试、模型槽、context 字符预算不改；摘要不单独读取长期记忆。评测构造 Host 显式 enable_memory=False，包括重开 Host 的评测恢复；其余控制和委派 Run 不自动保存/注入。总开关不更改 API 显式保存许可，但不能被显式保存反向开启。没有密码保管功能：拒绝已知 provider/embedding 凭据及常见秘密/授权指令模式，UI 应提示不输入秘密。
+
+撤销只更新未来检索资格，不删除唯一事实源、历史聊天/摘要/导出或供应商请求。源内容在普通会话上下文仍可能出现，因此不得宣称彻底遗忘；撤销后不从这些历史内容重建记忆。当前阶段不承诺通用语义冲突检测（冲突以同 scope/project/key 判定），不自动归并同义主题，不作任意自然语言抽取、不增加多租户或外部同步。
+### 对话优先的前端壳层（2026-10-17）
+
+App 只维护浏览器外观与导航状态；项目、会话、Run 和事件仍以原 Pinia/API/SSE 投影为准。会话导航先通过路由守卫，再由 ChatView 的路由监听选择会话；项目切换同步聊天 URL，并在变更前检查未保存表单。原生目录返回值按原样提交，空白检查不修剪实际路径。
+
+ChatView 在 UI 边界统一检查发送条件，IME 组合输入不触发快捷键，活动任务中的草稿不形成后台队列。滚动容器按距底部位置决定是否跟随；工具活动只投影现有 Run.tools，展开显示原始脱敏证据，不把完成状态解释为独立验收。上下文面板按真实 Run 身份查询历史记忆记录。ThemeControl 只保存主题偏好；折叠/移动侧栏对不可见区域使用 inert，移动抽屉支持焦点约束、Escape 与焦点返回。减少动态效果遵循 prefers-reduced-motion。

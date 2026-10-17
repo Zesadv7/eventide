@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PanelClose from "../components/PanelClose.vue";
+const detailClosed = ref(false);
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -62,7 +64,7 @@ function sync() {
   const receipt = state.value.receipt;
   if (receipt && receipts.get(project.value) !== receipt.run_id) {
     receipts.set(project.value, receipt.run_id);
-    choose(receipt.run_id);
+    if (!detailClosed.value) choose(receipt.run_id);
     void loadList();
   }
 }
@@ -71,6 +73,7 @@ function queryId() {
   return typeof route.query.index === "string" ? route.query.index : "";
 }
 function choose(id: string) {
+  detailClosed.value = !id;
   if (!mounted) return;
   if (selected.value !== id) {
     selected.value = id;
@@ -111,7 +114,8 @@ async function loadList() {
     ];
     if (entries.value.length <= 20) more.value = values.length === 20;
     listError.value = "";
-    if (!selected.value && values[0]) choose(values[0].run_id);
+    if (!detailClosed.value && !selected.value && values[0])
+      choose(values[0].run_id);
   } catch (e) {
     if (mounted && current === revision)
       listError.value = e instanceof Error ? e.message : "历史读取失败";
@@ -244,6 +248,13 @@ onUnmounted(() => {
   clearInterval(timer);
   stopObserving();
 });
+function closeDetail() {
+  detailClosed.value = true;
+  selected.value = "";
+  detail.value = null;
+  detailRevision++;
+  void router.replace({ query: { ...route.query, index: undefined } });
+}
 </script>
 <template>
   <section class="page indexes">
@@ -316,6 +327,7 @@ onUnmounted(() => {
     </button>
     <p v-if="detailError" class="inline-error">{{ detailError }}</p>
     <article v-if="detail">
+      <PanelClose @close="closeDetail" />
       <h3>{{ labels[detail.status] || detail.status }}</h3>
       <p class="identity">{{ detail.run_id }}</p>
       <button v-if="activeDetail" :disabled="stopping" @click="stop">

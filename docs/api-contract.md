@@ -509,3 +509,29 @@ loaded_skills仅来自实际skill.loaded事件，可以为空。profile不把正
 也不添加工具调用、消费或完成证据。队列等待和刷新不改变固定内容。
 
 Python可选引用提取只增加retrieval.answer_result可读事件，不新增产品请求路由。结果报告的result_missing区分已开始却缺少结果事实，unattempted仅指确认未开始；权威读取覆盖未知时对应计数和remaining为null并标evidence.read_errors。Token/费用仍来自同一Host模型尝试，不能把两臂投影再次累计。
+
+
+## 系统目录选择
+
+`POST /api/directories/choose` 无请求体，只允许 loopback 连接且要求与服务匹配的 Origin；缺失或跨源返回 403。响应 HTTP 200 为 `{ "status": "selected", "path": "/absolute/path" }`，或只含 `status` 的 `cancelled`、`unavailable`、`busy`、`timed_out`。路径保留空格与换行，不返回其他目录信息、命令输出或异常文本。窗口属于服务宿主机；浏览器必须显式点击，不自动重试，不需要持久幂等键。选择仅回填表单，注册仍走原有项目接口及其幂等校验。取消、断开及 120 秒超时等待进程回收，重复请求在收尾期间仍返回 busy；不可用时只提供显式手动输入。
+## 长期偏好记忆
+
+全部写入要求本机/同源、`Idempotency-Key`（1–128 可见 ASCII）。成功变更与 `http.mutation_completed` 在一笔 SQLite 事务内提交；同键同体返回原结果，异体 409。已明确拒绝的错误有 `X-Eventide-Mutation-Outcome: rejected`；503 未知不能换键自动重放。标准错误 envelope 与其他路由一致。请求严格拒绝额外字段，revision 必须整数（不接受 bool）。
+
+| 方法和路径 | 请求/响应 |
+|---|---|
+| GET /api/memory | 可选 project_id/include_revoked=false；返回 settings、memories、suggestions、warning。不带 project_id 只有全局，带则全局加精确项目；无效项目404。建议包含历史状态，UI 可筛 pending |
+| POST /api/memory | `{scope:"global"或"project",project_id:null或ID,key,content}`；201 `{memory}`。global 不允许 project_id；project 必须真实ID |
+| PATCH /api/memory/settings | `{expected_revision:0或当前版本,enabled:bool}`；`{settings}` |
+| PATCH /api/memory/{id} | `{expected_revision,content?,status?:"active"或"paused"或"revoked"}`；`{memory}`。不能改 scope/key；revoked 不可恢复 |
+| DELETE /api/memory/{id} | body `{expected_revision}`；`{memory}` 状态 revoked，不是硬删除 |
+| POST /api/memory/suggestions/{id}/resolve | `{expected_revision,action:"accept"或"dismiss"}`；`{suggestion,memory?}`。accept 复核来源和同主题冲突 |
+| GET /api/runs/{run_id}/memory | `{snapshotted,snapshot,injections,receipts}`；不存在Run404。排队未开始 snapshotted=false；没有实际请求 injections=[] |
+
+Memory record：`id,revision,scope,project_id,key,content,status,source,created_at,updated_at`，source 为 `{type:"manual"|"explicit"|"suggestion",event_ids:string[],session_id:null|string}`；时间为 epoch 秒。主题 key `[a-z0-9_.-]{1,64}`，正文去除首尾空白后 1–500 字符，禁止换行/控制字符及已识别秘密和权限指令。Suggestion 字段相同但状态 pending/accepted/dismissed；独立 revision。Settings 为 `{enabled,revision}`，默认 true/0。
+
+Injection 为 `{request_id,attempt_id,memories:[{id,revision,scope,project_id,key}],digest}`。空 memories 表示该次请求无长期偏好注入。digest 固定实际注入块，不表示完整消息或答案因果。Receipt 为 `{type:"memory.saved"|"memory.suggested"|"memory.rejected",memory_id?,suggestion_id?,reason?}`。SSE 同名事件以及 `memory.injected` 可触发刷新；`memory.snapshot` 仅表示选择，不等于模型使用。建议/设置修改在控制Session留事实，管理页 mutation完成后应重新读取列表；运行页读取具体Run的注入事实。
+
+状态冲突/同作用域同key冲突409，记录不存在404，无效内容/来源422；同键绑定冲突沿原协议409。关闭总开关停止注入与新建议，但不拒绝主动保存或接受已展示建议，且不重新开启。普通编辑下一Run生效，暂停/撤销下一实际请求生效，重新启用条目下一Run生效。UI 必须提示撤销不擦除历史聊天、摘要、事件、导出和备份，已派发请求不可撤回。
+
+`snapshot` 为该Run开始执行时的 `{memories:[{id,revision,scope,project_id,key}]}`，尚未选定时为 null；它是选择证据，不表示已派发。

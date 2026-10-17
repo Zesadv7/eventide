@@ -1,3 +1,4 @@
+import MemoryView from "./views/MemoryView.vue";
 import ProjectsView from "./views/ProjectsView.vue";
 import HistoryImportsView from "./views/HistoryImportsView.vue";
 import WorktreesView from "./views/WorktreesView.vue";
@@ -15,6 +16,7 @@ import SessionsView from "./views/SessionsView.vue";
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
+    { path: "/memory", component: MemoryView },
     { path: "/projects", component: ProjectsView },
     { path: "/imports", component: HistoryImportsView },
     { path: "/worktrees", component: WorktreesView },

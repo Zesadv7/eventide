@@ -78,6 +78,7 @@ it("retains original body and request identity after a lost response", async () 
   expect(sessionMutationState("one").pending).toBeNull();
 });
 it("keeps a stale editor version until explicit refresh and hides managed sessions", async () => {
+  vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
   const list = vi
     .spyOn(sessionsApi, "list")
     .mockResolvedValue([
@@ -170,4 +171,18 @@ it("clears pending intent only on a definite rejected receipt", async () => {
     ApiError,
   );
   expect(sessionMutationState("one").pending).toBeNull();
+});
+
+it("does not discard a renamed draft when reselecting the same session and declining", async () => {
+  vi.spyOn(sessionsApi, "list").mockResolvedValue([item]);
+  const confirm = vi.fn().mockReturnValue(false);
+  vi.stubGlobal("confirm", confirm);
+  const wrapper = await render();
+  await wrapper.get('input:not([type="checkbox"])').setValue("keep this draft");
+  await wrapper.get(".session-grid button").trigger("click");
+  expect(
+    wrapper.get<HTMLInputElement>('input:not([type="checkbox"])').element.value,
+  ).toBe("keep this draft");
+  expect(confirm).toHaveBeenCalledTimes(1);
+  wrapper.unmount();
 });

@@ -34,7 +34,9 @@ it("keeps an uncertain removal retryable after the record disappears and page re
   await flushPromises();
   await wrapper.get("article button").trigger("click");
   await wrapper.get('input[type="checkbox"]').setValue(true);
-  await wrapper.get('[aria-label="移除项目确认"] button').trigger("click");
+  await wrapper
+    .get('[aria-label="移除项目确认"] button:not(.panel-close)')
+    .trigger("click");
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   await flushPromises();
   expect(sessionStorage.getItem("eventide.pending-workspace-removal")).toBe(
@@ -46,7 +48,9 @@ it("keeps an uncertain removal retryable after the record disappears and page re
   await flushPromises();
   expect(wrapper.get('[aria-label="移除项目确认"]').text()).toContain("other");
   await wrapper.get('input[type="checkbox"]').setValue(true);
-  await wrapper.get('[aria-label="移除项目确认"] button').trigger("click");
+  await wrapper
+    .get('[aria-label="移除项目确认"] button:not(.panel-close)')
+    .trigger("click");
   await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   await flushPromises();
   const keys = fetch.mock.calls.map(

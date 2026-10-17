@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PanelClose from "../components/PanelClose.vue";
+import { useUnsavedChanges } from "../composables/useUnsavedChanges";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -25,6 +27,10 @@ const entries = ref<Session[]>([]),
   notice = ref(""),
   confirmDelete = ref(false),
   loading = ref(false);
+const canDiscard = useUnsavedChanges(
+  () => !!selected.value && title.value !== selected.value.title,
+  { guardQueryChanges: true },
+);
 const state = ref(sessionMutationState(project.value));
 const locked = computed(() => state.value.active || !!state.value.pending);
 let loadGeneration = 0;
@@ -33,7 +39,8 @@ let revision = 0,
 const unsubscribe = observeSessionMutations(() => {
   state.value = sessionMutationState(project.value);
 });
-function choose(value: Session) {
+function choose(value: Session, replaceDraft = false) {
+  if (!replaceDraft && !canDiscard()) return;
   selected.value = { ...value };
   title.value = value.title;
   confirmDelete.value = false;
@@ -52,7 +59,7 @@ async function load() {
     entries.value = values.filter((s) => !s.managed);
     const id = selected.value?.session_id || route.query.session;
     const found = entries.value.find((s) => s.session_id === id);
-    if (found) choose(found);
+    if (found) choose(found, true);
     else {
       selected.value = null;
       title.value = "";
@@ -125,7 +132,7 @@ watch(
   (id) => {
     if (id === selected.value?.session_id) return;
     const found = entries.value.find((entry) => entry.session_id === id);
-    if (found) choose(found);
+    if (found) choose(found, true);
   },
 );
 onMounted(reset);
@@ -133,6 +140,14 @@ onUnmounted(() => {
   mounted = false;
   unsubscribe();
 });
+function closeEditor() {
+  if (!canDiscard()) return;
+  loadGeneration++;
+  selected.value = null;
+  title.value = "";
+  confirmDelete.value = false;
+  void router.replace({ query: { ...route.query, session: undefined } });
+}
 </script>
 <template>
   <section class="page sessions-page">
@@ -150,7 +165,9 @@ onUnmounted(() => {
         重试原会话管理请求
       </button>
     </p>
-    <button :disabled="loading || locked" @click="load">刷新会话版本</button>
+    <button :disabled="loading || locked" @click="canDiscard() && load()">
+      刷新会话版本
+    </button>
     <p v-if="!entries.length">{{ loading ? "读取中…" : "暂无普通会话。" }}</p>
     <div class="session-grid">
       <button
@@ -164,6 +181,7 @@ onUnmounted(() => {
       </button>
     </div>
     <article v-if="selected">
+      <PanelClose label="关闭会话编辑" @close="closeEditor" />
       <h3>
         {{ selected.title === "New session" ? "新对话" : selected.title }}
       </h3>
