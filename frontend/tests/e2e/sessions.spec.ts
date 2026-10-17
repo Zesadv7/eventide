@@ -46,7 +46,30 @@ test("session management preserves retry identity and rejects stale tabs", async
   expect(
     (await (await page.request.get(`/api/sessions/${session}`)).json()).title,
   ).toBe("已保存但响应丢失");
-  await other.getByRole("button", { name: "刷新会话版本" }).click();
+  const refresh = other.getByRole("button", {
+    name: "刷新会话版本",
+    exact: true,
+  });
+  // Refreshing a stale tab must not silently discard its unsaved title.
+  const cancelledDialog = other.waitForEvent("dialog");
+  const cancelledRefresh = refresh.click();
+  const cancel = await cancelledDialog;
+  expect(cancel.type()).toBe("confirm");
+  expect(cancel.message()).toBe("有尚未保存的修改，确定放弃并离开吗？");
+  await cancel.dismiss();
+  await cancelledRefresh;
+  await expect(other.getByLabel("会话名称")).toHaveValue("过时覆盖");
+  expect(
+    (await (await page.request.get(`/api/sessions/${session}`)).json()).title,
+  ).toBe("已保存但响应丢失");
+
+  const acceptedDialog = other.waitForEvent("dialog");
+  const acceptedRefresh = refresh.click();
+  const accept = await acceptedDialog;
+  expect(accept.type()).toBe("confirm");
+  expect(accept.message()).toBe("有尚未保存的修改，确定放弃并离开吗？");
+  await accept.accept();
+  await acceptedRefresh;
   await expect(other.getByLabel("会话名称")).toHaveValue("已保存但响应丢失");
   await other.close();
   await page.getByRole("button", { name: "归档会话", exact: true }).click();
@@ -76,7 +99,9 @@ test("new Session retries a lost acceptance across reload without duplicates", a
   page,
 }) => {
   await page.goto("./#/");
-  await expect(page.getByRole("button", { name: "＋ 新建对话" })).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "新建对话 New chat", exact: true }),
+  ).toBeEnabled();
   const workspace = (
     await (await page.request.get("/api/workspaces")).json()
   )[0].workspace_id;
@@ -93,10 +118,14 @@ test("new Session retries a lost acceptance across reload without duplicates", a
       await route.abort();
     } else await route.continue();
   });
-  await page.getByRole("button", { name: "＋ 新建对话" }).click();
+  await page
+    .getByRole("button", { name: "新建对话 New chat", exact: true })
+    .click();
   await expect(page.getByRole("alert")).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "＋ 新建对话" }).click();
+  await page
+    .getByRole("button", { name: "新建对话 New chat", exact: true })
+    .click();
   await expect.poll(() => keys.length).toBe(2);
   expect(keys[0]).toBe(keys[1]);
   await expect

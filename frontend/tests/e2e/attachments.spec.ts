@@ -4,7 +4,9 @@ test("attachment lost upload reuses its identity after refresh and never creates
   page,
 }) => {
   await page.goto("./#/chat");
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await page
+    .getByRole("button", { name: "新建对话 New chat", exact: true })
+    .click();
   await expect(page.getByRole("textbox", { name: "任务输入" })).toBeEnabled();
   const keys: string[] = [];
   let path = "";

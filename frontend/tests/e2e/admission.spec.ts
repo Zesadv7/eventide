@@ -5,7 +5,9 @@ test("an ambiguous accepted response survives refresh and replays exactly one Ru
 }) => {
   await page.goto("./#/chat");
   const previous = page.url();
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await page
+    .getByRole("button", { name: "新建对话 New chat", exact: true })
+    .click();
   await expect(page).not.toHaveURL(previous);
   const session = decodeURIComponent(
     new URL(page.url()).hash.split("/").at(-1)!,

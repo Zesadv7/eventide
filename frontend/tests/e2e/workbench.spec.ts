@@ -1,9 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 import { access, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { openWorkbenchPage } from "./navigation";
 async function newConversation(page: Page) {
   const previous = page.url();
-  await page.getByRole("button", { name: "＋ 新建对话", exact: true }).click();
+  await page
+    .getByRole("button", { name: "新建对话 New chat", exact: true })
+    .click();
   await expect(page).not.toHaveURL(previous);
   await expect(page.getByRole("textbox", { name: "任务输入" })).toBeEnabled();
 }
@@ -33,7 +36,7 @@ test("real Skills API: reviewed import, explicit activation, resources and durab
   await page.getByRole("textbox", { name: "任务输入" }).fill("技能场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
   await expect(page.getByText("已加载审查技能", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "◇ Skills", exact: true }).click();
+  await openWorkbenchPage(page, "Skills");
   await expect(page.getByText(/已加载 user:code-review/)).toBeVisible();
   await page.reload();
   await expect(page.getByText(/已加载 user:code-review/)).toBeVisible();
@@ -75,7 +78,7 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
   const monitor = await context.newPage();
   await monitor.goto(second);
   await expect(monitor.getByRole("region", { name: "工具审批" })).toBeVisible();
-  await page.getByRole("link", { name: "▥ 用量", exact: true }).click();
+  await openWorkbenchPage(page, "用量");
   await expect(page.getByRole("heading", { name: "用量与成本" })).toBeVisible();
   await page.goto(second);
   await page.getByRole("button", { name: "批准这一次", exact: true }).click();
@@ -86,7 +89,7 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
   await monitor.close();
   await page.reload();
   await expect(page.getByText("审批场景已完成", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "▥ 用量", exact: true }).click();
+  await openWorkbenchPage(page, "用量");
   await expect(page.getByRole("heading", { name: "请求明细" })).toBeVisible();
   await expect(page.locator(".stat-grid").getByText("供应商报告")).toHaveCount(
     0,
@@ -131,16 +134,33 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
   await input.fill("停止场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
   await page.getByRole("button", { name: "■ 停止", exact: true }).click();
-  await expect(page.getByText("本轮已停驻", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "已停驻，等待你决定下一步",
+      exact: true,
+    }),
+  ).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "放弃恢复", exact: true }).click();
-  await expect(page.getByText("本轮已停驻", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", {
+      name: "已停驻，等待你决定下一步",
+      exact: true,
+    }),
+  ).toHaveCount(0);
   await newConversation(page);
   await expect(page).not.toHaveURL(second);
   await input.fill("停驻场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
-  await expect(page.getByText("本轮已停驻", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "检查并继续", exact: true }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "已停驻，等待你决定下一步",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Continue · 检查并继续", exact: true })
+    .click();
   await expect(page.getByText("已恢复完成", { exact: true })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
@@ -150,7 +170,9 @@ test("real Runtime API: chat, preview, drafts, approval, usage, stop and Continu
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect(page.locator(".sidebar")).not.toBeInViewport();
-  await expect(page.getByRole("button", { name: "切换导航" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "打开导航", exact: true }),
+  ).toBeVisible();
   await page.screenshot({
     path: "test-results/workbench-mobile.png",
     fullPage: true,
@@ -201,10 +223,15 @@ test("real budgets API: price versions, zero admission limit, reload and shared 
   await newConversation(page);
   await page.getByRole("textbox", { name: "任务输入" }).fill("预算阻止场景");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
-  await expect(page.getByText("本轮已停驻", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "已停驻，等待你决定下一步",
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(page.locator(".parked-card")).toContainText("token_budget");
   const conversation = page.url();
-  await page.getByRole("link", { name: "▥ 用量", exact: true }).click();
+  await openWorkbenchPage(page, "用量");
   await page.getByRole("button", { name: "最近运行", exact: true }).click();
   await expect(
     page
@@ -219,11 +246,13 @@ test("real budgets API: price versions, zero admission limit, reload and shared 
   await page.getByRole("button", { name: "保存预算", exact: true }).click();
   await expect(page.getByText("已关闭这一范围的预算限制。")).toBeVisible();
   await page.goto(conversation);
-  await page.getByRole("button", { name: "检查并继续", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Continue · 检查并继续", exact: true })
+    .click();
   await expect(
     page.getByText("已读取项目：预算阻止场景", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "▥ 用量", exact: true }).click();
+  await openWorkbenchPage(page, "用量");
   await page.getByRole("button", { name: "最近运行", exact: true }).click();
   await expect(page.getByText("CNY 已知费用", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "费用估算" })).toContainText(
@@ -274,7 +303,12 @@ test("real snapshot API: concurrent project conversations and independent stop",
     monitor.getByRole("button", { name: "■ 停止", exact: true }),
   ).toBeVisible();
   await monitor.getByRole("button", { name: "■ 停止", exact: true }).click();
-  await expect(monitor.getByText("本轮已停驻", { exact: true })).toBeVisible();
+  await expect(
+    monitor.getByRole("heading", {
+      name: "已停驻，等待你决定下一步",
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(
     page.getByText("快照已完成：并发快照场景 B", { exact: true }),
   ).toBeVisible({ timeout: 15000 });
@@ -297,7 +331,13 @@ test("real worktree API: concurrent edits, source preservation and stable sessio
   );
   const original = await readFile(`${source}/README.md`, "utf8");
   await page.getByRole("button", { name: "添加项目", exact: true }).click();
-  await page.getByLabel("本机项目绝对路径", { exact: true }).fill(source);
+  const projectForm = page.locator("form.add-workspace");
+  await projectForm
+    .getByRole("button", { name: "手动输入路径", exact: true })
+    .click();
+  await projectForm
+    .getByLabel("服务电脑上的项目路径", { exact: true })
+    .fill(source);
   await page
     .locator("form.add-workspace")
     .getByRole("button", { name: "添加项目", exact: true })
@@ -403,7 +443,7 @@ test("real queue API: six conversations, shared limits, precise cancellation and
     await expect(
       page.getByRole("button", { name: "取消排队", exact: true }),
     ).toBeVisible();
-    await page.getByRole("link", { name: "≋ 任务队列", exact: true }).click();
+    await openWorkbenchPage(page, "任务队列");
     const counter = (title: string) =>
       page
         .locator(".stat-grid article")

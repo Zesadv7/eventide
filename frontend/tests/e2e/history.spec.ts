@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { openWorkbenchPage } from "./navigation";
 
 test("real run history: archived evidence, exact JSONL and reload without replacing active chat", async ({
   page,
@@ -64,7 +65,7 @@ test("real run history: archived evidence, exact JSONL and reload without replac
 
     await page.goto("./#/chat");
     await page
-      .getByRole("button", { name: "＋ 新建对话", exact: true })
+      .getByRole("button", { name: "新建对话 New chat", exact: true })
       .click();
     const input = page.getByRole("textbox", { name: "任务输入" });
     await expect(input).toBeEnabled();
@@ -78,7 +79,7 @@ test("real run history: archived evidence, exact JSONL and reload without replac
     const active = await (await activeReceipt).json();
     activeRun = active.run_id;
     await expect(page.getByText("生成中 · 尚未保存")).toBeVisible();
-    await page.getByRole("link", { name: "↶ 历史运行", exact: true }).click();
+    await openWorkbenchPage(page, "历史运行");
     await page.getByLabel("项目会话（含归档）").selectOption(session);
     await expect(page.getByLabel("项目会话（含归档）")).toContainText(
       "浏览器历史归档 · 已归档",
@@ -140,7 +141,9 @@ test("real run history: archived evidence, exact JSONL and reload without replac
     expect(
       (await (await page.request.get(`/api/runs/${activeRun}`)).json()).status,
     ).toBe("running");
-    await page.getByRole("link", { name: "◌ 对话", exact: true }).click();
+    await page
+      .getByRole("link", { name: "Eventide 工作台", exact: true })
+      .click();
     await expect(
       page.getByRole("button", { name: "■ 停止", exact: true }),
     ).toBeVisible();

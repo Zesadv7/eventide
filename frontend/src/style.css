@@ -1724,6 +1724,9 @@ svg {
   .main-pane,
   .sidebar-collapsed .main-pane {
     margin-left: 0;
+    /* A viewport resize must not animate the desktop gutter through mobile
+       content widths. Keep the collapse animation on desktop only. */
+    transition: none;
   }
   .sidebar-scrim {
     display: block;

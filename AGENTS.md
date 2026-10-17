@@ -252,3 +252,9 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 ## schema v5 测试断言补齐（2026-10-17）
 
 - 已完成：先复现 `test_session_metadata_archive_and_safe_delete` 的唯一失败为实际迁移版本 5、旧断言 4，仅将该断言更新为 5；生产代码和其他断言不变。`test_workspace_store.py`、`test_preference_memory.py`、`test_preference_memory_api.py` 合计 49 项通过（1 条依赖弃用警告），Ruff 与 git diff --check 通过；未重跑全量或调用付费模型，远端 CI 另验。
+
+## 移动断点布局复验（2026-10-17）
+
+- 进行中：远端新版 E2E 在桌面切换 320px 后立即检查时，交付/评测/历史导入/项目/副本五项出现横向溢出。静态定位到新版 `.main-pane` 的桌面 gutter 动画跨越移动断点，使 320px 页面短暂保留 260px 左边距；移动断点立即移除 gutter，桌面折叠动画保留，不隐藏页面溢出。新增七个页面逐帧宽度及元素几何诊断回归；173 项前端测试、TypeScript、Vite 构建、变更文件 Prettier 及 diff 检查通过。本机 Chromium 因沙箱 socket 权限无法启动，提升执行也在 bwrap 挂载失败，真实渲染证据待远端 CI。
+
+- 2026-10-17 CI 浏览器回归修复：旧标签/折叠菜单/手动目录入口/Continue 定位与当前 UI 对齐；会话刷新显式验证取消保留草稿、确认后读取服务端版本，不删除行为断言。手机断点立即移除桌面左边距动画，新增七页面连续 20 帧溢出几何回归；原溢出断言不变。本地 173 项前端、类型/构建/格式与差异检查通过。隔离 Chromium 启动受环境 socket 权限限制，场景未执行，真实浏览器回归仍由新 CI 验证。此前后端五个远端 job 已通过；不将前端单元通过当端到端通过。
