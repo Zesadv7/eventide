@@ -248,3 +248,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 - 本次新验证：集成前端全量 171 项/27 文件通过；随后记忆关闭及交付切换两个小修复另跑 21 项定向通过。TypeScript/Vite、Prettier、Ruff、Mypy 121 模块通过。记忆/目录/项目管理集成 60 项通过，分发 6 项通过；后端模块另有 163 项针对性验证，计数有重叠，不相加。本轮未重跑整个后端全量、Docker 或付费模型实验，远端 CI 独立报告。
 - 云桌面实际浏览器验证：新版界面可打开、收起/展开侧栏无溢出、创建空会话、记忆页面打开、草稿返回弹确认且取消保留原值、清空测试草稿后关闭/返回成功。项目加号实际打开 Linux GTK 系统目录窗口，选择 HOME 后回填绝对目录，未自动注册。macOS 系统窗口未在真实 Mac 验证。
 - 源码和完整 Git 历史另存持久备份；独立 GitHub 分支推送及远端 tree 核验是交付步骤，不以本地提交代替远端存储。原历史 83b349e 不可逐字恢复，本次为基于 d2a42cc 的重新实现。
+
+## schema v5 测试断言补齐（2026-10-17）
+
+- 已完成：先复现 `test_session_metadata_archive_and_safe_delete` 的唯一失败为实际迁移版本 5、旧断言 4，仅将该断言更新为 5；生产代码和其他断言不变。`test_workspace_store.py`、`test_preference_memory.py`、`test_preference_memory_api.py` 合计 49 项通过（1 条依赖弃用警告），Ruff 与 git diff --check 通过；未重跑全量或调用付费模型，远端 CI 另验。
