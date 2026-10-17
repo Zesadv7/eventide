@@ -23,6 +23,7 @@ from eventide.budgets import BudgetExceeded, BudgetScope, is_service_probe_run
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
 from eventide.delivery_limits import delivery_usage
+from eventide.execution_sandbox import SandboxFileTools, SandboxWorkspaces
 from eventide.execution_snapshots import ExecutionSnapshots
 from eventide.execution_worktrees import ExecutionWorktrees
 from eventide.executor import (
@@ -68,6 +69,11 @@ from eventide.rag.tool import index_available as knowledge_index_available
 from eventide.rag.tool import sparse_handler as knowledge_sparse_handler
 from eventide.retrieval_runtime import runtime_search_handler
 from eventide.run_dispatch import RunDispatch
+from eventide.sandbox_profile import (
+    SandboxCommandExecutor,
+    resolve_sandbox_profile,
+    validate_sandbox_profile,
+)
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skill_packages import SkillPackageError
 from eventide.skill_runtime import SkillRuntime, execute_skill_script, script_tool
@@ -205,6 +211,10 @@ class RuntimeHost:
                 checkpoint_directories=self._checkpoint_directories,
             )
             self.execution_worktrees = ExecutionWorktrees(self.state_dir)
+            self.execution_sandboxes = SandboxWorkspaces(
+                self.state_dir, checkpoint_files=self._checkpoint_files,
+                checkpoint_directories=self._checkpoint_directories,
+            )
             self._recover_interrupted_runs()
             self._secret_box = SecretBox(self.settings.state_dir)
             self._provider_secret_error: str | None = None
@@ -523,6 +533,11 @@ class RuntimeHost:
             if run
             else "idle",
             "latest_run": run,
+            "execution_profile": (
+                "sandbox" if self.session_execution_target(session_id) == "sandbox"
+                else "local" if run else None
+            ),
+            "sandbox_profile": self._session_sandbox_profile(session_id),
             "execution": self.run_execution(run["id"]) if run else {"kind": "source"},
             "task_plan": self.store.task_plan(session_id) or [],
             "active_task_id": task_state["active_task_id"],
@@ -1160,6 +1175,8 @@ class RuntimeHost:
             "evaluation", "index", "worktree_control", "history_import", "python_experiment",
         }:
             return f"{binding['kind']}_run:{run_id}"
+        if binding.get("kind") == "sandbox":
+            return f"sandbox:{binding['sandbox_id']}"
         if binding.get("kind") == "snapshot":
             return f"snapshot_run:{run_id}"
         if binding.get("kind") == "worktree":
@@ -1184,6 +1201,12 @@ class RuntimeHost:
         binding = self._execution_binding(run_id)
         if not binding:
             return {"kind": "source"}
+        if binding["kind"] == "sandbox":
+            return {key: binding[key] for key in (
+                "kind", "sandbox_id", "working_directory", "skipped",
+            )} | {"profile": (self._admitted_intent(run_id) or {}).get(
+                "execution_profile_config", {}
+            )}
         if binding["kind"] == "delivery":
             return dict(binding)
         if binding["kind"] == "python_experiment":
@@ -1202,6 +1225,12 @@ class RuntimeHost:
             "kind", "workspace_id", "snapshot_id", "working_directory", "skipped",
         )}
 
+    def _session_sandbox_profile(self, session_id: str) -> dict[str, Any] | None:
+        return next((event["payload"]["execution_profile_config"]
+                     for event in self.store.session_events(session_id)
+                     if event["type"] == "run.admitted"
+                     and "execution_profile_config" in event["payload"]), None)
+
     def _session_worktree(self, session_id: str) -> dict[str, Any] | None:
         return next((event["payload"]["execution_binding"]
                      for event in self.store.session_events(session_id)
@@ -1210,12 +1239,14 @@ class RuntimeHost:
                     None)
 
     def _execution_paths(self, binding: dict[str, Any]) -> tuple[Path, Path]:
-        service = (self.execution_snapshots if binding["kind"] == "snapshot"
+        service = (self.execution_sandboxes if binding["kind"] == "sandbox" else
+                   self.execution_snapshots if binding["kind"] == "snapshot"
                    else self.execution_worktrees)
         return service.restore(binding)
 
     def _execution_checkpoint(self, binding: dict[str, Any]) -> dict[str, Any]:
-        service = (self.execution_snapshots if binding["kind"] == "snapshot"
+        service = (self.execution_sandboxes if binding["kind"] == "sandbox" else
+                   self.execution_snapshots if binding["kind"] == "snapshot"
                    else self.execution_worktrees)
         return service.checkpoint(binding)
 
@@ -1253,7 +1284,7 @@ class RuntimeHost:
         """Run one independent bounded check, without asking the model to judge itself."""
         await self.initialize()
         workspace = self.sessions.workspace(session_id)
-        if self.session_execution_target(session_id) == "snapshot":
+        if self.session_execution_target(session_id) in {"snapshot", "sandbox"}:
             raise ValueError("Independent commands cannot run inside a Plan snapshot")
         binding = self._session_worktree(session_id)
         if binding:
@@ -1725,6 +1756,8 @@ class RuntimeHost:
                 generation = prior.get("generation")
             execution_config = prior.get("execution_config") or {}
             old_intent = self._admitted_intent(source_id) or {}
+            if old_intent.get("execution_profile_config"):
+                execution_config = validate_sandbox_profile(old_intent["execution_profile_config"])
             skill_snapshot = old_intent.get("skill_snapshot") or next((
                 e["payload"] for e in self.store.run_events(source_id)
                 if e["type"] == "skills.snapshot"
@@ -1751,6 +1784,8 @@ class RuntimeHost:
             "generation": generation,
             **({"skill_snapshot": skill_snapshot} if skill_snapshot is not None else {}),
             **({"execution_config": execution_config} if execution_config else {}),
+            **({"execution_profile_config": execution_config}
+               if execution_config.get("kind") == "sandbox" else {}),
         }
 
     async def admit_run(self, request: RunRequest) -> str:
@@ -1849,6 +1884,29 @@ class RuntimeHost:
             raise ValueError("Run identity already used")
         if self.session_busy(session_id):
             raise ValueError("Session is busy")
+        previous_run = self.store.latest_run_summary(session_id)
+        was_sandbox = self.session_execution_target(session_id) == "sandbox"
+        if request:
+            if request.execution_profile not in {"local", "sandbox"}:
+                raise ValueError("Unknown execution profile")
+            if previous_run and (request.execution_profile == "sandbox") != was_sandbox:
+                raise ValueError(
+                    "Execution profile is fixed for this Session; create a new Session"
+                )
+            if request.execution_profile == "sandbox":
+                if request.execution_target != "source":
+                    raise ValueError(
+                        "Sandbox owns its task copy; do not select another execution target"
+                    )
+                if request.selected_skills:
+                    raise ValueError("Skills are disabled in sandbox execution")
+            elif request.sandbox_image is not None:
+                raise ValueError("Sandbox image requires the sandbox execution profile")
+        if ((request and request.execution_profile == "sandbox")
+                or (request is None and was_sandbox)):
+            return await self._reserve_copy_run(
+                session_id, run_id, request, workspace, request_fingerprint,
+            )
         if (request and self._session_worktree(session_id)
                 and request.execution_target != "worktree"):
             raise ValueError("Session owns a worktree; choose worktree or create a new Session")
@@ -1952,7 +2010,9 @@ class RuntimeHost:
         self, session_id: str, run_id: str, request: RunRequest | None,
         workspace: WorkspaceRecord, request_fingerprint: str | None,
     ) -> str:
-        target = request.execution_target if request else self.session_execution_target(session_id)
+        target = ("sandbox" if request and request.execution_profile == "sandbox" else
+                  request.execution_target if request
+                  else self.session_execution_target(session_id))
         if target == "snapshot" and request and run_policy.normalize_mode(request.mode) != "plan":
             raise ValueError("Snapshot execution requires Plan mode")
         task = asyncio.current_task()
@@ -1969,6 +2029,29 @@ class RuntimeHost:
                 self._admissions[f"snapshot_run:{run_id}"] = run_id
                 try:
                     intent = self._run_intent(request, source_id, session_id)
+                    if target == "sandbox":
+                        if any(e["type"] == "tool.outcome_unknown"
+                               for e in self.store.session_events(session_id)):
+                            raise ValueError("Sandbox has an unresolved tool outcome")
+                        profile = self._session_sandbox_profile(session_id)
+                        if profile:
+                            profile = validate_sandbox_profile(profile)
+                            if request and request.sandbox_image not in {
+                                None, profile["requested_image"], profile["image"],
+                            }:
+                                raise ValueError("Sandbox image is fixed for this Session")
+                        else:
+                            if previous:
+                                raise ValueError("Sandbox profile is missing; execution refused")
+                            if not request or not request.sandbox_image:
+                                raise ValueError(
+                                    "Sandbox requires an explicit preinstalled Docker image"
+                                )
+                            profile = await resolve_sandbox_profile(
+                                request.sandbox_image, Path(workspace.path),
+                            )
+                        intent["execution_profile_config"] = profile
+                        intent["execution_config"] = profile
                     if source_id:
                         binding = self._execution_binding(source_id)
                         assert binding is not None
@@ -1981,6 +2064,14 @@ class RuntimeHost:
                             await self._admission_check(
                                 self._validate_continue, workspace, previous,
                             )
+                    elif target == "sandbox" and previous:
+                        binding = self._execution_binding(previous["id"])
+                        if not binding or binding["kind"] != "sandbox":
+                            raise ValueError("Sandbox binding is missing")
+                        if any(e["type"] == "tool.outcome_unknown"
+                               for e in self.store.session_events(session_id)):
+                            raise ValueError("Sandbox has an unresolved tool outcome")
+                        await self._admission_check(self._execution_paths, binding)
                     elif target == "worktree" and (binding := self._session_worktree(session_id)):
                         copy_id = binding["execution_workspace_id"]
                         if self.workspace_busy(copy_id):
@@ -2014,7 +2105,8 @@ class RuntimeHost:
                                 session = self.store.get_session(session_id)
                                 assert session is not None
                                 binding = await self._admission_check(
-                                    (self.execution_snapshots.create if target == "snapshot"
+                                    (self.execution_sandboxes.create if target == "sandbox" else
+                                     self.execution_snapshots.create if target == "snapshot"
                                      else self.execution_worktrees.create),
                                     workspace.workspace_id, root,
                                     session["working_directory"],
@@ -2028,9 +2120,10 @@ class RuntimeHost:
                                     self._admissions[copy.workspace_id] = run_id
                                 else:
                                     copy_root = root
-                                intent["skill_snapshot"] = await self._freeze_skills(
-                                    workspace, request, root=copy_root,
-                                )
+                                if target != "sandbox":
+                                    intent["skill_snapshot"] = await self._freeze_skills(
+                                        workspace, request, root=copy_root,
+                                    )
                                 current = await self._admission_check(
                                     self._workspace_checkpoint, root,
                                 )
@@ -2113,7 +2206,7 @@ class RuntimeHost:
                 binding["execution_workspace_id"]
             ):
                 raise ValueError("Execution worktree has an unresolved tool outcome")
-            if binding["kind"] == "worktree":
+            if binding["kind"] in {"worktree", "sandbox"}:
                 observed = await self._admission_check(self._execution_checkpoint, binding)
                 accepted = self.store.get_run(run_id)
                 if not accepted or observed != accepted["checkpoint"]:
@@ -2424,6 +2517,23 @@ class RuntimeHost:
         from eventide.worktree_control import is_worktree_control_run
 
         for run_id in self.store.unfinished_runs():
+            binding = self._execution_binding(run_id)
+            if binding and binding.get("kind") == "sandbox":
+                events = self.store.run_events(run_id)
+                settled = {event["payload"].get("call_id") for event in events
+                           if event["type"] in {"tool.completed", "tool.outcome_unknown"}}
+                for event in events:
+                    if (event["type"] == "tool.prepared"
+                            and event["payload"].get("name") in {
+                                "bash", "read_file", "glob", "write_file", "edit_file",
+                            } and event["payload"].get("call_id") not in settled):
+                        self.store.append_event(run_id, "tool.outcome_unknown", {
+                            "call_id": event["payload"]["call_id"],
+                            "name": event["payload"]["name"], "readonly": False,
+                            "workspace_id": f"sandbox:{binding['sandbox_id']}",
+                            "sandbox_id": binding["sandbox_id"],
+                            "error": "Host stopped before sandbox container cleanup was confirmed",
+                        })
             payload: dict[str, Any] = {"error": "Host stopped before terminal fact"}
             started = any(event["type"] == "run.started"
                           for event in self.store.run_events(run_id))
@@ -2468,6 +2578,11 @@ class RuntimeHost:
         root = Path(workspace.path)
         if binding:
             try:
+                if binding["kind"] == "sandbox":
+                    current = self._execution_checkpoint(binding)
+                    return ([], current) if run and current == run.get("checkpoint") else (
+                        ["sandbox changed since last checkpoint"], None
+                    )
                 if binding["kind"] == "snapshot":
                     return [], self._execution_checkpoint(binding)
                 root, _ = self._execution_paths(binding)
@@ -2652,16 +2767,33 @@ class RuntimeHost:
                     or {}
                 )
             )
+            sandbox_execution = bool(execution_binding and execution_binding["kind"] == "sandbox")
+            if sandbox_execution:
+                execution_config = validate_sandbox_profile(
+                    intent.get("execution_profile_config", {}),
+                )
+                checked = await resolve_sandbox_profile(execution_config["image"], workspace_root)
+                if checked["image"] != execution_config["image"]:
+                    raise ValueError("Sandbox image identity changed")
+            elif intent.get("execution_profile_config"):
+                raise ValueError("Sandbox profile is missing its execution binding")
             command_executor: CommandExecutor = self.executor.command_executor
-            if execution_config.get("kind") == "container":
+            if execution_config.get("kind") in {"container", "sandbox"}:
                 from eventide.container_executor import ContainerCommandExecutor
 
                 command_executor = ContainerCommandExecutor(
                     execution_config["image"],
-                    timeout=self.settings.command_timeout,
-                    read_only=False,
+                    timeout=(execution_config["timeout"] if sandbox_execution
+                             else self.settings.command_timeout),
+                    read_only=bool(sandbox_execution and intent["mode"] == "plan"),
+                    memory_mb=execution_config.get("memory_mb", 512),
+                    cpus=execution_config.get("cpus", 1),
+                    pids_limit=execution_config.get("pids_limit", 128),
+                    output_limit=execution_config.get("output_limit", 25_000),
                 )
-            if workspace.git_root:
+            if sandbox_execution:
+                command_executor = SandboxCommandExecutor(command_executor, workspace_root)
+            if workspace.git_root and not sandbox_execution:
                 command_executor = CoordinatedCommandExecutor(
                     command_executor, self._project_git_locks[workspace.project_id],
                 )
@@ -2760,7 +2892,7 @@ class RuntimeHost:
                 },
                 sink,
             )
-            if readonly_profile:
+            if readonly_profile or sandbox_execution:
                 skills = SkillCatalog(workspace_root, ())
             else:
                 frozen_skills = intent.get("skill_snapshot")
@@ -2839,7 +2971,7 @@ class RuntimeHost:
                 skill_tools.append(script_tool(skills))
             rag_tools: list[dict[str, Any]] = []
             rag_handlers: dict[str, Any] = {}
-            if (workspace_root / INDEX_RELATIVE_PATH).is_file():
+            if not sandbox_execution and (workspace_root / INDEX_RELATIVE_PATH).is_file():
                 try:
                     rag_embedder, rag_profile = provider_from_settings(self.settings)
                     if knowledge_index_available(workspace_root, rag_profile):
@@ -3097,7 +3229,7 @@ class RuntimeHost:
             worker_tools = (
                 [READONLY_WORKER_TOOL]
                 if self.settings.workers_enabled and workspace.git_root
-                and not readonly_profile and not snapshot_execution
+                and not readonly_profile and not snapshot_execution and not sandbox_execution
                 else []
             )
             tools = [
@@ -3120,6 +3252,21 @@ class RuntimeHost:
                 **manager.handlers,
                 **({"delegate_readonly": delegate_readonly} if worker_tools else {}),
             }
+            if sandbox_execution:
+                names = {"bash", "read_file", "glob", "write_file", "edit_file", "compact",
+                         "read_tool_result", "todo_write"}
+                tools = [dict(tool) for tool in [*TOOLS, READ_TOOL_RESULT_TOOL, TODO_WRITE_TOOL]
+                         if tool["name"] in names]
+                for tool in tools:
+                    if tool["name"] == "bash":
+                        tool["description"] = (
+                            "Run an offline command inside the isolated Docker task copy."
+                        )
+                tools = run_policy.filter_tool_catalog(tools, mode)
+                handlers = {**{name: HANDLERS[name] for name in ("bash", "compact")},
+                            **SandboxFileTools(command_executor, workspace_root).handlers,
+                            "read_tool_result": tool_result_reader(self.store, session_id),
+                            "todo_write": write_task_plan}
             if readonly_profile:
                 names = {"read_file", "glob", "compact", "read_tool_result"}
                 tools = [tool for tool in [*TOOLS, READ_TOOL_RESULT_TOOL] if tool["name"] in names]
@@ -3159,6 +3306,14 @@ class RuntimeHost:
             instructions = self._clean(ContextBuilder.instructions(workspace_root))
             skill_prompt = skills.prompt()
             mode_note = run_policy.mode_system_note(mode)
+            if sandbox_execution:
+                mode_note += (
+                    " Offline Docker task copy: file and shell tools execute in the container. "
+                    "MCP, Skills, workers, and knowledge retrieval are disabled. "
+                    "Dependencies must be preinstalled in the image. Changes are candidates; "
+                    "the user must export and review the patch before manually applying it. "
+                    "Never claim changes were applied to the source project."
+                )
             base_system = (
                 "You are Eventide. Use tools to finish work, respect permissions, and never "
                 "claim success without evidence.\n"
@@ -3289,7 +3444,11 @@ class RuntimeHost:
                         "call_id": call.id,
                         "name": call.name,
                         "readonly": snapshot_execution,
-                        "workspace_id": execution_workspace.workspace_id,
+                        "workspace_id": (f"sandbox:{execution_binding['sandbox_id']}"
+                                         if sandbox_execution and execution_binding
+                                         else execution_workspace.workspace_id),
+                        **({"sandbox_id": execution_binding["sandbox_id"]}
+                           if sandbox_execution and execution_binding else {}),
                         **({"snapshot_id": execution_binding["snapshot_id"]}
                            if snapshot_execution and execution_binding else {}),
                         "error": self._semantic(content),

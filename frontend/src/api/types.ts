@@ -1,6 +1,13 @@
 import type { components } from "./schema";
 export type Generation = components["schemas"]["GenerationPatch"];
-export type RunInput = components["schemas"]["RunBody"];
+// Defaults stay optional at the request boundary, including after schema regeneration.
+export type RunInput = Omit<
+  components["schemas"]["RunBody"],
+  "execution_profile" | "sandbox_image"
+> & {
+  execution_profile?: "local" | "sandbox";
+  sandbox_image?: string | null;
+};
 export type ProviderInput = components["schemas"]["ProviderConfigBody"];
 export interface Workspace {
   startup_workspace?: boolean;
@@ -31,6 +38,7 @@ export interface Run {
 export interface Execution {
   kind:
     | "source"
+    | "sandbox"
     | "snapshot"
     | "worktree"
     | "evaluation"
@@ -47,6 +55,8 @@ export interface Execution {
   name?: string;
   base_commit?: string;
   workspace_id?: string;
+  sandbox_id?: string;
+  profile?: SandboxProfile;
   snapshot_id?: string;
   working_directory?: string;
   skipped?: number;
@@ -59,7 +69,20 @@ export interface Approval {
   arguments?: unknown;
   [key: string]: unknown;
 }
+export interface SandboxProfile {
+  kind: "sandbox";
+  image: string;
+  requested_image: string;
+  network: "none";
+  memory_mb: number;
+  cpus: number;
+  pids_limit: number;
+  timeout: number;
+  output_limit: number;
+}
 export interface Session {
+  execution_profile?: "local" | "sandbox" | null;
+  sandbox_profile?: SandboxProfile | null;
   metadata_hash?: string;
   managed?: boolean;
   legacy_imported?: boolean;

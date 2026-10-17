@@ -288,7 +288,10 @@ class ContainerCommandExecutor:
             raise RuntimeError(
                 "Docker executable is unavailable; install Docker and select a local image"
             )
-        env = dict(os.environ)
+        env = {key: value for key, value in os.environ.items() if key in {
+            "PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
+            "SystemRoot", "USERPROFILE",
+        }}
         endpoint = await self._endpoint(docker, cwd, env)
         # Freeze the selected daemon for creation, execution and cleanup.
         env.pop("DOCKER_CONTEXT", None)

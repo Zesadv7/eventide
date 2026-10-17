@@ -535,3 +535,11 @@ Injection 为 `{request_id,attempt_id,memories:[{id,revision,scope,project_id,ke
 状态冲突/同作用域同key冲突409，记录不存在404，无效内容/来源422；同键绑定冲突沿原协议409。关闭总开关停止注入与新建议，但不拒绝主动保存或接受已展示建议，且不重新开启。普通编辑下一Run生效，暂停/撤销下一实际请求生效，重新启用条目下一Run生效。UI 必须提示撤销不擦除历史聊天、摘要、事件、导出和备份，已派发请求不可撤回。
 
 `snapshot` 为该Run开始执行时的 `{memories:[{id,revision,scope,project_id,key}]}`，尚未选定时为 null；它是选择证据，不表示已派发。
+
+## 可选 Docker 执行配置
+
+`POST /api/sessions/{session_id}/runs` / Python `RunRequest` 新增 `execution_profile: "local" | "sandbox" = "local"`、`sandbox_image: string | null = null`（非空时最长 256 字符）。幂等指纹包含这些字段。sandbox 首次接收要求显式本地镜像和 `execution_target="source"`；它会创建自己的候选副本，不能同时选 snapshot/worktree。选择 Skills、local 请求携带 sandbox_image、无镜像/本机 Docker、远程 Docker daemon 或无效镜像时接收前拒绝。已运行 Session 固定边界，不能在 local/sandbox 间切换；后续 sandbox 请求可将 image 省略或设 null，继承固定镜像；不同镜像拒绝。Continue 没有配置覆盖字段。
+
+Session 响应新增 `execution_profile: "local" | "sandbox" | null`（null 表示尚无 Run）和 `sandbox_profile: object | null`。Run 的既有 `execution` 响应在沙箱时为 `{kind:"sandbox", sandbox_id, working_directory, skipped, profile}`。profile 固定字段为 `kind:"sandbox", image:"sha256:…", requested_image, network:"none", memory_mb:512, cpus:1, pids_limit:128, timeout:120, output_limit:25000, disable_mcp:true`。镜像检查仅证明本地镜像存在，不是 Python/项目依赖或完整 Docker Desktop 验收声明。清理未知须继续展示失败/停驻状态。
+
+`GET /api/runs/{run_id}/sandbox-diff` 返回 `text/plain` 和 `Content-Disposition: attachment; filename="candidate.patch"`，`Cache-Control: no-store`。要求本机调用，显式跨站 Origin/Sec-Fetch-Site 拒绝；不存在 Run 为404，非沙箱/产物不安全/超过2MiB/二进制或不支持文件名为422，仍在运行或清理未知为409。补丁对应该 Session 当前共享候选与首次过滤 baseline，可能包含后续 Run 的修改，不能当成所查历史 Run 的固定产物。接口不应用补丁、不改源文件；必须由用户审阅后手动处理源漂移与冲突。

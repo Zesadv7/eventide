@@ -6,11 +6,17 @@ from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse, Response
 
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.run_mutations import mutate_run_action
 from eventide.http_api.schemas import AbandonBody, ApprovalBody, RunBody
-from eventide.http_control import MUTATION_OUTCOME_HEADER, mutation_key, run_receipt
+from eventide.http_control import (
+    MUTATION_OUTCOME_HEADER,
+    check_mutation_origin,
+    mutation_key,
+    run_receipt,
+)
 from eventide.models import RunRequest
 from eventide.scheduler import QueueFull
 from eventide.usage import build_usage_ledger
@@ -115,6 +121,10 @@ def create_router(context: ApiContext) -> APIRouter:
         agent_runtime.create_session(session_id)
         record = agent_runtime.session_status(session_id)
         payload = {**body.model_dump(), "generation": body.generation.patch()}
+        if body.execution_profile == "local" and body.sandbox_image is None:
+            # Preserve outstanding legacy local request identities across this upgrade.
+            payload.pop("execution_profile")
+            payload.pop("sandbox_image")
         receipt = run_receipt(agent_runtime, request, session_id, "run", payload)
         if receipt.existing:
             return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
@@ -131,6 +141,8 @@ def create_router(context: ApiContext) -> APIRouter:
                     run_id,
                     mode=body.mode,
                     execution_target=body.execution_target,
+                    execution_profile=body.execution_profile,
+                    sandbox_image=body.sandbox_image,
                     attachment_ids=list(body.attachment_ids),
                     model=body.model,
                     generation=body.generation.patch(),
@@ -151,6 +163,36 @@ def create_router(context: ApiContext) -> APIRouter:
         if not record:
             raise HTTPException(status_code=404, detail="Run not found")
         return {**record, "execution": agent_runtime.run_execution(run_id)}
+
+    @router.get(
+        "/api/runs/{run_id}/sandbox-diff", response_class=Response,
+        responses={200: {"content": {"text/plain": {"schema": {"type": "string"}}}}},
+    )
+    async def sandbox_diff(run_id: str, request: Request) -> PlainTextResponse:
+        require_local_request(request)
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            raise HTTPException(403, "Cross-site sandbox export is not allowed")
+        if request.headers.get("origin") is not None:
+            check_mutation_origin(request, require_origin=True)
+        record = agent_runtime.store.get_run(run_id)
+        if not record:
+            raise HTTPException(404, "Run not found")
+        binding = agent_runtime._execution_binding(run_id)
+        if not binding or binding["kind"] != "sandbox":
+            raise HTTPException(422, "Run has no sandbox candidate")
+        if agent_runtime.session_busy(record["session_id"]):
+            raise HTTPException(409, "Sandbox is busy; wait for execution to stop")
+        if any(e["type"] == "tool.outcome_unknown"
+               for e in agent_runtime.store.session_events(record["session_id"])):
+            raise HTTPException(409, "Sandbox cleanup is unconfirmed; export is blocked")
+        try:
+            patch = agent_runtime.execution_sandboxes.diff(binding)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(422, "Sandbox output is unsafe or exceeds export limits") from exc
+        return PlainTextResponse(patch, headers={
+            "Content-Disposition": 'attachment; filename="candidate.patch"',
+            "Cache-Control": "no-store",
+        })
 
     @router.post("/api/runs/{run_id}/cancel")
     async def cancel_run(run_id: str, request: Request) -> dict[str, Any]:

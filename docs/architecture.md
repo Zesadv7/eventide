@@ -231,7 +231,7 @@ Vue 3/TypeScript/Vite、Vue Router和Pinia提供唯一用户界面，Hash路由�
 
 本轮演进以 Web 工作台、同项目隔离并发、正式 Skills 与 Token 成本治理为目标，编号步骤及验收证据见根目录 `AGENTS.md`。该清单按状态与验证证据界定当前能力；直接源运行继续使用 Workspace 串行，显式 Plan 快照和独立 worktree 可并发，Vue已承接用户控制面，旧原生前端和用户CLI已删除；服务部署与Python开发接口继续复用同一Host。长期取舍见 ADR-048。
 
-系统仍面向可信单机使用：没有账号、多租户、公网鉴权、分布式锁或 Agent Graph。可选 Docker 只隔离 Shell 命令，不是覆盖文件工具与 Provider 的完整 Agent 沙箱；默认 Local 使用本机权限。状态根锁不等于工具安全隔离。AGENTS.md 是模型指令，不会扩张 PolicyEngine 权限。生产代码的 import、--help、测试与离线评测不需要 API Key 或网络。
+系统仍面向可信单机使用：没有账号、多租户、公网鉴权、分布式锁或 Agent Graph。既有独立命令后端 Docker 只隔离 Shell 命令，不是覆盖文件工具与 Provider 的完整 Agent 沙箱；默认 Local 使用本机权限。状态根锁不等于工具安全隔离。AGENTS.md 是模型指令，不会扩张 PolicyEngine 权限。生产代码的 import、--help、测试与离线评测不需要 API Key 或网络。
 
 完整验证门禁见 AGENTS.md。测试创建隔离目录和独立状态根，Git 测试使用测试仓库；不使用或删除用户级真实状态。
 
@@ -723,3 +723,19 @@ ContextBuilder 之前固定本次请求可包含的 ID 集合；每次重试取�
 App 只维护浏览器外观与导航状态；项目、会话、Run 和事件仍以原 Pinia/API/SSE 投影为准。会话导航先通过路由守卫，再由 ChatView 的路由监听选择会话；项目切换同步聊天 URL，并在变更前检查未保存表单。原生目录返回值按原样提交，空白检查不修剪实际路径。
 
 ChatView 在 UI 边界统一检查发送条件，IME 组合输入不触发快捷键，活动任务中的草稿不形成后台队列。滚动容器按距底部位置决定是否跟随；工具活动只投影现有 Run.tools，展开显示原始脱敏证据，不把完成状态解释为独立验收。上下文面板按真实 Run 身份查询历史记忆记录。ThemeControl 只保存主题偏好；折叠/移动侧栏对不可见区域使用 inert，移动抽屉支持焦点约束、Escape 与焦点返回。减少动态效果遵循 prefers-reduced-motion。桌面侧栏折叠可平滑调整内容左边距；进入移动断点时立即移除桌面 gutter，避免 320px 屏幕在动画期间只剩几十像素内容宽度。窄屏长表格仍在各自 table-scroll 内横向滚动，不通过隐藏整个页面溢出来截断控件。
+
+## 可选执行配置与独立候选（Sandbox v1）
+
+`execution_profile=local|sandbox` 与既有 `mode`、`execution_target` 分离。local 缺省行为不变；sandbox 只接受默认 source target，Host 自行创建 `kind=sandbox` 的独立候选绑定。`sandbox_profile.py` 接收时通过本机 Docker inspect 把显式镜像名固定为 sha256 ID，严格固定 network/CPU/memory/PIDs/timeout/output 限额；完整 `execution_profile_config` 和候选 binding 同事务写入 `run.admitted`。同 Session 后续请求、Continue 和重启均复用原 profile/binding，不回读工作区可变默认值、不从新标签解析替换镜像，也不允许跨 local/sandbox 继承历史。每次实际执行在 Provider 之前复核固定镜像可用性。
+
+`execution_sandbox.py` 只管理内容产物而非第二套状态源：过滤 SourceSnapshot，创建 `execution-sandboxes/<id>/content` 与容器不可见的 baseline/binding 元数据。绑定冻结原源码 manifest、checkpoint、相对 cwd 和文件系统身份。生产容器仅挂载 content；嵌套 cwd 通过容器内 cd 处理，不新增宿主路径挂载。Host 对快照/产物读取使用 nofollow 目录描述符和 fstat，拒绝符号链接、硬链接、特殊文件、保护路径及超限；不会在容器可写目录运行宿主 Git。候选快照/补丁是数据，不在宿主导入、执行或构建。
+
+`SandboxFileTools` 在镜像内运行固定 `python3 -I` 帮助程序，参数作为字面 JSON 传入；Host 不调用原本地文件 handlers。ToolExecutor/PolicyEngine 仍是全部模型工具的入口，正向目录及 handlers 白名单同时限制能力。MCP 不连接；Skills/worker/retrieval/custom handlers 不提供，系统提示说明限制，Plan 的只读筛选和 Auto/Agent 审批语义保持。Provider、控制面、事件存储和 Docker daemon 仍位于 Host，不宣称整个 Agent 的 OS 沙箱。
+
+容器生命周期沿用受拥有的 create/start/remove：取消等待清理，不确定结果保留 `tool.outcome_unknown`。沙箱 unknown 使用 `sandbox:<id>` 执行归属，不能污染源 Workspace 或其他会话。重启时所有未结算的容器工具 prepared（包括 read/glob）均保守落 unknown，防止遗留容器与导出/Continue 竞态；abandon 不解除沙箱清理未知。未执行的排队接收可以按原恢复机制 Continue，已发生工具未知需人工检查。
+
+导出只比较不可变过滤 baseline 与当前候选，保持过滤文件不存在于补丁语义；完整 UTF-8 unified diff 最大 2 MiB，超限/不支持内容明确失败而非截断。导出只读、限本机并拒绝跨站，不自动应用/提交/合并。当前版本不支持硬磁盘配额、网络开放、Skills/MCP/workers 或原始二进制/引用文件名补丁；模型网络与 Docker 安全边界由用户宿主管理。
+
+本模式以已注册的受信本地源码和 Git 配置为输入，且不防御并发恶意宿主进程。源码准备阶段仍在 Host 调用既有 Git checkpoint（不是任意恶意仓库导入沙箱）；隔离保证针对模型发起的工具操作。默认容器 Shell 设置 PYTHONDONTWRITEBYTECODE=1，减少正常 Python 检查生成 pyc 造成文本补丁不可导出；项目其他二进制构建产物仍需按导出限制处理。
+
+导出只表达文本内容差异，不表达可执行位或其他权限变化；初始复制不会保留源码可执行位。镜像工具请通过 `python3 script.py` / `sh script.sh` 等显式解释器调用，或仅在候选内按需设置权限。容器固定 UID 对 content 有写权限，baseline/元数据位于不可见、仅宿主拥有的父目录。

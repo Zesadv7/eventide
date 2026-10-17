@@ -9,7 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -147,16 +150,14 @@ class ReadonlyProfile:
 
 
 def _excluded(path: PurePosixPath) -> bool:
-    parts = tuple(part.lower() for part in path.parts)
-    if any(part in {".git", ".eventide", ".nexus", ".ssh", ".aws"} for part in parts):
-        return True
-    name = parts[-1]
-    return (
-        name == ".env"
-        or name.startswith(".env.")
-        or name
-        in {"mcp.json", "secret.key", "credentials.json", "credentials", "id_rsa", "id_ed25519"}
+    protected = {
+        ".git", ".eventide", ".nexus", ".ssh", ".aws", "mcp.json", "secret.key",
+        "credentials.json", "credentials", "id_rsa", "id_ed25519",
+    }
+    return any(
+        name in protected or name == ".env" or name.startswith(".env.")
         or name.endswith((".pem", ".key", ".p12", ".pfx", ".keystore"))
+        for name in (part.lower() for part in path.parts)
     )
 
 
@@ -167,6 +168,51 @@ def _has_link(path: Path, root: Path) -> bool:
             return True
         current = current.parent
     return False
+
+
+@contextmanager
+def _open_directory(path: Path) -> Iterator[int]:
+    """Open every component without following links, retaining the final directory FD."""
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise ValueError("Safe source copying requires no-follow directory support")
+    absolute = path.absolute()
+    if ".." in absolute.parts:
+        raise ValueError("Directory cannot contain parent traversal")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    descriptor = os.open(absolute.anchor, flags)
+    try:
+        for name in absolute.parts[1:]:
+            child = os.open(name, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        yield descriptor
+    finally:
+        os.close(descriptor)
+
+
+def _read_regular_file(directory: int, name: str, limit: int) -> bytes:
+    """Read a bounded ordinary file through an owned directory, rejecting link races."""
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ValueError("Source contains an unsafe resource or hardlink")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            raw = stream.read(limit + 1)
+        after = os.fstat(descriptor)
+        if (
+            after.st_nlink != 1
+            or (
+                before.st_dev, before.st_ino, before.st_size,
+                before.st_mtime_ns, before.st_ctime_ns,
+            ) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns,
+            )
+        ):
+            raise ValueError("Source file changed while being copied")
+        return raw
+    finally:
+        os.close(descriptor)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,7 +228,7 @@ class SourceSnapshot:
     def create(
         cls, workspace: Path, working_root: Path, state_dir: Path,
         *, checkpoint_files: tuple[Path, ...] = (),
-        checkpoint_directories: tuple[Path, ...] = (),
+        checkpoint_directories: tuple[Path, ...] = (), secure_copy: bool = False,
     ) -> SourceSnapshot:
         workspace = workspace.resolve(strict=True)
         working_root = working_root.resolve(strict=True)
@@ -225,6 +271,7 @@ class SourceSnapshot:
                 or (state_dir.is_relative_to(workspace) and source.is_relative_to(state_dir))
                 or _has_link(source, workspace)
                 or not source.is_file()
+                or (secure_copy and source.stat().st_nlink != 1)
                 or "\\" in scoped
             ):
                 skipped += 1
@@ -245,8 +292,12 @@ class SourceSnapshot:
             for source, relative_name in candidates:
                 if _has_link(source, workspace):
                     raise ValueError("Source path changed during snapshot creation")
-                with source.open("rb") as stream:
-                    raw = stream.read(MAX_SOURCE_BYTES + 1)
+                if secure_copy:
+                    with _open_directory(source.parent) as directory:
+                        raw = _read_regular_file(directory, source.name, MAX_SOURCE_BYTES)
+                else:
+                    with source.open("rb") as stream:
+                        raw = stream.read(MAX_SOURCE_BYTES + 1)
                 if len(raw) > MAX_SOURCE_BYTES or b"\0" in raw:
                     skipped += 1
                     continue

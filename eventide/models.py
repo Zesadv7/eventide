@@ -64,6 +64,8 @@ class RunRequest:
     request_fingerprint: str | None = None
     selected_skills: list[str] | None = None
     execution_target: str = "source"
+    execution_profile: str = "local"
+    sandbox_image: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

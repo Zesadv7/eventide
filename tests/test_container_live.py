@@ -127,3 +127,55 @@ async def test_real_timeout_and_stop_wait_for_cleanup(isolated_workspace, image,
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_real_optional_sandbox_edits_tests_and_exports_patch(isolated_workspace, image):
+    """A useful offline task crosses file + shell boundaries and leaves source untouched."""
+    from dataclasses import replace
+
+    from tests.test_host import make_repo
+
+    root = make_repo(isolated_workspace / "sandbox-source")
+    (root / "answer.py").write_text("def answer():\n    return 41\n")
+    (root / "test_answer.py").write_text(
+        "import unittest\nfrom answer import answer\n"
+        "class TestAnswer(unittest.TestCase):\n"
+        "    def test_answer(self):\n        self.assertEqual(answer(), 42)\n"
+    )
+    (root / ".env").write_text("DO_NOT_MOUNT=secret\n")
+    subprocess.run(["git", "-C", str(root), "add", "answer.py", "test_answer.py"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "sandbox task fixture"], check=True)
+    provider = ScriptedProvider([
+        call("read_file", {"path": "answer.py"}, "read"),
+        call("edit_file", {"path": "answer.py", "old_text": "return 41",
+                           "new_text": "return 42"}, "edit"),
+        call("bash", {"command": "python3 -m unittest -v && test ! -e .git && "
+                      "test ! -e .env && test ! -d __pycache__ && "
+                      "test ! -e /var/run/docker.sock"}, "test"),
+        {"text": "Candidate test passed; review exported patch."},
+    ])
+    host = RuntimeHost(
+        replace(settings_for(root), state_dir=isolated_workspace / "sandbox-state"), provider,
+    )
+    try:
+        result = await host.run(RunRequest(
+            "fix answer and verify", mode="agent", execution_profile="sandbox", sandbox_image=image,
+        ))
+        assert result.status == "completed"
+        events = host.store.run_events(result.run_id)
+        results = [event["payload"] for event in events if event["type"] == "tool.completed"]
+        assert len(results) == 3 and all(not item["is_error"] for item in results), results
+        assert "OK" in results[-1]["content"]
+        assert (root / "answer.py").read_text() == "def answer():\n    return 41\n"
+        assert (root / ".env").read_text() == "DO_NOT_MOUNT=secret\n"
+        binding = host._execution_binding(result.run_id)
+        assert binding is not None
+        patch = host.execution_sandboxes.diff(binding)
+        assert "+    return 42" in patch and ".env" not in patch
+        checked = subprocess.run(
+            ["git", "-C", str(root), "apply", "--check", "-"], input=patch,
+            text=True, capture_output=True,
+        )
+        assert checked.returncode == 0, checked.stderr
+    finally:
+        await host.close()

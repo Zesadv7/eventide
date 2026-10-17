@@ -6,6 +6,7 @@ import { api } from "../api/client";
 import type { Generation, Message } from "../api/types";
 import GenerationEditor from "../components/GenerationEditor.vue";
 import SafeContent from "../components/SafeContent.vue";
+import SandboxEvidence from "../components/SandboxEvidence.vue";
 import RunMemoryPanel from "../components/RunMemoryPanel.vue";
 import EventideLogo from "../components/EventideLogo.vue";
 import ToolActivity from "../components/ToolActivity.vue";
@@ -15,6 +16,8 @@ const store = useWorkbench(),
   route = useRoute(),
   mode = ref("auto"),
   executionTarget = ref<"source" | "snapshot" | "worktree">("source"),
+  executionProfile = ref<"local" | "sandbox">("local"),
+  sandboxImage = ref(""),
   model = ref(""),
   generation = ref<Generation>({}),
   modelList = ref<string[]>([]),
@@ -29,13 +32,48 @@ const session = computed(() => store.currentSession),
 const boundWorktree = computed(
   () => session.value?.execution?.kind === "worktree",
 );
+const boundSandbox = computed(
+  () =>
+    session.value?.execution_profile === "sandbox" ||
+    session.value?.execution?.kind === "sandbox" ||
+    run.value?.execution?.kind === "sandbox",
+);
+const profileFrozen = computed(
+  () =>
+    !!session.value?.execution_profile ||
+    !!session.value?.latest_run ||
+    !!run.value ||
+    boundWorktree.value ||
+    boundSandbox.value,
+);
+watch(
+  [() => store.selectedSession, boundSandbox, profileFrozen],
+  () => {
+    const pendingBody = store.pending[store.selectedSession]?.body;
+    executionProfile.value =
+      boundSandbox.value ||
+      (!profileFrozen.value && pendingBody?.execution_profile === "sandbox")
+        ? "sandbox"
+        : "local";
+    sandboxImage.value = boundSandbox.value
+      ? session.value?.sandbox_profile?.requested_image ||
+        session.value?.execution?.profile?.requested_image ||
+        ""
+      : pendingBody?.sandbox_image || "";
+  },
+  { immediate: true },
+);
 const evaluationRun = computed(() =>
   session.value?.execution?.kind === "evaluation"
     ? session.value.execution.evaluation_id || run.value?.run_id
     : undefined,
 );
 const busyOther = computed(
-    () => store.workspaceBusy && !isActive.value && !boundWorktree.value,
+    () =>
+      store.workspaceBusy &&
+      !isActive.value &&
+      !boundWorktree.value &&
+      !boundSandbox.value,
   ),
   unknown = computed(() => run.value?.reason === "unknown_tool_outcome");
 const preview = computed(() =>
@@ -113,6 +151,9 @@ function content(message: Message) {
 const canSubmit = computed(
   () =>
     !!draft.value.trim() &&
+    (executionProfile.value !== "sandbox" ||
+      boundSandbox.value ||
+      !!sandboxImage.value.trim()) &&
     !!session.value &&
     !evaluationRun.value &&
     !isActive.value &&
@@ -193,13 +234,25 @@ watch(
 );
 async function submit() {
   if (!canSubmit.value) return;
+  const identity = store.selectedSession;
   try {
     await store.submit({
       prompt: draft.value,
       mode: mode.value,
-      execution_target: boundWorktree.value
-        ? "worktree"
-        : executionTarget.value,
+      ...(executionProfile.value === "sandbox"
+        ? {
+            execution_profile: "sandbox" as const,
+            sandbox_image: boundSandbox.value
+              ? null
+              : sandboxImage.value.trim(),
+          }
+        : {}),
+      execution_target:
+        executionProfile.value === "sandbox"
+          ? "source"
+          : boundWorktree.value
+            ? "worktree"
+            : executionTarget.value,
       model: model.value || null,
       generation: generation.value,
       attachment_ids: (store.attachments[store.selectedSession] || []).map(
@@ -207,7 +260,7 @@ async function submit() {
       ),
     });
   } catch (e) {
-    store.fail(e);
+    if (identity === store.selectedSession) store.fail(e);
   }
 }
 async function upload(event: Event) {
@@ -455,6 +508,11 @@ async function abandon() {
             >
           </div>
         </div>
+        <SandboxEvidence
+          v-if="run && boundSandbox"
+          :execution="run.execution"
+          :run-id="run.run_id"
+        />
         <details v-if="run" class="run-details">
           <summary>
             运行证据 · {{ run.steps || 0 }} 步 ·
@@ -531,6 +589,17 @@ async function abandon() {
               <option value="agent">Agent · 自动批准风险操作</option>
             </select>
             <select
+              v-model="executionProfile"
+              aria-label="执行环境"
+              :disabled="
+                profileFrozen || !!pending || isActive || store.creating
+              "
+            >
+              <option value="local">本机执行</option>
+              <option value="sandbox">Docker 沙箱 · 离线</option>
+            </select>
+            <select
+              v-if="executionProfile === 'local'"
               v-model="executionTarget"
               :disabled="boundWorktree || store.creating"
               aria-label="执行位置"
@@ -549,7 +618,7 @@ async function abandon() {
               <option v-for="item in models" :key="item" :value="item">
                 {{ item }}
               </option></select
-            ><ComposerMenu label="Skills"
+            ><ComposerMenu v-if="executionProfile === 'local'" label="Skills"
               ><div @vue:mounted="loadSkills">
                 <strong>项目 Skills</strong>
                 <p class="muted">已配置的技能由后端固定到本轮，按需加载。</p>
@@ -590,6 +659,34 @@ async function abandon() {
             {{ store.sending[store.selectedSession] ? "接收中…" : "发送 ↑" }}
           </button>
         </div>
+        <div v-if="executionProfile === 'sandbox'" class="sandbox-options">
+          <label v-if="!boundSandbox"
+            >预装依赖的本地 Docker 镜像
+            <input
+              v-model="sandboxImage"
+              aria-label="沙箱镜像"
+              placeholder="例如 eventide-dev:local"
+              maxlength="256"
+              :disabled="!!pending || isActive || store.creating"
+            />
+          </label>
+          <p v-else class="muted">
+            本对话已固定沙箱镜像与候选目录，后续消息和 Continue 沿用。
+          </p>
+          <p class="muted">
+            容器工具离线执行，模型仍由本机连接服务商。仅使用受信项目和镜像；复制过滤后的文本文件，排除
+            .git、常见凭据文件和二进制，但不扫描源码中的秘密。请提前准备镜像及依赖。Docker
+            不可用或镜像不存在时会明确失败，不会回退到本机执行。
+          </p>
+          <p class="muted">
+            沙箱 v1 不启用 MCP、Skills、workers
+            或检索。修改保留在候选目录中，只能显式导出补丁，不会自动采纳到源码。选择沙箱不代表
+            Docker 或镜像已就绪。
+          </p>
+        </div>
+        <p v-if="profileFrozen" class="muted">
+          执行环境已随首轮固定；切换本机或沙箱请新建对话。
+        </p>
         <details class="generation-panel">
           <summary>本次生成设置</summary>
           <div class="button-row">
@@ -614,14 +711,21 @@ async function abandon() {
           Agent 模式会自动批准本轮风险工具，请确认项目与任务范围。
         </p>
         <p
-          v-if="mode === 'plan' && executionTarget === 'snapshot'"
+          v-if="
+            executionProfile === 'local' &&
+            mode === 'plan' &&
+            executionTarget === 'snapshot'
+          "
           class="muted"
         >
           需要 Git 项目和可用
           HEAD。快照排除密钥、链接、二进制及过大文件；本轮使用固定
           Skills，不连接 MCP 或读取源目录索引。Continue 继续使用原快照。
         </p>
-        <p v-if="executionTarget === 'worktree'" class="muted">
+        <p
+          v-if="executionProfile === 'local' && executionTarget === 'worktree'"
+          class="muted"
+        >
           首次创建需要干净的 Git 源项目和可用
           HEAD；修改保留在本对话副本中，不自动提交或采纳。
           绑定后不会切回源目录，若要操作其他副本请新建对话。工作副本不是操作系统沙箱。
@@ -693,3 +797,19 @@ async function abandon() {
     >
   </section>
 </template>
+
+<style scoped>
+.sandbox-options {
+  margin-top: 12px;
+}
+.sandbox-options label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.sandbox-options input {
+  width: 100%;
+  min-width: 0;
+}
+</style>
