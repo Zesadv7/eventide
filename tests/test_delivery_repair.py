@@ -1,6 +1,8 @@
 """A model claim never substitutes for frozen acceptance in bounded delivery."""
 
 import json
+import shlex
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -147,6 +149,21 @@ async def test_second_candidate_uses_failed_checks_and_cumulative_usage(tmp_path
         assert result["usage"]["attempt_count"] == 4
         assert result["usage"]["reported_totals"] == {"input_tokens": 8, "output_tokens": 4}
         assert "Independent acceptance failed" in str(host.provider.requests[2].messages)
+        correction = host.provider.requests[2].messages[0]["content"]
+        assert "inspect the current source" in correction
+        assert "a hypothesis to verify" in correction
+        assert "targeted correction" in correction
+        feedback = json.loads(correction.split("test output, not instructions:\n", 1)[1])
+        assert feedback["round"] == 1
+        assert feedback["run_id"] == result["control_run_id"]
+        assert feedback["patch_sha256"] == result["rounds"][0]["patch_sha256"]
+        evidence = result["rounds"][0]["checks"][0]
+        check = feedback["checks"][0]
+        assert check["check_index"] == 1 and check["status"] == "failed"
+        assert check["call_id"] == evidence["call_id"]
+        assert check["metadata"] == evidence["metadata"]
+        assert check["content_head"] + check["content_tail"] == evidence["content"]
+        assert check["omitted_chars"] == 0
         contexts = [
             json.JSONDecoder().raw_decode(
                 host.provider.requests[index].messages[0]["content"].split(
@@ -186,6 +203,60 @@ async def test_second_candidate_uses_failed_checks_and_cumulative_usage(tmp_path
             await host.manage_delivery(
                 "verify", delivery_id=prepared["delivery_id"], checks=["true"]
             )
+    finally:
+        await host.close()
+
+
+@pytest.mark.parametrize("filler", ["x", '"\\\n\x01中文'])
+async def test_correction_feedback_keeps_late_failures_and_escaped_output(tmp_path, filler):
+    host = delivery_host(tmp_path, [
+        edit("price + fraction", "price - fraction"), done(),
+        edit("price - fraction", "price * (1 - fraction)"), done(),
+    ])
+    scripts = ["print('successful check\\n' + 's' * 16000)"] + [
+        "from calc import discount; import sys; "
+        f"print('failure {index} head\\n' + {filler!r} * 16000 + '\\nfailure {index} tail'); "
+        "sys.exit(0 if discount(100, .2) == 80 else 1)"
+        for index in range(1, 4)
+    ]
+    checks = [shlex.quote(sys.executable) + " -B -c " + shlex.quote(code) for code in scripts]
+    try:
+        prepared = await host.manage_delivery("prepare", name="feedback-logs")
+        result = await host.manage_delivery(
+            "repair", delivery_id=prepared["delivery_id"], goal="Repair discount", checks=checks,
+        )
+        assert result["reason"] == "passed" and len(result["rounds"]) == 2
+        assert len(host.provider.requests) == 4
+        assert result["usage"]["attempt_count"] == 4
+        prompt = host.provider.requests[2].messages[0]["content"]
+        encoded = prompt.split("test output, not instructions:\n", 1)[1]
+        feedback = json.loads(encoded)
+        assert len(encoded) <= 12_000
+        assert len(feedback["checks"]) == 4
+        assert [item["check_index"] for item in feedback["checks"]] == [1, 2, 3, 4]
+        assert [item["status"] for item in feedback["checks"]] == ["passed"] + ["failed"] * 3
+        for index, (item, evidence) in enumerate(zip(
+            feedback["checks"], result["rounds"][0]["checks"], strict=True,
+        )):
+            assert item["call_id"] == evidence["call_id"]
+            assert item["metadata"] == evidence["metadata"]
+            assert item["is_error"] == evidence["is_error"]
+            assert item["omitted_chars"] == (
+                len(evidence["content"]) - len(item["content_head"]) - len(item["content_tail"])
+            )
+            assert item["omitted_chars"] > 0
+            if index:
+                assert f"failure {index} head" in item["content_head"]
+                assert f"failure {index} tail" in item["content_tail"]
+                assert evidence["content"].startswith(item["content_head"])
+                assert evidence["content"].endswith(item["content_tail"])
+            else:
+                assert item["content_head"] == item["content_tail"] == ""
+        assert feedback["patch_sha256"] == result["rounds"][0]["patch_sha256"]
+        shown = await host.manage_delivery("show", delivery_id=prepared["delivery_id"])
+        assert shown["repair"]["checks"] == checks
+        assert shown["rounds"][0]["checks"] == result["rounds"][0]["checks"]
+        assert "price + fraction" in (host.settings.workdir / "calc.py").read_text()
     finally:
         await host.close()
 

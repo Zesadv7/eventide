@@ -281,3 +281,9 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | REL-1 | 已完成 | 用户授权集成与发布；本地 master 从原版本快进至 a9ba371，保留全部历史及未跟踪目录。完整验证复用该 SHA 六项全绿 CI（39066692877）：Python 两版本各 1,941 通过/29 跳过、覆盖率 93.01%、185 前端/31 浏览器/55 真实 Docker。未重复全量或付费实验，远端发布身份以 master 和 0.5.0 Release 为准。 |
 | REL-2 | 已完成 | macOS 27.0.1 arm64、Docker Desktop 4.95.0 实机：原生目录选择经生产 HTTP 返回 200 和正确绝对路径；首次关闭为实际 cancelled，busy 释放。真实沙箱修复/容器内 unittest 与外部断言/可应用补丁导出、超时清理/停止清理三项通过；另检查实际容器无网络、只读根、UID1000、cap-drop ALL/no-new-privileges、512MiB/1CPU/128PIDs、唯一候选挂载及清理。使用已有本地镜像、隔离状态与 ScriptedProvider，不改用户状态、不发付费请求。原始摘要在忽略目录。 |
 | REL-3 | 已完成 | 0.5.0 版本号、API/OpenAPI、前端包与锁、CI wheel 路径和当前稳定文档一致；真实 OpenAPI 类型生成、TypeScript/Vite 重建、变更格式与 Ruff、离线 lock 检查通过。发布/服务/静态分发 12 项通过，干净 wheel 构建及脱离源码隔离服务/资源/退役入口检查通过；逐文件核对安装包与源码、README 元数据及版本一致。旧构建缓存移入忽略目录保留，旧 Release 和历史实验不改写。完整 CI 复用 REL-1，发行提交 [skip ci] 避免重复全量；推送/标签/Release 身份以 GitHub 为准。 |
+
+## 交付失败反馈与修正提示（2026-10-21）
+
+| 编号 | 状态 | 内容与验收 |
+|---|---|---|
+| FB-1 | 已完成 | 仅调整失败后的 Writer 输入：保留全部验收项状态、元数据、轮次/补丁和调用来源；失败日志按项保留头尾、标注省略量，计入 JSON 转义后仍不超过 12,000 字符。修正前要求核查源码、简述失败依据/待验证假设/修正点，原验收事实、失败签名、轮数、预算及权限不改。新增长日志/转义两项并增强二轮修正回归，先复现原三项失败（含 JSON 截坏），修正后仅运行 test_delivery_repair：21 项通过、1 项真实 Docker 按既有开关跳过；Ruff、变更模块 Mypy、独立只读复核及 git diff --check 通过。README/architecture/ADR-076 已同步，无新增模型请求，不重复前端、全量、容器或付费实验；未做真实模型效果对照，不宣称修复率提升。本地提交保存代码、测试和文档。 |

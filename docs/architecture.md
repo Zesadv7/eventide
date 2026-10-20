@@ -522,6 +522,8 @@ retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime�
 
 Writer每轮的用户任务消息附带JSON执行上下文：固定验收命令、当前/最大轮次、36次/用户固定Token软限（默认60k）/900秒限制，以及唯一交付账本和绝对deadline派生的已用/剩余额度。此为开轮快照，未知尝试单列，已报告Token余量不代表未知消费为零。命令字符串和失败输出只作为数据，不加入系统指令；Writer被要求在必要修改完成后交还独立Verifier，不能自报通过。原命令与保护范围不变，停驻/失败Writer仍不自动验收，真实交付成功与否继续由固定验收决定。
 
+失败后的 Writer 使用新会话及同一 checkout，上一候选的证据由原反馈块交接：`round/run_id/patch_sha256` 标识验收来源，各项 `check_index` 从 1 开始关联已有 `acceptance_commands`，保留 `call_id/status/is_error/metadata`。先为全部检查保留元数据，再将剩余额度分配给失败日志；按 JSON 转义后的实际长度选择 `content_head/content_tail`，序列化结果最多 12,000 字符，成功项不回灌日志。`omitted_chars` 仅计算本次投影相对已记录 `content` 省略的字符数，执行器先前的字节截断仍由原 `metadata` 标记，不将节选当成完整输出。投影不修改 `delivery.round_finished`、`delivery.verified` 或原失败签名，也不增加状态表或模型请求。修正提示要求依据失败检查核查当前源码、简述可验证假设和修正点；说明不参与验收判分，失败输出继续明确为不可信数据。
+
 `ModelBudgetController`在主请求和embedding预留前检查 `delivery_limits`。以可信预算context.delivery_id筛选独占attempt，跨Writer根Run及其子任务累计；无await的检查/预留保持单进程串行原子边界。36次上限包含失败尝试和辅助模型请求，embedding只进Token总量。控制Run终止或交付结束后，不允许通过Writer Continue再派发。独立验收不占模型槽；Writer共用原根队列，交付管理Run不重复占根名额。
 
 每轮先复核源码/保护范围与patch，和上一轮完全相同即停止；失败签名对测试耗时文本做归一化，重复失败停止。最多3次候选验收，成功才开放显式采纳。超时/取消只发一次子任务取消并等待收尾；真实未知工具结果停驻副本。此流程没有恢复自动重放，失败产物保留用于检查；Web接收与所有权见下节。
