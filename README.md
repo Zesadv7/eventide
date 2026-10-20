@@ -6,28 +6,31 @@ Eventide 是以 Web 为唯一用户操作入口的软件工程 Agent 工作台�
 
 后端使用 Python、asyncio、FastAPI 和 Pydantic 2；前端使用 Vue 3、TypeScript、Vite、Router 和 Pinia。单服务进程支持持久任务队列、流式预览、权限审批、Token 与费用治理。实现进度和验收证据以 [AGENTS.md](AGENTS.md) 为准；真实模型效果与离线机制验证分开报告。
 
-## 当前版本：0.4.0
+## 当前版本：0.5.0
 
 主流程：**添加项目 → 配置模型与 Skills → 创建对话 → 检索与隔离修改 → 独立验收 → 查看补丁 → 人工采纳**。
 
 | 核心能力 | 当前实现 |
 |---|---|
-| Web 工作台 | 项目、多会话、模型设置、审批、历史与 SSE 流式预览 |
+| Web 工作台 | 对话优先界面、主题、折叠侧栏、系统目录选择、审批与 SSE 流式预览 |
 | Agent 执行 | 自有 RuntimeHost、工具契约、权限策略、追加式事件和重启恢复 |
 | 同项目并发 | 只读快照、会话独立 Git worktree、持久队列与共享模型额度 |
 | Skills / MCP | 本地目录与 ZIP 导入、版本固定、按需加载、受控脚本和官方 MCP SDK |
+| 长期偏好 | 安装级／项目级、来源与版本、确认建议、暂停／撤销、实际请求注入记录 |
+| 可选执行沙箱 | Docker 内文件与 Shell 工具、固定镜像、无网络候选目录及显式文本补丁导出 |
 | 代码检索 | 增量 FTS5 / RRF，可选本地语义检索、重排与查询改写 |
 | 修复交付 | 最多三轮候选、固定独立验收、补丁与源码复核、人工采纳 |
 
-最近一次验证结果如下；详细实验条件和失败保留在[追加质量改进验证](#追加质量改进验证)。
+0.5.0 集成来源为 `a9ba371`，其[六项完整 CI](https://github.com/Zesadv7/eventide/actions/runs/39066692877)全部通过；本次只补 macOS 实机与版本分发检查。历史模型结果另列，详细条件和失败保留在[追加质量改进验证](#追加质量改进验证)，没有用旧实验声称新记忆或沙箱提升模型效果。
 
 | 验证范围 | 结果 |
 |---|---|
-| 后端离线门禁 | 1,820 项通过，10 项可选路径跳过；语句覆盖率 93.65% |
-| 前端与浏览器 | 128 项前端测试、24 条浏览器检查；浏览器使用真实 API 和假 Provider |
-| 容器与分发 | 54 项真实 Docker 测试，wheel 及镜像资源、启动与恢复验证通过 |
-| GLM 冻结任务回归 | 20 题各三次，共 42/60 通过；理解、定位与修复任务合计 |
-| 新独立理解 / 定位任务 | 8 题各三次，共 22/24 通过，单独报告 |
+| 后端离线门禁 | Linux Python 3.10／3.14 各 1,941 项通过、29 项跳过；覆盖率 93.01% |
+| 前端与浏览器 | 185 项前端测试、31 条浏览器检查（30 条真实 API／1 条布局 fixture），模型使用假 Provider |
+| 容器与分发 | CI 55 项真实 Docker 测试及镜像分发通过；macOS 追加沙箱修复／导出、超时与停止三项及实际容器配置核查 |
+| macOS 系统目录 | 实际选择通过生产 HTTP 路由返回正确路径，实际关闭返回 cancelled，选择器释放；不注册项目或发模型请求 |
+| 历史 GLM 冻结任务回归 | 20 题各三次，共 42/60 通过；理解、定位与修复任务合计 |
+| 历史独立理解 / 定位任务 | 8 题各三次，共 22/24 通过，单独报告 |
 
 当前面向本机、单用户使用。模型仍会出现事实和引用错误，复杂修复可能触及预算或失败；worktree 不提供操作系统沙箱。尚无已证实的 Token 或费用改善，不将离线测试通过当作模型任务成功率。
 
@@ -84,6 +87,8 @@ uv run eventide-server --host 127.0.0.1 --port 8000
 也可参考 [.env.example](.env.example) 配置 `EVENTIDE_PROVIDER`、`EVENTIDE_MODEL`、`EVENTIDE_BASE_URL`、`EVENTIDE_API_KEY`、超时和可选检索参数。页面保存的连接优先于环境配置；密钥以Fernet加密写入状态库，不进入代码、响应和报告。不要把密钥放进命令行参数或Git。
 
 默认状态根：macOS 为 `~/Library/Application Support/Eventide`，Windows 为 `%LOCALAPPDATA%\Eventide`，Linux 为 `$XDG_STATE_HOME/eventide` 或 `~/.local/state/eventide`。`EVENTIDE_STATE_DIR` 可覆盖，相对路径相对于服务初始项目解析。状态根保存 `runtime.sqlite`、`secret.key`、租约和受管产物，需要一并备份；`EVENTIDE_SECRET_KEY` 可提供固定Fernet主密钥。同状态根只允许一个Host，开发脚本不能在服务运行时另开第二个Owner。
+
+0.5.0 使用 schema v5，为偏好事件新增索引并自动迁移旧版状态。升级前停止服务并备份完整状态根；旧版程序不能直接打开升级后的 v5 库，回退需使用升级前备份。本次发布验收仅使用隔离临时状态，没有迁移用户的实际状态目录。
 
 流式预览是临时内容，不逐Token落库、不推进SSE持久游标。只有完整模型响应才形成可执行工具调用；断流或半成品不会自动重发。刷新后从持久事件恢复，页面切换和观察连接断开不停止后台任务。
 
@@ -259,7 +264,7 @@ Vite默认同源代理到 `http://127.0.0.1:8000`，`EVENTIDE_API_URL` 可覆盖
 
 发布构建使用干净构建目录；setuptools可能保留旧`build/`缓存，确认其中只有可丢弃构建输出后再清理。wheel门禁拒绝已退役入口及清单以外的页面资源，不能只凭构建命令成功判断可分发。
 
-构建会更新 `eventide/workbench/` 的源码指纹和资源SHA-256；修改前端后必须一起提交新产物。`uv build --wheel --out-dir .task_outputs/dist` 后，用 `uv run python frontend/scripts/check_wheel.py .task_outputs/dist/eventide-0.4.0-py3-none-any.whl` 隔离检查资源、服务入口和旧入口退役情况。
+构建会更新 `eventide/workbench/` 的源码指纹和资源SHA-256；修改前端后必须一起提交新产物。`uv build --wheel --out-dir .task_outputs/dist` 后，用 `uv run python frontend/scripts/check_wheel.py .task_outputs/dist/eventide-0.5.0-py3-none-any.whl` 隔离检查资源、服务入口和旧入口退役情况。
 
 更多实现说明见 [architecture.md](docs/architecture.md)、[api-contract.md](docs/api-contract.md)、[decisions.md](docs/decisions.md) 和 [AGENTS.md](AGENTS.md)。项目采用 [MIT License](LICENSE)。
 
@@ -399,4 +404,4 @@ C5固定40查询的真实配对已完成，全部120请求用量已报告：原�
 
 沙箱修改仅是候选，不自动写回项目。停止执行后，可从 Run 详情导出当前会话候选的完整文本补丁（最多 2 MiB），审阅后自行应用到源项目；这不是历史 Run 快照，也不包含被过滤文件或二进制变化。暂不提供应用内采纳、二进制导出和带空白/引号文件名的补丁。源项目可在沙箱运行后改变，手动应用前需自行检查冲突。Docker/镜像不可用、候选损坏或容器清理结果未知时明确失败，不回退本地；清理未知的会话禁止继续、追加运行和导出，保留证据供人工检查 Docker 后新建会话。
 
-验证状态按本轮维护记录单列：离线测试不等同真实 Docker 边界测试；真实 macOS Docker Desktop 仍需目标机器验证。
+2026-10-21 已在 Apple Silicon、macOS 27.0.1／Docker Desktop 4.95.0 实测：Host 沙箱读取、修改、容器内 unittest、外部结果断言与补丁可应用性检查通过，源文件和过滤凭据不变；超时／停止后确认容器清理。另检查实际容器的无网络、只读根、UID 1000:1000、cap-drop ALL、no-new-privileges、512 MiB／1 CPU／128 PIDs 及唯一候选挂载。使用已安装的本地镜像和 ScriptedProvider，未发付费模型请求；这不取消上述边界和限制。

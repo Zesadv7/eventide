@@ -95,7 +95,7 @@ jobs:
           EVENTIDE_PYTHON: ${{ github.workspace }}/.venv/bin/python
           EVENTIDE_E2E_BUILT: "1"
       - run: uv build --wheel --out-dir .task_outputs/dist
-      - run: uv run python frontend/scripts/check_wheel.py .task_outputs/dist/eventide-0.4.0-py3-none-any.whl
+      - run: uv run python frontend/scripts/check_wheel.py .task_outputs/dist/eventide-0.5.0-py3-none-any.whl
       - run: uv run pytest -q tests/test_bundled_evaluations.py::test_installed_wheel_contains_all_resources_and_loads_without_checkout
         env:
-          EVENTIDE_TEST_EVAL_WHEEL: ${{ github.workspace }}/.task_outputs/dist/eventide-0.4.0-py3-none-any.whl
+          EVENTIDE_TEST_EVAL_WHEEL: ${{ github.workspace }}/.task_outputs/dist/eventide-0.5.0-py3-none-any.whl
