@@ -283,7 +283,7 @@ ContainerCommandExecutor通过Docker create/start/rm、argv执行和有界输出
 
 acceptance_tests工程评测使用一次性Git fixture，原测试复制到外部临时目录并保存SHA清单。基线必须退出1；结束后测试源/数据清单不变，清理fixture的派生bytecode，再以-I/-B独立Python、先导入stdlib unittest后加入候选源码，运行原版测试。check_project通过唯一ToolExecutor/Policy留下独立Run证据，不接受模型自判。report增加verification字段；baseline/verification run id、exit/timed_out、manifest与tests_unchanged可追溯。测试、数据与模型预算均有限，失败消费不推测；这些功能测试不构成恶意代码隔离证明。
 
-CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optional-extensions 安装全部 extras；container job 显式预拉测试镜像后开启真实 readonly boundary、Host Skill 脚本及取消/超时测试，再构建部署镜像、执行一次性卷上的服务分发检查；web job 固定 Playwright 版本并安装 headless Chromium，严格模式缺浏览器必须失败。默认离线门禁仍不依赖 Key 或 Docker；未执行的远程 CI 不能当成本机真实 Docker 验证证据。
+CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：默认 test 矩阵在 Python 3.10/3.14 各运行一次全量测试，3.14 同次采集覆盖率并检查 85% 门槛，quality 只运行 Ruff/Mypy；optional-extensions 安装全部 extras；container job 显式预拉测试镜像后开启真实 readonly boundary、Host Skill 脚本及取消/超时测试，再构建部署镜像、执行一次性卷上的服务分发检查；web job 固定 Playwright 版本并安装 headless Chromium，严格模式缺浏览器必须失败。默认离线门禁仍不依赖 Key 或 Docker；未执行的远程 CI 不能当成本机真实 Docker 验证证据。
 
 
 ## 请求用量账本基础（U1）

@@ -101,5 +101,5 @@
 - **日期、范围与状态：** 2026-10-22，自动化测试／新测试问题，已完成；基线88a7ab8加EV-1未提交实现。
 - **命令与证据：** `uv run pytest -q tests/test_tool_result_paging.py tests/test_delivery_repair.py tests/test_host.py::test_tool_catalog_stays_within_its_budget`：27通过、1失败、1真实Docker按原开关跳过；`.task_outputs/quality-increment/ev-tests.log`。新增中段回查用例已完成两轮修复和成功回查，随后用 `child["run_id"]` 读取Run详情导致KeyError；该投影使用其他身份字段。
 - **原因与处理：** 测试错误假定Run投影字段，改为使用此前已获得的权威worker_run_id，不改业务断言或生产行为。独立复核另发现临时grant随执行配置继承的权限风险，现将能力绑定精确Writer Run并加拒绝测试；这是审查发现，不冒充本次KeyError的原因或已经发生的数据泄露。类型检查还要求为新增结构配置显式声明dict[str, Any]，已补齐。
-- **复验与边界：** 首次定向复验1通过、1失败（`ev-recheck.log`）：同一新测试又误将workspace_id视作Run字段，补齐身份来源应通过Session查询。两次均为新测试投影假定错误，未改生产结果；最终仅复验该项1通过（`ev-final-recheck.log`），权限白名单unit在前次复验已通过；4个变更模块Mypy及Ruff通过。实际模型效果、付费接口和真实容器未验证。实现提交收口时补记。
+- **复验与边界：** 首次定向复验1通过、1失败（`ev-recheck.log`）：同一新测试又误将workspace_id视作Run字段，补齐身份来源应通过Session查询。两次均为新测试投影假定错误，未改生产结果；最终仅复验该项1通过（`ev-final-recheck.log`），权限白名单unit在前次复验已通过；4个变更模块Mypy及Ruff通过。实际模型效果、付费接口和真实容器未验证。实现及测试修正提交 `ec075fa`。
 - **经验、参与与追问：** Codex实施和静态复核，用户指定范围；应复用权威身份，不能猜投影字段。临时能力为何不能随持久后端配置复用？如何区分测试错误与权限边界问题？

@@ -295,10 +295,16 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 |---|---|---|
 | TS-1 | 已完成 | 2026-10-22：本地 search_text 接入 Plan/快照/只读 worker，严格参数、实际 cwd、行号/分页及文件/枚举/输出上限，沙箱不回退宿主。首批106通过/1旧目录断言失败，补断言后该项1通过；独立复核修复先无界枚举问题，搜索11项通过；补充枚举后文件变成越界链接的回归1项通过，读取前复用路径校验。Ruff、7变更模块Mypy及新增枚举实现Mypy、diff检查通过；README/architecture/ADR-094同步，失败记录FAIL-006。不跑全量/付费/真实容器，不宣称模型效果提升。 |
 | EV-1 | 已完成 | 2026-10-22：Controller仅向精确Writer Run冻结上一失败轮验收call白名单，read_tool_result分页原Event Log并标原候选来源，配置继承不传播权限。首批27通过/1新增测试投影字段失败/1显式Docker跳过；仅复验新增权限与中段日志用例，先1过1字段失败，最终原失败1通过。Ruff/Mypy4模块、独立权限复核、diff检查通过；FAIL-007保留两次新测试错误，README/architecture/ADR-030同步。不改预算/验收/普通Session隔离，无付费或真实容器调用。 |
-| AC-1 | 已完成 | 现有修复目标可选追加人工覆盖清单，保留原目标，占位内容明确待填写/未验证；详情展示冻结目标和一基编号验收命令。不新增后端字段，不改变通过判定、预算或固定验收。交付组件10项、TypeScript及变更文件Prettier通过，Vue生产构建并重新打包4项资源完成；README/architecture同步。日志在忽略目录.task_outputs/acceptance-checklist/，本轮无验证失败，不新增失败流水账；未重跑后端、全量前端、浏览器、容器或模型，不宣称真实任务成功率提升。 |
+| AC-1 | 已完成 | 现有修复目标可选追加人工覆盖清单，保留原目标，占位内容明确待填写/未验证；详情展示冻结目标和一基编号验收命令。不新增后端字段，不改变通过判定、预算或固定验收。交付组件10项、TypeScript及变更文件Prettier通过，Vue生产构建并重新打包4项资源完成，集成后资源与源码指纹专项1项通过；README/architecture同步。日志在忽略目录.task_outputs/quality-increment/acceptance-checklist/，本轮无验证失败，不新增失败流水账；未重跑后端、全量前端、浏览器、容器或模型，不宣称真实任务成功率提升。 |
 
 ## 交付失败反馈与修正提示（2026-10-21）
 
 | 编号 | 状态 | 内容与验收 |
 |---|---|---|
 | FB-1 | 已完成 | 仅调整失败后的 Writer 输入：保留全部验收项状态、元数据、轮次/补丁和调用来源；失败日志按项保留头尾、标注省略量，计入 JSON 转义后仍不超过 12,000 字符。修正前要求核查源码、简述失败依据/待验证假设/修正点，原验收事实、失败签名、轮数、预算及权限不改。新增长日志/转义两项并增强二轮修正回归，先复现原三项失败（含 JSON 截坏），修正后仅运行 test_delivery_repair：21 项通过、1 项真实 Docker 按既有开关跳过；Ruff、变更模块 Mypy、独立只读复核及 git diff --check 通过。README/architecture/ADR-076 已同步，无新增模型请求，不重复前端、全量、容器或付费实验；未做真实模型效果对照，不宣称修复率提升。本地提交保存代码、测试和文档。 |
+
+## CI 测试去重（2026-10-22）
+
+| 编号 | 状态 | 内容与验收 |
+|---|---|---|
+| CI-1 | 已完成 | Python 3.10 保留一次 pytest，3.14 在一次 pytest 中检查覆盖率 ≥85%；quality 删除重复全量，仅保留 Ruff/Mypy。YAML 解析、按版本条件选择与命令语法检查通过；对照 acf9056，触发器、矩阵、服务/smoke 与其余 job 完全一致，git diff --check 通过。README/architecture 已同步，证据在忽略目录 .task_outputs/quality-increment/ci-dedup/validation.log。本轮无验证失败，不新增失败流水账；未运行全量、前端、容器或模型，实际 GitHub 执行仍以之后 CI 为准。 |

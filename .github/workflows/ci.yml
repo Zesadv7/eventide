@@ -21,6 +21,9 @@ jobs:
       - run: uv run python -m eventide --help
       - run: uv run python tests/check_service.py
       - run: uv run pytest -q
+        if: matrix.python-version == '3.10'
+      - run: uv run pytest -q --cov=eventide --cov-fail-under=85
+        if: matrix.python-version == '3.14'
       - run: uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
   quality:
@@ -32,7 +35,6 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --locked --extra dev
-      - run: uv run pytest --cov=eventide --cov-fail-under=85
       - run: uv run ruff check eventide tests examples
       - run: uv run mypy eventide
 
