@@ -16,7 +16,7 @@ PREVIEW_TAIL_CHARS = 2_000
 
 TOOL = {
     "name": "read_tool_result",
-    "description": "Read part of a complete tool result from this session.",
+    "description": "Read a stored tool result permitted for this run.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -47,8 +47,11 @@ def preview(event: dict[str, Any]) -> tuple[str, int]:
     return content[:PREVIEW_HEAD_CHARS] + marker + content[-PREVIEW_TAIL_CHARS:], omitted
 
 
-def reader(store: RuntimeStore, session_id: str) -> Callable[..., str]:
-    """Build a session-scoped handler for the dynamic read_tool_result tool."""
+def reader(
+    store: RuntimeStore, session_id: str, *, acceptance: dict[str, Any] | None = None,
+    current_run_id: str | None = None,
+) -> Callable[..., str]:
+    """Session lookup plus a controller-frozen allowlist of prior acceptance calls."""
 
     def read_tool_result(
         run_id: str,
@@ -66,6 +69,17 @@ def reader(store: RuntimeStore, session_id: str) -> Callable[..., str]:
         ):
             return f"Error: limit must be between 1 and {PAGE_MAX_CHARS}"
         result = store.get_tool_result(session_id, run_id, call_id)
+        origin = ""
+        if (
+            result is None and acceptance is not None
+            and current_run_id == acceptance["reader_run_id"]
+            and run_id == acceptance["run_id"] and call_id in acceptance["call_ids"]
+        ):
+            result = store.get_tool_result(acceptance["session_id"], run_id, call_id)
+            origin = (
+                f"[Acceptance evidence: delivery={acceptance['delivery_id']}; "
+                f"round={acceptance['round']}; patch={acceptance['patch_sha256']}]\n"
+            )
         if result is None:
             return "Error: tool result not found in this session"
         content = result["content"]
@@ -73,6 +87,6 @@ def reader(store: RuntimeStore, session_id: str) -> Callable[..., str]:
         start = min(offset, total)
         end = min(start + limit, total)
         next_hint = f"; next offset {end}" if end < total else "; end of result"
-        return f"[Tool result {start}:{end} of {total}{next_hint}]\n{content[start:end]}"
+        return origin + f"[Tool result {start}:{end} of {total}{next_hint}]\n{content[start:end]}"
 
     return read_tool_result

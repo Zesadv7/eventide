@@ -314,6 +314,8 @@ Superseded（原生页面及JS门禁由ADR-055/085的Vue实现取代；Session/R
 
 **影响：** 最新的大结果不再单独占满请求，模型仍能按证据需要无损回读具体区间；审计导出、工作记录和默认 MessagesProjection 保持原文。分页身份必须同时匹配当前 Session、Run 和 call，不能跨 Session 探测结果。不引入外部 artifact 文件、数据库迁移或自动任务拆分；TodoWrite/Task System 属于后续调度层工作。
 
+2026-10-22 限定扩展：交付Controller可从已完成的上一失败轮次，向精确Writer Run冻结该交付的验收call白名单。read_tool_result仅对该Run开放指定控制Session/Run/call的日志页，附原轮次与patch来源；其他会话及后续Run继续拒绝。不是通用跨会话访问，原Event Log仍是唯一事实源。
+
 ## ADR-031：Session 计划以事件快照驱动执行
 
 **状态：Accepted**。

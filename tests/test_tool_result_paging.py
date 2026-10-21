@@ -10,6 +10,40 @@ from eventide.tool_results import INLINE_RESULT_CHARS, PAGE_MAX_CHARS, reader
 from tests.test_runtime import settings_for
 
 
+async def test_acceptance_allowlist_pages_only_exact_controller_calls(isolated_workspace):
+    host = RuntimeHost(settings_for(isolated_workspace))
+    try:
+        controller = host.create_session()
+        writer = host.create_session()
+        content = "a" * 9_000 + "MIDDLE_FAILURE" + "z" * 9_000
+        _append_result(host, controller, "control", content)
+        _append_result(host, controller, "unrelated", "private other run")
+        host.store.append_fact(controller, "tool.completed", {
+            "call_id": "other_check", "content": "private other check",
+        }, run_id="control")
+        grant = {
+            "reader_run_id": "writer_run",
+            "delivery_id": "delivery_example", "session_id": controller,
+            "run_id": "control", "round": 1, "patch_sha256": "a" * 64,
+            "call_ids": ["large"],
+        }
+        read = reader(host.store, writer, acceptance=grant, current_run_id="writer_run")
+        page = read("control", "large", offset=9_000, limit=14)
+        assert page.endswith("MIDDLE_FAILURE")
+        assert "round=1" in page and "patch=" + "a" * 64 in page
+        assert "not found" in read("control", "other_check")
+        assert "not found" in read("unrelated", "large")
+        assert "not found" in reader(host.store, writer)("control", "large")
+        assert "not found" in reader(
+            host.store, writer, acceptance=grant, current_run_id="ordinary_run",
+        )("control", "large")
+        assert "not found" in reader(host.store, host.create_session(), acceptance={
+            **grant, "run_id": "another_delivery_control",
+        })("control", "large")
+    finally:
+        await host.close()
+
+
 def _append_result(host, session, run_id, content):
     host.store.create_run(run_id, session)
     host.store.append_message(session, {"role": "user", "content": "produce output"})

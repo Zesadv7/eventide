@@ -90,6 +90,26 @@ async def test_search_invalid_arguments_never_execute(tmp_path, arguments):
     assert result.metadata["code"] == "invalid_arguments" and not called
 
 
+def test_search_rechecks_scope_if_a_file_changes_to_an_external_link(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    file = root / "source.py"
+    file.write_text("needle")
+    outside = tmp_path / "private"
+    outside.write_text("needle private")
+    collect = filesystem._search_paths
+
+    def changed(base, pattern):
+        result = collect(base, pattern)
+        file.unlink()
+        file.symlink_to(outside)
+        return result
+
+    monkeypatch.setattr(filesystem, "_search_paths", changed)
+    with pytest.raises(PermissionError):
+        filesystem.run_search_text("needle", cwd=root)
+
+
 async def test_plan_search_uses_executor_cwd_without_index(tmp_path):
     (tmp_path / "source.py").write_text("target_symbol = 1\n")
     provider = ScriptedProvider([

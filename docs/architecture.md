@@ -532,6 +532,8 @@ Writer每轮的用户任务消息附带JSON执行上下文：固定验收命令�
 
 ### Web 交付所有权
 
+交付修正的 `read_tool_result` 增加受限授权：Controller 从本交付、本控制 Run 的上一失败 `delivery.round_finished` 事实生成精确验收 call 白名单，冻结到 Writer admission 的 execution_config，绑定 reader_run_id、控制 Session/Run、原轮次和 patch。Host 注入当前 Run 身份；Reader 先保持原本会话查询，仅在当前 Run 与获授权 Writer 相等、控制 Run 和 call 同时匹配时读取原 Event Log。页头标明原候选来源。即使后端配置被同副本后续 Session 或 Continue 继承，新的 Run 身份也不能继承该临时权限。只读 worker/sandbox 不获得此授权；容器 Writer 仍由 Host 分页已保存的脱敏日志。未新增状态源、数据库结构或通用跨 Session 查询，日志中执行器已丢弃的内容无法恢复，后续修改仍需重新独立验收。
+
 `WebDeliveryController`将prepare/repair/apply作为同一个Root调度器的持久控制Run接收；归档control Session不能作为普通聊天使用。prepare以项目Session串行，后续操作按delivery Session串行，执行锁与源checkout锁分开。事件`delivery.operation_accepted`冻结操作正文；历史从canonical事实按提交顺序重建，跨Session的delivery事实不能按各自session_seq混排。
 
 Web repair持有一个根名额，Writer通过受信控制Run的parent_run_id借用此名额，仍独立拥有Session及checkout并经过Host原主链。派发前检查父控制Run仍持有根lease、operation=repair、delivery身份与checkout一致；没有第二调度器。四个修复控制Run不会各占根名额后再等待四个Writer根名额。模型槽仍全局最多两个。预算根为控制Run，主Writer/摘要/子任务消费按同一交付累计；管理终态投影不重复记账。取消等待Writer实际收尾再释放根。

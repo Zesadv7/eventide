@@ -3245,7 +3245,10 @@ class RuntimeHost:
             tools = run_policy.filter_tool_catalog(tools, mode)
             handlers = {
                 **self.handlers,
-                "read_tool_result": tool_result_reader(self.store, session_id),
+                "read_tool_result": tool_result_reader(
+                    self.store, session_id, acceptance=execution_config.get("acceptance_evidence"),
+                    current_run_id=run_id,
+                ),
                 "todo_write": write_task_plan,
                 **({"load_skill": load_skill, "read_skill_resource": read_skill_resource,
                     "run_skill_script": run_skill_script} if skills else {}),

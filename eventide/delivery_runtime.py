@@ -325,12 +325,28 @@ class DeliveryController:
         checkout = Path(checkout_ws.path)
         child_session = host.create_session(workspace_id=checkout_ws.workspace_id)
         child_id = f"run_{uuid.uuid4().hex[:16]}"
-        config = {
+        config: dict[str, Any] = {
             "kind": "container" if image is not None else "local",
             "disable_mcp": True,
             "writer_delivery_id": delivery_id,
             **({"image": image} if image is not None else {}),
         }
+        previous = next((
+            event for event in reversed(host.store.delivery_facts(delivery_id))
+            if event["type"] == "delivery.round_finished" and event["run_id"] == run_id
+            and event["payload"]["status"] == "failed"
+        ), None)
+        if previous is not None:
+            evidence = previous["payload"]
+            config["acceptance_evidence"] = {
+                "reader_run_id": child_id,
+                "delivery_id": delivery_id,
+                "session_id": previous["session_id"],
+                "run_id": run_id,
+                "round": evidence["round"],
+                "patch_sha256": evidence["patch_sha256"],
+                "call_ids": [check["call_id"] for check in evidence["checks"]],
+            }
         from eventide.delivery_control import is_delivery_control_run, start_owned_writer
 
         owned = is_delivery_control_run(host.store, run_id)

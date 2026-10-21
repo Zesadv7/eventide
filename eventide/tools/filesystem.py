@@ -88,7 +88,7 @@ def run_search_text(
             exhausted = True
             break
         scanned += 1
-        with path.open("rb") as source:
+        with resolve_scoped_path(base, str(path)).open("rb") as source:
             raw = source.read(min(SEARCH_FILE_BYTES, SEARCH_SCAN_BYTES - used_bytes) + 1)
         used_bytes += len(raw)
         if len(raw) > SEARCH_FILE_BYTES:
