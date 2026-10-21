@@ -309,6 +309,12 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 |---|---|---|
 | CI-1 | 已完成 | Python 3.10 保留一次 pytest，3.14 在一次 pytest 中检查覆盖率 ≥85%；quality 删除重复全量，仅保留 Ruff/Mypy。YAML 解析、按版本条件选择与命令语法检查通过；对照 acf9056，触发器、矩阵、服务/smoke 与其余 job 完全一致，git diff --check 通过。README/architecture 已同步，证据在忽略目录 .task_outputs/quality-increment/ci-dedup/validation.log。本轮无验证失败，不新增失败流水账；未运行全量、前端、容器或模型，当前真实CI已验证两版本各执行一次全量、3.14同次采覆盖率，见MERGE-1。 |
 
+## README 与使用文档整理（2026-10-22）
+
+| 编号 | 状态 | 范围与验收 |
+|---|---|---|
+| DOC-1 | 已完成 | 2026-10-22：README 从417行/27,172字符精简至122行/3,682字符，保留四项核心能力、启动、设计概览、真实验证与边界；新增 docs/user-guide.md 承接操作、状态备份/恢复、Skills、沙箱和开发接口。历史结果复用 architecture 的真实模型实验锚点，补入迁移所需的冻结条件/失败与消费摘要；failure-cases 的旧 README 引用已改向。真实工作台截图为临时项目/独立状态/ScriptedProvider，明确标注演示，1440×1000、134,778字节，无页面脚本错误；禁用 dotenv、未读取用户状态或调用真实模型，临时服务已关闭。文档本地链接/锚点、代码块、命令与元数据、截图及diff检查通过，独立只读复核完成；旧Docker镜像示例标签已统一，开发服务与检查命令分终端说明。AGENTS前4000字符及生产代码/资源保持不变，无测试或截图任务失败，不新增失败流水账；原始检查摘要在忽略目录.task_outputs/readme-refresh/。未重跑后端/前端/浏览器套件、Docker或付费测试，本地提交不自动推送。README 后续只保留定位、核心能力、启动、设计概览、验证边界与文档入口，完整操作、历次验收和排障流水按对应文档职责维护。 |
+
 ## 本轮合并准备（2026-10-22）
 
 | 编号 | 状态 | 内容与验收 |
