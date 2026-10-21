@@ -33,7 +33,7 @@
 | FAIL-003 | Python 3.10 无法收集测试 | CI / 测试兼容性问题 | 已完成：修复及历史证据核对 |
 | FAIL-004 | 原验收通过仍遗漏 HTTP 分支 | 真实模型任务 / 验收覆盖不足 | 已完成：复盘；旧条件失败仍保留 |
 | FAIL-005 | Docker 基镜像获取失败 | 容器构建 / 环境或外部故障 | 待外部验证：构建已缓解，公网故障根因待查 |
-| FAIL-006 | 新增搜索工具后旧目录断言未同步 | 自动化测试 / 测试契约更新遗漏 | 已完成：两处旧目录断言均定向复验通过 |
+| FAIL-006 | 新增搜索工具后旧目录断言未同步 | 自动化测试 / 测试契约更新遗漏 | 进行中：CI另发现Skills目录断言遗漏 |
 | FAIL-007 | 回查集成测试误用 Run 投影字段 | 自动化测试 / 新测试问题 | 已完成：修正投影身份来源，定向通过 |
 
 ## FAIL-001：长日志截断验收反馈 JSON
@@ -97,6 +97,8 @@
 - **经验、参与与追问：** Codex 实施并定位，用户指定范围；新增基础工具同时影响 Host、Plan、worker 及请求固定开销。如何区分旧契约更新遗漏和权限回归？为什么不能只扩大压缩预算却不记录工具目录增长？
 
 - **2026-10-22 合并前追加：** 基线83abd88，静态复核发现 `tests/test_worker_lifecycle.py` 的 ControlledProvider 也遗漏新工具。实际执行 `uv run pytest -q tests/test_worker_lifecycle.py -x`，首项等待 `both` 三秒超时、1失败即停（`.task_outputs/quality-increment/merge-worker-red.log`）。代码中目录断言位于设置同步事件之前，不能把该现象当生产调度变慢。此次只补该集合，保留3秒时限和停止/父子隔离等断言；`uv run pytest -q tests/test_worker_lifecycle.py` 随后6项通过（4.82秒，`merge-worker-green.log`），Ruff及diff检查通过。修正由本条和该测试文件的同一Git提交追溯（`git log --oneline -- tests/test_worker_lifecycle.py`）。先前首批定向范围不覆盖该文件，不能冒充当时已经验证，也不能将本次定向通过当当前提交完整CI已通过。
+
+- **2026-10-22 当前提交真实CI追加：** 用户授权发布后，候选1166ca6的CI `39642683561`、Python3.10 job `119370022716` 在 `uv run pytest -q` 得到1956通过、1失败、29跳过。唯一失败 `test_runtime_exposes_and_audits_workspace_skill_loading` 的精确工具集合也遗漏search_text；日志 `.task_outputs/quality-increment/github-py310-first.log`（约第288–366行）证明新增工具是差异。先前worker专项不覆盖此文件，不能称之前已验证；最终两个Python版本均为同一项失败、各1956通过/29跳过；3.14覆盖率93.04%达到85%，该轮整体仍为失败（`github-first-failed.log`）。其他四个job通过。此次只补该断言，本地 `uv run pytest -q tests/test_skill_loading.py` 4项通过（`merge-skills-green.log`），Ruff/diff通过；全测试AST盘点确认其余五类基础目录契约已同步，sandbox限制不改。当前待修正提交真实CI确认。GitHub对修正后的新SHA仍需真实门禁：现有push工作流会触发整套，不能用旧SHA通过的job替代新SHA结果；不另跑本地全量。
 
 ## FAIL-007：回查集成测试误用 Run 投影字段
 

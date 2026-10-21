@@ -75,6 +75,7 @@ async def test_runtime_exposes_and_audits_workspace_skill_loading(isolated_works
             "write_file",
             "edit_file",
             "glob",
+            "search_text",
             "compact",
             "read_tool_result",
             "todo_write",
