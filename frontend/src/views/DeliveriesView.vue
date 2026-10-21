@@ -39,6 +39,11 @@ const name = ref(""),
   image = ref(""),
   rounds = ref(3),
   tokenLimit = ref(60_000);
+const acceptanceTemplate = `验收覆盖清单（待填写，不代表已覆盖）：
+- 预期行为：[待填写] -> 固定验收命令第 [待填写] 条
+- 关键异常：[待填写] -> 固定验收命令第 [待填写] 条
+未覆盖项（未验证）：
+- [待填写内容、原因和后续核查方式]`;
 const repairSnapshot = () =>
   JSON.stringify([
     goal.value,
@@ -367,6 +372,22 @@ function closeDetail() {
             :disabled="locked || busy"
           />
         </label>
+        <button
+          type="button"
+          :disabled="
+            locked ||
+            busy ||
+            goal.length + acceptanceTemplate.length + (goal ? 2 : 0) > 20000
+          "
+          @click="goal += (goal ? '\n\n' : '') + acceptanceTemplate"
+        >
+          追加验收覆盖清单模板
+        </button>
+        <p class="muted">
+          将预期行为与关键异常对应到下方验收命令编号（从 1
+          开始）；没有验收证据的项写明
+          “未验证”。模板占位内容不代表已覆盖，填写后随目标一起固定。
+        </p>
         <label
           >累计 Token 软限<input
             v-model.number="tokenLimit"
@@ -414,7 +435,17 @@ function closeDetail() {
             status[detail.repair_status || ""] || detail.repair_status
           }}。停止原因：{{ detail.repair_result?.reason || "尚未结束" }}
         </p>
-        <p>固定验收：{{ detail.repair.checks }}</p>
+        <h4>固定目标与验收覆盖清单</h4>
+        <pre class="fixed-goal">{{ detail.repair.goal }}</pre>
+        <h4>固定验收命令</h4>
+        <ol class="acceptance-commands">
+          <li v-for="(command, index) in detail.repair.checks" :key="index">
+            <pre>{{ command }}</pre>
+          </li>
+        </ol>
+        <p class="muted">
+          验收命令通过不代表覆盖全部目标；清单为人工说明，未覆盖项仍未验证。
+        </p>
         <p>固定 Token 软限：{{ detail.repair.limits.observed_tokens }}</p>
         <div
           v-for="round in detail.rounds"

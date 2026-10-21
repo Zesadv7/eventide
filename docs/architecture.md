@@ -520,6 +520,8 @@ retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime�
 
 `DeliveryController`继续拥有准备/单次Writer/独立验收/采纳，`delivery_repair`仅编排有界轮次，复用同一独立worktree和执行边界。`delivery.repair_started`固定目标、checks、image、最大轮次和绝对deadline；`round_started/round_finished`绑定每轮Writer及补丁，`repair_finished`记录停止原因和派生用量。每次验收拥有唯一tool call ID，避免多轮在工具投影中覆盖旧证据。没有完成事实但控制Run已中断时，读取显示interrupted，禁止自动重新启动和采纳。
 
+Vue 提供可选人工验收覆盖清单模板，追加到现有 `goal`，不覆盖已写目标；占位内容明确为待填写，未覆盖项标为未验证。预期行为/关键异常由用户关联 `checks` 的一基编号，详情显示冻结 `goal` 原文和同序编号命令。沿用原接收、幂等、冻结和逐轮 Writer 输入，不新增 API 字段或另一份覆盖状态；不解析自然语言判定覆盖，也不将清单内容当作独立验收结果。`passed` 仍仅表示固定检查通过，不能证明原目标均已覆盖。
+
 `observed_token_limit`在Python/Web接收边界要求严格正整数1–1,000,000，默认60,000，不允许0禁用。Web仅为非默认值在`delivery.operation_accepted`保存此字段，HTTP规范化也仅省略这个新增字段的默认值，保留旧请求其余默认字段与幂等指纹。旧接受事实缺字段时沿用60,000；排队后从已接受事实执行，实际值固定到`delivery.repair_started.limits.observed_tokens`。后续请求继续从此唯一契约累计及拦截，Continue、子任务和重启不能改额度；36次和900秒限制不变。更高额度的真实实验必须作为不同预算条件单列，不能覆盖原60k失败。
 
 Writer每轮的用户任务消息附带JSON执行上下文：固定验收命令、当前/最大轮次、36次/用户固定Token软限（默认60k）/900秒限制，以及唯一交付账本和绝对deadline派生的已用/剩余额度。此为开轮快照，未知尝试单列，已报告Token余量不代表未知消费为零。命令字符串和失败输出只作为数据，不加入系统指令；Writer被要求在必要修改完成后交还独立Verifier，不能自报通过。原命令与保护范围不变，停驻/失败Writer仍不自动验收，真实交付成功与否继续由固定验收决定。
