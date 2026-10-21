@@ -289,8 +289,28 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | REL-2 | 已完成 | macOS 27.0.1 arm64、Docker Desktop 4.95.0 实机：原生目录选择经生产 HTTP 返回 200 和正确绝对路径；首次关闭为实际 cancelled，busy 释放。真实沙箱修复/容器内 unittest 与外部断言/可应用补丁导出、超时清理/停止清理三项通过；另检查实际容器无网络、只读根、UID1000、cap-drop ALL/no-new-privileges、512MiB/1CPU/128PIDs、唯一候选挂载及清理。使用已有本地镜像、隔离状态与 ScriptedProvider，不改用户状态、不发付费请求。原始摘要在忽略目录。 |
 | REL-3 | 已完成 | 0.5.0 版本号、API/OpenAPI、前端包与锁、CI wheel 路径和当前稳定文档一致；真实 OpenAPI 类型生成、TypeScript/Vite 重建、变更格式与 Ruff、离线 lock 检查通过。发布/服务/静态分发 12 项通过，干净 wheel 构建及脱离源码隔离服务/资源/退役入口检查通过；逐文件核对安装包与源码、README 元数据及版本一致。旧构建缓存移入忽略目录保留，旧 Release 和历史实验不改写。完整 CI 复用 REL-1，发行提交 [skip ci] 避免重复全量；推送/标签/Release 身份以 GitHub 为准。 |
 
+## 代码调查与验收增量（2026-10-22）
+
+| 编号 | 状态 | 范围与验收 |
+|---|---|---|
+| TS-1 | 已完成 | 2026-10-22：本地search_text接入Plan/快照/只读worker，严格契约、实际cwd、行号/分页及枚举/扫描/输出上限；链接目录不递归、读取前复验路径，沙箱不回退宿主。此前首批106通过/1旧目录断言失败，补断言1通过；搜索11项和新增漂移链接1项通过，Ruff/Mypy及独立复核通过。合并前另补worker生命周期fixture旧工具集合，先复现3秒等待失败，再仅修断言后6项通过，时限/生产代码不改；FAIL-006保留两处遗漏与验证范围。README/architecture/ADR-094已同步。当前候选918b40a的六项CI已通过，见MERGE-1；无付费或真实容器调用。 |
+| EV-1 | 已完成 | 2026-10-22：Controller仅向精确Writer Run冻结上一失败轮验收call白名单，read_tool_result分页原Event Log并标原候选来源，配置继承不传播权限。首批27通过/1新增测试投影字段失败/1显式Docker跳过；仅复验新增权限与中段日志用例，先1过1字段失败，最终原失败1通过。Ruff/Mypy4模块、独立权限复核、diff检查通过；FAIL-007保留两次新测试错误，README/architecture/ADR-030同步。不改预算/验收/普通Session隔离，无付费或真实容器调用。 |
+| AC-1 | 已完成 | 现有修复目标可选追加人工覆盖清单，保留原目标，占位内容明确待填写/未验证；详情展示冻结目标和一基编号验收命令。不新增后端字段，不改变通过判定、预算或固定验收。交付组件10项、TypeScript及变更文件Prettier通过，Vue生产构建并重新打包4项资源完成，集成后资源与源码指纹专项1项通过；README/architecture同步。日志在忽略目录.task_outputs/quality-increment/acceptance-checklist/，本轮无验证失败，不新增失败流水账；未重跑后端、全量前端、浏览器、容器或模型，不宣称真实任务成功率提升。 |
+
 ## 交付失败反馈与修正提示（2026-10-21）
 
 | 编号 | 状态 | 内容与验收 |
 |---|---|---|
 | FB-1 | 已完成 | 仅调整失败后的 Writer 输入：保留全部验收项状态、元数据、轮次/补丁和调用来源；失败日志按项保留头尾、标注省略量，计入 JSON 转义后仍不超过 12,000 字符。修正前要求核查源码、简述失败依据/待验证假设/修正点，原验收事实、失败签名、轮数、预算及权限不改。新增长日志/转义两项并增强二轮修正回归，先复现原三项失败（含 JSON 截坏），修正后仅运行 test_delivery_repair：21 项通过、1 项真实 Docker 按既有开关跳过；Ruff、变更模块 Mypy、独立只读复核及 git diff --check 通过。README/architecture/ADR-076 已同步，无新增模型请求，不重复前端、全量、容器或付费实验；未做真实模型效果对照，不宣称修复率提升。本地提交保存代码、测试和文档。 |
+
+## CI 测试去重（2026-10-22）
+
+| 编号 | 状态 | 内容与验收 |
+|---|---|---|
+| CI-1 | 已完成 | Python 3.10 保留一次 pytest，3.14 在一次 pytest 中检查覆盖率 ≥85%；quality 删除重复全量，仅保留 Ruff/Mypy。YAML 解析、按版本条件选择与命令语法检查通过；对照 acf9056，触发器、矩阵、服务/smoke 与其余 job 完全一致，git diff --check 通过。README/architecture 已同步，证据在忽略目录 .task_outputs/quality-increment/ci-dedup/validation.log。本轮无验证失败，不新增失败流水账；未运行全量、前端、容器或模型，当前真实CI已验证两版本各执行一次全量、3.14同次采覆盖率，见MERGE-1。 |
+
+## 本轮合并准备（2026-10-22）
+
+| 编号 | 状态 | 内容与验收 |
+|---|---|---|
+| MERGE-1 | 已完成 | 2026-10-22：修正候选918b40a的[六项CI](https://github.com/Zesadv7/eventide/actions/runs/39644102821)全部通过：Python3.10/3.14各1957通过/29跳过，覆盖率93.03%（≥85%）；前端187、浏览器31、真实Docker55、可选扩展60及服务/smoke/wheel/镜像分发通过。首轮1166ca6两版本同一旧目录断言失败完整保留在FAIL-006；只修测试预期，本地Skills4项验证，新SHA按既有门禁验证。master集成沿用已验证的源码、测试和资源，仅补验收Markdown，且AGENTS前4000字符一致；合并提交[skip ci]避免再跑相同整版，最终远端身份以Git为准。日志/结果在忽略目录.task_outputs/quality-increment/github-ci-fixed.*，无付费模型请求。 |

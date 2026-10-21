@@ -347,7 +347,7 @@ class ToolExecutor:
                     call.id, call.name, "Permission denied by user or approval timeout", True,
                     {"code": "permission_denied"},
                 )
-        if call.name in {"bash", "read_file", "write_file", "edit_file", "glob"}:
+        if call.name in {"bash", "read_file", "write_file", "edit_file", "glob", "search_text"}:
             arguments["cwd"] = context.cwd
         try:
             output: object

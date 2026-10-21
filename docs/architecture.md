@@ -8,6 +8,8 @@ Apple Silicon macOS27.0.1、Docker Desktop4.95.0 实机补验：生产目录选�
 
 schema v5 升级只增加偏好事实索引，但旧程序拒绝打开v5，回退须恢复升级前完整状态备份。候选沙箱仍不等于整个Agent离线，Provider在Host联网；受信源码/镜像/daemon、扩展禁用、纯文本导出和无硬磁盘配额限制不变。历史模型实验继续按原版本和条件报告，不由本次集成外推新效果。
 
+2026-10-22 增量集成：候选918b40a的[CI39644102821](https://github.com/Zesadv7/eventide/actions/runs/39644102821)六job全部通过，Python3.10/3.14各1957通过/29跳过，覆盖率93.03%，前端187、浏览器31、真实Docker55、可选扩展60及服务/smoke/分发验收通过。首轮1166ca6的旧Skills目录断言失败不改判，见failure-cases.md的FAIL-006；后续只改该测试预期并在新SHA上重新验证。master合并保持候选源码、测试、资源和AGENTS运行时前4000字符相同，仅补验收Markdown，以[skip ci]避免再跑相同整版。
+
 ## 核心关系
 
 ```text
@@ -99,6 +101,8 @@ RuntimeEvent 包含 event_id、session_id、严格递增 session_seq、turn_id�
 SSE/get_events 为旧客户端把 prepared/completed 映射成 tool.request/tool.result，并使用 session_seq 作为兼容 seq 游标；JSONL 导出使用 canonical 事件名称。事件先提交，再通知观察者；观察者失败不改变运行事实。
 
 ## 三类投影与上下文
+
+`search_text` 是无需索引的本地只读工具，复用严格工具契约、PolicyEngine、Executor 的实际 cwd 注入，支持 Plan、固定快照和只读 worker。字面匹配返回真实源码行号；路径模式支持 glob，隐藏段须显式匹配。不递归目录链接，先限制目录枚举2,000项，再按路径排序；扫描最多10MiB、单文件1MiB，非UTF-8／二进制／过大文件明确计数。匹配行 offset、最多50行及约9,000正文字符限定返回大小；枚举或扫描不完整会明确提示缩小模式。分页只在源码未变的已枚举范围有意义，不承诺活动源目录跨页快照一致。Sandbox 正向工具目录不包含该工具，禁止调用宿主 handler。新增目录实测增加637字符，相应测试固定开销显式调整；没有模型效果或降本结论。
 
 `read_file` 在生产源目录、执行副本和只读快照中统一展示一基绝对源码行号，保留空行及分页后的原始坐标；默认页10,000显示字符（包含行号前缀），`offset` 仍为零基。真实交付中的98/183行目标源码此前被3,600字符页拆开，默认页调整减少必要源码被切成多个往返的情况；12,000字符请求预览及上下文硬限不变，不宣称节省Token。原文件、编辑匹配和旧事件不改写。Host明确要求保持用户指定的输出格式、字段和标识，引用实际读取的源码；Plan只限制执行权限，不再额外要求事实问答必须产出计划。模型不遵守格式或给出错误事实时仍由原独立判分拒绝，不剥围栏改判，不自动追加请求纠错。
 
@@ -259,7 +263,7 @@ Vue 3/TypeScript/Vite、Vue Router和Pinia提供唯一用户界面，Hash路由�
 
 `workers.py` 提供不可变 ReadonlyProfile、Git 当前源码快照、角色协议与严格报告校验，没有第二个 Agent loop。Host 的 delegate_readonly 是经过 ToolExecutor/PolicyEngine 的动态工具，默认关闭。父 Run 持有实际执行 Workspace 所有权，创建绑定该 Workspace 的独立归档 Session，在自己的执行作用域内直接复用同一个 `_execute`，将全部文件根覆盖为独立快照；子 Run 不重新争用父锁，避免同 Workspace 等待死锁。直接源根任务继续串行，最多两个内部只读快照子任务可并发；显式根Plan快照本身可并发，但当前不再嵌套委派。子身份记录在 run.admitted/start 的 parent_run_id、worker_role、snapshot_id；普通接收和 Continue 按持久身份拒绝对子 Session 执行，API 拒绝附件。
 
-子 Run 不读取父消息、不连接 MCP、不使用 custom handlers/Skills/RAG/delegate，目录和执行器仅含四个安全读取工具。深度为 1，每父 Run 最多 4 个子任务，8 步/4,000 Token 软上限/60 秒批次期限；在开启父 Token 上限时按剩余量分配。worker.started 保留源 checkpoint、manifest 和排除数；worker.completed 保留子用量和报告校验状态，父 usage 为 inclusive，子 usage 为 exclusive。未知失败请求消费不估算。父取消或超时先取消并等待子终态，再删除自己创建的快照；重启不自动重派或采纳结果。
+子 Run 不读取父消息、不连接 MCP、不使用 custom handlers/Skills/RAG/delegate，目录和执行器仅含固定的只读工具（含无需索引的search_text）。深度为 1，每父 Run 最多 4 个子任务，8 步/4,000 Token 软上限/60 秒批次期限；在开启父 Token 上限时按剩余量分配。worker.started 保留源 checkpoint、manifest 和排除数；worker.completed 保留子用量和报告校验状态，父 usage 为 inclusive，子 usage 为 exclusive。未知失败请求消费不估算。父取消或超时先取消并等待子终态，再删除自己创建的快照；重启不自动重派或采纳结果。
 
 派发前先为整批建立并复核可信源码快照，再计算原始角色/精确目标与snapshot_id的SHA-256；目标在脱敏前参与摘要，新增元数据不保存原文。`run.admitted.delegation`在子身份事务内固定fingerprint和parent_call_id；源于该Run的子admission本身即为已接收证据，不依赖稍后可能缺失的worker.started或父工具结果。child message沿原语义脱敏入口保存，已知凭据不复制到新子会话。
 
@@ -281,7 +285,7 @@ ContainerCommandExecutor通过Docker create/start/rm、argv执行和有界输出
 
 acceptance_tests工程评测使用一次性Git fixture，原测试复制到外部临时目录并保存SHA清单。基线必须退出1；结束后测试源/数据清单不变，清理fixture的派生bytecode，再以-I/-B独立Python、先导入stdlib unittest后加入候选源码，运行原版测试。check_project通过唯一ToolExecutor/Policy留下独立Run证据，不接受模型自判。report增加verification字段；baseline/verification run id、exit/timed_out、manifest与tests_unchanged可追溯。测试、数据与模型预算均有限，失败消费不推测；这些功能测试不构成恶意代码隔离证明。
 
-CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：optional-extensions 安装全部 extras；container job 显式预拉测试镜像后开启真实 readonly boundary、Host Skill 脚本及取消/超时测试，再构建部署镜像、执行一次性卷上的服务分发检查；web job 固定 Playwright 版本并安装 headless Chromium，严格模式缺浏览器必须失败。默认离线门禁仍不依赖 Key 或 Docker；未执行的远程 CI 不能当成本机真实 Docker 验证证据。
+CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：默认 test 矩阵在 Python 3.10/3.14 各运行一次全量测试，3.14 同次采集覆盖率并检查 85% 门槛，quality 只运行 Ruff/Mypy；optional-extensions 安装全部 extras；container job 显式预拉测试镜像后开启真实 readonly boundary、Host Skill 脚本及取消/超时测试，再构建部署镜像、执行一次性卷上的服务分发检查；web job 固定 Playwright 版本并安装 headless Chromium，严格模式缺浏览器必须失败。默认离线门禁仍不依赖 Key 或 Docker；未执行的远程 CI 不能当成本机真实 Docker 验证证据。
 
 
 ## 请求用量账本基础（U1）
@@ -518,6 +522,8 @@ retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime�
 
 `DeliveryController`继续拥有准备/单次Writer/独立验收/采纳，`delivery_repair`仅编排有界轮次，复用同一独立worktree和执行边界。`delivery.repair_started`固定目标、checks、image、最大轮次和绝对deadline；`round_started/round_finished`绑定每轮Writer及补丁，`repair_finished`记录停止原因和派生用量。每次验收拥有唯一tool call ID，避免多轮在工具投影中覆盖旧证据。没有完成事实但控制Run已中断时，读取显示interrupted，禁止自动重新启动和采纳。
 
+Vue 提供可选人工验收覆盖清单模板，追加到现有 `goal`，不覆盖已写目标；占位内容明确为待填写，未覆盖项标为未验证。预期行为/关键异常由用户关联 `checks` 的一基编号，详情显示冻结 `goal` 原文和同序编号命令。沿用原接收、幂等、冻结和逐轮 Writer 输入，不新增 API 字段或另一份覆盖状态；不解析自然语言判定覆盖，也不将清单内容当作独立验收结果。`passed` 仍仅表示固定检查通过，不能证明原目标均已覆盖。
+
 `observed_token_limit`在Python/Web接收边界要求严格正整数1–1,000,000，默认60,000，不允许0禁用。Web仅为非默认值在`delivery.operation_accepted`保存此字段，HTTP规范化也仅省略这个新增字段的默认值，保留旧请求其余默认字段与幂等指纹。旧接受事实缺字段时沿用60,000；排队后从已接受事实执行，实际值固定到`delivery.repair_started.limits.observed_tokens`。后续请求继续从此唯一契约累计及拦截，Continue、子任务和重启不能改额度；36次和900秒限制不变。更高额度的真实实验必须作为不同预算条件单列，不能覆盖原60k失败。
 
 Writer每轮的用户任务消息附带JSON执行上下文：固定验收命令、当前/最大轮次、36次/用户固定Token软限（默认60k）/900秒限制，以及唯一交付账本和绝对deadline派生的已用/剩余额度。此为开轮快照，未知尝试单列，已报告Token余量不代表未知消费为零。命令字符串和失败输出只作为数据，不加入系统指令；Writer被要求在必要修改完成后交还独立Verifier，不能自报通过。原命令与保护范围不变，停驻/失败Writer仍不自动验收，真实交付成功与否继续由固定验收决定。
@@ -529,6 +535,8 @@ Writer每轮的用户任务消息附带JSON执行上下文：固定验收命令�
 每轮先复核源码/保护范围与patch，和上一轮完全相同即停止；失败签名对测试耗时文本做归一化，重复失败停止。最多3次候选验收，成功才开放显式采纳。超时/取消只发一次子任务取消并等待收尾；真实未知工具结果停驻副本。此流程没有恢复自动重放，失败产物保留用于检查；Web接收与所有权见下节。
 
 ### Web 交付所有权
+
+交付修正的 `read_tool_result` 增加受限授权：Controller 从本交付、本控制 Run 的上一失败 `delivery.round_finished` 事实生成精确验收 call 白名单，冻结到 Writer admission 的 execution_config，绑定 reader_run_id、控制 Session/Run、原轮次和 patch。Host 注入当前 Run 身份；Reader 先保持原本会话查询，仅在当前 Run 与获授权 Writer 相等、控制 Run 和 call 同时匹配时读取原 Event Log。页头标明原候选来源。即使后端配置被同副本后续 Session 或 Continue 继承，新的 Run 身份也不能继承该临时权限。只读 worker/sandbox 不获得此授权；容器 Writer 仍由 Host 分页已保存的脱敏日志。未新增状态源、数据库结构或通用跨 Session 查询，日志中执行器已丢弃的内容无法恢复，后续修改仍需重新独立验收。
 
 `WebDeliveryController`将prepare/repair/apply作为同一个Root调度器的持久控制Run接收；归档control Session不能作为普通聊天使用。prepare以项目Session串行，后续操作按delivery Session串行，执行锁与源checkout锁分开。事件`delivery.operation_accepted`冻结操作正文；历史从canonical事实按提交顺序重建，跨Session的delivery事实不能按各自session_seq混排。
 

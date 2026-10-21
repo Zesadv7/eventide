@@ -59,6 +59,13 @@ class GlobArguments(_Arguments):
     pattern: NonemptyText
 
 
+class SearchTextArguments(_Arguments):
+    query: Annotated[str, Field(min_length=1, max_length=500)]
+    pattern: NonemptyText = "**/*"
+    offset: Annotated[int, Field(ge=0)] = 0
+    limit: Annotated[int, Field(ge=1, le=50)] = 50
+
+
 class CompactArguments(_Arguments):
     focus: str = ""
 
@@ -117,6 +124,7 @@ BUILTIN_ARGUMENTS: dict[str, type[BaseModel]] = {
     "write_file": WriteFileArguments,
     "edit_file": EditFileArguments,
     "glob": GlobArguments,
+    "search_text": SearchTextArguments,
     "compact": CompactArguments,
     "read_tool_result": ReadToolResultArguments,
     "todo_write": TodoWriteArguments,

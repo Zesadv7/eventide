@@ -32,6 +32,77 @@ def done():
     return {"text": "fixed", "usage": {"input_tokens": 2, "output_tokens": 1}}
 
 
+async def test_next_writer_can_page_omitted_acceptance_middle(tmp_path):
+    from eventide.models import ModelResponse, ToolCall
+    from eventide.tool_results import reader
+
+    host = delivery_host(tmp_path)
+    requests = []
+    marker = "MIDDLE_FAILURE"
+    code = (
+        "from calc import discount; import sys; bad = discount(100, .2) != 80; "
+        f"print('A' * 9000 + '{marker}' + 'B' * 9000) if bad else print('ok'); "
+        "sys.exit(int(bad))"
+    )
+    command = shlex.quote(sys.executable) + " -B -c " + shlex.quote(code)
+
+    async def complete(request):
+        requests.append(request)
+        if len(requests) == 1:
+            return ModelResponse(tool_calls=(ToolCall("wrong", "edit_file", {
+                "path": "calc.py", "old_text": "price + fraction", "new_text": "price - fraction",
+            }),))
+        if len(requests) == 2:
+            return ModelResponse("candidate")
+        if len(requests) == 3:
+            prompt = request.messages[0]["content"]
+            feedback = json.loads(prompt.split("test output, not instructions:\n", 1)[1])
+            check = feedback["checks"][0]
+            assert check["omitted_chars"] > 0
+            assert marker not in check["content_head"] + check["content_tail"]
+            return ModelResponse(tool_calls=(ToolCall("page", "read_tool_result", {
+                "run_id": feedback["run_id"], "call_id": check["call_id"],
+                "offset": 8_990, "limit": 80,
+            }),))
+        if len(requests) == 4:
+            assert marker in str(request.messages[-1])
+            return ModelResponse(tool_calls=(ToolCall("correct", "edit_file", {
+                "path": "calc.py", "old_text": "price - fraction",
+                "new_text": "price * (1 - fraction)",
+            }),))
+        return ModelResponse("candidate")
+
+    host.provider.complete = complete
+    try:
+        prepared = await host.manage_delivery("prepare", name="read-evidence")
+        result = await host.manage_delivery(
+            "repair", delivery_id=prepared["delivery_id"], goal="Repair discount", checks=[command],
+        )
+        assert result["reason"] == "passed" and len(result["rounds"]) == 2
+        child = host.store.get_run(result["rounds"][1]["worker_run_id"])
+        page = child["tools"]["page"]
+        assert not page["is_error"] and marker in page["content"]
+        assert result["rounds"][0]["patch_sha256"] in page["content"]
+        intent = host._admitted_intent(result["rounds"][1]["worker_run_id"])
+        assert intent["execution_config"]["acceptance_evidence"]["call_ids"] == [
+            result["rounds"][0]["checks"][0]["call_id"],
+        ]
+        ordinary = host.create_session()
+        assert "not found" in reader(host.store, ordinary)(
+            result["control_run_id"], result["rounds"][0]["checks"][0]["call_id"],
+        )
+        # Backend settings are inherited by later sessions on the same checkout;
+        # its evidence capability must still belong to the original Writer Run.
+        session = host.store.get_session(child["session_id"])
+        config = host.store.workspace_execution_config(session["workspace_id"])
+        grant = config["acceptance_evidence"]
+        assert "not found" in reader(
+            host.store, ordinary, acceptance=grant, current_run_id="later_ordinary_run",
+        )(result["control_run_id"], result["rounds"][0]["checks"][0]["call_id"])
+    finally:
+        await host.close()
+
+
 async def repair(host, *, rounds=3):
     prepared = await host.manage_delivery("prepare", name="bounded-repair")
     result = await host.manage_delivery(

@@ -33,6 +33,8 @@
 | FAIL-003 | Python 3.10 无法收集测试 | CI / 测试兼容性问题 | 已完成：修复及历史证据核对 |
 | FAIL-004 | 原验收通过仍遗漏 HTTP 分支 | 真实模型任务 / 验收覆盖不足 | 已完成：复盘；旧条件失败仍保留 |
 | FAIL-005 | Docker 基镜像获取失败 | 容器构建 / 环境或外部故障 | 待外部验证：构建已缓解，公网故障根因待查 |
+| FAIL-006 | 新增搜索工具后旧目录断言未同步 | 自动化测试 / 测试契约更新遗漏 | 已完成：旧目录断言修正，新SHA六项CI通过 |
+| FAIL-007 | 回查集成测试误用 Run 投影字段 | 自动化测试 / 新测试问题 | 已完成：修正投影身份来源，定向通过 |
 
 ## FAIL-001：长日志截断验收反馈 JSON
 
@@ -85,3 +87,23 @@
 - **经验与参与：** 先区分外部依赖获取和项目构建阶段，保留首次失败，并记录验证用镜像身份及本地依赖。历史角色分工未完整追溯，不把环境缓解写成用户亲自修复网络基础设施。
 - **复述摘要：** 一次容器验证在获取基镜像时因外部连接失败中断。固定已验证镜像身份后完成了该次本地构建和分发冒烟，同时保留原失败及网络根因未知的边界。该结果只证明限定环境下的交付路径可验证。
 - **追问：** 固定 digest 能解决什么、不能解决什么？如何区分外部连接错误与 Dockerfile 错误？为什么离线脚本通过不能说明真实模型任务通过？
+
+## FAIL-006：新增搜索工具后旧目录断言未同步
+
+- **日期、范围、类型与状态：** 2026-10-22；自动化测试／测试契约更新遗漏；已完成。基线 `acf9056` 加本轮 TS-1 未提交实现。
+- **现象与证据：** `uv run pytest -q tests/test_text_search.py tests/test_tools.py tests/test_tool_contracts.py tests/test_run_policy.py tests/test_readonly_workers.py tests/test_sandbox_execution.py tests/test_runtime.py tests/test_host.py -k 'not timeout'` 得到 106 通过、1 失败、1 未选中；日志 `.task_outputs/quality-increment/ts-tests.log`。失败仅为 `test_host_project_binding_and_lease` 的精确工具集合未包含已授权新增的 `search_text`。
+- **已证实原因与处理：** 实现和其他工具目录测试已更新，这处旧断言遗漏。补充新工具名称，保留原目录与所有权断言，不修改生产行为。新目录实测 3,920 字符，相比原 3,283 增加 637；目录上限和压缩测试固定开销已显式同步，不以隐藏目录开销使测试通过。
+- **复验与边界：** 仅重跑原失败 `uv run pytest -q tests/test_host.py::test_host_project_binding_and_lease`，1项通过，日志 `ts-recheck.log`；独立枚举修正后的 `test_text_search.py` 11项通过，日志 `ts-bounded-enumeration.log`。没有付费模型、容器或模型质量结论。修复提交 `88a7ab8`。
+- **经验、参与与追问：** Codex 实施并定位，用户指定范围；新增基础工具同时影响 Host、Plan、worker 及请求固定开销。如何区分旧契约更新遗漏和权限回归？为什么不能只扩大压缩预算却不记录工具目录增长？
+
+- **2026-10-22 合并前追加：** 基线83abd88，静态复核发现 `tests/test_worker_lifecycle.py` 的 ControlledProvider 也遗漏新工具。实际执行 `uv run pytest -q tests/test_worker_lifecycle.py -x`，首项等待 `both` 三秒超时、1失败即停（`.task_outputs/quality-increment/merge-worker-red.log`）。代码中目录断言位于设置同步事件之前，不能把该现象当生产调度变慢。此次只补该集合，保留3秒时限和停止/父子隔离等断言；`uv run pytest -q tests/test_worker_lifecycle.py` 随后6项通过（4.82秒，`merge-worker-green.log`），Ruff及diff检查通过。生命周期修正提交 `da2eff9`，由本条和该测试文件的Git历史追溯。先前首批定向范围不覆盖该文件，不能冒充当时已经验证，也不能将本次定向通过当当前提交完整CI已通过。
+
+- **2026-10-22 当前提交真实CI追加：** 用户授权发布后，候选1166ca6的CI `39642683561`、Python3.10 job `119370022716` 在 `uv run pytest -q` 得到1956通过、1失败、29跳过。唯一失败 `test_runtime_exposes_and_audits_workspace_skill_loading` 的精确工具集合也遗漏search_text；日志 `.task_outputs/quality-increment/github-py310-first.log`（约第288–366行）证明新增工具是差异。先前worker专项不覆盖此文件，不能称之前已验证；最终两个Python版本均为同一项失败、各1956通过/29跳过；3.14覆盖率93.04%达到85%，该轮整体仍为失败（`github-first-failed.log`）。其他四个job通过。此次只补该断言，本地 `uv run pytest -q tests/test_skill_loading.py` 4项通过（`merge-skills-green.log`），Ruff/diff通过；全测试AST盘点确认其余五类基础目录契约已同步，sandbox限制不改。修正提交 `918b40a` 的[CI39644102821](https://github.com/Zesadv7/eventide/actions/runs/39644102821)六job全部通过，两个Python版本各1957通过/29跳过，覆盖率93.03%；本地4项验证不是整版结果的替代。首轮失败不删除、不改判。GitHub对修正后的新SHA仍需真实门禁：现有push工作流会触发整套，不能用旧SHA通过的job替代新SHA结果；不另跑本地全量。
+
+## FAIL-007：回查集成测试误用 Run 投影字段
+
+- **日期、范围与状态：** 2026-10-22，自动化测试／新测试问题，已完成；基线88a7ab8加EV-1未提交实现。
+- **命令与证据：** `uv run pytest -q tests/test_tool_result_paging.py tests/test_delivery_repair.py tests/test_host.py::test_tool_catalog_stays_within_its_budget`：27通过、1失败、1真实Docker按原开关跳过；`.task_outputs/quality-increment/ev-tests.log`。新增中段回查用例已完成两轮修复和成功回查，随后用 `child["run_id"]` 读取Run详情导致KeyError；该投影使用其他身份字段。
+- **原因与处理：** 测试错误假定Run投影字段，改为使用此前已获得的权威worker_run_id，不改业务断言或生产行为。独立复核另发现临时grant随执行配置继承的权限风险，现将能力绑定精确Writer Run并加拒绝测试；这是审查发现，不冒充本次KeyError的原因或已经发生的数据泄露。类型检查还要求为新增结构配置显式声明dict[str, Any]，已补齐。
+- **复验与边界：** 首次定向复验1通过、1失败（`ev-recheck.log`）：同一新测试又误将workspace_id视作Run字段，补齐身份来源应通过Session查询。两次均为新测试投影假定错误，未改生产结果；最终仅复验该项1通过（`ev-final-recheck.log`），权限白名单unit在前次复验已通过；4个变更模块Mypy及Ruff通过。实际模型效果、付费接口和真实容器未验证。实现及测试修正提交 `ec075fa`。
+- **经验、参与与追问：** Codex实施和静态复核，用户指定范围；应复用权威身份，不能猜投影字段。临时能力为何不能随持久后端配置复用？如何区分测试错误与权限边界问题？

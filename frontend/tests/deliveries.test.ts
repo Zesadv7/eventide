@@ -152,6 +152,77 @@ it.each([60_000, 150_000])(
     wrapper.unmount();
   },
 );
+it("appends an unverified checklist without replacing the goal or commands", async () => {
+  reads();
+  vi.mocked(deliveriesApi.list).mockResolvedValue([
+    {
+      ...detail(),
+      repair: null,
+      repair_result: null,
+      repair_status: null,
+      verification: null,
+    },
+  ]);
+  const submit = vi
+    .spyOn(deliveriesApi, "submit")
+    .mockRejectedValue(new Error("fixture rejection"));
+  const wrapper = await render();
+  const target = wrapper.findAll("textarea")[0]!;
+  expect(target.element.value).toBe("");
+  await target.setValue("保留原目标和异常分支要求。");
+  await wrapper.findAll("textarea")[1]!.setValue("first-check\nsecond-check");
+  await wrapper
+    .findAll("button")
+    .find((b) => b.text() === "追加验收覆盖清单模板")!
+    .trigger("click");
+  const goal = target.element.value;
+  expect(goal).toMatch(/^保留原目标和异常分支要求。\n\n验收覆盖清单/);
+  expect(goal).toContain("待填写，不代表已覆盖");
+  expect(goal).toContain("未覆盖项（未验证）");
+  await wrapper.findAll("form")[1]!.trigger("submit");
+  await flushPromises();
+  expect(submit).toHaveBeenCalledWith(project, {
+    action: "repair",
+    delivery: id,
+    body: {
+      goal,
+      checks: ["first-check", "second-check"],
+      image: null,
+      max_rounds: 3,
+    },
+  });
+  await target.setValue("目标".repeat(10_000));
+  expect(
+    wrapper
+      .findAll("button")
+      .find((b) => b.text() === "追加验收覆盖清单模板")!
+      .attributes("disabled"),
+  ).toBeDefined();
+  wrapper.unmount();
+});
+it("shows the frozen coverage goal and ordered checks without claiming full coverage", async () => {
+  reads();
+  const goal = "目标：正常返回\n异常分支 -> 第 2 条\n未覆盖：超时；未验证";
+  vi.mocked(deliveriesApi.list).mockResolvedValue([
+    {
+      ...detail(),
+      repair: {
+        ...detail().repair!,
+        goal,
+        checks: ["check-normal", "check-error"],
+      },
+    },
+  ]);
+  const wrapper = await render();
+  expect(wrapper.get(".fixed-goal").text()).toBe(goal);
+  expect(
+    wrapper.findAll("ol.acceptance-commands li").map((check) => check.text()),
+  ).toEqual(["check-normal", "check-error"]);
+  expect(wrapper.text()).toContain("验收通过");
+  expect(wrapper.text()).toContain("验收命令通过不代表覆盖全部目标");
+  expect(wrapper.text()).toContain("未覆盖项仍未验证");
+  wrapper.unmount();
+});
 it("never presents a late response from the previous project", async () => {
   reads();
   let resolve!: (value: Delivery[]) => void;

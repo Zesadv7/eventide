@@ -119,7 +119,8 @@ if TYPE_CHECKING:
 TRUNCATION_REASONS = {"max_tokens", "length", "max_output_tokens", "incomplete"}
 READONLY_WORKER_TIMEOUT = 60.0
 BASE_RUNTIME_READONLY_TOOLS = frozenset(
-    {"read_file", "glob", "compact", "read_tool_result", "todo_write", "search_knowledge"}
+    {"read_file", "glob", "search_text", "compact", "read_tool_result", "todo_write",
+     "search_knowledge"}
 )
 
 
@@ -3244,7 +3245,10 @@ class RuntimeHost:
             tools = run_policy.filter_tool_catalog(tools, mode)
             handlers = {
                 **self.handlers,
-                "read_tool_result": tool_result_reader(self.store, session_id),
+                "read_tool_result": tool_result_reader(
+                    self.store, session_id, acceptance=execution_config.get("acceptance_evidence"),
+                    current_run_id=run_id,
+                ),
                 "todo_write": write_task_plan,
                 **({"load_skill": load_skill, "read_skill_resource": read_skill_resource,
                     "run_skill_script": run_skill_script} if skills else {}),
@@ -3268,7 +3272,7 @@ class RuntimeHost:
                             "read_tool_result": tool_result_reader(self.store, session_id),
                             "todo_write": write_task_plan}
             if readonly_profile:
-                names = {"read_file", "glob", "compact", "read_tool_result"}
+                names = {"read_file", "glob", "search_text", "compact", "read_tool_result"}
                 tools = [tool for tool in [*TOOLS, READ_TOOL_RESULT_TOOL] if tool["name"] in names]
                 handlers = {
                     name: handler

@@ -23,7 +23,8 @@ from tests.test_runtime import COMPACTION_BUDGET, settings_for
 # todo_write gained prerequisite IDs (measured 2_738). Strict generated contracts
 # add object closure, ranges and nullable plan fields (measured 3_283); this is an
 # explicit correctness/context tradeoff, guarded independently from compaction.
-TOOL_CATALOG_BUDGET = 3_350
+# Index-free literal search adds 637 characters (measured catalog: 3,920).
+TOOL_CATALOG_BUDGET = 4_000
 
 
 def make_repo(path: Path) -> Path:
@@ -64,6 +65,7 @@ async def test_host_project_binding_and_lease(isolated_workspace):
             "write_file",
             "edit_file",
             "glob",
+            "search_text",
             "compact",
         }
     finally:

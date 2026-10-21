@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_sha256": "5e33e8c983f2bcd105b7158e210f08172189697e3eafecc2297db79ce83ffefa",
+  "source_sha256": "7572df776894e3a716d89fa5704a47f25fa825882e54bccb58729752d38af4ea",
   "files": {
     "assets/favicon-CWOdeYzi.svg": "ad955d0d8fcf9fc8d9bab277a89144af9c2e167ce3c66f5e173a4932e65914a5",
-    "assets/index-Ca-MjsVB.css": "8b7f6441fdab4fe6736f25d4f16d6859b413bc6c633e6beb63cafeefecba5802",
-    "assets/index-xkq-5wB4.js": "29b2cf43184482d48f57dc10a846b2897b22bc3cd791996938c43582b51e85bd",
-    "index.html": "eb2bc1e433664f490a3839796f9f31eff72f59e8207651a7e646f3b9030ece97"
+    "assets/index-CzVYKc2r.css": "88883684638b5ea078d9e83ec0fb3e40ec280574d6fc609145cd19fc72d5e6a2",
+    "assets/index-DU9Ms1nx.js": "64c9a6be2facfcbf6308099f4461619cd99173a972c62dd2a67a5eeb3cf89c59",
+    "index.html": "9c8b2d4605506a0c46bc183b6f59fd450a6905af4a43c9facdfa7a5ce334aa67"
   }
 }

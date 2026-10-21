@@ -31,7 +31,7 @@ _REVIEW_COMMANDS = (
     re.compile(r"\bgit\s+(reset\s+--hard|clean\s+-|branch\s+-D)\b", re.I),
     re.compile(r"\b(chmod\s+777|drop\s+(table|database))\b", re.I),
 )
-_SAFE_FILE_TOOLS = {"read_file", "glob"}
+_SAFE_FILE_TOOLS = {"read_file", "glob", "search_text"}
 _SAFE_READ_TOOLS = {"search_knowledge"}
 _WRITE_FILE_TOOLS = {"write_file", "edit_file"}
 
