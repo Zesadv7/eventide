@@ -293,7 +293,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
 | 编号 | 状态 | 范围与验收 |
 |---|---|---|
-| TS-1 | 已完成 | 2026-10-22：本地 search_text 接入 Plan/快照/只读 worker，严格参数、实际 cwd、行号/分页及文件/枚举/输出上限，沙箱不回退宿主。首批106通过/1旧目录断言失败，补断言后该项1通过；独立复核修复先无界枚举问题，搜索11项通过；补充枚举后文件变成越界链接的回归1项通过，读取前复用路径校验。Ruff、7变更模块Mypy及新增枚举实现Mypy、diff检查通过；README/architecture/ADR-094同步，失败记录FAIL-006。不跑全量/付费/真实容器，不宣称模型效果提升。 |
+| TS-1 | 已完成 | 2026-10-22：本地search_text接入Plan/快照/只读worker，严格契约、实际cwd、行号/分页及枚举/扫描/输出上限；链接目录不递归、读取前复验路径，沙箱不回退宿主。此前首批106通过/1旧目录断言失败，补断言1通过；搜索11项和新增漂移链接1项通过，Ruff/Mypy及独立复核通过。合并前另补worker生命周期fixture旧工具集合，先复现3秒等待失败，再仅修断言后6项通过，时限/生产代码不改；FAIL-006保留两处遗漏与验证范围。README/architecture/ADR-094已同步。新整版CI仍未执行，见MERGE-1；无付费或真实容器调用。 |
 | EV-1 | 已完成 | 2026-10-22：Controller仅向精确Writer Run冻结上一失败轮验收call白名单，read_tool_result分页原Event Log并标原候选来源，配置继承不传播权限。首批27通过/1新增测试投影字段失败/1显式Docker跳过；仅复验新增权限与中段日志用例，先1过1字段失败，最终原失败1通过。Ruff/Mypy4模块、独立权限复核、diff检查通过；FAIL-007保留两次新测试错误，README/architecture/ADR-030同步。不改预算/验收/普通Session隔离，无付费或真实容器调用。 |
 | AC-1 | 已完成 | 现有修复目标可选追加人工覆盖清单，保留原目标，占位内容明确待填写/未验证；详情展示冻结目标和一基编号验收命令。不新增后端字段，不改变通过判定、预算或固定验收。交付组件10项、TypeScript及变更文件Prettier通过，Vue生产构建并重新打包4项资源完成，集成后资源与源码指纹专项1项通过；README/architecture同步。日志在忽略目录.task_outputs/quality-increment/acceptance-checklist/，本轮无验证失败，不新增失败流水账；未重跑后端、全量前端、浏览器、容器或模型，不宣称真实任务成功率提升。 |
 
@@ -308,3 +308,9 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | 编号 | 状态 | 内容与验收 |
 |---|---|---|
 | CI-1 | 已完成 | Python 3.10 保留一次 pytest，3.14 在一次 pytest 中检查覆盖率 ≥85%；quality 删除重复全量，仅保留 Ruff/Mypy。YAML 解析、按版本条件选择与命令语法检查通过；对照 acf9056，触发器、矩阵、服务/smoke 与其余 job 完全一致，git diff --check 通过。README/architecture 已同步，证据在忽略目录 .task_outputs/quality-increment/ci-dedup/validation.log。本轮无验证失败，不新增失败流水账；未运行全量、前端、容器或模型，实际 GitHub 执行仍以之后 CI 为准。 |
+
+## 本轮合并准备（2026-10-22）
+
+| 编号 | 状态 | 内容与验收 |
+|---|---|---|
+| MERGE-1 | 待外部验证 | GitHub API核对远端master仍为acf9056；最新已完成CI是a9ba371（39066692877，全绿），不覆盖本轮四提交及本次测试修正。当前改动仅在本地codex/investigation-evidence，未推送、未合并master。合并前需当前提交的真实CI通过；既有本地定向证据和历史绿色不替代新整版门禁。本次只复现并修正worker生命周期fixture，6项、Ruff与diff检查通过；未重复全量或重跑历史红色CI。 |

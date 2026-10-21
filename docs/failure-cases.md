@@ -33,7 +33,7 @@
 | FAIL-003 | Python 3.10 无法收集测试 | CI / 测试兼容性问题 | 已完成：修复及历史证据核对 |
 | FAIL-004 | 原验收通过仍遗漏 HTTP 分支 | 真实模型任务 / 验收覆盖不足 | 已完成：复盘；旧条件失败仍保留 |
 | FAIL-005 | Docker 基镜像获取失败 | 容器构建 / 环境或外部故障 | 待外部验证：构建已缓解，公网故障根因待查 |
-| FAIL-006 | 新增搜索工具后旧目录断言未同步 | 自动化测试 / 测试契约更新遗漏 | 已完成：旧断言补齐，定向复验通过 |
+| FAIL-006 | 新增搜索工具后旧目录断言未同步 | 自动化测试 / 测试契约更新遗漏 | 已完成：两处旧目录断言均定向复验通过 |
 | FAIL-007 | 回查集成测试误用 Run 投影字段 | 自动化测试 / 新测试问题 | 已完成：修正投影身份来源，定向通过 |
 
 ## FAIL-001：长日志截断验收反馈 JSON
@@ -95,6 +95,8 @@
 - **已证实原因与处理：** 实现和其他工具目录测试已更新，这处旧断言遗漏。补充新工具名称，保留原目录与所有权断言，不修改生产行为。新目录实测 3,920 字符，相比原 3,283 增加 637；目录上限和压缩测试固定开销已显式同步，不以隐藏目录开销使测试通过。
 - **复验与边界：** 仅重跑原失败 `uv run pytest -q tests/test_host.py::test_host_project_binding_and_lease`，1项通过，日志 `ts-recheck.log`；独立枚举修正后的 `test_text_search.py` 11项通过，日志 `ts-bounded-enumeration.log`。没有付费模型、容器或模型质量结论。修复提交 `88a7ab8`。
 - **经验、参与与追问：** Codex 实施并定位，用户指定范围；新增基础工具同时影响 Host、Plan、worker 及请求固定开销。如何区分旧契约更新遗漏和权限回归？为什么不能只扩大压缩预算却不记录工具目录增长？
+
+- **2026-10-22 合并前追加：** 基线83abd88，静态复核发现 `tests/test_worker_lifecycle.py` 的 ControlledProvider 也遗漏新工具。实际执行 `uv run pytest -q tests/test_worker_lifecycle.py -x`，首项等待 `both` 三秒超时、1失败即停（`.task_outputs/quality-increment/merge-worker-red.log`）。代码中目录断言位于设置同步事件之前，不能把该现象当生产调度变慢。此次只补该集合，保留3秒时限和停止/父子隔离等断言；`uv run pytest -q tests/test_worker_lifecycle.py` 随后6项通过（4.82秒，`merge-worker-green.log`），Ruff及diff检查通过。修正由本条和该测试文件的同一Git提交追溯（`git log --oneline -- tests/test_worker_lifecycle.py`）。先前首批定向范围不覆盖该文件，不能冒充当时已经验证，也不能将本次定向通过当当前提交完整CI已通过。
 
 ## FAIL-007：回查集成测试误用 Run 投影字段
 

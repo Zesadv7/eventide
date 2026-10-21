@@ -27,6 +27,7 @@ class ControlledProvider:
             assert {tool["name"] for tool in request.tools} == {
                 "read_file",
                 "glob",
+                "search_text",
                 "compact",
                 "read_tool_result",
             }
