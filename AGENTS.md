@@ -313,4 +313,4 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
 | 编号 | 状态 | 内容与验收 |
 |---|---|---|
-| MERGE-1 | 待外部验证 | GitHub API核对远端master仍为acf9056；最新已完成CI是a9ba371（39066692877，全绿），不覆盖本轮四提交及本次测试修正。当前改动仅在本地codex/investigation-evidence，未推送、未合并master。合并前需当前提交的真实CI通过；既有本地定向证据和历史绿色不替代新整版门禁。本次只复现并修正worker生命周期fixture，6项、Ruff与diff检查通过；未重复全量或重跑历史红色CI。 |
+| MERGE-1 | 进行中 | 2026-10-22用户授权先推送功能分支，当前提交真实CI全绿后合并并推送master。本地定向修正基线da2eff9；仅推已提交文件，保留未跟踪目录。失败先记录并定位，环境失败仅重跑失败job；代码修正后的新提交按实际门禁验证，不借用旧SHA结果。完成证据和最终Git身份待CI/合并后更新，不重复本地全量或付费实验。 |
