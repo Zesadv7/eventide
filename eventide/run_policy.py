@@ -15,6 +15,7 @@ PLAN_READONLY_TOOLS = frozenset(
     {
         "read_file",
         "glob",
+        "search_text",
         "compact",
         "read_tool_result",
         "todo_write",

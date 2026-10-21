@@ -33,6 +33,7 @@
 | FAIL-003 | Python 3.10 无法收集测试 | CI / 测试兼容性问题 | 已完成：修复及历史证据核对 |
 | FAIL-004 | 原验收通过仍遗漏 HTTP 分支 | 真实模型任务 / 验收覆盖不足 | 已完成：复盘；旧条件失败仍保留 |
 | FAIL-005 | Docker 基镜像获取失败 | 容器构建 / 环境或外部故障 | 待外部验证：构建已缓解，公网故障根因待查 |
+| FAIL-006 | 新增搜索工具后旧目录断言未同步 | 自动化测试 / 测试契约更新遗漏 | 已完成：旧断言补齐，定向复验通过 |
 
 ## FAIL-001：长日志截断验收反馈 JSON
 
@@ -85,3 +86,11 @@
 - **经验与参与：** 先区分外部依赖获取和项目构建阶段，保留首次失败，并记录验证用镜像身份及本地依赖。历史角色分工未完整追溯，不把环境缓解写成用户亲自修复网络基础设施。
 - **复述摘要：** 一次容器验证在获取基镜像时因外部连接失败中断。固定已验证镜像身份后完成了该次本地构建和分发冒烟，同时保留原失败及网络根因未知的边界。该结果只证明限定环境下的交付路径可验证。
 - **追问：** 固定 digest 能解决什么、不能解决什么？如何区分外部连接错误与 Dockerfile 错误？为什么离线脚本通过不能说明真实模型任务通过？
+
+## FAIL-006：新增搜索工具后旧目录断言未同步
+
+- **日期、范围、类型与状态：** 2026-10-22；自动化测试／测试契约更新遗漏；已完成。基线 `acf9056` 加本轮 TS-1 未提交实现。
+- **现象与证据：** `uv run pytest -q tests/test_text_search.py tests/test_tools.py tests/test_tool_contracts.py tests/test_run_policy.py tests/test_readonly_workers.py tests/test_sandbox_execution.py tests/test_runtime.py tests/test_host.py -k 'not timeout'` 得到 106 通过、1 失败、1 未选中；日志 `.task_outputs/quality-increment/ts-tests.log`。失败仅为 `test_host_project_binding_and_lease` 的精确工具集合未包含已授权新增的 `search_text`。
+- **已证实原因与处理：** 实现和其他工具目录测试已更新，这处旧断言遗漏。补充新工具名称，保留原目录与所有权断言，不修改生产行为。新目录实测 3,920 字符，相比原 3,283 增加 637；目录上限和压缩测试固定开销已显式同步，不以隐藏目录开销使测试通过。
+- **复验与边界：** 仅重跑原失败 `uv run pytest -q tests/test_host.py::test_host_project_binding_and_lease`，1项通过，日志 `ts-recheck.log`；独立枚举修正后的 `test_text_search.py` 11项通过，日志 `ts-bounded-enumeration.log`。没有付费模型、容器或模型质量结论。修复提交以 TS-1 状态及 Git 为准。
+- **经验、参与与追问：** Codex 实施并定位，用户指定范围；新增基础工具同时影响 Host、Plan、worker 及请求固定开销。如何区分旧契约更新遗漏和权限回归？为什么不能只扩大压缩预算却不记录工具目录增长？

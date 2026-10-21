@@ -49,6 +49,7 @@ class WorkerProvider:
             assert {tool["name"] for tool in request.tools} == {
                 "read_file",
                 "glob",
+                "search_text",
                 "compact",
                 "read_tool_result",
             }
@@ -69,6 +70,7 @@ class WorkerProvider:
                             {"tasks": [{"role": "reviewer", "goal": "recursion"}]},
                         ),
                         ToolCall("read", "read_file", {"path": "code.py"}),
+                        ToolCall("search", "search_text", {"query": "value", "pattern": "*.py"}),
                     ),
                     usage={"input_tokens": 3, "output_tokens": 2},
                 )
@@ -116,6 +118,7 @@ async def test_workers_are_concurrent_isolated_readonly_and_accounted(isolated_w
             tools = child["tools"]
             assert tools["write"]["is_error"] and tools["recurse"]["is_error"]
             assert "value = 1" in tools["read"]["content"]
+            assert "code.py:1: value = 1" in tools["search"]["content"]
             with pytest.raises(ValueError, match="Worker sessions"):
                 await host.run(RunRequest("try to write source", start["child_session_id"]))
             with pytest.raises(ValueError, match="Worker sessions"):

@@ -27,6 +27,7 @@ def test_filter_tool_catalog_keeps_only_the_plan_whitelist_without_mutating():
         {"name": "bash", "description": "b"},
         {"name": "write_file", "description": "w"},
         {"name": "glob", "description": "g"},
+        {"name": "search_text", "description": "text search"},
         {"name": "mcp__docs__search", "description": "m"},
         {"name": "compact", "description": "c"},
         {"name": "read_tool_result", "description": "p"},
@@ -44,6 +45,7 @@ def test_filter_tool_catalog_keeps_only_the_plan_whitelist_without_mutating():
     assert [tool["name"] for tool in visible] == [
         "read_file",
         "glob",
+        "search_text",
         "compact",
         "read_tool_result",
         "todo_write",
