@@ -346,3 +346,26 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 |---|---|---|
 | TC-1 | 已完成 | MCP超时/断连/取消复用unknown停驻，明确isError传递并接既有失败窗口。新16项通过，另62项既有契约/循环及真实本机stdio/HTTP通过；初轮测试接口/断言与两项受控缺陷见FAIL-014/015。Ruff及4模块Mypy通过；architecture/api-contract/user-guide/ADR-096同步，无付费或外部写调用，不新增重试/补偿。证据.task_outputs/tool-outcomes/。 |
 | TC-2 | 已完成 | unknown投影保留原参数及错误，Web优先显示结果待确认；存储/Host/Runtime/Trace定向61项、已有unknown恢复2项、前端聊天组件13项及重建资源/实际FastAPI分发2项通过。全仓Ruff、Mypy124模块、Vue类型/构建及变更格式通过；architecture/api-contract/user-guide/ADR-096/README同步，FAIL-014/015复验及提交d2fccd6已登记。TC-1/2合计143项不同后端定向用例通过，非全量结果；遵从不重复无关测试，未重跑全量、浏览器、Docker或付费模型。分发测试1条既有依赖弃用警告。证据.task_outputs/tool-outcomes/，本地提交不推送。 |
+
+## 检索副本隔离与可信证据（2026-10-22）
+
+执行基线 `845a6b0`，用户确认源目录、普通 worktree 与交付 Writer；真实 embedding 基线为智谱标准 API `embedding-3`。保留 Runtime/ToolExecutor/Policy/Event Log，不引入新编排框架、向量数据库或检索 Agent；快照、只读 worker、Docker 任务沙箱暂不开放知识检索。
+
+固定契约：Run/交付修复新增 `knowledge_index=existing|prepare`，默认 existing；Continue 继承并复验。prepare 在实际 Run 内、工具组装前准备当前副本索引，每轮 Writer 各自增量准备；不另占根任务名额，不在任务内每次查询时重建。所有远程请求共用模型槽、唯一 attempt 与项目/交付预算，准备失败明确停止，不自动重放。
+
+生产索引位于状态根 `indexes/<实际 workspace_id>/index.sqlite`，源码根与存储位置分离；状态根在目标源码内时拒绝准备。新位置缺失才只读识别本副本旧 `.eventide/index.sqlite`；新位置损坏不回退，不复制/双写/删除旧索引，不修改用户忽略规则。手动构建支持同项目注册副本，与自动准备共用 Workspace 构建锁；删除执行副本时清理受控派生索引。
+
+检索保留 FTS5/向量/RRF、5段/800每段/4000正文上限。结果带 Workspace、索引代次、配置指纹、文件哈希；从同一读快照取证，再核对至多5个命中文件。过期/删除/无法安全读取的旧正文不进入有效证据。ToolOutput 保留模型短文本及 retrieval metadata；retrieval.status、Run 投影和页面可追溯，旧历史不补造精度。精确线索优先文本搜索、概念线索可语义搜索、关键结论重读当前源码；不强制模型使用 RAG。
+
+实验冻结：原40查询（开发20/留出20）比较 FTS5、Hash混合、embedding-3混合；每查询一次真实向量、本地计时最多3次，不重复付费调用。另8个 Agent 任务（四类各2，开发/留出各4），无索引基线与增强候选；开发8次、留出16次，共24次，固定12步/20k已观测Token/300秒，MCP关闭，同模型/参数/Skills，失败不补跑。语义推荐须 Recall@5/MRR 一升一不降、本地p95≤较好基线2倍、下游通过/引用不降；安全正确性必须通过。效果不达标保留为可选，不改判或扩大批次；认证/余额/协议失败停止扩大live并继续离线。
+
+| 编号 | 状态 | 内容与验收 |
+|---|---|---|
+| RG1 | 进行中 | 基线、契约和固定实验登记；待补预期Red、测试数据冻结及证据。 |
+| RG2 | 待开始 | 外部索引存储、实际副本绑定、旧位置只读与清理；定向隔离/路径/兼容验证。 |
+| RG3 | 待开始 | 同代次文件哈希、新鲜度、有界结构化证据与明确诊断；定向真实性/边界验证。 |
+| RG4 | 待开始 | Run/Continue/Writer准备、预算/并发/停止与Web/API/SSE；定向生命周期和浏览器验证。 |
+| RG5 | 待开始 | embedding-3小请求、40查询及24次Agent对照；原始产物忽略保存，效果与机制分别报告。 |
+| RG6 | 待开始 | 一次后端完整门禁、前端/受影响分发、文档与失败核对；小提交，不推送。 |
+
+每步更新本表及相应稳定文档。原始日志统一保存忽略目录 `.task_outputs/retrieval-upgrade/`；所有失败按现有规范登记，预期Red与外部故障分开，不新增进度文档。
