@@ -270,7 +270,7 @@ Run 接收固定 `knowledge_index` 与不含凭据的 embedding 配置摘要；C
 | Hash混合 | 15/20 | 0.7500 | 0.6417 | 36.62ms | 31.88 / 36.98ms |
 | Qwen混合 | 19/20 | 0.9500 | 0.9250 | 37.80ms | 1219.78 / 1253.94ms |
 
-Qwen查询向量留出p50/p95为1184.11/1220.16ms；16文档首次索引9.21秒，整个40题三臂实验69.42秒，峰值RSS1.561GB。FTS5空结果3/20，两个混合臂空结果0；三臂运行异常0。Qwen唯一漏召回为hold-redis，详见failure-cases，未补跑或改标。候选通过本次排名与纯检索延迟门槛，但完整延迟明显增加；24次真实Agent下游对照尚未执行，因此仍是用户显式选用的本地候选，不晋升全项目默认，不宣称工程修复率提高。此次没有远程模型请求，不能凭本地计算伪造Provider Token计量或供应商费用改善。原始报告在忽略目录 `.task_outputs/retrieval-upgrade/local-qwen/`；此前embedding-3三次失败独立保留。
+Qwen查询向量留出p50/p95为1184.11/1220.16ms；16文档首次索引9.21秒，整个40题三臂实验69.42秒，峰值RSS1.561GB。FTS5空结果3/20，两个混合臂空结果0；三臂运行异常0。Qwen唯一漏召回为hold-redis，详见failure-cases，未补跑或改标。候选通过本次排名与纯检索延迟门槛，但完整延迟明显增加；随后24次真实Agent对照未达到下游门槛且没有实际语义调用，详见[冻结检索实验](#冻结检索实验入口)。它仍是用户显式选用的本地候选，不晋升全项目默认，不宣称工程修复率提高。上述40题为BF16条件，没有远程模型请求，不能凭本地计算伪造Provider Token计量或供应商费用改善。原始报告在忽略目录 `.task_outputs/retrieval-upgrade/local-qwen/`；此前embedding-3三次失败独立保留。
 
 RG工程收口（2026-10-22）：新增副本/新鲜度/准备/Continue/预算/去重及脚本Agent调查已通过。唯一全量2087通过、1项旧测试字段预期失败、12项可选跳过；更新该测试并定向通过，生产实现不变，覆盖93.69%。Vue199项、类型/构建/格式、Ruff/Mypy126模块、服务启动、smoke12及干净wheel资源/隔离服务通过。浏览器34过1超时，原样复验唯一失败通过；全部失败证据见failure-cases，未重跑全量或无关Docker。真实embedding-3最小调用两次失败且保留unknown，新密钥HTTP429/1113为标准API账户欠费；40查询、24次Agent批次未执行，不能据此宣称语义质量或修复率提高。
 
@@ -565,7 +565,7 @@ Vue的InputComposition只展示服务端已校验的固定字符统计，旧值�
 
 本地模型从固定包的 `config_sentence_transformers.json` 读取 `prompts.document` 与 `prompts.query`：索引构建的 `embed(texts)` 使用文档提示，`rag.embedding.embed_query(embedder, query)` 使用查询提示；缺失文件或对应角色保持显式空提示，不使用 `default_prompt_name` 替代角色，也不按模型名猜测前缀。配置类型错误明确拒绝。dense、hybrid、生产 retrieve 以及改写后的补充查询统一经过该入口，Hash／远程 Provider 原有对称编码协议不变。
 
-提示文本已属于固定包内容指纹，角色解释策略另由 `sentence-transformers-6.1.0-role-prompts-normalized-float32-v2` 进入模型 profile。旧本地语义索引或提示变更后的索引必须显式强制重建，不能把旧向量与新提示混用；该策略不增加提示管理平台。CPU、批量16、标准池化模块和每次推理前后的完整文件校验保持原样。离线替身验证只证明角色接线与证据链，不说明 Qwen 等具体模型质量或运行速度。
+提示文本已属于固定包内容指纹，历史角色策略为 `sentence-transformers-6.1.0-role-prompts-normalized-float32-v2`；当前固定CPU float32权重后使用 `sentence-transformers-6.1.0-cpu-fp32-role-prompts-v3`。旧本地语义索引、提示或计算策略变更后的索引必须显式强制重建，不能混用向量；该策略不增加提示管理平台。CPU、批量16、标准池化模块和每次推理前后的完整文件校验保持原样。离线替身验证只证明角色接线与证据链，不说明 Qwen 等具体模型质量或运行速度。
 
 Host在既有ToolExecutor/Policy边界内绑定重排器，CPU推理通过现有同步工具线程执行，取消仍等待实际工具收尾。重排候选不超过20，输出不超过5，失败输出诊断并保留融合排序；本地模型包在运行准备时缺失，验证索引后提供词面工具并记`retrieval.degraded`事件，不静默消失。所有生产检索路径最多返回5条，开发候选接口可保留原k范围。
 
@@ -585,7 +585,9 @@ retrieval_runtime在工具权限检查后验证索引、调用embedding_runtime�
 
 真实项目重建另发现CPU BF16注意力慢路径：492文件/约10839片段均≤800字符，首批64条在观测3分47秒时仍未返回；采样为cpu_flash_attention的BF16 GEMM，进程持续计算。停止未发布构建及未完成的SDPA math诊断后，仅把LocalSemanticEmbedder实例加载dtype固定float32，保留CPU、同一安全权重包/提示/池化和归一化，不采用全局注意力开关。算法指纹更新为 `sentence-transformers-6.1.0-cpu-fp32-role-prompts-v3`；旧索引必须明确重建。
 
-FP32生产路径6项定向测试、Ruff及3.10目标类型检查通过；禁止网络的真实Host小项目prepare→中文搜索→源码读取及无变化准备再次通过，首次11.23秒、峰值RSS2.792GB。16个较长源码片段FP32诊断9.54秒、峰值3.437GB；另仅比较原16语料文档向量，新旧余弦最低0.999833，证明数值接近但不能当作质量等价保证。此前40查询及24次真实Agent实验仍是BF16条件，未重跑留出或付费任务；实际全项目发布结果另记录。
+FP32生产路径6项定向测试、Ruff及3.10目标类型检查通过；禁止网络的真实Host小项目prepare→中文搜索→源码读取及无变化准备再次通过，首次11.23秒、峰值RSS2.792GB。16个较长源码片段FP32诊断9.54秒、峰值3.437GB；另仅比较原16语料文档向量，新旧余弦最低0.999833，证明数值接近但不能当作质量等价保证。此前40查询及24次真实Agent实验仍是BF16条件，未重跑留出或付费任务。
+
+实际源项目显式重建：固定ceea5d7源码，通过原IndexController的force=True发布到默认状态根indexes/ws_915aee9a77dd4a26/index.sqlite。492文件、10849片段、generation1、1024维；总耗时3637.58秒、峰值RSS5.838GB，全部文件索引哈希与构建前后源码一致，Git状态不变且Provider调用为空。旧中断Run已按恢复规则停驻，新Run为qwen_eventide_force_fp32_20261023；报告在agent-local/project-index-force-fp32.json。它证明实际构建可完成，但本机首次全量仍约61分钟，不适合每次查询重建；后续源码变化使用增量，其他副本仍需各自准备。
 
 2026-10-23真实Agent对照：固定GLM-5.3-Flash Coding Plan、温度1/low/输出8000、已准备Qwen包、原8题及24槽，开发先8次、留出16次全部执行且没有补跑。开发严格通过baseline0/4、candidate1/4；留出0/8、1/8，有效引用分别15/19（78.95%）、12/17（70.59%）。候选实际未调用search_knowledge，因此不能把通过数差异归因向量检索，也没有真实挑战过期检索路径；本轮不晋升默认，不能宣称提高工程修复率。完整耗时包括候选索引准备，留出p50/p95基线17.86/31.31秒、候选21.47/25.61秒；具体输出契约失败及原始证据见failure-cases与忽略目录 `retrieval-upgrade/agent-local/`。
 

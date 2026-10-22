@@ -335,7 +335,7 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 类型：真实本地模型／检索效果失败，非运行异常。基线 `9318396`；固定Qwen3-Embedding-0.6B revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`、官方query提示、CPU、无重排/改写。原16语料40查询不改，开发20先执行，再一次留出20；质量分母按题计，三次重复仅测本地排序时间。
 - 命令：`PYTHON_DOTENV_DISABLED=1 PYTHONPATH=. HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python .task_outputs/retrieval-upgrade/local-qwen/compare.py`。退出0表示批次执行完成，不代表每题命中；完整结果 `local-qwen/comparison.json`、输出 `comparison.log`，进程禁止网络。
 - 结果：开发三臂均20/20；留出FTS5为16/20、Hash混合15/20、Qwen混合19/20。Qwen未通过 `hold-redis`；FTS5另漏 `hold-password`、`hold-db`、`hold-unauth`，Hash另漏上述三题及 `hold-sql`。0运行异常、Qwen空结果0；漏召回的具体排序原因待核对保留命中证据，不推测为源码或协议故障。
-- 处理与取舍：不修改标签、query提示、候选数或重跑留出集。保留唯一失败与全部基线失败，不能把19/20写成全部正确；排名改善不等于Agent调查或工程修复率提高。实际参与为接线、固定模型与实验执行；待补充失败证据解释和最终提交，真实Agent下游对照仍未执行。
+- 处理与取舍：不修改标签、query提示、候选数或重跑留出集。保留唯一失败与全部基线失败，不能把19/20写成全部正确；排名改善不等于Agent调查或工程修复率提高。实际参与为接线、固定模型与实验执行；当时真实Agent下游尚未执行，后来完成的24次及逐例复盘见下方RG-AGENT，不改写本次检索结果。
 
 - 结果核对：`hold-redis`询问缓存服务器连接数量上限，标注目标为 `docs/redis-pool.md`。保留的前5条结果是缓存过期、缓存函数、金丝雀部署、授权失败及密码恢复，均为已核对的新鲜正文，目标未入前5；这是相关性失败，不是过期或跨副本误读。当前报告没有保存未返回候选的全部名次，不能断言错误只来自Qwen向量或RRF融合；不为分析而重新计算留出查询。角色适配提交主分支 `9318396`；本地完整Host冒烟另外通过，`smoke.json`显示真实向量1024维、禁止网络、源码无改动及无变化增量复用。质量回归无需“修到全过”才结束试用，后续优化必须使用开发集或新冻结集，保留当前结果。
 
@@ -346,7 +346,7 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 
 ### RG-AGENT：真实Coding Plan对照首题答案未通过（2026-10-23）
 
-- 类型：真实任务质量失败，原因待进一步核对。基线 `617c0af`；固定GLM-5.3-Flash Coding Plan、温度1/low/输出8000、本地固定Qwen；连接检查已报告usage。正式命令 `PYTHONPATH=. HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python .task_outputs/retrieval-upgrade/agent-local/run.py` 仍在执行，尚无最终退出码。
+- 类型：真实任务质量失败，初次登记时原因待查，后续逐例复盘见下。基线 `617c0af`；固定GLM-5.3-Flash Coding Plan、温度1/low/输出8000、本地固定Qwen；连接检查已报告usage。正式命令 `PYTHONPATH=. HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python .task_outputs/retrieval-upgrade/agent-local/run.py` 初次登记时仍在执行，最终退出0、24槽全执行；运行成功不等于答案通过。
 - 现象与证据：首个baseline正常完成5步、6工具调用、源码未变，但事实匹配失败、3条引用均未满足冻结判分；没有未知消费。原始日志 `agent-local/live.log`，独立Store `agent-local/state/runtime.sqlite`，可重建报告 `agent-local/development/report.json`。后续固定槽继续执行，不重跑首槽、不改判。
 - 维护诊断纠正：中间快照在已完成控制Run终态、但全批尚未结束时显示aborted；最初误按该字段写了“退出2、首槽停批”，实际运行工具仍返回活动session，candidate也已开始。这一推断已撤回；应以进程真实退出状态及最终计划覆盖率判定批次完成，不把运行中的旧导出当最终结果。
 
@@ -363,3 +363,6 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 处理与取舍：仅停止本轮PID47011（未发布构建）与47360（math诊断），两命令退出143；没有删除旧索引或伪造完成。开始单独验证相同固定包的CPU float32，若采用则必须新算法指纹并重新显式构建；增加内存换可接受的构建速度，不更换模型、调留出或引入全局SDPA开关/MPS平台。初次中断Run须由既有重启恢复标记停驻，不自动重放，后续用新身份。
 
 - FP32修正已通过局部验证：固定实例dtype=float32及v3指纹，6项定向通过、Ruff/3.10目标Mypy通过；旧v1/v2指纹拒绝在请求前执行。真实长片段16条9.54秒、RSS3.437GB，实际Host冒烟11.23秒、RSS2.792GB且索引复用通过。16语料文档向量与原BF16最低余弦0.999833，不能据此改写质量结果；不重跑40条留出或24次真实任务。原始证据 `cpu-fp32-probe.json`、`fp32-vector-check.json`、`local-qwen-fp32/smoke.json`，完整项目仍需使用新身份发布；这是当前性能瓶颈的最小修正，不承诺全部硬件收益或供应商成本改善。
+
+- 最终处理与复验：代码提交 `ceea5d7`，全量显式重建新Run `qwen_eventide_force_fp32_20261023` 退出0、completed、实际发布generation1。492文件/10849片段/1024维，3637.58秒、峰值RSS5.838GB；492文件索引哈希与构建前后源码全相符、Git状态不变、Provider用量为空。旧中断Run已恢复为interrupted，未自动重放或删除旧索引；报告 `agent-local/project-index-force-fp32.json` 及日志保留。后续收口Markdown变化须另作增量刷新。原BF16未完成证据不覆盖、不声称提速倍数；完整项目首次FP32构建仍约61分钟，内存/CPU和增量更新是当前维护取舍，不代表检索质量提升。
+- 附带环境诊断：一次只读 `ps -p 47990 -o pid=,etime=,%cpu=,rss=` 被本机沙箱拒绝，退出1；未据此判断构建失败，也未扩大权限重跑。最终使用原Host报告及命令真实退出状态确认完成。实际参与为采样定位、实例精度最小修正和真实索引核验，可追问为何计算策略进入指纹、如何避免中断发布和实验条件偷换。

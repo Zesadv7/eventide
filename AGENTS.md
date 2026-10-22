@@ -353,7 +353,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
 2026-10-23接入约束更新：用户要求仅用Coding Plan URL，停止标准API调用。已切换本机embedding地址，单次验证仍HTTP429/1113，尚无可用向量。不得自行回退标准API或更换冻结实验模型；历史标准接口计划及失败保留，不再作为继续调用的授权。
 
-2026-10-23本地候选试用（已完成试用，真实Agent效果仍待验证）：用户同意改试Qwen3-Embedding-0.6B，固定官方revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`；仅下载必要安全格式文件，复用SentenceTransformers/CPU和现有检索主链。先验证加载、查询/文档提示、真实向量及小型索引，记录时间/内存与限制；通过后按原40查询开发/留出划分对比FTS5、Hash混合、本地Qwen混合，不调留出标签或追跑成绩。embedding-3失败记录保留；本地试用不是远程模型原实验的补跑，不调用标准API、不宣称工程修复率提高。
+2026-10-23本地候选试用（真实对照已完成，未达到下游晋升门槛）：用户同意改试Qwen3-Embedding-0.6B，固定官方revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`；仅下载必要安全格式文件，复用SentenceTransformers/CPU和现有检索主链。先验证加载、查询/文档提示、真实向量及小型索引，记录时间/内存与限制；通过后按原40查询开发/留出划分对比FTS5、Hash混合、本地Qwen混合，不调留出标签或追跑成绩。embedding-3失败记录保留；本地试用不是远程模型原实验的补跑，不调用标准API、不宣称工程修复率提高。
 
 固定契约：Run/交付修复新增 `knowledge_index=existing|prepare`，默认 existing；Continue 继承并复验。prepare 在实际 Run 内、工具组装前准备当前副本索引，每轮 Writer 各自增量准备；不另占根任务名额，不在任务内每次查询时重建。所有远程请求共用模型槽、唯一 attempt 与项目/交付预算，准备失败明确停止，不自动重放。
 
@@ -369,8 +369,8 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | RG2 | 已完成 | 核心dcb436e已通过162项；0e447d0接入实际副本、新旧位置、手动目标及清理，8e36c00补4项路径/软限/历史边界。源与副本不串索引，旧库只读，新库损坏不回退，源码及忽略规则不变。 |
 | RG3 | 已完成 | dcb436e同快照哈希/代次、5文件新鲜度、有界ToolOutput与诊断；核心162项、过期提示后读当前源码的真实Host Scripted链路通过，旧正文不进入有效证据。architecture/api-contract同步；真实效果另归RG5。 |
 | RG4 | 已完成 | Run/Continue/Writer显式准备、锁/预算/取消和持久投影完成；55项主链关联、4项边界及35项embedding诊断通过。另受控复现手动索引换目标绕过去重，固定项目级身份后2项通过。Vue199项、真实API新增4旅程、OpenAPI/类型/构建通过；最终完整工程门禁在RG6。 |
-| RG5 | 待外部验证 | 9694c90接入受Host管理的40查询和8题双臂执行器，32项不同离线机制用例通过。两次标准接口最小请求失败；2026-10-23按用户要求切换Coding Plan后单次验证仍HTTP429/1113，三次均保留unknown。Coding Plan官方模型未列embedding-3，不能承诺套餐可抵扣；不再调用标准API。原embedding-3的40查询/24次Agent未执行；用户另行授权本地Qwen后，固定40查询完成，留出Qwen19/20、FTS5 16/20、Hash15/20，Recall/MRR及纯检索门槛通过、完整p95约1.254秒。24次真实Agent下游仍未执行，不晋升默认或宣称修复率提高；失败见RG-LIVE/RG-LOCAL。 |
-| RG6 | 已完成 | 工程收口：唯一一次全量2087通过/1旧测试失败/12显式跳过，覆盖93.69%≥85%；只更新旧请求测试排除新增默认字段，原失败1项及新增显式existing/prepare幂等断言通过，未改生产实现、未重跑全量。Ruff/Mypy126模块、Vue199项/类型/构建/格式、服务help/启动、离线smoke12及干净wheel资源/隔离服务和8题资源通过。浏览器全套34过1超时，原样仅复验1项通过；旧构建缓存/超时/测试失败全部登记。OpenAPI及产物更新，本地提交不推送；RG5真实效果仍待可用且经用户授权的embedding接入，不宣称检索质量提高。 |
+| RG5 | 已完成 | 9694c90接入受Host管理的40查询和8题双臂执行器，32项离线机制用例通过；617c0af最小开放本地接线另8项通过。embedding-3三次接入失败及unknown保留，不再调用标准API。经用户授权改为本地Qwen后，固定40查询完成，BF16留出Qwen19/20、FTS5 16/20、Hash15/20，排名及纯检索门槛通过，完整p95约1.254秒。随后24次真实Coding Plan Agent全执行：开发0/4→1/4、留出0/8→1/8，有效引用15/19→12/17；两臂search_knowledge均0，不能归因Qwen且下游门槛未通过。98请求输入146207/输出4055、unknown0；22质量失败保留。实施与固定实验完成，不晋升默认或宣称修复率提高；FP32仅另验计算和构建，未重跑留出。architecture及failure-cases RG-AGENT/RG-INDEX同步。 |
+| RG6 | 已完成 | 工程收口：唯一一次全量2087通过/1旧测试失败/12显式跳过，覆盖93.69%≥85%；只更新旧请求测试排除新增默认字段，原失败1项及新增显式existing/prepare幂等断言通过，未改生产实现、未重跑全量。Ruff/Mypy126模块、Vue199项/类型/构建/格式、服务help/启动、离线smoke12及干净wheel资源/隔离服务和8题资源通过。浏览器全套34过1超时，原样仅复验1项通过；旧构建缓存/超时/测试失败全部登记。OpenAPI及产物更新，本地提交不推送；后续本地真实实验结果见RG5，未达到下游晋升门槛，不宣称工程修复率提高。 |
 
 每步更新本表及相应稳定文档。原始日志统一保存忽略目录 `.task_outputs/retrieval-upgrade/`；所有失败按现有规范登记，预期Red与外部故障分开，不新增进度文档。
 
@@ -394,18 +394,19 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 ### RG5 评测执行器子任务
 
 - 已完成离线机制：新增受Host管理的40查询远程对照和8题真正Agent双臂入口；20查询只21次替身embedding（1次建库＋20次查询），最多三次本地计时不增加请求，不把60计时样本称60题。ScriptedProvider完整8开发/16留出通过，真实Git副本、过期回查、未知/取消停止扩批、质量失败保留且无需使用RAG均验证。原22项数据验证之外新增资源1项、Runner9项均定向通过（32个不同用例；无全量）；最终两模块Mypy、变更文件Ruff通过。全部失败见RG-EVAL，原始日志`eval-*.log`；不读真实凭据、不发live、不推送。
-- 必须保留的限制：每个Agent Run最多12步/20k已观测Token，前置索引构建另计且纳入总消费；300秒包含构建与调查。不新建逐次运行预算接口或将observed偷换为估算硬限。架构已写开发入口和报告重建口径；真实embedding-3、40查询和24次Agent效果仍待主任务处理外部额度并执行，机制完成不等于RG5整体完成。
+- 必须保留的限制：每个Agent Run最多12步/20k已观测Token，前置索引构建另计且纳入总消费；300秒包含构建与调查。不新建逐次运行预算接口或将observed偷换为估算硬限。当时真实embedding-3及下游效果待外部条件；后来经用户授权使用本地Qwen完成固定实验，结果见RG5及RG-AGENT，不以机制完成代替效果通过。
 
 
 ### RG-LOCAL 本地 embedding 角色适配子任务（2026-10-23）
 
 - 已完成（离线适配）：基线 `2696b2e`，固定包 query/document 提示分别用于查询/文档，内容及角色策略纳入指纹，旧本地语义索引须显式重建。新增11项含三入口及真实 Host prepare→查询→改写补查接线；首次9过2项测试问题，修正后仅复验失败与尚未运行的相关范围，最终81个不同用例通过、1项既有真实模型显式跳过。Ruff、独立只读复核、diff检查通过；Mypy默认3.10目标首次被共享环境NumPy语法阻断，改用已有隔离Python3.10检查环境后三模块通过，另3.12目标通过。architecture同步，失败及日志见 failure-cases RG-LOCAL、`.task_outputs/retrieval-upgrade/local-roles/`。CPU/安全/哈希边界保持，无模型下载/网络调用；真实Qwen冒烟及效果由主任务独立验证，本子任务不宣称效果提高。
 
-- RG-LOCAL真实试用已完成：主分支角色适配9318396；固定Qwen包1.203GB已准备到源码外并配置本机local_semantic，聊天配置不改。禁止网络的Host冒烟通过，1024维、中文检索英文源码及无变化索引复用，首次流程32.47秒/峰值RSS1.558GB。原40查询三臂对照69.42秒完成、无运行异常，开发均20/20，留出Qwen19/20、FTS5 16/20、Hash15/20；Qwen留出Recall.95/MRR.925、纯检索p95 37.80ms、完整p95 1253.94ms，峰值RSS1.561GB。漏召回与81项定向中的失败均已登记；architecture/user-guide/ADR-071同步。未跑真实聊天或重复全量/前端/Docker，24次Agent效果仍另验；报告在local-qwen/smoke.json及comparison.json。
+- RG-LOCAL真实试用已完成：主分支角色适配9318396；固定Qwen包1.203GB已准备到源码外并配置本机local_semantic，聊天配置不改。禁止网络的Host冒烟通过，1024维、中文检索英文源码及无变化索引复用，首次流程32.47秒/峰值RSS1.558GB。原40查询三臂对照69.42秒完成、无运行异常，开发均20/20，留出Qwen19/20、FTS5 16/20、Hash15/20；Qwen留出Recall.95/MRR.925、纯检索p95 37.80ms、完整p95 1253.94ms，峰值RSS1.561GB。漏召回与81项定向中的失败均已登记；architecture/user-guide/ADR-071同步。当时未跑真实聊天，后续24次见RG-AGENT；未重复全量/前端/Docker，原BF16报告在local-qwen/smoke.json及comparison.json。
 
 ### RG-AGENT 本地检索真实Agent对照（2026-10-23）
 
-- 状态：进行中。用户要求继续真实对照；保留冻结8题及开发8次/留出16次、交替两臂，不根据结果补跑。聊天固定GLM-5.3-Flash、Coding Plan地址，沿用此前温度1/low思考/输出8000；embedding固定上述本地Qwen，不调用标准API。每任务12步/20k已观测Token/300秒（含候选索引准备），MCP/worker/Skills/改写/重排关闭。先一次受Host管理的连接检查，认证、余额、协议或未知用量故障停止扩批，保留未尝试状态。测试使用临时项目/独立状态，不改日常聊天配置；仅开放现有评测器的本地embedding接线，定向验证后执行。
+- 状态：已完成（实施、固定实验及源Workspace重建；效果未达晋升门槛）。用户要求继续真实对照；保留冻结8题及开发8次/留出16次、交替两臂，不根据结果补跑。聊天固定GLM-5.3-Flash、Coding Plan地址，沿用此前温度1/low思考/输出8000；embedding固定上述本地Qwen，不调用标准API。每任务12步/20k已观测Token/300秒（含候选索引准备），MCP/worker/Skills/改写/重排关闭。测试使用临时项目/独立状态，不改日常聊天配置；仅开放现有评测器的本地embedding接线。
 - 本地接线验证：8项定向测试、Ruff及Python3.10目标一模块Mypy通过，原失败/取消/未知停批和质量失败保留规则保持；独立只读复核无阻塞。Coding Plan连接检查已获得合法响应及reported用量（输入24/输出32，因32输出上限止于思考、正文为空），仅证明认证/协议可通，不计为任务成功。正式24次比较仍按8000输出上限执行。
-- 真实24次已完成：开发baseline0/4、candidate1/4；留出baseline0/8、candidate1/8，有效引用15/19→12/17。两臂都未调用search_knowledge，不能归因本地Qwen；没有达到默认晋升条件。失败保留且未改提示/标签/补跑。用户另要求实际显式重建Eventide源Workspace索引：当前进行中，预计约492文件/10839片段，使用IndexController(force=True)和真实默认状态根，本地CPU计算、不调用聊天；构建期间不改源码，随后核对全文件哈希及用量为空。
-- 全项目BF16/CPU首批慢于小样本，采样后主动停止未发布构建（143），保留旧索引；只固定实例CPU float32、v3算法指纹，不加全局SDPA开关或MPS平台。6项加载/角色/旧索引拒绝定向、Ruff/3.10目标Mypy和禁止网络的真实Host冒烟通过；FP32首次11.23秒/RSS2.792GB。原16文档向量新旧最低余弦.999833，历史BF16报告保留，未重跑留出或付费24次。失败和性能证据见RG-INDEX；新身份全项目发布仍进行中。
+- 真实24次已完成：开发baseline0/4、candidate1/4；留出baseline0/8、candidate1/8，有效引用15/19→12/17。两臂都未调用search_knowledge，不能归因本地Qwen；没有达到默认晋升条件。失败保留且未改提示/标签/补跑。完整结果及22个质量失败见architecture/failure-cases，原始证据在agent-local/development、holdout及combined.json。
+- 全项目BF16/CPU首批慢于小样本，采样后主动停止未发布构建（143），保留旧索引；ceea5d7只固定实例CPU float32、v3算法指纹，不加全局SDPA开关或MPS平台。6项加载/角色/旧索引拒绝定向、Ruff/3.10目标Mypy和禁止网络的真实Host冒烟通过；FP32首次11.23秒/RSS2.792GB。原16文档向量新旧最低余弦.999833，历史BF16报告保留，未重跑留出或付费24次。失败和性能证据见RG-INDEX。
+- 实际显式重建已完成：冻结源码ceea5d7，通过原IndexController(force=True)向真实默认状态根发布源Workspace的v3/1024维索引，492文件/10849片段、generation1，3637.58秒、峰值RSS5.838GB。492文件索引哈希与构建前后源码逐一一致，工作区状态不变，Provider用量为空；无聊天或远程embedding请求。Run为qwen_eventide_force_fp32_20261023，报告agent-local/project-index-force-fp32.json。其他副本未重建，首次大项目CPU构建仍昂贵；文档收口会改变少量源码，须沿用同一入口增量刷新，不能沿用原新鲜度断言。
