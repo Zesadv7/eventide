@@ -549,6 +549,10 @@ Vue的InputComposition只展示服务端已校验的固定字符统计，旧值�
 
 `rag/local_models.py`负责本地包清单、准备、内容校验和惰性依赖；`rag/search.py`支持已取得向量的融合接口，避免未来异步受预算管理的调用链重复请求embedding。模型profile包含包内容指纹和算法版本，索引维度在构建时固定。Sentence Transformers依赖版本固定，模型仅使用local_files_only和禁用远程代码的加载路径。
 
+本地模型从固定包的 `config_sentence_transformers.json` 读取 `prompts.document` 与 `prompts.query`：索引构建的 `embed(texts)` 使用文档提示，`rag.embedding.embed_query(embedder, query)` 使用查询提示；缺失文件或对应角色保持显式空提示，不使用 `default_prompt_name` 替代角色，也不按模型名猜测前缀。配置类型错误明确拒绝。dense、hybrid、生产 retrieve 以及改写后的补充查询统一经过该入口，Hash／远程 Provider 原有对称编码协议不变。
+
+提示文本已属于固定包内容指纹，角色解释策略另由 `sentence-transformers-6.1.0-role-prompts-normalized-float32-v2` 进入模型 profile。旧本地语义索引或提示变更后的索引必须显式强制重建，不能把旧向量与新提示混用；该策略不增加提示管理平台。CPU、批量16、标准池化模块和每次推理前后的完整文件校验保持原样。离线替身验证只证明角色接线与证据链，不说明 Qwen 等具体模型质量或运行速度。
+
 Host在既有ToolExecutor/Policy边界内绑定重排器，CPU推理通过现有同步工具线程执行，取消仍等待实际工具收尾。重排候选不超过20，输出不超过5，失败输出诊断并保留融合排序；本地模型包在运行准备时缺失，验证索引后提供词面工具并记`retrieval.degraded`事件，不静默消失。所有生产检索路径最多返回5条，开发候选接口可保留原k范围。
 
 每次模型加载/推理前后校验本地文件内容，额外I/O成本需纳入C4/C5延迟测量。该层不产生远程Provider用量，不把本地字符或CPU耗时冒充供应商Token；远程embedding和索引Web控制面已分别按ADR-072/075接入主Host。默认CI不安装retrieval重依赖、不下载模型；原可选扩展门禁明确安装code/telemetry，真实本地模型测试需显式提供两个固定目录环境变量。

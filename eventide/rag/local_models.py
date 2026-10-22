@@ -241,16 +241,34 @@ def _library() -> Any:
 class LocalSemanticEmbedder:
     def __init__(self, path: Path):
         self.prepared = load_local_model(path, kind="embedding")
+        config_path = self.prepared.path / "config_sentence_transformers.json"
+        config = _json(config_path) if config_path.exists() else {}
+        if not isinstance(config, dict) or not isinstance(config.get("prompts", {}), dict):
+            raise LocalModelError("local_model_invalid_prompts")
+        prompts = config.get("prompts", {})
+        self._prompts = {role: prompts.get(role, "") for role in ("query", "document")}
+        if any(not isinstance(prompt, str) for prompt in self._prompts.values()):
+            raise LocalModelError("local_model_invalid_prompts")
         self._model: Any = None
 
     def profile(self) -> EmbeddingProfile:
         return EmbeddingProfile(
             provider="local_semantic", model=self.prepared.fingerprint, base_url="local",
-            algorithm_version=f"sentence-transformers-{LIBRARY_VERSION}-normalized-float32-v1",
+            algorithm_version=(
+                f"sentence-transformers-{LIBRARY_VERSION}-role-prompts-normalized-float32-v2"
+            ),
             dimension=None,
         )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        """Encode indexed documents with the immutable package's document prompt."""
+        return self._embed(texts, prompt=self._prompts["document"])
+
+    def embed_query(self, query: str) -> list[float]:
+        """Encode search text with the same package's query instruction."""
+        return self._embed([query], prompt=self._prompts["query"])[0]
+
+    def _embed(self, texts: list[str], *, prompt: str) -> list[list[float]]:
         if not texts:
             return []
         self.prepared.verify()
@@ -264,7 +282,7 @@ class LocalSemanticEmbedder:
             for start in range(0, len(texts), EMBED_BATCH_SIZE):
                 batch = texts[start:start + EMBED_BATCH_SIZE]
                 encoded = self._model.encode(
-                    batch, batch_size=EMBED_BATCH_SIZE, show_progress_bar=False, prompt="",
+                    batch, batch_size=EMBED_BATCH_SIZE, show_progress_bar=False, prompt=prompt,
                     normalize_embeddings=True, precision="float32", convert_to_numpy=True,
                 )
                 values = [[float(value) for value in row] for row in encoded]

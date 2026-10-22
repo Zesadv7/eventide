@@ -21,6 +21,18 @@ class EmbeddingProvider(Protocol):
     def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
+def embed_query(embedder: EmbeddingProvider, query: str) -> list[float]:
+    """Use local package query prompts; symmetric providers retain their protocol."""
+    from eventide.rag.local_models import LocalSemanticEmbedder
+
+    if isinstance(embedder, LocalSemanticEmbedder):
+        return embedder.embed_query(query)
+    vectors = embedder.embed([query])
+    if len(vectors) != 1:
+        raise RuntimeError("Embedding response count does not match the request")
+    return vectors[0]
+
+
 @dataclass(frozen=True, slots=True)
 class EmbeddingProfile:
     provider: str

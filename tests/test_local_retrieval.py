@@ -14,7 +14,7 @@ import pytest
 
 from eventide.config import Settings
 from eventide.rag import local_models
-from eventide.rag.embedding import HashEmbedder, provider_from_settings
+from eventide.rag.embedding import HashEmbedder, embed_query, provider_from_settings
 from eventide.rag.index import IndexStore
 from eventide.rag.local_models import (
     LocalCrossEncoder,
@@ -25,6 +25,7 @@ from eventide.rag.local_models import (
     reranker_from_settings,
 )
 from eventide.rag.search import (
+    dense_search,
     format_results,
     hybrid_candidates_from_vector,
     hybrid_search,
@@ -79,6 +80,128 @@ def fake_library(monkeypatch):
     monkeypatch.setattr(local_models, "version", lambda _name: local_models.LIBRARY_VERSION)
     monkeypatch.setattr(local_models.importlib, "import_module", lambda _name: library)
     return library, calls
+
+
+@pytest.fixture
+def prompted(tmp_path):
+    source = _source(tmp_path)
+    (source / "config_sentence_transformers.json").write_text(json.dumps({
+        "prompts": {"query": "Instruct: Find relevant code\nQuery:", "document": "passage: "},
+        "default_prompt_name": "query",
+    }))
+    return prepare_local_model(
+        source, tmp_path / "prompted", kind="embedding", revision="a" * 40,
+    )
+
+
+@pytest.mark.parametrize("search", [dense_search, hybrid_search, retrieve])
+def test_local_query_entry_points_use_package_roles(tmp_path, prompted, fake_library, search):
+    from tests.test_host import make_repo
+
+    repo = make_repo(tmp_path / "repo")
+    (repo / "code.txt").write_text("cancel restart keeps original tool evidence\n")
+    embedder = LocalSemanticEmbedder(prompted.path)
+    profile = embedder.profile()
+    IndexStore(repo).build(embedder=embedder, profile=profile)
+    encoded = [call for call in fake_library[1] if call[0] == "encode"]
+    assert encoded and all(call[2]["prompt"] == "passage: " for call in encoded)
+    fake_library[1].clear()
+    search(repo, "  cancel restart  ", embedder=embedder, profile=profile)
+    encoded = [call for call in fake_library[1] if call[0] == "encode"]
+    assert len(encoded) == 1 and encoded[0][1] == ["cancel restart"]
+    assert encoded[0][2]["prompt"] == "Instruct: Find relevant code\nQuery:"
+
+
+def test_local_missing_prompts_remain_explicitly_empty(prepared, fake_library):
+    embedder = LocalSemanticEmbedder(prepared.path)
+    assert embedder.embed(["document"]) == [[1.0, 0.0]]
+    assert embed_query(embedder, "query") == [1.0, 0.0]
+    encoded = [call for call in fake_library[1] if call[0] == "encode"]
+    assert [call[2]["prompt"] for call in encoded] == ["", ""]
+
+
+@pytest.mark.parametrize("config", [[], {"prompts": None}, {"prompts": {"query": None}},
+                                    {"prompts": {"document": 7}}])
+def test_local_invalid_prompt_configuration_fails_before_inference(tmp_path, fake_library, config):
+    source = _source(tmp_path)
+    (source / "config_sentence_transformers.json").write_text(json.dumps(config))
+    prepared = prepare_local_model(
+        source, tmp_path / "prepared", kind="embedding", revision="a" * 40,
+    )
+    with pytest.raises(LocalModelError, match="local_model_invalid_prompts"):
+        LocalSemanticEmbedder(prepared.path)
+    assert not fake_library[1]
+
+
+@pytest.mark.parametrize("change", ["algorithm", "prompt"])
+def test_local_prompt_policy_changes_require_index_rebuild(
+    tmp_path, prompted, fake_library, change,
+):
+    from tests.test_host import make_repo
+
+    repo = make_repo(tmp_path / "repo")
+    (repo / "code.txt").write_text("query evidence is indexed here\n")
+    original = LocalSemanticEmbedder(prompted.path)
+    old_profile = original.profile()
+    if change == "algorithm":
+        old_profile = replace(old_profile, algorithm_version=(
+            f"sentence-transformers-{local_models.LIBRARY_VERSION}-normalized-float32-v1"
+        ))
+    IndexStore(repo).build(embedder=original, profile=old_profile)
+    candidate = original
+    if change == "prompt":
+        source = tmp_path / "source-embedding"
+        (source / "config_sentence_transformers.json").write_text(json.dumps({
+            "prompts": {"query": "different instruction", "document": "passage: "},
+        }))
+        changed = prepare_local_model(
+            source, tmp_path / "changed", kind="embedding", revision="a" * 40,
+        )
+        candidate = LocalSemanticEmbedder(changed.path)
+        assert candidate.profile().model != original.profile().model
+    fake_library[1].clear()
+    with pytest.raises(ValueError, match="Embedding configuration changed; rebuild with --force"):
+        retrieve(repo, "query", embedder=candidate, profile=candidate.profile())
+    assert not fake_library[1]
+
+
+async def test_local_prepare_and_rewritten_query_keep_distinct_roles(
+    tmp_path, prompted, fake_library,
+):
+    from eventide.host import RuntimeHost
+    from eventide.models import RunRequest
+    from eventide.providers import ScriptedProvider
+    from tests.test_host import make_repo
+
+    repo = make_repo(tmp_path / "repo")
+    (repo / "behavior.txt").write_text("cancel restart does not repeat tool calls\n")
+    settings = replace(settings_for(repo), state_dir=tmp_path / "state",
+                       embedding_provider="local_semantic", embedding_model_path=prompted.path,
+                       retrieval_query_rewrite=True)
+    provider = ScriptedProvider([
+        {"tool_calls": [{"id": "search", "name": "search_knowledge",
+                         "arguments": {"query": "cancel restart"}}]},
+        {"text": "tool call recovery"},
+        {"text": "done"},
+    ])
+    host = RuntimeHost(settings, provider, enable_mcp=False)
+    try:
+        result = await host.run(RunRequest("investigate", mode="plan", knowledge_index="prepare"))
+        assert result.status == "completed"
+        encoded = [call for call in fake_library[1] if call[0] == "encode"]
+        assert encoded[0][2]["prompt"] == "passage: "
+        assert [(call[1], call[2]["prompt"]) for call in encoded[1:]] == [
+            (["cancel restart"], "Instruct: Find relevant code\nQuery:"),
+            (["tool call recovery"], "Instruct: Find relevant code\nQuery:"),
+        ]
+        state = host.store.get_run(result.run_id)
+        assert state["retrieval"]["status"] == "available"
+        evidence = state["tools"]["search"]["metadata"]["retrieval"]
+        assert evidence["mode"] == "query-rrf"
+        assert all(hit["freshness"] == "fresh" for hit in evidence["hits"])
+        assert len(provider.requests) == 3
+    finally:
+        await host.close()
 
 
 def test_prepare_is_explicit_immutable_and_profile_binds_content_revision(prepared, tmp_path):

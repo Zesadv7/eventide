@@ -315,3 +315,17 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 最终定向复验：同一隔离真实服务，仅运行 `retrieval.spec.ts --grep 'source preparation|ordinary worktree|delivery Writer'`，3/3 通过（约1.1分钟），证据 `.task_outputs/retrieval-upgrade/ui/e2e-recheck.log`；此前等待锁取消旅程已通过，不重复运行。合计4个不同旅程通过，没有付费模型调用。新增浏览器用例和测试服务钩子在 `d004f0e`，夹具路径修正与本记录随 RG4-E2E 收口提交；原失败不是生产事故，实际参与为编写定向旅程、定位夹具路径别名及复验，不能宣称模型检索质量提高。
 
 - 与主任务交叉核对：生产 `Settings.from_env()` 已对状态目录调用 `.resolve()`；本问题来自浏览器服务手工构造 Settings 绕过该入口，故只改 fixture 根路径，不放宽索引链接校验。
+
+### RG-LOCAL：角色提示适配的索引指纹测试夹具为空（2026-10-23）
+
+- 类型：测试问题；不是用户事故或生产缺陷。基线 `2696b2e` 加本地角色适配未提交改动。
+- 命令：`PYTHON_DOTENV_DISABLED=1 <项目 .venv>/bin/python -m pytest -q tests/test_local_retrieval.py -k 'package_roles or missing_prompts or invalid_prompt or prompt_policy or distinct_roles'`。首轮 9 通过、2 失败、43 未选；日志 `.task_outputs/retrieval-upgrade/local-roles/new-tests.log`。
+- 已证实原因：两项指纹变更用例只调用 `make_repo`，其初始文件不属于可索引语料，空索引无法推断本地模型维度；尚未触达要验证的指纹拒绝路径。
+- 处理与取舍：只补实际可索引文档，不修改生产空语料保护、不伪造向量维度。第一次仅复验两项均触达正确拒绝，但新测试错误消息少写 `with`，再次 2 失败；证据 `local-roles/recheck.log`。随后只修断言匹配现有明确消息；原失败2项及尚未运行的相关旧用例合计72通过、1项真实模型显式跳过，不重复首轮已过9项，最终81个不同用例通过。Ruff通过，证据 `local-roles/regression.log`、`ruff.log`；相关代码、测试与本记录同一本地提交。真实模型效果不由此判断。
+- 实际参与与经验：本轮编写角色适配及定向测试，发现的是新增测试前提不足；可追问固定模型提示如何进入指纹、为何应在请求前拒绝不匹配索引，不能讲成解决了线上检索事故。
+
+### RG-LOCAL：共享依赖环境阻断 Python 3.10 类型目标（2026-10-23）
+
+- 类型：环境/外部依赖故障。变更三模块运行 `python -m mypy eventide/rag/embedding.py eventide/rag/local_models.py eventide/rag/search.py`，退出2；共享 `.venv` 的 `numpy/__init__.pyi:737` 使用Python3.12 `type`语法，仓库默认3.10目标在检查项目代码前失败。证据 `.task_outputs/retrieval-upgrade/local-roles/mypy.log`。
+- 已证实环境变化：主任务安装本地retrieval可选依赖，新增的NumPy类型文件引发语法不兼容；本子任务没有改动依赖。先完成3.12目标三模块检查，再使用主任务提供的既有 `.task_outputs/publish-py310/bin/python` 保留默认3.10目标复核，三模块均通过。证据 `local-roles/mypy-py312.log`、`mypy-py310.log`；没有放宽仓库门槛或改生产代码，原失败保留。
+- 经验与范围：区分类型环境解析失败与项目类型错误，复用已有最小检查环境；没有重跑全仓或为修测试重新安装依赖。记录随本地角色适配同提交，真实模型推理另验收。

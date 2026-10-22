@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from eventide.rag.embedding import EmbeddingProfile, EmbeddingProvider
+from eventide.rag.embedding import EmbeddingProfile, EmbeddingProvider, embed_query
 from eventide.rag.index import DenseCandidate, IndexedChunk, IndexStore, SparseCandidate
 from eventide.rag.local_models import MAX_RERANK_CANDIDATES, LocalModelError
 
@@ -96,10 +96,7 @@ def dense_search(
         raise ValueError("Search query must not be empty")
     store = IndexStore(workspace, index_dir=index_dir)
     store.validate_profile(profile)
-    vectors = embedder.embed([cleaned])
-    if len(vectors) != 1:
-        raise RuntimeError("Embedding response count does not match the request")
-    vector = vectors[0]
+    vector = embed_query(embedder, cleaned)
     with store.snapshot() as reader:
         stored_profile = reader.validate_profile(profile)
         if stored_profile.dimension != len(vector):
@@ -217,11 +214,9 @@ def hybrid_search(
     # Fail before a potentially remote embedding request, then revalidate the
     # pinned snapshot in case a rebuild commits while the request is in flight.
     store.validate_profile(profile)
-    vectors = embedder.embed([cleaned])
-    if len(vectors) != 1:
-        raise RuntimeError("Embedding response count does not match the request")
+    vector = embed_query(embedder, cleaned)
     candidates = hybrid_candidates_from_vector(
-        workspace, cleaned, vectors[0], profile=profile, candidate_limit=count * 2,
+        workspace, cleaned, vector, profile=profile, candidate_limit=count * 2,
         index_dir=index_dir,
     )[:count]
     return verify_results(store, candidates)
@@ -285,16 +280,14 @@ def retrieve(
         raise ValueError("Search query must not be empty")
     IndexStore(workspace, index_dir=index_dir).validate_profile(profile)
     try:
-        vectors = embedder.embed([query.strip()])
+        vector = embed_query(embedder, query.strip())
     except LocalModelError as exc:
         return retrieval_from_vector(
             workspace, query, vector=None, profile=None, k=k, diagnostics=(exc.code,),
             index_dir=index_dir,
         )
-    if len(vectors) != 1:
-        raise RuntimeError("Embedding response count does not match the request")
     return retrieval_from_vector(
-        workspace, query, vector=vectors[0], profile=profile, reranker=reranker, k=k,
+        workspace, query, vector=vector, profile=profile, reranker=reranker, k=k,
         index_dir=index_dir,
     )
 

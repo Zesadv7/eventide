@@ -396,3 +396,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 - 已完成离线机制：新增受Host管理的40查询远程对照和8题真正Agent双臂入口；20查询只21次替身embedding（1次建库＋20次查询），最多三次本地计时不增加请求，不把60计时样本称60题。ScriptedProvider完整8开发/16留出通过，真实Git副本、过期回查、未知/取消停止扩批、质量失败保留且无需使用RAG均验证。原22项数据验证之外新增资源1项、Runner9项均定向通过（32个不同用例；无全量）；最终两模块Mypy、变更文件Ruff通过。全部失败见RG-EVAL，原始日志`eval-*.log`；不读真实凭据、不发live、不推送。
 - 必须保留的限制：每个Agent Run最多12步/20k已观测Token，前置索引构建另计且纳入总消费；300秒包含构建与调查。不新建逐次运行预算接口或将observed偷换为估算硬限。架构已写开发入口和报告重建口径；真实embedding-3、40查询和24次Agent效果仍待主任务处理外部额度并执行，机制完成不等于RG5整体完成。
 
+
+### RG-LOCAL 本地 embedding 角色适配子任务（2026-10-23）
+
+- 已完成（离线适配）：基线 `2696b2e`，固定包 query/document 提示分别用于查询/文档，内容及角色策略纳入指纹，旧本地语义索引须显式重建。新增11项含三入口及真实 Host prepare→查询→改写补查接线；首次9过2项测试问题，修正后仅复验失败与尚未运行的相关范围，最终81个不同用例通过、1项既有真实模型显式跳过。Ruff、独立只读复核、diff检查通过；Mypy默认3.10目标首次被共享环境NumPy语法阻断，改用已有隔离Python3.10检查环境后三模块通过，另3.12目标通过。architecture同步，失败及日志见 failure-cases RG-LOCAL、`.task_outputs/retrieval-upgrade/local-roles/`。CPU/安全/哈希边界保持，无模型下载/网络调用；真实Qwen冒烟及效果由主任务独立验证，本子任务不宣称效果提高。
