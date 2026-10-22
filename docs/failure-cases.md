@@ -275,3 +275,17 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 首轮已通过的范围：注册路径被替换为另一仓库链接时，状态查询不可用且手动构建拒绝；源码临时不可见时，已完成索引历史仍可读取。不为补日志重复运行这两项。
 - 参与与经验：维护代理编写故障注入与测试；错误来自测试对现有口径和前置条件理解不全。可追问 input-only 用量为何不能补造输出字段，以及为什么要检查完整调用链后再认定可复现问题。后续定向复验另追加，不把这一轮称为全通过。
 - 修正后仅复验原预算断言及替换后的实际副本用例：2 通过 / 1.56 秒，`core/preparation-boundaries-recheck.log`；Ruff 与 diff 检查通过。新用例使用用户在源目录外创建的真实 Git worktree，再注册到同项目并直接绑定 Session；源 prepare 拒绝，实际副本 prepare 成功，不借此宣称 Host 可在嵌套状态根创建 managed worktree 或 Writer。最终四项边界各有通过证据，前两项原通过未重复运行；原五项尝试的失败仍保留。
+
+
+## RG-UI-E2E：真实检索浏览器旅程首轮路径校验失败（2026-10-22）
+
+- 类型：环境／测试夹具问题，原因待核实；基线为前端 `d004f0e`、借入 core `fc666fe`（本地 cherry-pick `9a83339`）与主任务未提交 `root-runtime.patch`，后端借入修改不由本子任务提交。
+- 命令：`PYTHON_DOTENV_DISABLED=1 EVENTIDE_PYTHON=/Users/zesadv/Documents/Codex/eventide/.venv/bin/python npm run test:e2e -- tests/e2e/retrieval.spec.ts`（frontend 目录）。首轮 1 通过、3 失败／12.8 秒；等待准备锁时取消与刷新通过，源目录/worktree/Writer 在准备阶段停止，尚未执行模型。
+- 现象：Run 报 `Knowledge index path contains a link or unsupported file type`；Writer 同时返回 `writer_stopped`、零调用与零验收轮次。需核对 macOS 临时目录 `/var` 到 `/private/var` 的别名与 fixture 状态路径是否规范化；不把推测写成生产实现原因。
+- 证据：`.task_outputs/retrieval-upgrade/ui/e2e-first.log`，浏览器 error-context 原件存放 `frontend/test-results/retrieval-*/error-context.md`（忽略产物）。处理和定向复验待补；没有真实模型请求或用户项目影响。
+
+- 路径原因已证实：测试服务用 `Path(temporary)` 保留 macOS `/var` 目录别名，而新外部索引目录校验拒绝祖先链接；将测试临时根先 `.resolve()`，不改变生产 IndexStore 的链接拒绝规则。首轮 error-context 已复制到 `.task_outputs/retrieval-upgrade/ui/e2e-first-artifacts/`，避免 Playwright 后续覆盖；只复验三个失败旅程。
+
+- 最终定向复验：同一隔离真实服务，仅运行 `retrieval.spec.ts --grep 'source preparation|ordinary worktree|delivery Writer'`，3/3 通过（约1.1分钟），证据 `.task_outputs/retrieval-upgrade/ui/e2e-recheck.log`；此前等待锁取消旅程已通过，不重复运行。合计4个不同旅程通过，没有付费模型调用。新增浏览器用例和测试服务钩子在 `d004f0e`，夹具路径修正与本记录随 RG4-E2E 收口提交；原失败不是生产事故，实际参与为编写定向旅程、定位夹具路径别名及复验，不能宣称模型检索质量提高。
+
+- 与主任务交叉核对：生产 `Settings.from_env()` 已对状态目录调用 `.resolve()`；本问题来自浏览器服务手工构造 Settings 绕过该入口，故只改 fixture 根路径，不放宽索引链接校验。

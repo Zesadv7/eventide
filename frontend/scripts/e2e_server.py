@@ -116,7 +116,7 @@ def main() -> None:
             yield ModelStreamEvent("response_completed", response=response)
 
     with tempfile.TemporaryDirectory(prefix="eventide-vue-e2e-") as temporary:
-        root = Path(temporary)
+        root = Path(temporary).resolve()
         fixtures = build_fixtures(root / "workspaces", sys.executable)
         os.chdir(root)
         settings = Settings(
