@@ -353,6 +353,8 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
 2026-10-23接入约束更新：用户要求仅用Coding Plan URL，停止标准API调用。已切换本机embedding地址，单次验证仍HTTP429/1113，尚无可用向量。不得自行回退标准API或更换冻结实验模型；历史标准接口计划及失败保留，不再作为继续调用的授权。
 
+2026-10-23本地候选试用（进行中）：用户同意改试Qwen3-Embedding-0.6B，固定官方revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`；仅下载必要安全格式文件，复用SentenceTransformers/CPU和现有检索主链。先验证加载、查询/文档提示、真实向量及小型索引，记录时间/内存与限制；通过后按原40查询开发/留出划分对比FTS5、Hash混合、本地Qwen混合，不调留出标签或追跑成绩。embedding-3失败记录保留；本地试用不是远程模型原实验的补跑，不调用标准API、不宣称工程修复率提高。
+
 固定契约：Run/交付修复新增 `knowledge_index=existing|prepare`，默认 existing；Continue 继承并复验。prepare 在实际 Run 内、工具组装前准备当前副本索引，每轮 Writer 各自增量准备；不另占根任务名额，不在任务内每次查询时重建。所有远程请求共用模型槽、唯一 attempt 与项目/交付预算，准备失败明确停止，不自动重放。
 
 生产索引位于状态根 `indexes/<实际 workspace_id>/index.sqlite`，源码根与存储位置分离；状态根在目标源码内时拒绝准备。新位置缺失才只读识别本副本旧 `.eventide/index.sqlite`；新位置损坏不回退，不复制/双写/删除旧索引，不修改用户忽略规则。手动构建支持同项目注册副本，与自动准备共用 Workspace 构建锁；删除执行副本时清理受控派生索引。
