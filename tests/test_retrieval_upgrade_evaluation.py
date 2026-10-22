@@ -133,9 +133,19 @@ async def test_remote_api_failure_retains_unknown_and_stops_before_queries(
 
 
 @pytest.mark.parametrize("split,count", [("development", 8), ("holdout", 16)])
+@pytest.mark.parametrize("provider", ["openai_compatible", "local_semantic"])
 async def test_actual_agent_pairs_use_current_files_after_semantic_search(
-    host, embeddings, tmp_path, split, count,
+    host, embeddings, tmp_path, split, count, provider, monkeypatch,
 ):
+    if provider == "local_semantic":
+        from eventide.rag.embedding import provider_from_settings
+
+        local = HashEmbedder(16)
+        _, profile = provider_from_settings(host.settings)
+        profile = replace(profile, provider="local_semantic", base_url="local", dimension=16)
+        host.settings = replace(host.settings, embedding_provider="local_semantic")
+        monkeypatch.setattr("eventide.retrieval_runtime.provider_from_settings",
+                            lambda settings: (local, profile))
     dataset = load_agent_dataset()
     cases = {case.id: case for case in dataset.cases}
     script = []
@@ -164,6 +174,10 @@ async def test_actual_agent_pairs_use_current_files_after_semantic_search(
         assert arm["stale_or_foreign_quotes"] == 0
     assert not report["remaining"] and not report["missing_results"]
     assert report["evidence"]["usage"]["complete"]
+    if provider == "local_semantic":
+        assert not embeddings
+        assert all(row["preparation_usage"]["attempt_count"] == 0
+                   for row in report["arms"]["candidate"]["results"])
     for row in report["arms"]["baseline"]["results"]:
         assert not any(call["name"] == "search_knowledge" for call in row["tool_calls"])
         assert row["preparation_usage"]["attempt_count"] == 0

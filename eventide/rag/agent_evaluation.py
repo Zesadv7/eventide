@@ -298,9 +298,9 @@ async def run_agent_comparison(
             or host.settings.max_steps != 12 or host.settings.run_token_limit != 20_000
             or host.settings.retrieval_query_rewrite
             or host.settings.reranker_model_path is not None
-            or host.settings.embedding_provider != "openai_compatible"):
+            or host.settings.embedding_provider not in {"openai_compatible", "local_semantic"}):
         raise ValueError("Use an isolated Host with MCP/workers/rewrite/rerank disabled, "
-                         "12 steps, 20000 observed Tokens and remote embeddings")
+                         "12 steps, 20000 observed Tokens and remote or local semantic embeddings")
     await host.initialize()
     dataset = load_agent_dataset()
     plan = attempt_plan(dataset, split)

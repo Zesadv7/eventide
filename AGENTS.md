@@ -402,3 +402,8 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 - 已完成（离线适配）：基线 `2696b2e`，固定包 query/document 提示分别用于查询/文档，内容及角色策略纳入指纹，旧本地语义索引须显式重建。新增11项含三入口及真实 Host prepare→查询→改写补查接线；首次9过2项测试问题，修正后仅复验失败与尚未运行的相关范围，最终81个不同用例通过、1项既有真实模型显式跳过。Ruff、独立只读复核、diff检查通过；Mypy默认3.10目标首次被共享环境NumPy语法阻断，改用已有隔离Python3.10检查环境后三模块通过，另3.12目标通过。architecture同步，失败及日志见 failure-cases RG-LOCAL、`.task_outputs/retrieval-upgrade/local-roles/`。CPU/安全/哈希边界保持，无模型下载/网络调用；真实Qwen冒烟及效果由主任务独立验证，本子任务不宣称效果提高。
 
 - RG-LOCAL真实试用已完成：主分支角色适配9318396；固定Qwen包1.203GB已准备到源码外并配置本机local_semantic，聊天配置不改。禁止网络的Host冒烟通过，1024维、中文检索英文源码及无变化索引复用，首次流程32.47秒/峰值RSS1.558GB。原40查询三臂对照69.42秒完成、无运行异常，开发均20/20，留出Qwen19/20、FTS5 16/20、Hash15/20；Qwen留出Recall.95/MRR.925、纯检索p95 37.80ms、完整p95 1253.94ms，峰值RSS1.561GB。漏召回与81项定向中的失败均已登记；architecture/user-guide/ADR-071同步。未跑真实聊天或重复全量/前端/Docker，24次Agent效果仍另验；报告在local-qwen/smoke.json及comparison.json。
+
+### RG-AGENT 本地检索真实Agent对照（2026-10-23）
+
+- 状态：进行中。用户要求继续真实对照；保留冻结8题及开发8次/留出16次、交替两臂，不根据结果补跑。聊天固定GLM-5.3-Flash、Coding Plan地址，沿用此前温度1/low思考/输出8000；embedding固定上述本地Qwen，不调用标准API。每任务12步/20k已观测Token/300秒（含候选索引准备），MCP/worker/Skills/改写/重排关闭。先一次受Host管理的连接检查，认证、余额、协议或未知用量故障停止扩批，保留未尝试状态。测试使用临时项目/独立状态，不改日常聊天配置；仅开放现有评测器的本地embedding接线，定向验证后执行。
+- 本地接线验证：8项定向测试、Ruff及Python3.10目标一模块Mypy通过，原失败/取消/未知停批和质量失败保留规则保持；独立只读复核无阻塞。Coding Plan连接检查已获得合法响应及reported用量（输入24/输出32，因32输出上限止于思考、正文为空），仅证明认证/协议可通，不计为任务成功。正式24次比较仍按8000输出上限执行。
