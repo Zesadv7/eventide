@@ -351,6 +351,8 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
 执行基线 `845a6b0`，用户确认源目录、普通 worktree 与交付 Writer；真实 embedding 基线为智谱标准 API `embedding-3`。保留 Runtime/ToolExecutor/Policy/Event Log，不引入新编排框架、向量数据库或检索 Agent；快照、只读 worker、Docker 任务沙箱暂不开放知识检索。
 
+2026-10-23接入约束更新：用户要求仅用Coding Plan URL，停止标准API调用。已切换本机embedding地址，单次验证仍HTTP429/1113，尚无可用向量。不得自行回退标准API或更换冻结实验模型；历史标准接口计划及失败保留，不再作为继续调用的授权。
+
 固定契约：Run/交付修复新增 `knowledge_index=existing|prepare`，默认 existing；Continue 继承并复验。prepare 在实际 Run 内、工具组装前准备当前副本索引，每轮 Writer 各自增量准备；不另占根任务名额，不在任务内每次查询时重建。所有远程请求共用模型槽、唯一 attempt 与项目/交付预算，准备失败明确停止，不自动重放。
 
 生产索引位于状态根 `indexes/<实际 workspace_id>/index.sqlite`，源码根与存储位置分离；状态根在目标源码内时拒绝准备。新位置缺失才只读识别本副本旧 `.eventide/index.sqlite`；新位置损坏不回退，不复制/双写/删除旧索引，不修改用户忽略规则。手动构建支持同项目注册副本，与自动准备共用 Workspace 构建锁；删除执行副本时清理受控派生索引。
@@ -365,8 +367,8 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | RG2 | 已完成 | 核心dcb436e已通过162项；0e447d0接入实际副本、新旧位置、手动目标及清理，8e36c00补4项路径/软限/历史边界。源与副本不串索引，旧库只读，新库损坏不回退，源码及忽略规则不变。 |
 | RG3 | 已完成 | dcb436e同快照哈希/代次、5文件新鲜度、有界ToolOutput与诊断；核心162项、过期提示后读当前源码的真实Host Scripted链路通过，旧正文不进入有效证据。architecture/api-contract同步；真实效果另归RG5。 |
 | RG4 | 已完成 | Run/Continue/Writer显式准备、锁/预算/取消和持久投影完成；55项主链关联、4项边界及35项embedding诊断通过。另受控复现手动索引换目标绕过去重，固定项目级身份后2项通过。Vue199项、真实API新增4旅程、OpenAPI/类型/构建通过；最终完整工程门禁在RG6。 |
-| RG5 | 待外部验证 | 9694c90接入受Host管理的40查询和8题双臂执行器，32项不同离线机制用例通过。两次独立最小embedding请求失败并保留unknown；新密钥HTTP429/1113，官方解释账户欠费，停止扩大付费调用。40查询及24次Agent真实批次均未执行，不宣称效果提高。 |
-| RG6 | 已完成 | 工程收口：唯一一次全量2087通过/1旧测试失败/12显式跳过，覆盖93.69%≥85%；只更新旧请求测试排除新增默认字段，原失败1项及新增显式existing/prepare幂等断言通过，未改生产实现、未重跑全量。Ruff/Mypy126模块、Vue199项/类型/构建/格式、服务help/启动、离线smoke12及干净wheel资源/隔离服务和8题资源通过。浏览器全套34过1超时，原样仅复验1项通过；旧构建缓存/超时/测试失败全部登记。OpenAPI及产物更新，本地提交不推送；RG5真实效果仍待标准API额度恢复，不宣称检索质量提高。 |
+| RG5 | 待外部验证 | 9694c90接入受Host管理的40查询和8题双臂执行器，32项不同离线机制用例通过。两次标准接口最小请求失败；2026-10-23按用户要求切换Coding Plan后单次验证仍HTTP429/1113，三次均保留unknown。Coding Plan官方模型未列embedding-3，不能承诺套餐可抵扣；不再调用标准API。40查询及24次Agent真实批次均未执行，不宣称效果提高；失败见RG-LIVE。 |
+| RG6 | 已完成 | 工程收口：唯一一次全量2087通过/1旧测试失败/12显式跳过，覆盖93.69%≥85%；只更新旧请求测试排除新增默认字段，原失败1项及新增显式existing/prepare幂等断言通过，未改生产实现、未重跑全量。Ruff/Mypy126模块、Vue199项/类型/构建/格式、服务help/启动、离线smoke12及干净wheel资源/隔离服务和8题资源通过。浏览器全套34过1超时，原样仅复验1项通过；旧构建缓存/超时/测试失败全部登记。OpenAPI及产物更新，本地提交不推送；RG5真实效果仍待可用且经用户授权的embedding接入，不宣称检索质量提高。 |
 
 每步更新本表及相应稳定文档。原始日志统一保存忽略目录 `.task_outputs/retrieval-upgrade/`；所有失败按现有规范登记，预期Red与外部故障分开，不新增进度文档。
 

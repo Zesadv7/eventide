@@ -256,6 +256,8 @@ Run 接收固定 `knowledge_index` 与不含凭据的 embedding 配置摘要；C
 
 `retrieval.status` 与工具 metadata 沿用原 Event Log。可用表示索引协议和配置可以查询，不保证全部源码最新；最终命中的文件再核对。快照、只读 worker 和任务 Docker 沙箱暂不开放，Docker 独立验收不受影响。仅在检索工具可用时加入按线索选择搜索、核对当前源码的提示，不新增模型路由。
 
+2026-10-23接入约束更新：用户要求停用标准API，仅用智谱Coding Plan地址。忽略的本机embedding配置已切换至 `/api/coding/paas/v4/`；独立受Host管理的一次embedding-3请求仍返回HTTP429/1113，unknown1，没有向量。未重试、未回退标准API；官方套餐列表没有承诺embedding-3，故当前阻塞是尚未获得符合用户要求的可用向量服务。原冻结40查询/24次Agent对照仍未执行，切换本地或其他embedding前需重新明确实验基线，不改写历史结果。
+
 RG工程收口（2026-10-22）：新增副本/新鲜度/准备/Continue/预算/去重及脚本Agent调查已通过。唯一全量2087通过、1项旧测试字段预期失败、12项可选跳过；更新该测试并定向通过，生产实现不变，覆盖93.69%。Vue199项、类型/构建/格式、Ruff/Mypy126模块、服务启动、smoke12及干净wheel资源/隔离服务通过。浏览器34过1超时，原样复验唯一失败通过；全部失败证据见failure-cases，未重跑全量或无关Docker。真实embedding-3最小调用两次失败且保留unknown，新密钥HTTP429/1113为标准API账户欠费；40查询、24次Agent批次未执行，不能据此宣称语义质量或修复率提高。
 
 RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户从知识索引页显式构建后，Git Workspace 内 `.eventide/index.sqlite` 保存 `files`、带文件/行号/标题路径的 `chunks`、float32 embedding BLOB、FTS5 trigram 索引和 embedding fingerprint；数据库可随时删除重建，不进入 canonical Runtime schema 或 Event Log。v0.4 只枚举 `git ls-files --cached --others --exclude-standard` 可见的 UTF-8 文本，跳过 symlink、二进制、超过 1 MiB 的文件以及 `.git/`、`.eventide/`。增量判断以内容 SHA-256 为准；构建在写事务外完成读取、切块和 embedding，提交时重新核对语料与 index generation，并以单个 SQLite 事务替换文件、chunk、FTS 和 meta，因此查询只看到旧或新完整快照。

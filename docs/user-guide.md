@@ -128,7 +128,7 @@ Skill包采用 `SKILL.md`、`references/`、`scripts/` 和 `assets/`。支持本
 
 默认Hash embedding用于离线机制验证；远程embedding可用兼容接口并通过Host唯一预算/用量主链派发。每批最多64片段，未变化不发请求，失败保留既有消费并维持旧索引。Agent的 `search_knowledge` 返回带文件/行号的有界片段，遵循权限及实际执行副本。
 
-本轮真实语义基线使用智谱标准 API 的 `embedding-3`，在本机 `.env` 或服务环境单独配置（不要覆盖聊天模型设置）：
+如选择智谱标准 API 的 `embedding-3`，在本机 `.env` 或服务环境单独配置（不要覆盖聊天模型设置；以下不是Coding Plan套餐配置）：
 
 ```dotenv
 EVENTIDE_EMBEDDING_PROVIDER=openai_compatible
@@ -139,6 +139,8 @@ EVENTIDE_RETRIEVAL_QUERY_REWRITE=0
 ```
 
 远程使用模型默认维度，`EVENTIDE_EMBEDDING_DIM` 仅用于Hash。标准API Key与Coding Plan套餐Key的额度规则请按[智谱官方说明](https://docs.bigmodel.cn/cn/coding-plan/notice/api-key-management)确认。先验证一次小请求，再扩大实验；HTTP失败显示状态及可用的数字业务码，原始响应与密钥不入事件。未返回usage仍为unknown，不是免费调用。配置指纹改变须在页面显式强制重建，不在普通任务中自动全量重建。
+
+Coding Plan的兼容地址为 `https://open.bigmodel.cn/api/coding/paas/v4/`，但[官方套餐模型列表](https://docs.bigmodel.cn/cn/coding-plan/overview)未列出embedding-3，不能通过替换URL就假定向量请求可使用套餐。2026-10-23本项目单次验证该地址返回HTTP429/1113，未获得向量；不能将当前接入标为可用。具体失败与后续限制见[失败案例](failure-cases.md)。
 
 可选 `uv sync --extra retrieval` 安装固定版本Sentence Transformers依赖。模型需预先在本机准备，使用 `eventide.rag.local_models.prepare_local_model` 固定revision及内容清单；配置 `EVENTIDE_EMBEDDING_PROVIDER=local_semantic`、`EVENTIDE_EMBEDDING_MODEL_PATH` 和可选 `EVENTIDE_RERANKER_MODEL_PATH`。运行时不下载，禁用远程代码、链接和pickle权重，CPU惰性加载。CrossEncoder最多重排20候选、返回5条；缺失或失败明确降级，不伪造分数。`uv sync --extra code` 可增加tree-sitter结构切块。
 

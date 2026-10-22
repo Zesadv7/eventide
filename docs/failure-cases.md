@@ -250,6 +250,14 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - **处理：** 停止扩大调用，保留失败及未知用量；离线实现继续。用户先选择“已配置”，随后澄清尚不清楚密钥获取位置；已提供官方标准 API 入口，尚未再次派发请求。后续配置完成再使用新尝试身份，不覆盖首轮失败。
 - **参与与总结：** Codex 执行单次受控接入，用户处理外部配置。可追问：为什么接口失败不能记真实零 Token，以及错误脱敏与故障可诊断性之间的取舍；尚未证明检索效果。
 
+### RG-LIVE：改用 Coding Plan 地址仍未获得向量（2026-10-23）
+
+- **类型与基线：** 真实 API／外部接入失败，基线 `b283495`。用户明确要求停用标准 API；仅将忽略的本机 `.env` 中 embedding 地址改为 `https://open.bigmodel.cn/api/coding/paas/v4/`，保留密钥及权限0600，没有修改聊天配置或生产代码。
+- **命令与证据：** `PYTHONPATH=. .venv/bin/python .task_outputs/retrieval-upgrade/live/probe-coding.py`，退出2。独立 `embedding3_smoke_03_coding` 经 RuntimeHost 派发一次，结果在 `live/probe-03-coding.json`，账本在 `live/probe-03-coding-state/runtime.sqlite`；1次attempt、unknown1、没有向量，不覆盖前两次记录。
+- **已证实结果与限制：** Coding Plan 地址同样返回HTTP429／数字码1113。官方错误码将1113解释为账户欠费；但该响应不能单独证明此密钥属于哪种账户、套餐是否可用或 `/embeddings` 具体如何计费。[套餐模型列表](https://docs.bigmodel.cn/cn/coding-plan/overview)未列embedding-3，[embedding-3文档](https://docs.bigmodel.cn/cn/guide/models/embedding/embedding-3)仅展示标准接口，因此不能宣称换URL即可用套餐抵扣embedding。
+- **处理与取舍：** 失败后停止，未重试、未回退标准API、未启动40查询或24次Agent批次；未知用量不改零。当前配置只是按要求切换地址，不能称为可用。后续需确认供应商支持及授权，或经用户选择另用本地语义模型；不擅自改变冻结实验基线。
+- **参与与总结：** Codex核对官方资料、切换本地配置并做一次受Host管理的验证。可追问聊天生成和向量接口为何不能互换、HTTP429为何需结合业务码、无法确认计费时为何保留unknown；没有已证实的语义质量收益。
+
 ## RG-ROOT：任务准备接线的定向验证
 
 - **受控缺陷复现：** 交叉审查发现本轮新增手动索引workspace_id会改变控制Session，原run_receipt因此改变同一项目HTTP请求的去重身份。同一Idempotency-Key改目标可能再次构建；新增两方向测试复现202而非409，证据`index-key-red.log`。这属于本轮未发布实现缺口，不是历史线上事故。修复保持项目级请求身份，实际执行仍绑定具体副本；定向复验另记。
