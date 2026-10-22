@@ -902,6 +902,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{workspace_id}/index-status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Status */
+    get: operations["status_api_workspaces__workspace_id__index_status_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/indexes/configuration": {
     parameters: {
       query?: never;
@@ -1513,6 +1530,12 @@ export interface components {
        * @default 60000
        */
       observed_token_limit: number;
+      /**
+       * Knowledge Index
+       * @default existing
+       * @enum {string}
+       */
+      knowledge_index: "existing" | "prepare";
     };
     /** DeliveryRepairResult */
     DeliveryRepairResult: {
@@ -1997,6 +2020,8 @@ export interface components {
        * @default false
        */
       code_structure: boolean;
+      /** Workspace Id */
+      workspace_id?: string | null;
     };
     /** IndexConfiguration */
     IndexConfiguration: {
@@ -2019,6 +2044,8 @@ export interface components {
       session_id: string;
       /** Project Id */
       project_id: string;
+      /** Workspace Id */
+      workspace_id: string;
       /**
        * Status
        * @enum {string}
@@ -2049,6 +2076,8 @@ export interface components {
       session_id: string;
       /** Project Id */
       project_id: string;
+      /** Workspace Id */
+      workspace_id: string;
       /** Status Url */
       status_url: string;
       /** Events Url */
@@ -2240,6 +2269,12 @@ export interface components {
        * @enum {string}
        */
       execution_profile: "local" | "sandbox";
+      /**
+       * Knowledge Index
+       * @default existing
+       * @enum {string}
+       */
+      knowledge_index: "existing" | "prepare";
       /** Sandbox Image */
       sandbox_image?: string | null;
       /** Attachment Ids */
@@ -2334,6 +2369,33 @@ export interface components {
     WorkspaceBody: {
       /** Path */
       path: string;
+    };
+    /** WorkspaceIndexStatus */
+    WorkspaceIndexStatus: {
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "available" | "unavailable";
+      /** Workspace Id */
+      workspace_id: string;
+      /**
+       * Location
+       * @enum {string}
+       */
+      location: "managed" | "legacy";
+      /** Reason */
+      reason?: string | null;
+      /** Detail */
+      detail?: string | null;
+      /** Model */
+      model?: string | null;
+      /** Generation */
+      generation?: number | null;
+      /** Embedding Fingerprint */
+      embedding_fingerprint?: string | null;
+      /** Config Hash */
+      config_hash?: string | null;
     };
     /** WorktreeBody */
     WorktreeBody: {
@@ -10543,6 +10605,127 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           };
+        };
+      };
+      /** @description bad request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description method not allowed */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description rate limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  status_api_workspaces__workspace_id__index_status_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspace_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceIndexStatus"];
         };
       };
       /** @description bad request */

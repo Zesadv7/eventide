@@ -9815,6 +9815,146 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/index-status": {
+      "get": {
+        "tags": ["indexes"],
+        "summary": "Status",
+        "operationId": "status_api_workspaces__workspace_id__index_status_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceIndexStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "payload too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/indexes/configuration": {
       "get": {
         "tags": ["indexes"],
@@ -15058,6 +15198,12 @@
             "minimum": 1.0,
             "title": "Observed Token Limit",
             "default": 60000
+          },
+          "knowledge_index": {
+            "type": "string",
+            "enum": ["existing", "prepare"],
+            "title": "Knowledge Index",
+            "default": "existing"
           }
         },
         "additionalProperties": false,
@@ -16181,6 +16327,17 @@
             "type": "boolean",
             "title": "Code Structure",
             "default": false
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
           }
         },
         "additionalProperties": false,
@@ -16242,6 +16399,10 @@
             "type": "string",
             "title": "Project Id"
           },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
           "status": {
             "type": "string",
             "enum": ["queued", "running", "completed", "failed", "interrupted"],
@@ -16289,6 +16450,7 @@
           "run_id",
           "session_id",
           "project_id",
+          "workspace_id",
           "status",
           "configuration",
           "force",
@@ -16327,6 +16489,10 @@
             "type": "string",
             "title": "Project Id"
           },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
           "status_url": {
             "type": "string",
             "title": "Status Url"
@@ -16341,6 +16507,7 @@
           "run_id",
           "session_id",
           "project_id",
+          "workspace_id",
           "status_url",
           "events_url"
         ],
@@ -16802,6 +16969,12 @@
             "title": "Execution Profile",
             "default": "local"
           },
+          "knowledge_index": {
+            "type": "string",
+            "enum": ["existing", "prepare"],
+            "title": "Knowledge Index",
+            "default": "existing"
+          },
           "sandbox_image": {
             "anyOf": [
               {
@@ -17138,6 +17311,93 @@
         "type": "object",
         "required": ["path"],
         "title": "WorkspaceBody"
+      },
+      "WorkspaceIndexStatus": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["available", "unavailable"],
+            "title": "Status"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "location": {
+            "type": "string",
+            "enum": ["managed", "legacy"],
+            "title": "Location"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation"
+          },
+          "embedding_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Fingerprint"
+          },
+          "config_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Hash"
+          }
+        },
+        "type": "object",
+        "required": ["status", "workspace_id", "location"],
+        "title": "WorkspaceIndexStatus"
       },
       "WorktreeBody": {
         "properties": {

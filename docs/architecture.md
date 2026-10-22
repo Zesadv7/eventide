@@ -256,6 +256,8 @@ Run 接收固定 `knowledge_index` 与不含凭据的 embedding 配置摘要；C
 
 `retrieval.status` 与工具 metadata 沿用原 Event Log。可用表示索引协议和配置可以查询，不保证全部源码最新；最终命中的文件再核对。快照、只读 worker 和任务 Docker 沙箱暂不开放，Docker 独立验收不受影响。仅在检索工具可用时加入按线索选择搜索、核对当前源码的提示，不新增模型路由。
 
+RG工程收口（2026-10-22）：新增副本/新鲜度/准备/Continue/预算/去重及脚本Agent调查已通过。唯一全量2087通过、1项旧测试字段预期失败、12项可选跳过；更新该测试并定向通过，生产实现不变，覆盖93.69%。Vue199项、类型/构建/格式、Ruff/Mypy126模块、服务启动、smoke12及干净wheel资源/隔离服务通过。浏览器34过1超时，原样复验唯一失败通过；全部失败证据见failure-cases，未重跑全量或无关Docker。真实embedding-3最小调用两次失败且保留unknown，新密钥HTTP429/1113为标准API账户欠费；40查询、24次Agent批次未执行，不能据此宣称语义质量或修复率提高。
+
 RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户从知识索引页显式构建后，Git Workspace 内 `.eventide/index.sqlite` 保存 `files`、带文件/行号/标题路径的 `chunks`、float32 embedding BLOB、FTS5 trigram 索引和 embedding fingerprint；数据库可随时删除重建，不进入 canonical Runtime schema 或 Event Log。v0.4 只枚举 `git ls-files --cached --others --exclude-standard` 可见的 UTF-8 文本，跳过 symlink、二进制、超过 1 MiB 的文件以及 `.git/`、`.eventide/`。增量判断以内容 SHA-256 为准；构建在写事务外完成读取、切块和 embedding，提交时重新核对语料与 index generation，并以单个 SQLite 事务替换文件、chunk、FTS 和 meta，因此查询只看到旧或新完整快照。
 
 C1 进一步固定 `IndexStore` 的 Workspace 目录身份。扫描拒绝非规范相对路径及任何祖先链接，打开文件后检查常规文件类型与身份，读取最多 1 MiB 加一个检测字节。索引只允许固定 `.eventide/index.sqlite` 路径；父目录、数据库与三个 SQLite 附属文件检查真实路径、文件类型与链接，数据库和附属文件拒绝硬链接。新建数据库先以独占创建取得已知文件身份，SQLite 打开后复核，失败关闭连接；构建在 embedding 完成后及提交扫描后再核对索引目录/数据库身份。链接与目录重定向拒绝，不改变 Runtime 的状态根配置或预算事实。

@@ -338,15 +338,30 @@ def test_local_admission_keeps_legacy_idempotency_fingerprint(tmp_path):
             headers={"Idempotency-Key": uuid.uuid4().hex},
         ).json()["session_id"]
         body = {"prompt": "local"}
+        key = uuid.uuid4().hex
         accepted = client.post(
             f"/api/sessions/{session}/runs",
             json=body,
-            headers={"Idempotency-Key": uuid.uuid4().hex},
+            headers={"Idempotency-Key": key},
         )
         run_id = accepted.json()["run_id"]
         assert wait_for_run(client, run_id)["status"] == "completed"
-        legacy = RunBody(**body).model_dump(exclude={"execution_profile", "sandbox_image"})
+        legacy = RunBody(**body).model_dump(
+            exclude={"execution_profile", "sandbox_image", "knowledge_index"},
+        )
         legacy["generation"] = {}
         assert host._admitted_intent(run_id)["request_fingerprint"] == digest(
             [session, "run", legacy]
         )
+        replay = client.post(
+            f"/api/sessions/{session}/runs",
+            json={**body, "knowledge_index": "existing"},
+            headers={"Idempotency-Key": key},
+        )
+        assert replay.status_code == 202 and replay.json()["run_id"] == run_id
+        changed = client.post(
+            f"/api/sessions/{session}/runs",
+            json={**body, "knowledge_index": "prepare"},
+            headers={"Idempotency-Key": key},
+        )
+        assert changed.status_code == 409
