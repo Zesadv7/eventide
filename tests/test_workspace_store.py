@@ -33,6 +33,43 @@ def test_store_replay_order_and_terminal(isolated_workspace):
     reopened.close()
 
 
+def test_unknown_tool_projection_survives_reopen_without_claiming_completion(isolated_workspace):
+    path = isolated_workspace / "runtime.sqlite"
+    store = RuntimeStore(path)
+    store.create_session("s")
+    store.create_run("r", "s")
+    store.append_fact("s", "tool.prepared", {
+        "call_id": "mcp", "name": "mcp__demo__write", "arguments": {"text": "payload"},
+        "readonly": False,
+    }, run_id="r")
+    store.append_fact("s", "tool.outcome_unknown", {
+        "call_id": "mcp", "name": "mcp__demo__write", "error": "connection lost",
+    }, run_id="r")
+    store.append_fact("s", "tool.prepared", {
+        "call_id": "read", "name": "read_file",
+    }, run_id="r")
+    store.append_fact("s", "tool.completed", {
+        "call_id": "read", "name": "read_file", "is_error": False, "content": "ok",
+    }, run_id="r")
+    store.finish_run("r", status="interrupted", reason="unknown_tool_outcome")
+    state = store.get_run("r")
+    assert state["tool_calls"] == 2
+    assert state["tools"]["mcp"] == {
+        "call_id": "mcp", "name": "mcp__demo__write", "arguments": {"text": "payload"},
+        "readonly": False, "error": "connection lost", "status": "outcome_unknown",
+    }
+    assert state["tools"]["read"]["status"] == "completed"
+    assert state["reason"] == "unknown_tool_outcome"
+    store.close()
+    reopened = RuntimeStore(path)
+    try:
+        assert reopened.get_run("r") == state
+        assert not any(e["type"] == "tool.completed" and e["payload"]["call_id"] == "mcp"
+                       for e in reopened.run_events("r"))
+    finally:
+        reopened.close()
+
+
 def test_global_fact_query_keeps_all_history_and_ignores_partial(isolated_workspace):
     store = RuntimeStore(isolated_workspace / "runtime.sqlite")
     store.create_session("first")

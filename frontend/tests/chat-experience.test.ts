@@ -181,4 +181,26 @@ describe("theme and disclosure controls", () => {
     expect(wrapper.text()).toContain("<script>");
     wrapper.unmount();
   });
+  it("shows uncertain outcomes ahead of error flags without marking success", () => {
+    const wrapper = mount(ToolActivity, {
+      props: {
+        tools: {
+          call: {
+            name: "mcp__demo__write",
+            status: "outcome_unknown",
+            is_error: true,
+            error: "<script>lost response</script>",
+          },
+          success: { name: "read_file", status: "completed", is_error: false },
+        },
+        count: 2,
+      },
+    });
+    const entries = wrapper.findAll(".tool-entry");
+    expect(entries[0].get("small").text()).toBe("结果待确认");
+    expect(entries[1].get("small").text()).toBe("已完成");
+    expect(wrapper.find("script").exists()).toBe(false);
+    expect(wrapper.text()).toContain("<script>lost response</script>");
+    wrapper.unmount();
+  });
 });

@@ -14,10 +14,10 @@ const entries = computed(() =>
   })),
 );
 function status(data: Record<string, unknown>) {
-  if (data.is_error || data.status === "failed") return "执行失败";
-  if (data.status === "completed") return "已完成";
   if (data.status === "unknown" || data.status === "outcome_unknown")
     return "结果待确认";
+  if (data.is_error || data.status === "failed") return "执行失败";
+  if (data.status === "completed") return "已完成";
   return String(data.status || "已记录");
 }
 </script>

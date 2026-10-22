@@ -1136,3 +1136,5 @@ MCP handler返回明确的ToolOutput（正文、is_error、metadata），ToolExe
 SDK的REQUEST_TIMEOUT/CONNECTION_CLOSED及调用中的TimeoutError、连接/流关闭、HTTP传输异常和取消，统一标记outcome_unknown并复用Host停驻、工作区限制和Continue拒绝。SDK无法提供可靠派发确认，可能在请求未到远端时也保守停止；这是避免盲目重复写入的取舍，不是恰好一次执行或远端事务。明确的其他协议错误仍保留原错误通道，发现失败及参数/权限拒绝不升级为未知。
 
 未知不是已失败，也不表示远端已停止；没有自动补偿、重发或人工核销新平台。现有事件、脱敏、导出及恢复边界继续有效；进程崩溃前已有prepared而无结果的MCP仍沿既有保守恢复路径。
+
+TC-2补充：tool.outcome_unknown必须进入逐调用投影；保留prepared的参数和unknown错误，前端优先显示结果待确认。取消不能把未知显示成普通失败，刷新不依赖内存缓存；不新增核销或重发入口。

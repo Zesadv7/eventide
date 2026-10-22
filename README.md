@@ -83,6 +83,8 @@ flowchart LR
 - **状态**：SQLite WAL 与追加式事件记录；队列、审批、用量和恢复复用同一 Runtime。
 - **扩展**：Skills、官方 MCP SDK；FTS5 / RRF 检索，可选本地语义模型与重排。
 
+MCP 调用中超时、断连或取消导致结果未知时，页面明确提示并停驻，不自动重发可能已执行的操作。
+
 详细的所有权、并发、恢复及取舍见 [架构](docs/architecture.md) 和 [设计决策](docs/decisions.md)。
 
 ## 验证与当前边界

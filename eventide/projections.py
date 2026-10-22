@@ -105,6 +105,12 @@ class RuntimeStateProjection:
                 state["tools"][payload["call_id"]] = {**payload, "status": "prepared"}
             if kind in {"tool.completed", "tool.abandoned"}:
                 state["tools"][payload["call_id"]] = {**payload, "status": kind.split(".")[1]}
+            if kind == "tool.outcome_unknown":
+                state["tools"][payload["call_id"]] = {
+                    **state["tools"].get(payload["call_id"], {}),
+                    **payload,
+                    "status": "outcome_unknown",
+                }
             if kind == "approval.required":
                 state["pending_approvals"][payload["approval_id"]] = payload
                 if not terminal:

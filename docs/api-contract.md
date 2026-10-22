@@ -182,6 +182,8 @@ Workspace capabilities 增加 readonly_workers（enabled/roles/max_concurrency/m
 
 交付由下述持久HTTP与Vue有界修复控制面提供准备、修复、查询、补丁核对和人工采纳；手动run/verify保留Python开发接口。原Run/Session/SSE/export可读取Writer与control Run证据；delivery事实与patch artifact hash存同一Event Log。Writer的execution_config在后续Run/Continue生效；图片/PDF契约不变。control Session归档且不能用于普通模型执行。
 
+Run详情的`tools[call_id].status`将该调用投影为`outcome_unknown`，保留prepared的脱敏参数和unknown事件的error/归属；只计一次调用，刷新/重启重建不产生新的完成事实。Web卡片显示“结果待确认”，优先于通用is_error标记。
+
 新增canonical tool.outcome_unknown与终态reason=unknown_tool_outcome；它保留未确认调用，不伪装成tool.completed，相关Workspace阻止普通Run、Continue和交付写入。前端显示“工具结果未确认”，不能将其展示为已停止或允许继续。未知状态不因abandon或重启清除。导出仍包含完整canonical证据，默认脱敏Trace只派生安全元数据。
 
 

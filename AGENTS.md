@@ -345,4 +345,4 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | 编号 | 状态 | 范围与验收 |
 |---|---|---|
 | TC-1 | 已完成 | MCP超时/断连/取消复用unknown停驻，明确isError传递并接既有失败窗口。新16项通过，另62项既有契约/循环及真实本机stdio/HTTP通过；初轮测试接口/断言与两项受控缺陷见FAIL-014/015。Ruff及4模块Mypy通过；architecture/api-contract/user-guide/ADR-096同步，无付费或外部写调用，不新增重试/补偿。证据.task_outputs/tool-outcomes/。 |
-| TC-2 | 待开始 | Run 工具投影及 Web 卡片展示结果待确认，保持已完成/失败语义；定向验证、同步契约和分发资源。 |
+| TC-2 | 已完成 | unknown投影保留原参数及错误，Web优先显示结果待确认；存储/Host/Runtime/Trace定向61项、已有unknown恢复2项、前端聊天组件13项及重建资源/实际FastAPI分发2项通过。全仓Ruff、Mypy124模块、Vue类型/构建及变更格式通过；architecture/api-contract/user-guide/ADR-096/README同步，FAIL-014/015复验及提交d2fccd6已登记。TC-1/2合计143项不同后端定向用例通过，非全量结果；遵从不重复无关测试，未重跑全量、浏览器、Docker或付费模型。分发测试1条既有依赖弃用警告。证据.task_outputs/tool-outcomes/，本地提交不推送。 |

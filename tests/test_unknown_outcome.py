@@ -48,7 +48,9 @@ async def test_unknown_result_parks_and_quarantines_workspace_across_restart(iso
         assert result.status == "interrupted"
         run = host.store.get_run(result.run_id)
         assert run["reason"] == "unknown_tool_outcome"
-        assert run["tools"]["shell"]["status"] == "prepared"
+        assert run["tools"]["shell"]["status"] == "outcome_unknown"
+        assert run["tools"]["shell"]["arguments"] == {"command": "work"}
+        assert "ContainerCleanupError" in run["tools"]["shell"]["error"]
         assert not any(e["type"] == "tool.completed" for e in host.store.run_events(result.run_id))
         state, repo = host.state_dir, host.settings.workdir
         await host.close()

@@ -151,7 +151,7 @@ Continue 从来源 `run.admitted` / `run.started` 继承 Plan 的只读限制与
 
 ## 入口、模型与 MCP
 
-MCP工具结果保留显式`isError`为ToolOutput→ToolResult，不再用正文的`Error:`前缀判定成功/失败；`metadata.mcp_is_error`保存该字段，明确失败使用`execution_failed`并进入已有三次同签名且源码无变化的失败窗口。调用边界内的本地/SDK超时、断连及取消转为`MCPOutcomeUnknown`，由Executor/Host沿既有`tool.outcome_unknown`停驻，不写成已完成或自动重试。服务器明确返回的其他协议错误仍是普通失败；参数与权限拒绝在调用前结束。SDK不暴露可靠的远端派发确认，即使无法证明请求已到达，也保守停驻；取消通知不能证明远端副作用已撤销。详见ADR-096。
+MCP工具结果保留显式`isError`为ToolOutput→ToolResult，不再用正文的`Error:`前缀判定成功/失败；`metadata.mcp_is_error`保存该字段，明确失败使用`execution_failed`并进入已有三次同签名且源码无变化的失败窗口。调用边界内的本地/SDK超时、断连及取消转为`MCPOutcomeUnknown`，由Executor/Host沿既有`tool.outcome_unknown`停驻，不写成已完成或自动重试。服务器明确返回的其他协议错误仍是普通失败；参数与权限拒绝在调用前结束。SDK不暴露可靠的远端派发确认，即使无法证明请求已到达，也保守停驻；取消通知不能证明远端副作用已撤销。RuntimeStateProjection将未知事实合并进原工具条目，保留脱敏参数与错误原因，Web显示“结果待确认”；这只是已有事件的可重建视图，不新增状态存储或完成事实。详见ADR-096。
 
 
 `api.py` 是 FastAPI 组装入口，保留 `create_app(runtime=None)`；现有 HTTP 路由按工作区、Session、Run、模型生成参数、Provider 配置、附件及 SSE/导出拆入 `http_api/`。请求模型集中声明；每个 router factory 接收同一应用的 `ApiContext`，其中只保存Host引用、ApprovalBroker和冻结的proxy peers，不拥有接收reservation或执行Task集合。每个应用独立创建上下文，禁止模块级共享可变状态。Host/RunDispatch管理接收与执行所有权，Store保存唯一事实；应用lifespan调用Host.close并等待实际清理。
