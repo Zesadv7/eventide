@@ -7,12 +7,13 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 from eventide.budgets import BudgetExceeded
-from eventide.models import ModelRequest
+from eventide.models import ModelRequest, ToolOutput
 from eventide.rag.index import IndexStore
 from eventide.rag.search import RetrievalOutcome, SearchResult, format_results, validate_k
+from eventide.rag.tool import retrieval_output
 from eventide.usage import build_usage_ledger
 from eventide.utils import owned_local_work
 from eventide.workspace import digest
@@ -42,7 +43,10 @@ def merge_queries(
     results = tuple(replace(item, score=score, sources=tuple(sorted(sources)),
                             rerank_score=None, rerank_rank=None)
                     for item, score, sources in candidates[:min(k, 5)])
-    return RetrievalOutcome(results, "query-rrf", (*original.diagnostics, *supplement.diagnostics))
+    return RetrievalOutcome(
+        results, "query-rrf", (*original.diagnostics, *supplement.diagnostics),
+        original.index_generation, original.embedding_fingerprint,
+    )
 
 
 def claim_rewrite(host: RuntimeHost, run_id: str, query: str) -> str | None:
@@ -60,10 +64,11 @@ def claim_rewrite(host: RuntimeHost, run_id: str, query: str) -> str | None:
 async def query_rewrite_outcome(
     host: RuntimeHost, run_id: str, workspace: Path,
     search: Callable[[str, int], Awaitable[RetrievalOutcome]], query: str, k: int = 5,
+    *, index_dir: Path | None = None,
 ) -> RetrievalOutcome:
     """Shared typed ranking result; execution/claim/budget rules match the production tool."""
     count = min(validate_k(k), 5)
-    generation = await owned_local_work(IndexStore(workspace).generation)
+    generation = await owned_local_work(IndexStore(workspace, index_dir=index_dir).generation)
     original = await search(query, count)
     def diagnosed(outcome: RetrievalOutcome, reason: str | None = None) -> RetrievalOutcome:
         diagnostics = (*outcome.diagnostics, reason) if reason else outcome.diagnostics
@@ -77,7 +82,7 @@ async def query_rewrite_outcome(
         "input_tokens", "output_tokens",
     )) >= host.settings.run_token_limit:
         return diagnosed(original, "rewrite_observed_budget_reached")
-    if await owned_local_work(IndexStore(workspace).generation) != generation:
+    if await owned_local_work(IndexStore(workspace, index_dir=index_dir).generation) != generation:
         return diagnosed(original, "rewrite_index_changed")
     root = claim_rewrite(host, run_id, query)
     if root is None:
@@ -114,14 +119,16 @@ async def query_rewrite_outcome(
                 "requesting_run_id": run_id, "status": reason,
             })
             return diagnosed(original, reason)
-        if await owned_local_work(IndexStore(workspace).generation) != generation:
+        if (await owned_local_work(IndexStore(workspace, index_dir=index_dir).generation)
+                != generation):
             finished("rewrite_index_changed")
             return diagnosed(original, "rewrite_index_changed")
         host.store.append_event(root, "retrieval.supplement_requested", {
             "requesting_run_id": run_id, "query_hash": digest(rewritten),
         })
         supplement = await search(rewritten, count)
-        if await owned_local_work(IndexStore(workspace).generation) != generation:
+        if (await owned_local_work(IndexStore(workspace, index_dir=index_dir).generation)
+                != generation):
             finished("rewrite_index_changed")
             return diagnosed(original, "rewrite_index_changed")
         combined = merge_queries(original, supplement, count)
@@ -144,12 +151,33 @@ async def query_rewrite_outcome(
         return diagnosed(original, "rewrite_failed")
 
 
+@overload
 def with_query_rewrite(
     host: RuntimeHost, run_id: str, workspace: Path,
     search: Callable[[str, int], Awaitable[RetrievalOutcome]],
-) -> Callable[..., Awaitable[str]]:
-    async def search_knowledge(query: str, k: int = 5) -> str:
-        outcome = await query_rewrite_outcome(host, run_id, workspace, search, query, k)
+    *, index_dir: Path | None = None, workspace_id: None = None,
+) -> Callable[..., Awaitable[str]]: ...
+
+
+@overload
+def with_query_rewrite(
+    host: RuntimeHost, run_id: str, workspace: Path,
+    search: Callable[[str, int], Awaitable[RetrievalOutcome]],
+    *, index_dir: Path | None = None, workspace_id: str,
+) -> Callable[..., Awaitable[ToolOutput]]: ...
+
+
+def with_query_rewrite(
+    host: RuntimeHost, run_id: str, workspace: Path,
+    search: Callable[[str, int], Awaitable[RetrievalOutcome]],
+    *, index_dir: Path | None = None, workspace_id: str | None = None,
+) -> Callable[..., Awaitable[str | ToolOutput]]:
+    async def search_knowledge(query: str, k: int = 5) -> str | ToolOutput:
+        outcome = await query_rewrite_outcome(
+            host, run_id, workspace, search, query, k, index_dir=index_dir,
+        )
+        if workspace_id is not None:
+            return retrieval_output(outcome, workspace_id=workspace_id)
         return format_results(list(outcome.results), mode=outcome.mode,
                               diagnostics=outcome.diagnostics)
 

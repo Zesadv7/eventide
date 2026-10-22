@@ -375,3 +375,5 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 ### RG1 评测数据冻结子任务
 
 - 已完成：新增 `retrieval-agent-v1` 8题，四类各开发/留出一题，固定源码、索引后变更、另副本干扰、事实及引用范围；批次固定开发8次/留出16次，交替两臂，不按结果补跑。正文SHA256为 `26a69ccf2e590f0ad41aeb86cf3411d476c8485031056fbb12b1d73747084ce4`。22项定向验证、Ruff通过；Mypy首轮仅缺类型已修正，复验结果见提交。原40查询与标签未改；无真实请求，数据冻结不等于模型效果。架构已同步，失败按RG-EVAL登记，Runner仍由RG5继续。
+
+- RG-CORE / RG2–RG3 核心子任务已完成：外部索引目录贯通构建/读快照/查询/改写，代次/指纹/文件哈希同快照取证，最终五条命中有界核对并移除无效正文；结构化 ToolOutput 与旧字符串开发接口兼容。核心与既有检索定向 162 项通过、1 项真实本地模型按开关跳过；Ruff、四模块 Mypy 和 diff 检查通过，日志 `core/expanded.log`、`compatibility.log`、`static-green.log`、`mypy.log`。两项预期 Red 已复验，3 处静态换行问题已修正并记录；无网络/模型请求。architecture 已同步；实际 Host/Web 准备、清理、权限和生命周期仍由主任务集成验收，不能把本子任务当 RG2–RG4 全部完成。

@@ -216,6 +216,12 @@ Host已对实际可用目录传入 `tools=`，归一化请求目录，并限制�
 
 ## Workspace 知识检索
 
+RG2/RG3 核心接口将源码根与索引目录分开：`IndexStore(workspace, index_dir=...)` 的构建、只读快照、查询及可选查询改写使用同一个明确目录。省略目录仍支持开发接口及旧索引位置；生产目录选择、旧位置只读兼容和实际 Workspace 身份由 Host 管理。外部目录同样检查链接、数据库及 SQLite 附属文件，不修改源码或 Git 忽略规则。
+
+`RetrievalOutcome` 现在保存同一 WAL 快照读取的索引代次和 embedding 指纹，每条 chunk 同时读取 `files.content_hash`。最终至多五条候选按文件去重后进行不跟随链接、最多 1 MiB 加检测字节的当前内容核对；修改、删除、链接、过大及无法读取都移除旧正文和标题，保留路径、索引行号及原因。`ToolOutput.metadata.retrieval` 保留 Workspace、代次、指纹、模式、诊断及命中来源；模型短文本仍限制五段、每段 800/合计 4,000 个正文字符。核对仅证明检查时内容一致，不证明未来不变或足以回答问题。早期 v1 稀疏索引没有 embedding 指纹时保持未知，不凭空补造。
+
+核心机制定向验证：两项预期 Red 转绿；新旧索引、路径与增量、同大小同时间戳变更、同快照重建、当前副本和改写绑定、输出上限及本地重排/既有离线评测共 162 项通过、1 项真实本地模型按既有开关跳过。该数值不表示真实模型效果或 RG4 生命周期验收；Host/Web 与真实 embedding 对照由本轮其余步骤继续集成。
+
 RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户从知识索引页显式构建后，Git Workspace 内 `.eventide/index.sqlite` 保存 `files`、带文件/行号/标题路径的 `chunks`、float32 embedding BLOB、FTS5 trigram 索引和 embedding fingerprint；数据库可随时删除重建，不进入 canonical Runtime schema 或 Event Log。v0.4 只枚举 `git ls-files --cached --others --exclude-standard` 可见的 UTF-8 文本，跳过 symlink、二进制、超过 1 MiB 的文件以及 `.git/`、`.eventide/`。增量判断以内容 SHA-256 为准；构建在写事务外完成读取、切块和 embedding，提交时重新核对语料与 index generation，并以单个 SQLite 事务替换文件、chunk、FTS 和 meta，因此查询只看到旧或新完整快照。
 
 C1 进一步固定 `IndexStore` 的 Workspace 目录身份。扫描拒绝非规范相对路径及任何祖先链接，打开文件后检查常规文件类型与身份，读取最多 1 MiB 加一个检测字节。索引只允许固定 `.eventide/index.sqlite` 路径；父目录、数据库与三个 SQLite 附属文件检查真实路径、文件类型与链接，数据库和附属文件拒绝硬链接。新建数据库先以独占创建取得已知文件身份，SQLite 打开后复核，失败关闭连接；构建在 embedding 完成后及提交扫描后再核对索引目录/数据库身份。链接与目录重定向拒绝，不改变 Runtime 的状态根配置或预算事实。

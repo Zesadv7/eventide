@@ -95,6 +95,7 @@ class IndexedChunk:
     end_line: int
     heading: str
     text: str
+    content_hash: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,13 +133,16 @@ class _Scan:
 class IndexStore:
     """Own the rebuildable knowledge index for one canonical Git Workspace."""
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, *, index_dir: Path | None = None):
         root, git_root = canonical_workspace(workspace)
         if git_root is None:
             raise ValueError("RAG indexing requires a Git workspace")
         self.workspace = root
         self._workspace_identity = self._identity(root)
-        self.path = root / INDEX_RELATIVE_PATH
+        self.index_dir = index_dir.absolute() if index_dir is not None else None
+        self.path = ((self.index_dir / "index.sqlite") if self.index_dir is not None
+                     else root / INDEX_RELATIVE_PATH)
+        self._bound_path = self.path
         self._snapshot: sqlite3.Connection | None = None
 
     @staticmethod
@@ -161,8 +165,12 @@ class IndexStore:
     def _validate_index_path(self) -> None:
         """Reject redirected index artifacts before SQLite can open or create them."""
         self._validate_workspace()
-        if self.path != self.workspace / INDEX_RELATIVE_PATH:
-            raise ValueError("Knowledge index path must remain inside its Workspace")
+        if self.path != self._bound_path:
+            raise ValueError(
+                "Knowledge index path must remain inside its Workspace or bound index directory"
+            )
+        if self.path.parent.resolve(strict=False) != self.path.parent:
+            raise ValueError("Knowledge index path contains a link or unsupported file type")
         paths = [self.path.parent, self.path]
         paths.extend(self.path.with_name(self.path.name + suffix) for suffix in (
             "-wal", "-shm", "-journal",
@@ -221,7 +229,7 @@ class IndexStore:
     def snapshot(self) -> Iterator[IndexStore]:
         """Pin metadata and both retrieval paths to one WAL read transaction."""
         self._validate_workspace()
-        reader = IndexStore(self.workspace)
+        reader = IndexStore(self.workspace, index_dir=self.index_dir)
         connection = reader._connect(create=False)
         try:
             connection.execute("BEGIN")
@@ -640,8 +648,9 @@ class IndexStore:
             with self._reader() as connection:
                 rows = connection.execute(
                     "SELECT chunks.id, chunks.file, chunks.start_line, chunks.end_line, "
-                    "chunks.heading, chunks.text, bm25(fts) AS score "
+                    "chunks.heading, chunks.text, files.content_hash, bm25(fts) AS score "
                     "FROM fts JOIN chunks ON chunks.id = fts.rowid "
+                    "JOIN files ON files.path = chunks.file "
                     "WHERE fts MATCH ? ORDER BY score ASC, chunks.id ASC LIMIT ?",
                     (match, limit),
                 ).fetchall()
@@ -656,6 +665,7 @@ class IndexStore:
                     end_line=int(row["end_line"]),
                     heading=str(row["heading"]),
                     text=str(row["text"]),
+                    content_hash=str(row["content_hash"]),
                 ),
                 rank=rank,
                 bm25=float(row["score"]),
@@ -667,6 +677,56 @@ class IndexStore:
         """Read the current published generation without holding a transaction during inference."""
         with self._reader() as connection:
             return self._generation(connection)
+
+    def retrieval_identity(self) -> tuple[int, str | None]:
+        """Read the evidence identity from the caller's pinned read snapshot."""
+        with self._reader() as connection:
+            meta = self._meta(connection)
+            fingerprint = (
+                self._validated_embedding_profile(meta).fingerprint()
+                if int(connection.execute("PRAGMA user_version").fetchone()[0]) == 2
+                else None
+            )
+            return self._generation(connection), fingerprint
+
+    def file_freshness(self, relative: str, content_hash: str) -> str:
+        """Check one hit against bounded current bytes without following source links."""
+        self._validate_workspace()
+        parts = PurePosixPath(relative).parts
+        if (not parts or PurePosixPath(relative).is_absolute() or ".." in parts
+                or "\\" in relative or PurePosixPath(relative).as_posix() != relative):
+            return "unsafe"
+        candidate = self.workspace / Path(*parts)
+        try:
+            if (candidate.resolve(strict=True) != candidate
+                    or not stat_module.S_ISREG(candidate.lstat().st_mode)):
+                return "unsafe"
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            with os.fdopen(os.open(candidate, flags), "rb") as stream:
+                before = os.fstat(stream.fileno())
+                if (not stat_module.S_ISREG(before.st_mode)
+                        or candidate.resolve(strict=True) != candidate
+                        or self._identity(candidate) != (before.st_dev, before.st_ino)):
+                    return "unsafe"
+                if before.st_size > MAX_SOURCE_BYTES:
+                    return "too_large"
+                body = stream.read(MAX_SOURCE_BYTES + 1)
+                if len(body) > MAX_SOURCE_BYTES:
+                    return "too_large"
+                after = os.fstat(stream.fileno())
+                if (candidate.resolve(strict=True) != candidate
+                        or self._identity(candidate) != (after.st_dev, after.st_ino)):
+                    return "unsafe"
+                if (before.st_mtime_ns, before.st_size) != (after.st_mtime_ns, after.st_size):
+                    return "changed"
+        except FileNotFoundError:
+            return "deleted"
+        except RuntimeError:
+            return "unsafe"
+        except OSError:
+            return "unreadable"
+        self._validate_workspace()
+        return "fresh" if hashlib.sha256(body).hexdigest() == content_hash else "changed"
 
     def embedding_profile(self) -> EmbeddingProfile:
         """Read and verify the vector identity stored with the index."""
@@ -725,8 +785,9 @@ class IndexStore:
             return []
         with self._reader() as connection:
             rows = connection.execute(
-                "SELECT id, file, start_line, end_line, heading, text, vec "
-                "FROM chunks WHERE vec IS NOT NULL"
+                "SELECT chunks.id, file, start_line, end_line, heading, text, vec, "
+                "files.content_hash FROM chunks JOIN files ON files.path = chunks.file "
+                "WHERE vec IS NOT NULL"
             ).fetchall()
         query_norm = math.sqrt(sum(value * value for value in vector))
         scored: list[tuple[float, sqlite3.Row]] = []
@@ -754,6 +815,7 @@ class IndexStore:
                     end_line=int(row["end_line"]),
                     heading=str(row["heading"]),
                     text=str(row["text"]),
+                    content_hash=str(row["content_hash"]),
                 ),
                 rank=rank,
                 similarity=similarity,

@@ -173,7 +173,7 @@ def test_hybrid_search_uses_one_generation_during_rebuild(
     monkeypatch.setattr(IndexStore, "dense_search", rebuild_after_dense)
     hits = hybrid_search(root, "needle", embedder=HashEmbedder(), profile=profile)
     assert len(hits) == 1
-    assert hits[0].chunk.text == "original needle"
+    assert hits[0].chunk.text == "" and hits[0].freshness == "changed"
     assert hits[0].sources == ("dense", "sparse")
     assert store.sparse_search("replacement", limit=5)[0].chunk.text == "replacement unrelated"
 
