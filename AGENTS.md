@@ -353,7 +353,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
 2026-10-23接入约束更新：用户要求仅用Coding Plan URL，停止标准API调用。已切换本机embedding地址，单次验证仍HTTP429/1113，尚无可用向量。不得自行回退标准API或更换冻结实验模型；历史标准接口计划及失败保留，不再作为继续调用的授权。
 
-2026-10-23本地候选试用（进行中）：用户同意改试Qwen3-Embedding-0.6B，固定官方revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`；仅下载必要安全格式文件，复用SentenceTransformers/CPU和现有检索主链。先验证加载、查询/文档提示、真实向量及小型索引，记录时间/内存与限制；通过后按原40查询开发/留出划分对比FTS5、Hash混合、本地Qwen混合，不调留出标签或追跑成绩。embedding-3失败记录保留；本地试用不是远程模型原实验的补跑，不调用标准API、不宣称工程修复率提高。
+2026-10-23本地候选试用（已完成试用，真实Agent效果仍待验证）：用户同意改试Qwen3-Embedding-0.6B，固定官方revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`；仅下载必要安全格式文件，复用SentenceTransformers/CPU和现有检索主链。先验证加载、查询/文档提示、真实向量及小型索引，记录时间/内存与限制；通过后按原40查询开发/留出划分对比FTS5、Hash混合、本地Qwen混合，不调留出标签或追跑成绩。embedding-3失败记录保留；本地试用不是远程模型原实验的补跑，不调用标准API、不宣称工程修复率提高。
 
 固定契约：Run/交付修复新增 `knowledge_index=existing|prepare`，默认 existing；Continue 继承并复验。prepare 在实际 Run 内、工具组装前准备当前副本索引，每轮 Writer 各自增量准备；不另占根任务名额，不在任务内每次查询时重建。所有远程请求共用模型槽、唯一 attempt 与项目/交付预算，准备失败明确停止，不自动重放。
 
@@ -369,7 +369,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | RG2 | 已完成 | 核心dcb436e已通过162项；0e447d0接入实际副本、新旧位置、手动目标及清理，8e36c00补4项路径/软限/历史边界。源与副本不串索引，旧库只读，新库损坏不回退，源码及忽略规则不变。 |
 | RG3 | 已完成 | dcb436e同快照哈希/代次、5文件新鲜度、有界ToolOutput与诊断；核心162项、过期提示后读当前源码的真实Host Scripted链路通过，旧正文不进入有效证据。architecture/api-contract同步；真实效果另归RG5。 |
 | RG4 | 已完成 | Run/Continue/Writer显式准备、锁/预算/取消和持久投影完成；55项主链关联、4项边界及35项embedding诊断通过。另受控复现手动索引换目标绕过去重，固定项目级身份后2项通过。Vue199项、真实API新增4旅程、OpenAPI/类型/构建通过；最终完整工程门禁在RG6。 |
-| RG5 | 待外部验证 | 9694c90接入受Host管理的40查询和8题双臂执行器，32项不同离线机制用例通过。两次标准接口最小请求失败；2026-10-23按用户要求切换Coding Plan后单次验证仍HTTP429/1113，三次均保留unknown。Coding Plan官方模型未列embedding-3，不能承诺套餐可抵扣；不再调用标准API。40查询及24次Agent真实批次均未执行，不宣称效果提高；失败见RG-LIVE。 |
+| RG5 | 待外部验证 | 9694c90接入受Host管理的40查询和8题双臂执行器，32项不同离线机制用例通过。两次标准接口最小请求失败；2026-10-23按用户要求切换Coding Plan后单次验证仍HTTP429/1113，三次均保留unknown。Coding Plan官方模型未列embedding-3，不能承诺套餐可抵扣；不再调用标准API。原embedding-3的40查询/24次Agent未执行；用户另行授权本地Qwen后，固定40查询完成，留出Qwen19/20、FTS5 16/20、Hash15/20，Recall/MRR及纯检索门槛通过、完整p95约1.254秒。24次真实Agent下游仍未执行，不晋升默认或宣称修复率提高；失败见RG-LIVE/RG-LOCAL。 |
 | RG6 | 已完成 | 工程收口：唯一一次全量2087通过/1旧测试失败/12显式跳过，覆盖93.69%≥85%；只更新旧请求测试排除新增默认字段，原失败1项及新增显式existing/prepare幂等断言通过，未改生产实现、未重跑全量。Ruff/Mypy126模块、Vue199项/类型/构建/格式、服务help/启动、离线smoke12及干净wheel资源/隔离服务和8题资源通过。浏览器全套34过1超时，原样仅复验1项通过；旧构建缓存/超时/测试失败全部登记。OpenAPI及产物更新，本地提交不推送；RG5真实效果仍待可用且经用户授权的embedding接入，不宣称检索质量提高。 |
 
 每步更新本表及相应稳定文档。原始日志统一保存忽略目录 `.task_outputs/retrieval-upgrade/`；所有失败按现有规范登记，预期Red与外部故障分开，不新增进度文档。
@@ -400,3 +400,5 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 ### RG-LOCAL 本地 embedding 角色适配子任务（2026-10-23）
 
 - 已完成（离线适配）：基线 `2696b2e`，固定包 query/document 提示分别用于查询/文档，内容及角色策略纳入指纹，旧本地语义索引须显式重建。新增11项含三入口及真实 Host prepare→查询→改写补查接线；首次9过2项测试问题，修正后仅复验失败与尚未运行的相关范围，最终81个不同用例通过、1项既有真实模型显式跳过。Ruff、独立只读复核、diff检查通过；Mypy默认3.10目标首次被共享环境NumPy语法阻断，改用已有隔离Python3.10检查环境后三模块通过，另3.12目标通过。architecture同步，失败及日志见 failure-cases RG-LOCAL、`.task_outputs/retrieval-upgrade/local-roles/`。CPU/安全/哈希边界保持，无模型下载/网络调用；真实Qwen冒烟及效果由主任务独立验证，本子任务不宣称效果提高。
+
+- RG-LOCAL真实试用已完成：主分支角色适配9318396；固定Qwen包1.203GB已准备到源码外并配置本机local_semantic，聊天配置不改。禁止网络的Host冒烟通过，1024维、中文检索英文源码及无变化索引复用，首次流程32.47秒/峰值RSS1.558GB。原40查询三臂对照69.42秒完成、无运行异常，开发均20/20，留出Qwen19/20、FTS5 16/20、Hash15/20；Qwen留出Recall.95/MRR.925、纯检索p95 37.80ms、完整p95 1253.94ms，峰值RSS1.561GB。漏召回与81项定向中的失败均已登记；architecture/user-guide/ADR-071同步。未跑真实聊天或重复全量/前端/Docker，24次Agent效果仍另验；报告在local-qwen/smoke.json及comparison.json。

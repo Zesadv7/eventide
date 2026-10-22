@@ -329,3 +329,12 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 类型：环境/外部依赖故障。变更三模块运行 `python -m mypy eventide/rag/embedding.py eventide/rag/local_models.py eventide/rag/search.py`，退出2；共享 `.venv` 的 `numpy/__init__.pyi:737` 使用Python3.12 `type`语法，仓库默认3.10目标在检查项目代码前失败。证据 `.task_outputs/retrieval-upgrade/local-roles/mypy.log`。
 - 已证实环境变化：主任务安装本地retrieval可选依赖，新增的NumPy类型文件引发语法不兼容；本子任务没有改动依赖。先完成3.12目标三模块检查，再使用主任务提供的既有 `.task_outputs/publish-py310/bin/python` 保留默认3.10目标复核，三模块均通过。证据 `local-roles/mypy-py312.log`、`mypy-py310.log`；没有放宽仓库门槛或改生产代码，原失败保留。
 - 经验与范围：区分类型环境解析失败与项目类型错误，复用已有最小检查环境；没有重跑全仓或为修测试重新安装依赖。记录随本地角色适配同提交，真实模型推理另验收。
+
+### RG-LOCAL：冻结检索留出集仍有漏召回（2026-10-23）
+
+- 类型：真实本地模型／检索效果失败，非运行异常。基线 `9318396`；固定Qwen3-Embedding-0.6B revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`、官方query提示、CPU、无重排/改写。原16语料40查询不改，开发20先执行，再一次留出20；质量分母按题计，三次重复仅测本地排序时间。
+- 命令：`PYTHON_DOTENV_DISABLED=1 PYTHONPATH=. HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python .task_outputs/retrieval-upgrade/local-qwen/compare.py`。退出0表示批次执行完成，不代表每题命中；完整结果 `local-qwen/comparison.json`、输出 `comparison.log`，进程禁止网络。
+- 结果：开发三臂均20/20；留出FTS5为16/20、Hash混合15/20、Qwen混合19/20。Qwen未通过 `hold-redis`；FTS5另漏 `hold-password`、`hold-db`、`hold-unauth`，Hash另漏上述三题及 `hold-sql`。0运行异常、Qwen空结果0；漏召回的具体排序原因待核对保留命中证据，不推测为源码或协议故障。
+- 处理与取舍：不修改标签、query提示、候选数或重跑留出集。保留唯一失败与全部基线失败，不能把19/20写成全部正确；排名改善不等于Agent调查或工程修复率提高。实际参与为接线、固定模型与实验执行；待补充失败证据解释和最终提交，真实Agent下游对照仍未执行。
+
+- 结果核对：`hold-redis`询问缓存服务器连接数量上限，标注目标为 `docs/redis-pool.md`。保留的前5条结果是缓存过期、缓存函数、金丝雀部署、授权失败及密码恢复，均为已核对的新鲜正文，目标未入前5；这是相关性失败，不是过期或跨副本误读。当前报告没有保存未返回候选的全部名次，不能断言错误只来自Qwen向量或RRF融合；不为分析而重新计算留出查询。角色适配提交主分支 `9318396`；本地完整Host冒烟另外通过，`smoke.json`显示真实向量1024维、禁止网络、源码无改动及无变化增量复用。质量回归无需“修到全过”才结束试用，后续优化必须使用开发集或新冻结集，保留当前结果。

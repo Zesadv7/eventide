@@ -144,6 +144,16 @@ Coding Plan的兼容地址为 `https://open.bigmodel.cn/api/coding/paas/v4/`，�
 
 可选 `uv sync --extra retrieval` 安装固定版本Sentence Transformers依赖。模型需预先在本机准备，使用 `eventide.rag.local_models.prepare_local_model` 固定revision及内容清单；配置 `EVENTIDE_EMBEDDING_PROVIDER=local_semantic`、`EVENTIDE_EMBEDDING_MODEL_PATH` 和可选 `EVENTIDE_RERANKER_MODEL_PATH`。运行时不下载，禁用远程代码、链接和pickle权重，CPU惰性加载。CrossEncoder最多重排20候选、返回5条；缺失或失败明确降级，不伪造分数。`uv sync --extra code` 可增加tree-sitter结构切块。
 
+Qwen3-Embedding-0.6B可作为本地候选；本轮固定官方revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`，必要模型文件约1.203GB，依赖与索引另计。准备目录只保留 `model.safetensors`、`config.json`、`config_sentence_transformers.json`、`modules.json`、`tokenizer.json`、`tokenizer_config.json` 和 `1_Pooling/config.json`，再通过上述准备接口生成带指纹的版本目录；不把下载缓存或额外格式文件混入。文件放在源码之外，不进入Git。示例配置：
+
+```dotenv
+EVENTIDE_EMBEDDING_PROVIDER=local_semantic
+EVENTIDE_EMBEDDING_MODEL_PATH=/absolute/path/to/prepared-qwen-model
+EVENTIDE_RETRIEVAL_QUERY_REWRITE=0
+```
+
+本地embedding无需API Key或Base URL，聊天模型仍单独配置。查询和文档分别读取固定包的 `prompts.query` / `prompts.document`，缺少角色提示时使用空提示；Qwen使用官方原查询指令。角色策略升级已改变本地索引指纹，旧索引需显式强制重建。当前使用CPU，保留模型文件完整性校验；模型可加载不代表检索收益或响应速度已达到推荐门槛。用uv启动时保留可选依赖，例如 `uv run --extra retrieval eventide-server`；开发环境还需保留自己启用的dev/code等extra。
+
 `EVENTIDE_RETRIEVAL_QUERY_REWRITE=1` 是默认关闭的实验开关：每个根任务与worker共用一次改写、最多一次补检索，不重试、不清零，原候选保留。改写和额外embedding均归原预算；无效输出或索引漂移保留原结果，预算拒绝或取消正常停驻。
 
 检索升级的浏览器定向验证使用临时 Git 项目、本地 Hash 和脚本模型，覆盖源目录、副本、Writer、准备等待时取消和刷新恢复；它验证页面与真实 API 接线，不代表 embedding-3 的语义质量。

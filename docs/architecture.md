@@ -258,6 +258,20 @@ Run 接收固定 `knowledge_index` 与不含凭据的 embedding 配置摘要；C
 
 2026-10-23接入约束更新：用户要求停用标准API，仅用智谱Coding Plan地址。忽略的本机embedding配置已切换至 `/api/coding/paas/v4/`；独立受Host管理的一次embedding-3请求仍返回HTTP429/1113，unknown1，没有向量。未重试、未回退标准API；官方套餐列表没有承诺embedding-3，故当前阻塞是尚未获得符合用户要求的可用向量服务。原冻结40查询/24次Agent对照仍未执行，切换本地或其他embedding前需重新明确实验基线，不改写历史结果。
 
+同日经用户授权改试本地Qwen3-Embedding-0.6B，固定官方revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`，必要安全格式文件1,203,021,431字节，包内容指纹 `7b9387cbfda024a032f603115b3e084d6b9b04f02d5b055af7ae6b72d60cc3a6`。M4/16GiB、SentenceTransformers6.1.0、Transformers5.20.0、Torch2.14.1、CPU实测权重为bfloat16，输出1024维float32归一化向量；查询使用官方包原query提示，不增加改写或重排。源码之外的固定模型目录已配置到本机忽略的`.env`，无需embedding服务密钥，聊天设置未修改。
+
+真实Host冒烟在禁止网络、ScriptedProvider、MCP关闭的隔离项目中完成prepare→中文search_knowledge→英文read_file；证据新鲜、目标命中、源码干净，无变化再次prepare重建文件0。首次完整流程32.47秒，后续无变化准备3.26秒，进程峰值RSS1.558GB；包含冷加载和完整性检查，不当作每次查询延迟。角色适配的81个不同定向测试、Ruff及三模块类型检查通过，首次测试/NumPy检查环境问题已记录并复验；没有重跑全量、前端或Docker。
+
+本地真实检索对照复用原16语料/40查询及标签：先开发20，再一次留出20，两个向量方案每题各取一次向量，纯检索计时重复3次。开发三臂均20/20、Recall@5/MRR均1；留出如下。模型在索引后驻留，向量时间含每次前后文件哈希；纯检索含源码新鲜度核对，完整查询为一次向量计算加首次排序，未混入其他臂耗时。
+
+| 留出方案 | 完整召回题数 | Recall@5 | MRR | 纯检索p95 | 完整查询p50 / p95 |
+|---|---:|---:|---:|---:|---:|
+| FTS5 | 16/20 | 0.8000 | 0.7500 | 37.42ms | 32.57 / 37.55ms |
+| Hash混合 | 15/20 | 0.7500 | 0.6417 | 36.62ms | 31.88 / 36.98ms |
+| Qwen混合 | 19/20 | 0.9500 | 0.9250 | 37.80ms | 1219.78 / 1253.94ms |
+
+Qwen查询向量留出p50/p95为1184.11/1220.16ms；16文档首次索引9.21秒，整个40题三臂实验69.42秒，峰值RSS1.561GB。FTS5空结果3/20，两个混合臂空结果0；三臂运行异常0。Qwen唯一漏召回为hold-redis，详见failure-cases，未补跑或改标。候选通过本次排名与纯检索延迟门槛，但完整延迟明显增加；24次真实Agent下游对照尚未执行，因此仍是用户显式选用的本地候选，不晋升全项目默认，不宣称工程修复率提高。此次没有远程模型请求，不能凭本地计算伪造Provider Token计量或供应商费用改善。原始报告在忽略目录 `.task_outputs/retrieval-upgrade/local-qwen/`；此前embedding-3三次失败独立保留。
+
 RG工程收口（2026-10-22）：新增副本/新鲜度/准备/Continue/预算/去重及脚本Agent调查已通过。唯一全量2087通过、1项旧测试字段预期失败、12项可选跳过；更新该测试并定向通过，生产实现不变，覆盖93.69%。Vue199项、类型/构建/格式、Ruff/Mypy126模块、服务启动、smoke12及干净wheel资源/隔离服务通过。浏览器34过1超时，原样复验唯一失败通过；全部失败证据见failure-cases，未重跑全量或无关Docker。真实embedding-3最小调用两次失败且保留unknown，新密钥HTTP429/1113为标准API账户欠费；40查询、24次Agent批次未执行，不能据此宣称语义质量或修复率提高。
 
 RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户从知识索引页显式构建后，Git Workspace 内 `.eventide/index.sqlite` 保存 `files`、带文件/行号/标题路径的 `chunks`、float32 embedding BLOB、FTS5 trigram 索引和 embedding fingerprint；数据库可随时删除重建，不进入 canonical Runtime schema 或 Event Log。v0.4 只枚举 `git ls-files --cached --others --exclude-standard` 可见的 UTF-8 文本，跳过 symlink、二进制、超过 1 MiB 的文件以及 `.git/`、`.eventide/`。增量判断以内容 SHA-256 为准；构建在写事务外完成读取、切块和 embedding，提交时重新核对语料与 index generation，并以单个 SQLite 事务替换文件、chunk、FTS 和 meta，因此查询只看到旧或新完整快照。
