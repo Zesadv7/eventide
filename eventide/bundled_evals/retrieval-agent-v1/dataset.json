@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "version": "retrieval-agent-v1",
+  "cases": [
+    {
+      "id": "symbol-receipt",
+      "split": "development",
+      "category": "identifier",
+      "question": "Find apply_receipt_once. What persistent field prevents duplicate receipt handling, and which function writes it?",
+      "documents": {
+        "receipts.py": "def apply_receipt_once(store, receipt):\n    if store.contains(receipt.id):\n        return \"duplicate\"\n    store.append(receipt.id, state=\"settled\")\n    return \"applied\"\n",
+        "receipt_store.py": "class ReceiptStore:\n    key = \"receipt_id\"\n\n    def contains(self, value):\n        return value in self.rows\n\n    def append(self, value, state):\n        self.rows[value] = {self.key: value, \"state\": state}\n",
+        "preview.py": "def receipt_preview(receipt):\n    return {\"display_id\": receipt.id, \"status\": \"preview\"}\n"
+      },
+      "facts": [
+        {
+          "key": "deduplication_field",
+          "value": "receipt_id",
+          "evidence": {
+            "path": "receipt_store.py",
+            "start_line": 1,
+            "end_line": 8
+          }
+        },
+        {
+          "key": "writer_function",
+          "value": "apply_receipt_once",
+          "evidence": {
+            "path": "receipts.py",
+            "start_line": 1,
+            "end_line": 5
+          }
+        }
+      ]
+    },
+    {
+      "id": "symbol-cursor",
+      "split": "holdout",
+      "category": "identifier",
+      "question": "Find resume_after_cursor. Which token is passed to the event reader, and which token is used when no prior cursor exists?",
+      "documents": {
+        "events.py": "def resume_after_cursor(reader, cursor):\n    position = cursor if cursor is not None else \"origin\"\n    return reader.after(position)\n",
+        "history.py": "def history_window(reader, latest):\n    return reader.before(latest)\n",
+        "transport.py": "def transient_preview(frame):\n    return {\"cursor\": None, \"text\": frame}\n"
+      },
+      "facts": [
+        {
+          "key": "reader_argument",
+          "value": "position",
+          "evidence": {
+            "path": "events.py",
+            "start_line": 1,
+            "end_line": 3
+          }
+        },
+        {
+          "key": "initial_token",
+          "value": "origin",
+          "evidence": {
+            "path": "events.py",
+            "start_line": 1,
+            "end_line": 3
+          }
+        }
+      ]
+    },
+    {
+      "id": "concept-drain",
+      "split": "development",
+      "category": "concept",
+      "question": "When the user asks a process to stop, where does the implementation keep emptying its output before returning? Give the stopping function and the operation that waits for the reader.",
+      "documents": {
+        "process.py": "async def halt_child(child, reader):\n    child.terminate()\n    await child.wait()\n    await reader.join()\n    return \"stopped\"\n",
+        "launch.py": "async def launch_child(factory):\n    child = await factory()\n    return child\n",
+        "preview.py": "def trim_preview(text, limit):\n    return text[:limit]\n"
+      },
+      "facts": [
+        {
+          "key": "stop_function",
+          "value": "halt_child",
+          "evidence": {
+            "path": "process.py",
+            "start_line": 1,
+            "end_line": 5
+          }
+        },
+        {
+          "key": "reader_wait",
+          "value": "reader.join",
+          "evidence": {
+            "path": "process.py",
+            "start_line": 1,
+            "end_line": 5
+          }
+        }
+      ]
+    },
+    {
+      "id": "concept-adopt",
+      "split": "holdout",
+      "category": "concept",
+      "question": "Before adopting a proposed edit, how does this code detect that the original checkout changed since review? Give the comparison function and the exception identifier.",
+      "documents": {
+        "adoption.py": "from fingerprints import tree_digest\n\ndef adopt_patch(source, reviewed_digest, patch):\n    if tree_digest(source) != reviewed_digest:\n        raise SourceChanged()\n    return patch.apply(source)\n",
+        "fingerprints.py": "def tree_digest(tree):\n    return tree.content_hash()\n",
+        "labels.py": "def display_version(project):\n    return project.name\n"
+      },
+      "facts": [
+        {
+          "key": "comparison_function",
+          "value": "tree_digest",
+          "evidence": {
+            "path": "adoption.py",
+            "start_line": 1,
+            "end_line": 6
+          }
+        },
+        {
+          "key": "exception",
+          "value": "SourceChanged",
+          "evidence": {
+            "path": "adoption.py",
+            "start_line": 1,
+            "end_line": 6
+          }
+        }
+      ]
+    },
+    {
+      "id": "chain-capacity",
+      "split": "development",
+      "category": "cross_file",
+      "question": "Trace start_job into the shared admission check. Which setting caps active jobs, and what exception is raised when it is reached?",
+      "documents": {
+        "service.py": "from admission import reserve\n\ndef start_job(pool, settings):\n    return reserve(pool, settings.active_limit)\n",
+        "admission.py": "def reserve(pool, ceiling):\n    if pool.active >= ceiling:\n        raise CapacityReached()\n    pool.active += 1\n    return pool.active\n",
+        "defaults.py": "class Settings:\n    active_limit = 4\n    waiting_limit = 20\n"
+      },
+      "facts": [
+        {
+          "key": "limit_setting",
+          "value": "active_limit",
+          "evidence": {
+            "path": "service.py",
+            "start_line": 1,
+            "end_line": 4
+          }
+        },
+        {
+          "key": "exception",
+          "value": "CapacityReached",
+          "evidence": {
+            "path": "admission.py",
+            "start_line": 1,
+            "end_line": 5
+          }
+        }
+      ]
+    },
+    {
+      "id": "chain-sanitize",
+      "split": "holdout",
+      "category": "cross_file",
+      "question": "Trace save_transcript into its content transformation. Which function removes credentials, and what marker replaces them?",
+      "documents": {
+        "transcripts.py": "from redaction import hide_keys\n\ndef save_transcript(store, text, keys):\n    store.write(hide_keys(text, keys))\n",
+        "redaction.py": "def hide_keys(text, keys):\n    for key in keys:\n        text = text.replace(key, \"[credential]\")\n    return text\n",
+        "console.py": "def short_preview(text):\n    return text[:80]\n"
+      },
+      "facts": [
+        {
+          "key": "redaction_function",
+          "value": "hide_keys",
+          "evidence": {
+            "path": "transcripts.py",
+            "start_line": 1,
+            "end_line": 4
+          }
+        },
+        {
+          "key": "replacement_marker",
+          "value": "[credential]",
+          "evidence": {
+            "path": "redaction.py",
+            "start_line": 1,
+            "end_line": 4
+          }
+        }
+      ]
+    },
+    {
+      "id": "fresh-retention",
+      "split": "development",
+      "category": "freshness",
+      "question": "Check the current retention policy, including whether active jobs qualify for cleanup. Report the current retention_days literal and the expression guarding cleanup.",
+      "documents": {
+        "retention.py": "retention_days = 3\n\ndef can_clean(job):\n    return job.finished\n",
+        "storage.py": "def remove_log(path):\n    path.unlink()\n"
+      },
+      "facts": [
+        {
+          "key": "retention_days",
+          "value": "7",
+          "evidence": {
+            "path": "retention.py",
+            "start_line": 1,
+            "end_line": 4
+          }
+        },
+        {
+          "key": "cleanup_guard",
+          "value": "job.finished and not job.active",
+          "evidence": {
+            "path": "retention.py",
+            "start_line": 1,
+            "end_line": 4
+          }
+        }
+      ],
+      "after_index": {
+        "retention.py": "retention_days = 7\n\ndef can_clean(job):\n    return job.finished and not job.active\n"
+      }
+    },
+    {
+      "id": "copy-dispatch",
+      "split": "holdout",
+      "category": "freshness",
+      "question": "Inspect this checkout, which may differ from another registered copy. What is its queue selection strategy, and which field is the sorting key?",
+      "documents": {
+        "queue.py": "strategy = \"priority\"\n\ndef pick_job(jobs):\n    return min(jobs, key=lambda job: job.priority)\n",
+        "worker.py": "from queue import pick_job\n\ndef next_task(jobs):\n    return pick_job(jobs)\n"
+      },
+      "facts": [
+        {
+          "key": "strategy",
+          "value": "priority",
+          "evidence": {
+            "path": "queue.py",
+            "start_line": 1,
+            "end_line": 4
+          }
+        },
+        {
+          "key": "sorting_field",
+          "value": "job.priority",
+          "evidence": {
+            "path": "queue.py",
+            "start_line": 1,
+            "end_line": 4
+          }
+        }
+      ],
+      "foreign_documents": {
+        "queue.py": "strategy = \"fifo\"\n\ndef pick_job(jobs):\n    return min(jobs, key=lambda job: job.created_at)\n",
+        "worker.py": "from queue import pick_job\n\ndef next_task(jobs):\n    return pick_job(jobs)\n"
+      }
+    }
+  ]
+}

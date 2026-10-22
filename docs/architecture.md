@@ -1,5 +1,11 @@
 # Eventide 架构
 
+## 检索升级的代码调查对照集
+
+`rag/agent_evaluation.py` 加载固定字节哈希的 `bundled_evals/retrieval-agent-v1/dataset.json`：8个小型代码调查任务，标识符、概念表达、跨文件证据、过期或副本差异四类，每类开发/留出各一题。任务源码与隐藏判分标签分开；模型只接收问题、回答结构和所需事实字段名。判分检查事实字面量、当前源码精确引用及冻结行范围，不依赖模型自评或是否使用 `search_knowledge`。索引后变更用例保留旧索引，副本用例带另一份同名文件干扰源码。
+
+固定两臂：无索引文件工具基线、显式语义检索候选；开发每题各一次共8次，留出各两次共16次，交替首先执行的组别，不因失败替换尝试。该数据集与原16语料40查询检索benchmark、工程修复任务集独立；定向测试通过仅证明数据/判分机制，不说明RAG提升修复率。受Host管理的执行和真实效果证据另按RG5记录。
+
 ## 独立验收输出观察接线（L2-hook，2026-10-22）
 
 LocalCommandExecutor 和 ContainerCommandExecutor 提供默认关闭的 `output_observer(stream, data)`，在每次读取命令管道的原始字节后调用；stream 分别为 stdout／stderr，不声明两路输出的精确交错。原有每流25,000字节首尾预览、计数、CommandResult、超时和取消清理不变。Docker 只为 `start --attach` 的命令输出启用观察，inspect/create/rm 控制客户端保持关闭。

@@ -204,3 +204,8 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 执行包装错误：首次命令用 zsh 只读变量 `status` 保存退出值，报告命令另报 shell 错误；pytest 已完整执行，原日志保留，未为包装错误重复测试。后续使用专属变量或工具直接返回退出码。
 - 处理及复验：待实现后追加；计划分离源码与存储、用同一数据库快照记录哈希和代次，再核对最终命中文件。
 - 实际参与与可追问点：维护代理在临时 Git 项目编写并运行确定性测试；无真实模型、用户项目或生产事故影响，不能据此宣称模型效果提高。
+
+
+## RG-EVAL：检索评测冻结与受控执行
+
+- **2026-10-22，新代码静态检查问题，基线0a80177：** 新增8题数据和独立判分的22项定向测试、Ruff通过；`PYTHON_DOTENV_DISABLED=1 /Users/zesadv/Documents/Codex/eventide/.venv/bin/python -m mypy eventide/rag/agent_evaluation.py` 首轮退出1，唯一错误为批次列表缺显式类型（`var-annotated`）。证据 `.task_outputs/retrieval-upgrade/eval-contract-mypy.log`。补充列表类型，不改运行行为或冻结标签；仅复验该模块Mypy。此为维护期静态问题，不是线上故障或模型失败；Codex编写、定位和修正，可追问冻结批次为何不能按结果选择重跑。

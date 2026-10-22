@@ -371,3 +371,7 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 每步更新本表及相应稳定文档。原始日志统一保存忽略目录 `.task_outputs/retrieval-upgrade/`；所有失败按现有规范登记，预期Red与外部故障分开，不新增进度文档。
 
 - RG-CORE / RG1：已完成两项预期 Red，基线 `0a80177`；旧检索返回修改前正文，外部 `index_dir` 参数尚不支持。2026-10-22 两项失败 / 0.14 秒，证据 `.task_outputs/retrieval-upgrade/core/red.log`，原因和包装命令错误已记 `docs/failure-cases.md` 的 RG-CORE。这只证明计划缺口，RG2/RG3 实现与验收仍在进行中。
+
+### RG1 评测数据冻结子任务
+
+- 已完成：新增 `retrieval-agent-v1` 8题，四类各开发/留出一题，固定源码、索引后变更、另副本干扰、事实及引用范围；批次固定开发8次/留出16次，交替两臂，不按结果补跑。正文SHA256为 `26a69ccf2e590f0ad41aeb86cf3411d476c8485031056fbb12b1d73747084ce4`。22项定向验证、Ruff通过；Mypy首轮仅缺类型已修正，复验结果见提交。原40查询与标签未改；无真实请求，数据冻结不等于模型效果。架构已同步，失败按RG-EVAL登记，Runner仍由RG5继续。
