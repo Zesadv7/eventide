@@ -222,6 +222,12 @@ RG2/RG3 核心接口将源码根与索引目录分开：`IndexStore(workspace, i
 
 核心机制定向验证：两项预期 Red 转绿；新旧索引、路径与增量、同大小同时间戳变更、同快照重建、当前副本和改写绑定、输出上限及本地重排/既有离线评测共 162 项通过、1 项真实本地模型按既有开关跳过。该数值不表示真实模型效果或 RG4 生命周期验收；Host/Web 与真实 embedding 对照由本轮其余步骤继续集成。
 
+Run 接收固定 `knowledge_index` 与不含凭据的 embedding 配置摘要；Continue 继承并重新核对，旧 Run 缺字段不补造。source、普通 worktree 和 Writer 按实际 Workspace 取得状态根下的索引；准备在 admission 复核和副本所有权之后、工具组装之前进行。手动构建与任务准备共用 Workspace 构建锁，等待不占模型槽；远程批次复用唯一 attempt 和项目/交付预算，并在下一批前检查 Run 已报告 Token 软限。失败或取消持久记录 retrieval.status 并结束或停驻，不进入聊天循环或自动重放。
+
+实际 Workspace 根缺失或被替换成链接时明确拒绝；状态根位于实际源码内时拒绝准备。既有 WorktreeService 还要求状态根在源项目外，该创建约束不放宽。索引历史查询不依赖目录当前是否存在；真正允许删除的执行副本同时清理受控派生索引，原有 Session 历史保护不变。新位置损坏不回退旧库，旧位置只读，prepare 只向新位置发布；配置不匹配需用户显式 force 重建。
+
+`retrieval.status` 与工具 metadata 沿用原 Event Log。可用表示索引协议和配置可以查询，不保证全部源码最新；最终命中的文件再核对。快照、只读 worker 和任务 Docker 沙箱暂不开放，Docker 独立验收不受影响。仅在检索工具可用时加入按线索选择搜索、核对当前源码的提示，不新增模型路由。
+
 RAG 是与 Runtime 状态库分离的 Workspace 派生能力。用户从知识索引页显式构建后，Git Workspace 内 `.eventide/index.sqlite` 保存 `files`、带文件/行号/标题路径的 `chunks`、float32 embedding BLOB、FTS5 trigram 索引和 embedding fingerprint；数据库可随时删除重建，不进入 canonical Runtime schema 或 Event Log。v0.4 只枚举 `git ls-files --cached --others --exclude-standard` 可见的 UTF-8 文本，跳过 symlink、二进制、超过 1 MiB 的文件以及 `.git/`、`.eventide/`。增量判断以内容 SHA-256 为准；构建在写事务外完成读取、切块和 embedding，提交时重新核对语料与 index generation，并以单个 SQLite 事务替换文件、chunk、FTS 和 meta，因此查询只看到旧或新完整快照。
 
 C1 进一步固定 `IndexStore` 的 Workspace 目录身份。扫描拒绝非规范相对路径及任何祖先链接，打开文件后检查常规文件类型与身份，读取最多 1 MiB 加一个检测字节。索引只允许固定 `.eventide/index.sqlite` 路径；父目录、数据库与三个 SQLite 附属文件检查真实路径、文件类型与链接，数据库和附属文件拒绝硬链接。新建数据库先以独占创建取得已知文件身份，SQLite 打开后复核，失败关闭连接；构建在 embedding 完成后及提交扫描后再核对索引目录/数据库身份。链接与目录重定向拒绝，不改变 Runtime 的状态根配置或预算事实。

@@ -70,6 +70,7 @@ class RuntimeStateProjection:
             "checkpoint": None,
             "reason": None,
             "gap_files": None,
+            "retrieval": None,
         }
         terminal = False
         for event in events:
@@ -100,6 +101,8 @@ class RuntimeStateProjection:
                     state["usage"][key] = state["usage"].get(key, 0) + value
             if kind == "workspace.checkpoint":
                 state["checkpoint"] = payload.get("checkpoint")
+            if kind == "retrieval.status":
+                state["retrieval"] = payload
             if kind == "tool.prepared":
                 state["tool_calls"] += 1
                 state["tools"][payload["call_id"]] = {**payload, "status": "prepared"}

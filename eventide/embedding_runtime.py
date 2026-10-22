@@ -185,6 +185,17 @@ async def embed_remote(
         if isinstance(failure, EmbeddingRequestError):
             raise failure from None
         if isinstance(failure, Exception):
+            from openai import APIConnectionError, APIStatusError
+
+            if isinstance(failure, APIStatusError):
+                error = _field(failure.body, "error") or failure.body
+                code = str(_field(error, "code"))
+                suffix = f", provider code {code}" if code.isascii() and code.isdecimal() else ""
+                raise EmbeddingRequestError(
+                    f"Embedding request failed (HTTP {failure.status_code}{suffix})"
+                ) from None
+            if isinstance(failure, APIConnectionError):
+                raise EmbeddingRequestError("Embedding connection failed") from None
             raise EmbeddingRequestError("Embedding request or client cleanup failed") from None
         if failure is not None:
             raise failure

@@ -12,6 +12,7 @@ from eventide.index_control import IndexController
 from eventide.models import RunRequest
 from eventide.providers import ScriptedProvider
 from eventide.rag.index import IndexStore
+from eventide.retrieval_runtime import managed_index_dir
 from tests.test_evaluation_control import host_for
 
 
@@ -91,7 +92,7 @@ async def test_failed_build_stays_in_history_and_allows_explicit_new_request(tmp
     host, controller = controller_for(tmp_path)
     async def failed(*args, **kwargs):
         raise RuntimeError("index changed")
-    monkeypatch.setattr("eventide.index_control.build_index", failed)
+    monkeypatch.setattr("eventide.index_control.prepare_index", failed)
     try:
         run = await accept(controller)
         with pytest.raises(RuntimeError, match="index changed"):
@@ -140,7 +141,9 @@ def test_http_idempotency_origin_drift_and_restart_replay(tmp_path):
         assert client.post(endpoint, json=body,
                            headers={"Idempotency-Key": "build"}).json() == receipt
         assert len(client.get(endpoint).json()) == 1
-        assert IndexStore(Path(restored.default_workspace.path)).generation() == 1
+        index = IndexStore(Path(restored.default_workspace.path),
+                           index_dir=managed_index_dir(restored, restored.default_workspace))
+        assert index.generation() == 1
 
 
 def test_http_queue_cancel_is_idempotent_and_keeps_agent_roots(tmp_path):

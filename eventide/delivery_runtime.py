@@ -102,6 +102,8 @@ class DeliveryController:
         protected_patterns: tuple[str, ...] = (),
         max_rounds: int = 3,
         observed_token_limit: int = 60_000,
+        knowledge_index: str = "existing",
+        _retrieval_configuration: dict[str, Any] | None = None,
         _control_run_id: str | None = None,
     ) -> dict[str, Any]:
         host = self.host
@@ -239,6 +241,7 @@ class DeliveryController:
                         result = await run_repair(
                             self, run_id, delivery_id, source, checkout_ws, receipt,
                             goal or "", checks or [], image, max_rounds, observed_token_limit,
+                            knowledge_index, _retrieval_configuration,
                         )
                     elif action == "run":
                         if not goal or not goal.strip() or len(goal) > 20_000:
@@ -351,7 +354,17 @@ class DeliveryController:
         from eventide.delivery_control import is_delivery_control_run, start_owned_writer
 
         owned = is_delivery_control_run(host.store, run_id)
-        request = RunRequest(goal, child_session, child_id)
+        contract: dict[str, Any] = next((e["payload"] for e in host.store.delivery_facts(delivery_id)
+                         if e["type"] == "delivery.repair_started"), {})
+        option = contract.get("knowledge_index", "existing")
+        if "retrieval_configuration" in contract:
+            from eventide.retrieval_runtime import freeze_configuration
+
+            if freeze_configuration(host.settings, option)["retrieval_configuration"] != (
+                contract["retrieval_configuration"]
+            ):
+                raise ValueError("Embedding configuration changed between Writer rounds")
+        request = RunRequest(goal, child_session, child_id, knowledge_index=option)
         if owned:
             child = await start_owned_writer(host, run_id, child_session, child_id, request, config)
         else:

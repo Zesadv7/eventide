@@ -95,6 +95,7 @@ class WebDeliveryController:
         image: str | None = None,
         max_rounds: int = 3,
         observed_token_limit: int = 60_000,
+        knowledge_index: str = "existing",
         patch_sha256: str | None = None,
         request_fingerprint: str | None = None,
     ) -> str:
@@ -110,6 +111,9 @@ class WebDeliveryController:
         if action != "prepare" and not delivery_id:
             raise ValueError("Delivery identity required")
         if action == "repair":
+            from eventide.retrieval_runtime import freeze_configuration, validate_preparation
+
+            retrieval = freeze_configuration(self.host.settings, knowledge_index)
             if not goal or not goal.strip() or len(goal) > 20_000:
                 raise ValueError("Repair goal must contain 1-20000 characters")
             if (
@@ -129,6 +133,11 @@ class WebDeliveryController:
             raise ValueError("Delivery operation is busy")
         if delivery_id:
             value = self.delivery.load(delivery_id)
+            if action == "repair" and knowledge_index == "prepare":
+                checkout = self.host.resolve_or_register_workspace(
+                    Path(value["receipt"]["checkout"]),
+                )
+                validate_preparation(self.host, checkout)
             if value["applied"]:
                 raise ValueError("Delivery already applied")
             if action == "repair" and value["repair"]:
@@ -168,6 +177,7 @@ class WebDeliveryController:
             "checks": list(checks or []),
             "image": image,
             "max_rounds": max_rounds,
+            **(retrieval if action == "repair" else {}),
             **({"observed_token_limit": observed_token_limit}
                if action == "repair" and observed_token_limit != 60_000 else {}),
             "patch_sha256": patch_sha256,
@@ -234,6 +244,8 @@ class WebDeliveryController:
                 image=accepted["image"],
                 max_rounds=accepted["max_rounds"],
                 observed_token_limit=accepted.get("observed_token_limit", 60_000),
+                knowledge_index=accepted.get("knowledge_index", "existing"),
+                _retrieval_configuration=accepted.get("retrieval_configuration"),
                 _control_run_id=run_id,
             )
             summary = self.store.get_run_summary(run_id)

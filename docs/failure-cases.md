@@ -231,3 +231,29 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 随后单用例复验又暴露测试访问私有 `store.cursors`（未导出）的 TypeError。证据 `.task_outputs/retrieval-upgrade/ui/sse-recheck.log`；改为断言公开 events 中的序号，并复验整个相关测试文件。两次均属新增测试问题，未放宽状态或权限断言。
 
 - 最终复验：`tests/workbench.test.ts` 12 项全部通过（`.task_outputs/retrieval-upgrade/ui/sse-final.log`）；SSE 状态更新及重新创建 Pinia 后读取恢复均通过。前一次相关 53 项通过仍保留，不重新执行无关测试。经验：HTTP 替身每次返回独立 JSON 对象，断言公开接口，避免将测试中的共享引用或私有实现细节误判为生产故障；提交随 RG4-UI 保存。
+
+
+## RG-LIVE：标准 embedding-3 首次接入未成功
+
+- **日期、类型、基线：** 2026-10-22，真实 API／环境或外部故障待查；`0a80177` 加本轮未提交主链接线。不是模型检索质量失败。
+- **证据：** `.task_outputs/retrieval-upgrade/live/probe.py`，退出 2；`live/probe.json` 与隔离 `live/probe-state/runtime.sqlite`。只派发 1 次受 Host 管理的请求，0 个成功向量，1 次未知用量，预留未按零消费释放。
+- **现象与已知边界：** 返回 `EmbeddingRequestError: Embedding request or client cleanup failed`。现有适配器隐藏供应商异常细节，当前证据不足以归因于认证、余额或网络；不得写成“余额不足”。使用的是此前用户授权的智谱密钥，未写入文件或事件。
+- **处理：** 停止扩大调用，保留失败及未知用量；离线实现继续。用户先选择“已配置”，随后澄清尚不清楚密钥获取位置；已提供官方标准 API 入口，尚未再次派发请求。后续配置完成再使用新尝试身份，不覆盖首轮失败。
+- **参与与总结：** Codex 执行单次受控接入，用户处理外部配置。可追问：为什么接口失败不能记真实零 Token，以及错误脱敏与故障可诊断性之间的取舍；尚未证明检索效果。
+
+## RG-ROOT：任务准备接线的定向验证
+
+- **2026-10-22／维护期静态检查问题：** RG1已冻结，主链接线尚在实现。变更文件Ruff首轮退出1：4处导入排序、2处行长；`.task_outputs/retrieval-upgrade/root-ruff.log`。仅整理新增导入和换行，不改变边界、预算或验收；复验随本轮定向验证记录。Codex实现和修正，无模型效果或线上故障含义。
+
+- **RG-LIVE 新密钥复验：** 用户提供新的标准API Key后，单独保存到Git忽略且权限0600的本机`.env`，仅设置embedding字段。隔离`probe-02`再次只派发1次，退出2，返回HTTP429、供应商数字码1113；`.task_outputs/retrieval-upgrade/live/probe-02.json`与对应独立Store保留本次证据。未返回usage，1次未知保留；未扩大索引或模型批次。新增安全错误诊断不记录响应原文/密钥，35项embedding定向回归通过（embedding-runtime.log），HTTP401替身验证状态/数字码可见且密钥不泄露。供应商码含义待官方资料核对，不能把所有429都解释成限流。
+
+- **RG-LIVE 外部原因核对：** 智谱官方错误码页 `https://docs.bigmodel.cn/cn/faq/api-code` 将1113/HTTP429定义为账户欠费；第二次故障归类为标准API额度阻塞，已告知用户处理所属账户余额/适用资源包后再恢复。首轮仅通用错误，仍不倒推为同一已证实原因；两次均保留，不重写未知Token为0。
+
+- **RG-ROOT 类型检查：** 9个受影响模块Mypy首轮2项错误（root-mypy.log）：可选workspace_id使改写handler返回str/ToolOutput联合类型，Writer契约字典缺显式类型。生产调用已有真实Workspace身份，收紧内部handler参数为必填str并补字典类型；行为不增加兼容回退，复验见后续。
+- **RG-ROOT 并行整合工具问题：** 多worktree共用Git stash栈，默认索引发生交错；误删除的是评测代理暂存引用，已按完整对象SHA恢复全部两份实现，双方工作区核对无源码损失。只处理本轮自己的暂存，不触碰旧用户stash。后续并行整合用具体SHA或独立patch，不用默认stash栈顶。此为维护流程问题，非产品运行或线上事故。
+
+- **RG-ROOT 首次主链集成：** `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest -q tests/test_retrieval_preparation.py tests/test_index_control.py tests/test_retrieval_runtime.py tests/test_rag_tool.py tests/test_delivery_repair.py --tb=short` 返回6失败、46通过、1项真实Docker按开关跳过，134.20秒；证据 `root-integration.log`。新增测试漏传list_sessions的workspace_id、未创建fixture父目录、重复删除已释放admission；旧测试仍替换已改名的构建接线、断言旧源码索引位置。均为本轮测试接线/预期问题，已通过的源/副本/Writer与取消机制不重跑；修正后先复验这6项，保留原断言目的。不是用户事故或模型效果失败。
+
+- RG-ROOT边界修正后的Ruff再次报告3处新增长行及1处可合并if；root-ruff-recheck.log，均只调整新改行的格式，不改判定。
+
+- **RG-ROOT定向复验：** 上述6项原失败全部通过（1.68秒，root-integration-recheck.log）；随后新增source/worktree Continue继承与配置漂移、ScriptedProvider收到过期提示后读取当前源码3项通过（5.36秒，continue-stale.log）。9模块Mypy与受影响Ruff通过；无真实请求。首轮其余46项结果保留，不将本次复验写成重跑全量。

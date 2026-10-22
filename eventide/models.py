@@ -66,6 +66,7 @@ class RunRequest:
     execution_target: str = "source"
     execution_profile: str = "local"
     sandbox_image: str | None = None
+    knowledge_index: str = "existing"
 
 
 @dataclass(frozen=True, slots=True)

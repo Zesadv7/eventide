@@ -25,6 +25,7 @@ class DeliveryRepairBody(BaseModel):
     image: str | None = Field(default=None, min_length=1, max_length=512)
     max_rounds: int = Field(default=3, ge=1, le=3)
     observed_token_limit: int = Field(default=60_000, ge=1, le=1_000_000)
+    knowledge_index: Literal["existing", "prepare"] = "existing"
 
 
 class DeliveryApplyBody(BaseModel):
@@ -171,8 +172,10 @@ def create_router(context: ApiContext) -> APIRouter:
     ) -> dict[str, Any]:
         return await accept(
             project_for(delivery_id), "repair",
-            body.model_dump(exclude={"observed_token_limit"}
-                            if body.observed_token_limit == 60_000 else set()),
+            body.model_dump(exclude=(
+                ({"observed_token_limit"} if body.observed_token_limit == 60_000 else set())
+                | ({"knowledge_index"} if body.knowledge_index == "existing" else set())
+            )),
             request, delivery_id,
         )
 

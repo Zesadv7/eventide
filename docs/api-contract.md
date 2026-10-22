@@ -374,7 +374,7 @@ Python `RuntimeHost.manage_delivery("repair", delivery_id, goal, checks, image?,
 ### Web 交付接收和人工采纳
 
 - `POST /api/projects/{project_id}/deliveries`：`{name}`，1–48个小写字母/数字/连字符，创建独立副本。
-- `POST /api/deliveries/{delivery_id}/repair`：`{goal,checks,image?,max_rounds?,observed_token_limit?}`，目标1–20000字符，1–4个最多2000字符的明确验收命令，最多1–3轮（默认3）；已报告Token软限为1–1,000,000的严格整数，默认60,000。接收后冻结到原`limits.observed_tokens`，36次模型尝试及900秒保持固定。固定后不允许改验收条件、额度或重启同一修复流程。
+- `POST /api/deliveries/{delivery_id}/repair`：`{goal,checks,image?,max_rounds?,observed_token_limit?,knowledge_index?}`，目标1–20000字符，1–4个最多2000字符的明确验收命令，最多1–3轮（默认3）；已报告Token软限为1–1,000,000的严格整数，默认60,000。接收后冻结到原`limits.observed_tokens`，36次模型尝试及900秒保持固定。固定后不允许改验收条件、额度或重启同一修复流程。
 - `POST /api/deliveries/{delivery_id}/apply`：`{patch_sha256}`，必须与当前通过验收的补丁一致。持久接收和执行时均检查，源码漂移仍由原采纳检查拒绝。
 - 以上写入严格禁止额外字段，要求本机同源和`Idempotency-Key`；202返回run_id/delivery_id/project_id/status_url/events_url。同键同正文返回原身份，不重放；同键不同正文409。确定未接收的繁忙/冲突409或队列满429附`X-Eventide-Mutation-Outcome: rejected`，未知结果保留原键。
 - `GET /api/projects/{project_id}/deliveries`、`GET /api/deliveries/{delivery_id}`：已准备交付、固定修复条件、轮次、独立验收与采纳状态。
@@ -562,3 +562,14 @@ Session 响应新增 `execution_profile: "local" | "sandbox" | null`（null 表�
 现有模型工具 `read_tool_result(run_id,call_id,offset=0,limit=4000,stream?)` 接受可选stdout/stderr；省略或null沿用原已保存content字符坐标，不隐式解析旧日志分流。新stream坐标是脱敏保存文本的字符数，单页limit最多12,000，页头返回next_offset或end_of_stream、availability、capture_state/reason及encoding_loss。只能读取同Session或控制器冻结的精确Writer Run/call白名单；不提供任意路径或新增下载HTTP入口。
 
 capture_state为complete、quota_exceeded、write_failed、redaction_unavailable、interrupted或not_started；reason细分stream/run/global配额、写入/最终化失败、取消/超时/进程重启等。Docker管理诊断继续原content预览，未派发attach的命令归档为not_started。availability区分available、not_saved、expired、missing、corrupt与corrupt_or_unreadable；available仍可能只含不完整前缀，旧记录显式请求stream返回无分流证据。归档全文不自动灌入事件、SSE或JSONL；原短预览及主动回读的有界页仍按现有工具结果记录与导出。原12,000字符修正反馈和命令退出/人工采纳规则保持。
+
+
+### 副本索引、任务准备与可信检索（RG）
+
+普通Run与交付repair请求新增 `knowledge_index: existing|prepare`，默认existing。省略与显式existing保持同一幂等内容；prepare与existing是不同意图，同键不同意图409。接收时冻结选择和embedding配置摘要；Continue继承并复验，历史缺字段不补造。snapshot/sandbox的prepare在接收前拒绝；只读worker不提供索引工具。每轮Writer准备属于自身Run，无额外根任务。准备失败不进入模型循环，取消/预算/未知沿既有语义，重启不自动重放。
+
+手动 `POST /api/projects/{project_id}/indexes` 新增可选workspace_id；省略为源Workspace，只接受同项目注册且存在的副本。回执和详情新增workspace_id，项目历史聚合副本构建。新 `GET /api/workspaces/{workspace_id}/index-status` 返回status=available|unavailable、workspace_id、location=managed|legacy，以及可选reason/detail/model/generation/embedding_fingerprint/config_hash。字段可为null；available表示匹配索引可用，不代表全部源码都最新。损坏的新位置不回退旧位置。
+
+持久 `retrieval.status` payload含status=preparing|available|unavailable|failed、实际workspace_id、可选location/model/generation/embedding_fingerprint/reason/detail；准备成功可附build统计。Run投影的retrieval直接取最新事件，旧历史为null，SSE重放不能触发准备或消费。`tool.completed.metadata.retrieval` 含workspace_id/index_generation/embedding_fingerprint/mode/diagnostics和hits；命中含file/start_line/end_line/indexed_content_hash/freshness，freshness区分fresh/changed/deleted/unsafe/unreadable/too_large。旧调用缺metadata显示未记录；无命中与索引不可用分别表达。
+
+全文正文仍有界且经统一脱敏。过期命中不携带旧正文；索引中的行号只用于定位，不承诺当前文件同坐标。新鲜度只表示检查时文件哈希一致，不能推断答案充分性或未来稳定性。远程embedding与查询改写继续使用原attempt账本；没有新增证据数据库或响应缓存。

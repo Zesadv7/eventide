@@ -139,6 +139,27 @@ async def test_budget_refusal_precedes_remote_call(remote_host, monkeypatch):
     assert remote_host.budget_status()["reservations"] == []
 
 
+async def test_http_failure_keeps_safe_status_and_unknown_usage(remote_host, monkeypatch):
+    import httpx
+    from openai import APIStatusError
+
+    async def request():
+        raise APIStatusError(
+            "fixture-embedding-secret raw query", response=httpx.Response(
+                401, request=httpx.Request("POST", "https://embedding.invalid/v1/embeddings"),
+            ), body={"error": {"code": "1002", "message": "fixture-embedding-secret"}},
+        )
+
+    client = Client(request=request)
+    monkeypatch.setattr(embedding_runtime, "_client", lambda _: client)
+    run = admitted(remote_host)
+    with pytest.raises(EmbeddingRequestError, match="HTTP 401, provider code 1002") as error:
+        await embed_remote(remote_host, run, ["query"])
+    assert "secret" not in str(error.value)
+    assert ledger(remote_host, run)["unknown_attempts"] == 1
+    assert len(client.requests) == 1
+
+
 async def test_waiting_for_shared_slot_cancellation_never_reserves(remote_host, monkeypatch):
     created = []
     monkeypatch.setattr(embedding_runtime, "_client", lambda _: created.append(Client()))

@@ -6,15 +6,12 @@ import asyncio
 import re
 import time
 from dataclasses import asdict
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from eventide.budgets import BudgetExceeded
 from eventide.config import Settings
-from eventide.index_runtime import build_index
 from eventide.models import RunResult
-from eventide.rag.embedding import provider_from_settings
-from eventide.workspace import digest
+from eventide.retrieval_runtime import configuration, prepare_index, validate_preparation
 
 if TYPE_CHECKING:
     from eventide.host import RuntimeHost
@@ -46,17 +43,24 @@ class IndexController:
         self.store = host.store
         self._settings: dict[str, Settings] = {}
 
-    def owner(self, project_id: str, *, create: bool = True) -> str:
+    def owner(
+        self, project_id: str, *, create: bool = True, workspace_id: str | None = None,
+    ) -> str:
         project = self.store.get_project(project_id)
-        owner = f"index_control_{project_id}"
+        target = workspace_id or project.source_workspace_id
+        workspace = self.store.get_workspace(target)
+        if workspace.project_id != project_id:
+            raise ValueError("Index Workspace does not belong to this project")
+        owner = (f"index_control_{project_id}" if target == project.source_workspace_id
+                 else f"index_control_{project_id}_{target}")
         session = self.store.get_session(owner)
         marker = {"kind": "index", "project_id": project_id}
         if session is None and create:
-            self.host.create_session(owner, workspace_id=project.source_workspace_id)
+            self.host.create_session(owner, workspace_id=target)
             self.store.append_fact(owner, "control.session", marker)
             self.store.update_session(owner, title="索引管理", archived=True)
         elif session is not None and (
-            session["workspace_id"] != project.source_workspace_id
+            session["workspace_id"] != target
             or not any(e["type"] == "control.session" and e["payload"] == marker
                        for e in self.store.session_events(owner))
         ):
@@ -64,15 +68,12 @@ class IndexController:
         return owner
 
     def configuration(self) -> dict[str, Any]:
-        _, profile = provider_from_settings(self.host.settings)
-        # Endpoint and credentials never enter control events or browser configuration.
-        public = {"provider": profile.provider, "model": profile.model,
-                  "algorithm_version": profile.algorithm_version, "dimension": profile.dimension}
-        return {**public, "config_hash": digest({**public, "endpoint": profile.base_url})}
+        return configuration(self.host.settings)
 
     async def admit(
         self, project_id: str, run_id: str, *, config_hash: str, force: bool = False,
         code_structure: bool = False, request_fingerprint: str | None = None,
+        workspace_id: str | None = None,
     ) -> str:
         from eventide.host import _Admission
 
@@ -82,13 +83,13 @@ class IndexController:
         config = self.configuration()
         if config_hash != config["config_hash"]:
             raise ValueError("Index configuration changed; refresh before starting")
-        owner = self.owner(project_id)
+        owner = self.owner(project_id, workspace_id=workspace_id)
         if self.host.session_busy(owner):
             raise ValueError("Project index build is busy")
         if self.store.get_run_identity(run_id):
             raise ValueError("Run identity already used")
-        project = self.store.get_project(project_id)
-        workspace = self.store.get_workspace(project.source_workspace_id)
+        workspace = self.host.sessions.workspace(owner)
+        validate_preparation(self.host, workspace)
         intent = {
             "source": "index", "project_id": project_id, "workspace_id": workspace.workspace_id,
             "execution_binding": {"kind": "index", "index_run_id": run_id,
@@ -151,10 +152,8 @@ class IndexController:
             try:
                 if self.store.workspace_has_unknown_outcome(workspace.workspace_id):
                     raise ValueError("Source Workspace has an unresolved tool outcome")
-                embedder, profile = provider_from_settings(settings)
-                stats = await build_index(
-                    self.host, run_id, Path(workspace.path), settings=settings, profile=profile,
-                    embedder=embedder, force=accepted["force"],
+                stats = await prepare_index(
+                    self.host, run_id, workspace, settings=settings, force=accepted["force"],
                     code_structure=accepted["code_structure"],
                 )
                 self.store.append_event(run_id, "index.published", {
@@ -186,14 +185,20 @@ class IndexController:
         published = next((e["payload"] for e in reversed(self.store.run_events(run_id))
                           if e["type"] == "index.published"), None)
         return {"run_id": run_id, "session_id": run["session_id"],
-                "project_id": workspace.project_id, "status": run["status"],
+                "project_id": workspace.project_id, "workspace_id": workspace.workspace_id,
+                "status": run["status"],
                 "configuration": accepted["configuration"], "force": accepted["force"],
                 "code_structure": accepted["code_structure"], "published": published,
                 "error": run["error"], "events_url": f"/api/runs/{run_id}/events"}
 
     def list(self, project_id: str, *, limit: int = 20, before: str | None = None
              ) -> list[dict[str, Any]]:
-        owner = self.owner(project_id, create=False)
-        return [self.detail(run["id"]) for run in reversed(
-            self.store.list_runs(owner, limit=limit, before=before)
-        )]
+        self.store.get_project(project_id)
+        owners = [self.owner(project_id, workspace_id=w.workspace_id, create=False)
+                  for w in self.store.list_workspaces() if w.project_id == project_id]
+        runs = [run for owner in owners for run in self.store.list_runs(owner)]
+        runs.sort(key=lambda run: (run["started_at"], run["id"]), reverse=True)
+        if before is not None:
+            position = next((i for i, run in enumerate(runs) if run["id"] == before), None)
+            runs = [] if position is None else runs[position + 1:]
+        return [self.detail(run["id"]) for run in runs[:limit]]

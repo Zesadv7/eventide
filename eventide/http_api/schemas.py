@@ -14,6 +14,7 @@ class RunBody(BaseModel):
     mode: str = "auto"
     execution_target: Literal["source", "snapshot", "worktree"] = "source"
     execution_profile: Literal["local", "sandbox"] = "local"
+    knowledge_index: Literal["existing", "prepare"] = "existing"
     sandbox_image: str | None = Field(default=None, min_length=1, max_length=256)
     attachment_ids: list[str] = Field(default_factory=list)
     model: str | None = Field(default=None, max_length=256)

@@ -47,8 +47,19 @@ async def run_repair(
     image: str | None,
     max_rounds: int,
     observed_token_limit: int = 60_000,
+    knowledge_index: str = "existing",
+    retrieval_configuration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     host = controller.host
+    from eventide.retrieval_runtime import freeze_configuration, validate_preparation
+
+    retrieval = freeze_configuration(host.settings, knowledge_index)
+    if knowledge_index == "prepare":
+        validate_preparation(host, checkout_ws)
+    if retrieval_configuration is not None and (
+        retrieval["retrieval_configuration"] != retrieval_configuration
+    ):
+        raise ValueError("Embedding configuration changed since repair admission")
     checks = list(checks)
     if not goal.strip() or len(goal) > 20_000:
         raise ValueError("Repair goal must contain 1-20000 characters")
@@ -70,6 +81,7 @@ async def run_repair(
         "checks": checks,
         "image": image,
         "max_rounds": max_rounds,
+        **retrieval,
         "limits": {
             "model_attempts": 36, "observed_tokens": observed_token_limit, "seconds": MAX_SECONDS,
         },

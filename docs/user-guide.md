@@ -120,15 +120,25 @@ Skill包采用 `SKILL.md`、`references/`、`scripts/` 和 `assets/`。支持本
 
 ### 可选知识索引
 
-对话输入区可显式勾选“任务开始前准备知识索引”，适用于本机源目录和普通工作副本；默认不勾选，只使用已有匹配索引。固定快照和 Docker 任务沙箱禁用此项。交付页面的“每轮修复前准备知识索引”对每轮 Writer 生效，不影响 Docker 独立验收。未勾选不代表免费：已有索引的远程语义查询仍可能产生用量。
+知识索引保存于服务状态根 `indexes/<实际workspace_id>/index.sqlite`，是可重建派生数据。源目录、普通worktree、交付Writer各自使用自己的索引，不跨副本借用。知识索引页面可选择同项目已注册副本构建；没有新索引时只读识别该副本旧 `.eventide/index.sqlite`，显式构建只写新位置，不自动迁移或删除旧文件。新位置损坏会明确报错。内容哈希增删改、FTS5、embedding与RRF共用源码/模型/切块指纹；计算在写事务外，发布前重验源码和索引代次，查询只见旧或新完整版本。
 
-知识索引页默认选择项目源目录，也可选择同项目已注册的工作副本；状态显示实际 Workspace、服务状态目录或旧位置（只读）、代次与配置指纹。索引“可用”不代表全部源码最新，检索时仍会核对命中文件。接收结果未知时保持原副本和配置重试，不能将重试改成另一副本的构建。
+任务默认“仅使用已有索引”，不会自动构建，但实际语义查询仍可能调用embedding。显式勾选“任务开始前准备知识索引”后，在实际执行副本内先增量准备、成功后进入模型调查；交付每轮Writer也如此。准备失败终止任务，继续运行继承原选项及配置并复验；执行期间修改代码不会触发自动重建。状态根在源码目录内时拒绝准备，请将 `EVENTIDE_STATE_DIR` 设到源码之外。快照、只读worker和Docker任务沙箱不开放该能力；交付的Docker独立验收仍可使用。
 
-对话展示准备中、可用、不可用或失败原因，刷新后从 Run 记录恢复。工具活动展示文件、索引行号、内容哈希及核对结果；源码变化、删除、不安全路径、无法读取或超过大小上限分别说明。旧运行没有这些证据时显示“未记录”，不推断历史的新鲜度；原始工具记录仍可展开。
-
-知识索引由页面显式构建或由任务显式准备，保存于服务状态目录 `indexes/<实际 workspace_id>/index.sqlite`，是可重建派生数据。新位置不存在时才只读识别同副本旧 `.eventide/index.sqlite`，页面标明旧位置；不自动复制、删除或双写旧索引。内容哈希增删改、FTS5、embedding与RRF共用源码/模型/切块指纹；计算在写事务外，发布前重验源码和索引代次，查询只见旧或新完整版本。
+每条命中保留文件路径、索引行号、文件哈希、代次及来源；读取当前文件核对内容后才提供正文。过期、已删、链接、过大或不可读文件只显示路径与原因，引导读取当前源码。核对只证明检查时一致，不证明相关性或以后仍一致。模型可按线索选择：路径用glob/read_file，精确符号/报错用search_text，只有业务含义时可用search_knowledge，关键结论再读源码和测试。每次最多5段、每段800字符、正文合计4000字符。页面状态可从事件恢复，旧历史缺少证据时显示“未记录”。
 
 默认Hash embedding用于离线机制验证；远程embedding可用兼容接口并通过Host唯一预算/用量主链派发。每批最多64片段，未变化不发请求，失败保留既有消费并维持旧索引。Agent的 `search_knowledge` 返回带文件/行号的有界片段，遵循权限及实际执行副本。
+
+本轮真实语义基线使用智谱标准 API 的 `embedding-3`，在本机 `.env` 或服务环境单独配置（不要覆盖聊天模型设置）：
+
+```dotenv
+EVENTIDE_EMBEDDING_PROVIDER=openai_compatible
+EVENTIDE_EMBEDDING_MODEL=embedding-3
+EVENTIDE_EMBEDDING_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
+EVENTIDE_EMBEDDING_API_KEY=<标准API密钥>
+EVENTIDE_RETRIEVAL_QUERY_REWRITE=0
+```
+
+远程使用模型默认维度，`EVENTIDE_EMBEDDING_DIM` 仅用于Hash。标准API Key与Coding Plan套餐Key的额度规则请按[智谱官方说明](https://docs.bigmodel.cn/cn/coding-plan/notice/api-key-management)确认。先验证一次小请求，再扩大实验；HTTP失败显示状态及可用的数字业务码，原始响应与密钥不入事件。未返回usage仍为unknown，不是免费调用。配置指纹改变须在页面显式强制重建，不在普通任务中自动全量重建。
 
 可选 `uv sync --extra retrieval` 安装固定版本Sentence Transformers依赖。模型需预先在本机准备，使用 `eventide.rag.local_models.prepare_local_model` 固定revision及内容清单；配置 `EVENTIDE_EMBEDDING_PROVIDER=local_semantic`、`EVENTIDE_EMBEDDING_MODEL_PATH` 和可选 `EVENTIDE_RERANKER_MODEL_PATH`。运行时不下载，禁用远程代码、链接和pickle权重，CPU惰性加载。CrossEncoder最多重排20候选、返回5条；缺失或失败明确降级，不伪造分数。`uv sync --extra code` 可增加tree-sitter结构切块。
 

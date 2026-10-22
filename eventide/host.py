@@ -6,7 +6,6 @@ import asyncio
 import inspect
 import json
 import shutil
-import sqlite3
 import tempfile
 import time
 import uuid
@@ -61,14 +60,12 @@ from eventide.projections import TaskPlanProjection
 from eventide.provider_config import apply_provider_configuration
 from eventide.provider_probe import run_probe
 from eventide.providers import Provider, ProviderError, build_provider
-from eventide.rag.embedding import provider_from_settings
-from eventide.rag.index import INDEX_RELATIVE_PATH
-from eventide.rag.local_models import LocalModelError, reranker_from_settings
-from eventide.rag.tool import SEARCH_KNOWLEDGE_TOOL
-from eventide.rag.tool import handler as knowledge_search_handler
-from eventide.rag.tool import index_available as knowledge_index_available
-from eventide.rag.tool import sparse_handler as knowledge_sparse_handler
-from eventide.retrieval_runtime import runtime_search_handler
+from eventide.retrieval_runtime import (
+    configure_run_retrieval,
+    freeze_configuration,
+    managed_index_dir,
+    validate_preparation,
+)
 from eventide.run_dispatch import RunDispatch
 from eventide.sandbox_profile import (
     SandboxCommandExecutor,
@@ -241,6 +238,7 @@ class RuntimeHost:
             tools=self.tools,
         )
         self._workspace_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._index_build_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._snapshot_preparing: set[str] = set()
         self._project_git_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -473,7 +471,13 @@ class RuntimeHost:
                     if action == "remove":
                         for checkout in self.store.list_workspaces():
                             if checkout.path == result["path"]:
-                                self.store.remove_workspace(checkout.workspace_id)
+                                async with self._index_build_locks[checkout.workspace_id]:
+                                    directory = managed_index_dir(self, checkout)
+                                    if directory.exists():
+                                        if directory.resolve() != directory:
+                                            raise ValueError("Derived index path contains a link")
+                                        await self._admission_check(shutil.rmtree, directory)
+                                    self.store.remove_workspace(checkout.workspace_id)
                     elif action == "create":
                         checkout = self.resolve_or_register_workspace(result["path"])
                         if checkout.project_id != workspace.project_id:
@@ -1742,6 +1746,7 @@ class RuntimeHost:
         execution_config: dict[str, Any] = {}
         generation: dict[str, Any] | None = None
         skill_snapshot: dict[str, Any] | None = None
+        retrieval: dict[str, Any] = {}
         if source_id:
             prior: dict[str, Any] = next(
                 (
@@ -1760,12 +1765,20 @@ class RuntimeHost:
                 generation = prior.get("generation")
             execution_config = prior.get("execution_config") or {}
             old_intent = self._admitted_intent(source_id) or {}
+            if "knowledge_index" in old_intent:
+                retrieval = freeze_configuration(self.settings, old_intent["knowledge_index"])
+                if retrieval["retrieval_configuration"] != old_intent["retrieval_configuration"]:
+                    raise ValueError("Embedding configuration changed; Continue refused")
             if old_intent.get("execution_profile_config"):
                 execution_config = validate_sandbox_profile(old_intent["execution_profile_config"])
             skill_snapshot = old_intent.get("skill_snapshot") or next((
                 e["payload"] for e in self.store.run_events(source_id)
                 if e["type"] == "skills.snapshot"
             ), None)
+        if not source_id:
+            retrieval = freeze_configuration(
+                self.settings, request.knowledge_index if request else "existing",
+            )
         if not isinstance(model, str) or len(model) > 256:
             raise ValueError("Model name cannot exceed 256 characters")
         state = self.generation_settings(
@@ -1786,6 +1799,7 @@ class RuntimeHost:
             "provider": self.settings.provider,
             "endpoint_hash": digest(self.settings.base_url),
             "generation": generation,
+            **retrieval,
             **({"skill_snapshot": skill_snapshot} if skill_snapshot is not None else {}),
             **({"execution_config": execution_config} if execution_config else {}),
             **({"execution_profile_config": execution_config}
@@ -1891,6 +1905,12 @@ class RuntimeHost:
         previous_run = self.store.latest_run_summary(session_id)
         was_sandbox = self.session_execution_target(session_id) == "sandbox"
         if request:
+            if request.knowledge_index not in {"existing", "prepare"}:
+                raise ValueError("knowledge_index must be existing or prepare")
+            if request.knowledge_index == "prepare" and (
+                request.execution_target == "snapshot" or request.execution_profile == "sandbox"
+            ):
+                raise ValueError("Index preparation is unavailable for snapshot or sandbox")
             if request.execution_profile not in {"local", "sandbox"}:
                 raise ValueError("Unknown execution profile")
             if previous_run and (request.execution_profile == "sandbox") != was_sandbox:
@@ -1948,6 +1968,8 @@ class RuntimeHost:
                         raise ValueError("Session is parked; use Continue")
                     source_id = previous["id"] if request is None and previous else None
                     intent = self._run_intent(request, source_id, session_id)
+                    if intent.get("knowledge_index") == "prepare":
+                        validate_preparation(self, workspace)
                     if parent_run_id:
                         intent["parent_run_id"] = parent_run_id
                     if "skill_snapshot" not in intent:
@@ -2146,6 +2168,8 @@ class RuntimeHost:
                         if self.store.workspace_has_unknown_outcome(copy_id):
                             raise ValueError("Execution worktree has an unresolved tool outcome")
                         self._admissions[copy_id] = run_id
+                        if intent.get("knowledge_index") == "prepare":
+                            validate_preparation(self, self.store.get_workspace(copy_id))
                     checkpoint = await self._admission_check(self._execution_checkpoint, binding)
                     ids = list(request.attachment_ids) if request else []
                     records = attachments.load_attachments(self.state_dir, session_id, ids)
@@ -2973,37 +2997,11 @@ class RuntimeHost:
                 skill_tools.append(skills.resource_tool())
             if any(r.path.startswith("scripts/") for s in skills.skills for r in s.resources):
                 skill_tools.append(script_tool(skills))
-            rag_tools: list[dict[str, Any]] = []
-            rag_handlers: dict[str, Any] = {}
-            if not sandbox_execution and (workspace_root / INDEX_RELATIVE_PATH).is_file():
-                try:
-                    rag_embedder, rag_profile = provider_from_settings(self.settings)
-                    if knowledge_index_available(workspace_root, rag_profile):
-                        rag_tools.append(SEARCH_KNOWLEDGE_TOOL)
-                        reranker = reranker_from_settings(self.settings)
-                        rag_handlers["search_knowledge"] = (
-                            runtime_search_handler(
-                                self, run_id, workspace_root, rag_profile,
-                                settings=self.settings, reranker=reranker, embedder=rag_embedder,
-                            ) if (rag_profile.provider == "openai_compatible"
-                                  or self.settings.retrieval_query_rewrite) else
-                            knowledge_search_handler(
-                                workspace_root, rag_embedder, rag_profile, reranker=reranker,
-                            )
-                        )
-                except LocalModelError as exc:
-                    try:
-                        fallback = knowledge_sparse_handler(workspace_root, exc.code)
-                    except (OSError, RuntimeError, ValueError, sqlite3.Error):
-                        fallback = None
-                    if fallback is not None:
-                        rag_tools.append(SEARCH_KNOWLEDGE_TOOL)
-                        rag_handlers["search_knowledge"] = fallback
-                    await self._emit(run_id, "retrieval.degraded", {
-                        "reason": exc.code, "fallback": "sparse" if fallback else "unavailable",
-                    }, sink)
-                except (OSError, RuntimeError, ValueError):
-                    pass
+            rag_tools, rag_handlers = await configure_run_retrieval(
+                self, run_id, execution_workspace, intent,
+                supported=not (sandbox_execution or snapshot_execution or readonly_profile),
+                sink=sink,
+            )
 
             async def write_task_plan(todos: object) -> str:
                 state = self.store.task_plan_state(session_id)
@@ -3333,6 +3331,12 @@ class RuntimeHost:
                 + (f"\n\n{skill_prompt}" if skill_prompt else "")
                 + (f"\n\n{mode_note}" if mode_note else "")
             )
+            if rag_tools:
+                base_system += (
+                    "\nUse glob/read_file for known paths, search_text for identifiers/errors, "
+                    "search_knowledge for concepts. Read current source/tests to fill evidence "
+                    "gaps. Stale snippets are not evidence. State remaining gaps; RAG is optional."
+                )
             catalog_hash = digest(tools)
             tool_catalog_chars = tool_catalog_size(tools)
             await self._emit(

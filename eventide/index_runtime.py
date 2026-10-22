@@ -9,10 +9,12 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from eventide.budgets import BudgetExceeded
 from eventide.config import Settings
 from eventide.embedding_runtime import embed_remote
 from eventide.rag.embedding import EmbeddingProfile, EmbeddingProvider
 from eventide.rag.index import BuildStats, IndexStore
+from eventide.usage import build_usage_ledger
 
 if TYPE_CHECKING:
     from eventide.host import RuntimeHost
@@ -26,6 +28,7 @@ async def build_index(
     host: RuntimeHost, run_id: str, workspace: Path, *, settings: Settings,
     profile: EmbeddingProfile, embedder: EmbeddingProvider | None = None,
     force: bool = False, code_structure: bool = False,
+    index_dir: Path | None = None,
 ) -> BuildStats:
     """No second Store or request queue: worker thread waits for the owning event loop."""
     loop = asyncio.get_running_loop()
@@ -42,6 +45,14 @@ async def build_index(
         pending.add(task)
         try:
             check_cancelled()
+            if settings.run_token_limit:
+                totals = build_usage_ledger(host.model_usage_events(run_id))["reported_totals"]
+                observed = totals.get("input_tokens", 0) + totals.get("output_tokens", 0)
+                if observed >= settings.run_token_limit:
+                    raise BudgetExceeded([{
+                        "scope": "run", "scope_id": run_id, "reason": "observed_token_limit",
+                        "observed": observed, "limit": settings.run_token_limit,
+                    }])
             return await embed_remote(host, run_id, texts, settings=settings)
         finally:
             pending.discard(task)
@@ -67,7 +78,8 @@ async def build_index(
             return vectors
 
     worker = asyncio.create_task(asyncio.to_thread(
-        IndexStore(workspace).build, force=force, embedder=Bridge(), profile=profile,
+        IndexStore(workspace, index_dir=index_dir).build,
+        force=force, embedder=Bridge(), profile=profile,
         code_structure=code_structure, check_cancelled=check_cancelled,
     ))
     cancelled = False

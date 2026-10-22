@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_control import MUTATION_OUTCOME_HEADER, mutation_key, run_receipt
 from eventide.index_control import IndexController
+from eventide.retrieval_runtime import index_status
 from eventide.scheduler import QueueFull
+from eventide.utils import owned_local_work
 
 
 class IndexBuildBody(BaseModel):
@@ -18,12 +20,14 @@ class IndexBuildBody(BaseModel):
     config_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     force: bool = False
     code_structure: bool = False
+    workspace_id: str | None = None
 
 
 class IndexReceipt(BaseModel):
     run_id: str
     session_id: str
     project_id: str
+    workspace_id: str
     status_url: str
     events_url: str
 
@@ -58,6 +62,7 @@ class IndexDetail(BaseModel):
     run_id: str
     session_id: str
     project_id: str
+    workspace_id: str
     status: Literal["queued", "running", "completed", "failed", "interrupted"]
     configuration: IndexConfiguration
     force: bool
@@ -67,9 +72,29 @@ class IndexDetail(BaseModel):
     events_url: str
 
 
+class WorkspaceIndexStatus(BaseModel):
+    status: Literal["available", "unavailable"]
+    workspace_id: str
+    location: Literal["managed", "legacy"]
+    reason: str | None = None
+    detail: str | None = None
+    model: str | None = None
+    generation: int | None = None
+    embedding_fingerprint: str | None = None
+    config_hash: str | None = None
+
+
 def create_router(context: ApiContext) -> APIRouter:
     router = APIRouter(tags=["indexes"])
     controller = IndexController(context.runtime)
+
+    @router.get("/api/workspaces/{workspace_id}/index-status", response_model=WorkspaceIndexStatus)
+    async def status(workspace_id: str) -> dict[str, Any]:
+        try:
+            workspace = context.runtime.store.get_workspace(workspace_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return await owned_local_work(index_status, context.runtime, workspace)
 
     @router.get("/api/indexes/configuration", response_model=IndexConfiguration)
     async def configuration() -> dict[str, Any]:
@@ -84,10 +109,13 @@ def create_router(context: ApiContext) -> APIRouter:
         require_local_request(request)
         mutation_key(request)
         try:
-            owner = controller.owner(project_id, create=False)
+            owner = controller.owner(project_id, create=False, workspace_id=body.workspace_id)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
-        receipt = run_receipt(context.runtime, request, owner, "index", body.model_dump())
+        payload = body.model_dump()
+        if body.workspace_id is None:
+            payload.pop("workspace_id")
+        receipt = run_receipt(context.runtime, request, owner, "index", payload)
         if not receipt.existing:
             try:
                 await controller.admit(project_id, receipt.run_id, **body.model_dump(),
@@ -99,6 +127,7 @@ def create_router(context: ApiContext) -> APIRouter:
                                     if rejected else None) from exc
             controller.start(receipt.run_id)
         return {"run_id": receipt.run_id, "session_id": owner, "project_id": project_id,
+                "workspace_id": context.runtime.sessions.workspace(owner).workspace_id,
                 "status_url": f"/api/indexes/{receipt.run_id}",
                 "events_url": f"/api/runs/{receipt.run_id}/events"}
 
