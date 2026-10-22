@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypeVar
@@ -50,7 +51,9 @@ class _DockerClient(LocalCommandExecutor):
             )
         )
         stdout, stderr = _BoundedOutput(self.output_limit), _BoundedOutput(self.output_limit)
-        collection = asyncio.create_task(self._collect(process, stdout, stderr))
+        collection = asyncio.create_task(
+            self._collect(process, stdout, stderr, self.output_observer)
+        )
         timed_out = False
         try:
             if cancelled:
@@ -109,6 +112,7 @@ class ContainerCommandExecutor:
         pids_limit: int = 128,
         cleanup_timeout: float = 10,
         docker_path: str | Path | None = None,
+        output_observer: Callable[[str, bytes], None] | None = None,
     ):
         if (
             not isinstance(image, str)
@@ -146,7 +150,7 @@ class ContainerCommandExecutor:
         self.image, self.read_only = image, read_only
         self.memory_mb, self.cpus, self.pids_limit = memory_mb, cpus, pids_limit
         self.docker_path = str(docker_path) if docker_path is not None else "docker"
-        self._commands = _DockerClient(timeout, output_limit)
+        self._commands = _DockerClient(timeout, output_limit, output_observer=output_observer)
         self._control = _DockerClient(cleanup_timeout, 25_000)
 
     @staticmethod

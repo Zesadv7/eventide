@@ -117,11 +117,18 @@ class LocalCommandExecutor:
 
     backend_kind = "local"
 
-    def __init__(self, timeout: float = 120.0, output_limit: int = 25_000):
+    def __init__(
+        self,
+        timeout: float = 120.0,
+        output_limit: int = 25_000,
+        *,
+        output_observer: Callable[[str, bytes], None] | None = None,
+    ):
         if timeout <= 0 or output_limit < 2:
             raise ValueError("Command timeout must be positive and output_limit at least 2 bytes")
         self.timeout = timeout
         self.output_limit = output_limit
+        self.output_observer = output_observer
 
     async def execute(self, command: str, cwd: Path) -> CommandResult:
         started = time.monotonic()
@@ -163,7 +170,9 @@ class LocalCommandExecutor:
     ) -> CommandResult:
         stdout = _BoundedOutput(self.output_limit)
         stderr = _BoundedOutput(self.output_limit)
-        collection = asyncio.create_task(self._collect(process, stdout, stderr))
+        collection = asyncio.create_task(
+            self._collect(process, stdout, stderr, self.output_observer)
+        )
         timed_out = False
         try:
             await asyncio.wait_for(asyncio.shield(collection), self.timeout)
@@ -187,15 +196,24 @@ class LocalCommandExecutor:
 
     @staticmethod
     async def _collect(
-        process: asyncio.subprocess.Process, stdout: _BoundedOutput, stderr: _BoundedOutput
+        process: asyncio.subprocess.Process,
+        stdout: _BoundedOutput,
+        stderr: _BoundedOutput,
+        output_observer: Callable[[str, bytes], None] | None = None,
     ) -> None:
-        async def drain(stream: asyncio.StreamReader | None, output: _BoundedOutput) -> None:
+        async def drain(
+            stream: asyncio.StreamReader | None, output: _BoundedOutput, name: str,
+        ) -> None:
             if stream is not None:
                 while data := await stream.read(8192):
                     output.append(data)
+                    if output_observer is not None:
+                        output_observer(name, data)
 
         await asyncio.gather(
-            drain(process.stdout, stdout), drain(process.stderr, stderr), process.wait()
+            drain(process.stdout, stdout, "stdout"),
+            drain(process.stderr, stderr, "stderr"),
+            process.wait(),
         )
 
     @staticmethod

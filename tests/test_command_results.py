@@ -64,6 +64,70 @@ async def test_large_stdout_and_stderr_retain_head_tail_and_byte_counts(isolated
     assert len(result.stdout) < 150 and len(result.stderr) < 150
 
 
+async def test_output_observer_receives_both_complete_streams_before_preview_truncation(
+    isolated_workspace,
+):
+    marker = "MIDDLE_FAILURE"
+    stdout = b"A" * 50_000 + marker.encode() + b"B" * 50_000
+    stderr = ("中文诊断" * 10_000).encode()
+    command = python_command(
+        isolated_workspace,
+        "import sys\n"
+        f"sys.stdout.buffer.write({stdout!r})\n"
+        f"sys.stderr.buffer.write({stderr!r})\n",
+    )
+    received = {"stdout": bytearray(), "stderr": bytearray()}
+    result = await LocalCommandExecutor(
+        output_observer=lambda stream, data: received[stream].extend(data),
+    ).execute(command, isolated_workspace)
+
+    assert result.exit_code == 0 and result.truncated
+    assert marker not in result.stdout
+    assert received["stdout"] == stdout and received["stderr"] == stderr
+    assert result.stdout_bytes == len(stdout) and result.stderr_bytes == len(stderr)
+    assert result.stdout_omitted_bytes == len(stdout) - 25_000
+    assert result.stderr_omitted_bytes == len(stderr) - 25_000
+
+
+async def test_output_observer_keeps_received_bytes_when_command_times_out(isolated_workspace):
+    command = python_command(
+        isolated_workspace,
+        "import sys, time\nprint('before timeout', flush=True)\n"
+        "sys.stderr.write('diagnostic\\n'); sys.stderr.flush()\ntime.sleep(30)\n",
+    )
+    received = {"stdout": bytearray(), "stderr": bytearray()}
+    result = await LocalCommandExecutor(
+        timeout=0.5,
+        output_observer=lambda stream, data: received[stream].extend(data),
+    ).execute(command, isolated_workspace)
+
+    assert result.timed_out
+    assert received == {"stdout": b"before timeout\n", "stderr": b"diagnostic\n"}
+
+
+async def test_cancel_keeps_received_output_observer_bytes(isolated_workspace):
+    command = python_command(
+        isolated_workspace,
+        "import time\nprint('before cancel', flush=True)\ntime.sleep(30)\n",
+    )
+    received = bytearray()
+    ready = asyncio.Event()
+
+    def observe(stream, data):
+        assert stream == "stdout"
+        received.extend(data)
+        ready.set()
+
+    task = asyncio.create_task(
+        LocalCommandExecutor(output_observer=observe).execute(command, isolated_workspace)
+    )
+    await asyncio.wait_for(ready.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 5)
+    assert received == b"before cancel\n"
+
+
 async def test_utf8_output_preserved_when_not_truncated(isolated_workspace):
     command = python_command(
         isolated_workspace,

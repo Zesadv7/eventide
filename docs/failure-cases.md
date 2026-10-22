@@ -110,6 +110,7 @@
 - **复验与边界：** 首次定向复验1通过、1失败（`ev-recheck.log`）：同一新测试又误将workspace_id视作Run字段，补齐身份来源应通过Session查询。两次均为新测试投影假定错误，未改生产结果；最终仅复验该项1通过（`ev-final-recheck.log`），权限白名单unit在前次复验已通过；4个变更模块Mypy及Ruff通过。实际模型效果、付费接口和真实容器未验证。实现及测试修正提交 `ec075fa`。
 - **经验、参与与追问：** Codex实施和静态复核，用户指定范围；应复用权威身份，不能猜投影字段。临时能力为何不能随持久后端配置复用？如何区分测试错误与权限边界问题？
 
+
 ## FAIL-008：master 推送的 Git HTTPS 连接超时
 
 - **日期、范围与状态：** 2026-10-22，发布／Git传输，环境或外部故障，已完成（传输已恢复，底层根因未明）。已通过CI的源码候选918b40a、本地合并d16c006；源码与验收未改变。
@@ -124,3 +125,11 @@
 - **证据与现象：** `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest -q tests/test_acceptance_output.py --tb=short`：1失败，2.53秒；日志 `.task_outputs/acceptance-output/red.log`。真实独立验收命令单个stdout约100KB，中间唯一标记不在首尾；前置断言确认短content及其全部旧分页均无该标记，随后新stream参数因尚未实现而TypeError。这分别证明采集丢失与新契约尚不存在，不能把缺少参数报错单独当作生产缺陷。
 - **原因与处理计划：** `_BoundedOutput`只保留每流25,000字节头尾，Event Log未收到中段；已有约18KB用例只证明反馈层省略可回读。新增独立验收的受控脱敏文件及兼容分流分页，不增加重试/反思调用，不扩大预览。
 - **复验与边界：** 尚待实现后定向验证；全部失败按实际根因追加。Codex编写并运行受控用例，用户指定范围，不虚构真实用户影响或模型修复率收益。
+
+### 同批采集hook的预期Red与定向复验
+
+- **日期、范围与状态：** 2026-10-22，基线 `7d84f6c`，自动化测试／新增能力预期 Red；已完成。独立子任务 worktree 为 `ci-dedup/eventide`、分支 `codex/acceptance-output-executor`。
+- **失败命令与证据：** `PYTHON_DOTENV_DISABLED=1 /Users/zesadv/Documents/Codex/eventide/.venv/bin/python -m pytest -q tests/test_command_results.py tests/test_container_executor.py -k 'output_observer or cancel_keeps_received' --tb=short`；5失败、61未选中，退出1，日志 `.task_outputs/acceptance-output-hook/red.log`。
+- **已证实原因：** 旧 Local／Container 构造函数不接受新增 `output_observer` 参数，五项均为对应 TypeError；这是接口需求尚未实现，不能包装成生产故障，也尚未单凭此轮证明大日志回查已改善。
+- **处理与复验：** 实现默认关闭的可选两流原始字节观察接口，Docker仅向命令采集器传入，不观察inspect/create/rm。随后同一解释器运行 `-m pytest -q tests/test_command_results.py tests/test_container_executor.py --tb=short`，65通过／1项既有真实Docker按开关跳过、退出0，日志 `green.log`；Ruff通过、Mypy两模块通过（各自日志同目录）。原25,000字节预览、计数、取消/超时和Docker控制流程未改变。未运行真实容器或付费模型，回调通过不代替主任务日志归档、脱敏及授权回读的效果验收；本例修复与文档同一提交，以Git历史追溯。
+- **参与与追问：** 用户授权主任务，Codex分工实施；如何确保Docker管理输出不会误归档？为何回调观察与证据最终化需分开？

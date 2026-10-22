@@ -179,6 +179,38 @@ async def test_output_status_and_bounds_reuse_command_result(fake_docker, tmp_pa
     assert result.duration_ms > 0
 
 
+async def test_output_observer_receives_command_streams_but_not_docker_control_output(
+    fake_docker, tmp_path
+):
+    stdout = "A" * 50_000 + "MIDDLE_FAILURE" + "B" * 50_000
+    stderr = "中文诊断" * 10_000
+    configure(fake_docker, stdout=stdout, stderr=stderr, cleanup_pending=1)
+    received = {"stdout": bytearray(), "stderr": bytearray()}
+    result = await executor(
+        fake_docker, output_observer=lambda stream, data: received[stream].extend(data),
+    ).execute("ignored", tmp_path)
+
+    assert result.exit_code == 0 and result.truncated
+    assert "MIDDLE_FAILURE" not in result.stdout
+    assert received["stdout"] == stdout.encode()
+    assert received["stderr"] == stderr.encode()
+    assert [action(call) for call in calls(fake_docker)] == [
+        "context", "create", "start", "rm", "rm",
+    ]
+
+
+async def test_output_observer_retains_bytes_when_container_cleanup_is_unknown(
+    fake_docker, tmp_path
+):
+    configure(fake_docker, stdout="before cleanup", cleanup_exit=1)
+    received = {"stdout": bytearray(), "stderr": bytearray()}
+    with pytest.raises(ContainerCleanupError):
+        await executor(
+            fake_docker, output_observer=lambda stream, data: received[stream].extend(data),
+        ).execute("ignored", tmp_path)
+    assert received == {"stdout": b"before cleanup", "stderr": b""}
+
+
 async def test_timeout_removes_container_after_client_termination(fake_docker, tmp_path):
     configure(fake_docker, start_delay=30)
     result = await executor(fake_docker, timeout=0.1).execute("sleep 30", tmp_path)
