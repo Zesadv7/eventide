@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from eventide import attachments, model_catalog, run_policy
+from eventide.acceptance_output import AcceptanceOutputs
 from eventide.budget_prices import PriceVersion
 from eventide.budgets import BudgetExceeded, BudgetScope, is_service_probe_run
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
@@ -217,6 +218,8 @@ class RuntimeHost:
                 checkpoint_directories=self._checkpoint_directories,
             )
             self._recover_interrupted_runs()
+            self.acceptance_output = AcceptanceOutputs(self.store, self.state_dir)
+            self.acceptance_output.recover()
             self._secret_box = SecretBox(self.settings.state_dir)
             self._provider_secret_error: str | None = None
             self._load_persisted_provider()
@@ -3248,6 +3251,7 @@ class RuntimeHost:
                 "read_tool_result": tool_result_reader(
                     self.store, session_id, acceptance=execution_config.get("acceptance_evidence"),
                     current_run_id=run_id,
+                    outputs=self.acceptance_output,
                 ),
                 "todo_write": write_task_plan,
                 **({"load_skill": load_skill, "read_skill_resource": read_skill_resource,

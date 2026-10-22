@@ -75,6 +75,7 @@ class ReadToolResultArguments(_Arguments):
     call_id: NonemptyText
     offset: Annotated[int, Field(ge=0)] = 0
     limit: Annotated[int, Field(ge=1, le=12_000)] = 4_000
+    stream: Literal["stdout", "stderr"] | None = None
 
 
 class TodoItem(_Arguments):

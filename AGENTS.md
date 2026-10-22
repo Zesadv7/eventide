@@ -316,11 +316,11 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | 编号 | 状态 | 内容与验收 |
 |---|---|---|
 | L0 | 已完成 | 只读盘点采集/回查/脱敏/取消链；明确流式脱敏后UTF-8归档、字符分页、stream省略保持content、追加事实及证据产物、配额/期限与Local边界，见ADR-095。只读统计不重跑历史任务，无凭据或用户状态变更。 |
-| L1 | 已完成 | 新增单流约100KB、中间唯一标记的真实独立验收测试；旧content及全部分页均缺标记，新stream参数预期TypeError：1失败/2.53秒，见FAIL-009与.task_outputs/acceptance-output/red.log。只完成新能力预期Red，归档和分流尚未实现，既有18KB回查测试保留。 |
-| L2 | 进行中 | 带配额与排空降级的有界脱敏归档、Local接线、取消/异常最终化事实。 |
-| L3 | 待开始 | Docker仅验收attach归档；兼容分流分页、精确授权、12KB反馈内的证据状态。 |
-| L4 | 待开始 | 并发额度、重启部分产物、完整性、过期清理与活跃保护专项。 |
-| L5 | 待开始 | 定向集成和小范围真实Docker、一次全量收口、文档/失败记录核对及本地提交；不以机制通过宣称修复率提高。 |
+| L1 | 已完成 | 新增单流约100KB、中间唯一标记的真实独立验收测试；旧content及全部分页均缺标记，新stream参数预期TypeError：1失败/2.53秒，见FAIL-009与.task_outputs/acceptance-output/red.log。该步只验证新能力预期Red，当时归档和分流尚未实现，既有18KB回查测试保留。 |
+| L2 | 已完成 | 有界增量UTF-8/跨块脱敏文件、原始接收/保存量与校验摘要接入独立Verifier；Session维护事实以source_run_id关联控制Run，终态规则不变。真实Local的长日志、磁盘失败排空、取消/超时及Host重启回读通过；证据见lifecycle.log/recheck.log，稳定文档已同步。FAIL-010/011/012已修正，未改变验收结果。 |
+| L3 | 已完成 | read_tool_result显式stream读取分流字符页，省略保持旧content；精确Session/Writer Run/call授权、旧运行及12KB合法JSON/全部状态回归通过。真实python:3.12-slim Docker长日志中段回读通过；管理输出不归档，create失败标not_started。集成31通过/1目录预算失败/1跳过，目录说明缩短后原4,000上限定向通过，见FAIL-013。README/guide/architecture/api-contract已同步。 |
+| L4 | 已完成 | 同Host交错采集共享控制Run/全局额度、超额后继续计数、跨块中文/密钥、无效编码、磁盘故障、未发布.part/.log重启、过期/活跃保护、删除失败仍计费及缺失/篡改/链接均有专项。storage首轮10通过/5失败，修正后15通过；新增真实排空、精确授权与最终化路径测试均通过，共21项lifecycle及2项新增集成证据；只读复核两处必要修正已落实。 |
+| L5 | 已完成 | 2026-10-22：唯一一次全量2,002通过/12显式跳过（1条Starlette/AnyIO弃用警告），覆盖93.74%，归档模块94%；Ruff全仓、Mypy124模块、服务help/启动冒烟及离线smoke12/12通过。真实Docker仅新增长日志回读验证，21项定向包含该参数；不重跑镜像构建/前端/付费模型。源码/文档独立只读复核、链接、AGENTS前4000字符不变及diff检查通过，失败009–013均已复验登记；证据位于.task_outputs/acceptance-output/，ADR-095转Accepted，代码/测试/稳定文档同一本地提交，不推送，不宣称模型修复率提高。 |
 
 ## README 与使用文档整理（2026-10-22）
 

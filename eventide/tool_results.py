@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from eventide.acceptance_output import AcceptanceOutputs
 from eventide.store import RuntimeStore
 
 INLINE_RESULT_CHARS = 12_000
@@ -16,7 +17,7 @@ PREVIEW_TAIL_CHARS = 2_000
 
 TOOL = {
     "name": "read_tool_result",
-    "description": "Read a stored tool result permitted for this run.",
+    "description": "Page results or acceptance stdout/stderr.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -24,6 +25,7 @@ TOOL = {
             "call_id": {"type": "string"},
             "offset": {"type": "integer", "minimum": 0},
             "limit": {"type": "integer", "minimum": 1, "maximum": PAGE_MAX_CHARS},
+            "stream": {"type": "string", "enum": ["stdout", "stderr"]},
         },
         "required": ["run_id", "call_id"],
     },
@@ -50,6 +52,7 @@ def preview(event: dict[str, Any]) -> tuple[str, int]:
 def reader(
     store: RuntimeStore, session_id: str, *, acceptance: dict[str, Any] | None = None,
     current_run_id: str | None = None,
+    outputs: AcceptanceOutputs | None = None,
 ) -> Callable[..., str]:
     """Session lookup plus a controller-frozen allowlist of prior acceptance calls."""
 
@@ -58,6 +61,7 @@ def reader(
         call_id: str,
         offset: int = 0,
         limit: int = PAGE_DEFAULT_CHARS,
+        stream: str | None = None,
     ) -> str:
         if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
             return "Error: offset must be a non-negative integer"
@@ -68,20 +72,31 @@ def reader(
             or limit > PAGE_MAX_CHARS
         ):
             return f"Error: limit must be between 1 and {PAGE_MAX_CHARS}"
+        if stream not in (None, "stdout", "stderr"):
+            return "Error: stream must be stdout or stderr, or omitted for legacy content"
         result = store.get_tool_result(session_id, run_id, call_id)
+        evidence = store.get_acceptance_output(session_id, run_id, call_id)
         origin = ""
         if (
-            result is None and acceptance is not None
+            result is None and evidence is None and acceptance is not None
             and current_run_id == acceptance["reader_run_id"]
             and run_id == acceptance["run_id"] and call_id in acceptance["call_ids"]
         ):
             result = store.get_tool_result(acceptance["session_id"], run_id, call_id)
+            evidence = store.get_acceptance_output(acceptance["session_id"], run_id, call_id)
             origin = (
                 f"[Acceptance evidence: delivery={acceptance['delivery_id']}; "
                 f"round={acceptance['round']}; patch={acceptance['patch_sha256']}]\n"
             )
-        if result is None:
+        if result is None and evidence is None:
             return "Error: tool result not found in this session"
+        if stream is not None:
+            if evidence is None:
+                return "Error: this result has no separate stdout/stderr evidence"
+            archive = outputs or AcceptanceOutputs(store, store.path.parent)
+            return origin + archive.page(run_id, evidence, stream, offset, limit)
+        if result is None:
+            return "Error: no completed tool content; use a recorded acceptance stream"
         content = result["content"]
         total = len(content)
         start = min(offset, total)

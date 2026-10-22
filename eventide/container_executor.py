@@ -152,6 +152,7 @@ class ContainerCommandExecutor:
         self.docker_path = str(docker_path) if docker_path is not None else "docker"
         self._commands = _DockerClient(timeout, output_limit, output_observer=output_observer)
         self._control = _DockerClient(cleanup_timeout, 25_000)
+        self.attach_dispatched = False
 
     @staticmethod
     def _cwd(cwd: Path) -> Path:
@@ -284,6 +285,7 @@ class ContainerCommandExecutor:
         return cancelled
 
     async def execute(self, command: str, cwd: Path) -> CommandResult:
+        self.attach_dispatched = False
         if not isinstance(command, str) or "\x00" in command:
             raise ValueError("Container command must be text without NUL")
         cwd = self._cwd(cwd)
@@ -324,6 +326,7 @@ class ContainerCommandExecutor:
             elif not re.fullmatch(r"[a-f0-9]{12,64}", creation.stdout.strip()):
                 raise ContainerCleanupError(f"Docker did not confirm container identity for {name}")
             else:
+                self.attach_dispatched = True
                 result = await self._commands.run([*base, "start", "--attach", name], cwd, env)
         finally:
             cleanup_cancelled = await self._remove(base, cwd, env, name)

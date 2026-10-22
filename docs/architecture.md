@@ -191,7 +191,7 @@ HTTP提供项目/会话管理、固定cwd、普通Run/Continue、精确停止/�
 
 模型配置为 Host 级，活跃 run 期间不允许修改。RunRequest 可携带可选 `model`，只覆盖该次 Run 的 ModelRequest 和 checkpoint 身份，不修改 Host 默认配置或重建 Provider 客户端。Provider 客户端惰性创建，连接检查不切换活动 Provider。密钥继续使用 Fernet；主密钥优先 EVENTIDE_SECRET_KEY，否则状态根 secret.key。解密失败不退回明文。凭据管理及 Workspace 注册/移除仅接受本机回环请求。
 
-每个 run 按 Workspace 读取 mcp.json；MCP SDK transport 在同一 owning task 内连接和关闭，避免跨 task 的资源退出。各 MCP Server 独立连接和报告错误，单个 Server 的连接、发现或关闭异常不覆盖其他能力及已完成结果。模型请求、MCP 连接/调用和本地 Shell 分别受 `EVENTIDE_MODEL_TIMEOUT`、`EVENTIDE_MCP_TIMEOUT`、`EVENTIDE_COMMAND_TIMEOUT` 限制；取消 Shell 时终止其进程树。所有工具统一进入 ToolExecutor/PolicyEngine，文件工具内部再次检查路径。生产基础目录包含文件、Shell、compact、`read_tool_result` 和 `todo_write`；前者只能按当前 Session、指定 Run 和 call identity 读取 canonical `tool.completed`，单页最多 12,000 字符；后者替换当前 Session 计划，最多 20 项且只修改 Event Log，作为 recovery-safe 工具不会触发 Workspace checkpoint。Workspace 存在有效 Skill 时动态加入 `load_skill`；存在与当前 embedding fingerprint 匹配的知识索引时动态加入只读 `search_knowledge`。旧教学 task graph/teammate/cron、全局 Skill loader、同步 Agent/LLM、context/hooks、模拟 MCP 与全局注册表已经删除；不再提供 `AgentRuntime` / `TraceStore` 别名。Skills、摘要、恢复与审批均沿用已有生产实现。离线 Eval 使用 scripted Provider；离线与 live 评测均显式关闭真实 MCP，并为每条用例创建独立临时项目和评测数据库。
+每个 run 按 Workspace 读取 mcp.json；MCP SDK transport 在同一 owning task 内连接和关闭，避免跨 task 的资源退出。各 MCP Server 独立连接和报告错误，单个 Server 的连接、发现或关闭异常不覆盖其他能力及已完成结果。模型请求、MCP 连接/调用和本地 Shell 分别受 `EVENTIDE_MODEL_TIMEOUT`、`EVENTIDE_MCP_TIMEOUT`、`EVENTIDE_COMMAND_TIMEOUT` 限制；取消 Shell 时终止其进程树。所有工具统一进入 ToolExecutor/PolicyEngine，文件工具内部再次检查路径。生产基础目录包含文件、Shell、compact、`read_tool_result` 和 `todo_write`；前者只能按当前 Session、指定 Run 和 call identity 读取 canonical `tool.completed`，独立验收另支持下述受控分流证据，单页最多 12,000 字符；后者替换当前 Session 计划，最多 20 项且只修改 Event Log，作为 recovery-safe 工具不会触发 Workspace checkpoint。Workspace 存在有效 Skill 时动态加入 `load_skill`；存在与当前 embedding fingerprint 匹配的知识索引时动态加入只读 `search_knowledge`。旧教学 task graph/teammate/cron、全局 Skill loader、同步 Agent/LLM、context/hooks、模拟 MCP 与全局注册表已经删除；不再提供 `AgentRuntime` / `TraceStore` 别名。Skills、摘要、恢复与审批均沿用已有生产实现。离线 Eval 使用 scripted Provider；离线与 live 评测均显式关闭真实 MCP，并为每条用例创建独立临时项目和评测数据库。
 
 RunBody 支持每次 Run 的 `mode`（auto/plan/agent，未知值按 auto 处理）、`attachment_ids` 与可选 `model`，策略在 `run_policy.py` 中保持为纯函数，wiring 在 Host。`plan` 把模型可见的工具目录收敛为只读白名单（`read_file`/`glob`/`read_tool_result`/`compact`/`todo_write`/`load_skill`/`search_knowledge`），system 追加只读声明；executor handlers 同步裁剪到可见名字，模型幻觉出的写调用不会命中处理器；MCP 服务仍按 Workspace 配置连接，只是其工具不进入目录。`agent` 在该 Run 内自动允许 ASK 决策，不再等待审批处理器，`approval.resolved` payload 带 `auto: true` 且 `author="runtime"`，审计事实完整。附件上传采用 JSON base64、单文件 ≤10MB，存储在状态根 `attachments/~<sha256(session_id)>/{attachment_id}`，不属于 SQLite schema；内部 v3 记录保存精确 session_id，读取、标记、删除和水合均校验；新目录始终使用完整 ID 的 SHA-256，拒绝链接逃逸与重名覆盖。旧安全目录保守只读兼容，无法确认归属的旧记录拒绝访问。清单默认只返回未使用附件，used 由文件缓存或 canonical 引用共同确定；下载保持原始媒体类型，删除只允许未使用附件。HTTP 在返回 202 前校验归属与当前 Provider 能力。UTF-8 文本以分隔符内联且单附件超过 512KB 时截断；图片和 PDF 在事件中只保存不可变引用，每次 Provider 请求前从状态根水合，避免 canonical Event Log、审计导出和字符预算复制 base64。图片映射到 Anthropic、OpenAI-compatible 与 OpenAI Responses 的各自多模态协议；PDF 只映射到 Anthropic 与 OpenAI Responses。普通二进制可以存取，但没有协议映射时明确拒绝提交。
 
@@ -773,3 +773,18 @@ ChatView 在 UI 边界统一检查发送条件，IME 组合输入不触发快捷
 本模式以已注册的受信本地源码和 Git 配置为输入，且不防御并发恶意宿主进程。源码准备阶段仍在 Host 调用既有 Git checkpoint（不是任意恶意仓库导入沙箱）；隔离保证针对模型发起的工具操作。默认容器 Shell 设置 PYTHONDONTWRITEBYTECODE=1，减少正常 Python 检查生成 pyc 造成文本补丁不可导出；项目其他二进制构建产物仍需按导出限制处理。
 
 导出只表达文本内容差异，不表达可执行位或其他权限变化；初始复制不会保留源码可执行位。镜像工具请通过 `python3 script.py` / `sh script.sh` 等显式解释器调用，或仅在候选内按需设置权限。容器固定 UID 对 content 有写权限，baseline/元数据位于不可见、仅宿主拥有的父目录。
+
+
+### 独立验收输出归档
+
+`acceptance_output.py` 仅由独立 Verifier 启用：Local 管道或 Docker start/attach 的每块完整输出交给观察器，原首尾预览采集照旧，增量UTF-8解码、按已知密钥跨块脱敏，再同步有界写入状态根 `acceptance-output/<run摘要>/<产物ID>/{stdout,stderr}.part`。Docker context/create/rm 不归档；创建失败保留原诊断预览，标记命令归档 not_started。普通 Agent Shell、Skill 和其他工具不改变采集行为。
+
+Event Log 保存 `acceptance.output_started/recorded/expired/cleanup_failed` Session事实；payload 的 source_run_id、call_id 绑定原控制Run，不向已终态Run追加维护事实，不伪造工具完成。recorded 包含artifact_id/version及两流 received_bytes、stored_bytes/stored_chars、sha256、sealed、encoding_loss、capture_state/reason。工具完成的 metadata.output_evidence 引用同一记录。原始接收字节数与脱敏UTF-8保存字节不同，不能相减当省略量；崩溃恢复的原接收量未知为null。
+
+完整收尾时同步文件、改名.log，并在POSIX同步目录；整段成功才标complete，sealed仅说明已改名，不能单凭扩展名判断完整。配额、写入/同步故障、超时、取消或重启保留可校验前缀并标记不完整。Host先按原规则恢复Run，再将未发布的.part或已改名但未记录的.log保守记为interrupted。缺失/过期/损坏状态与采集是否完整分开；空且完整的真实流是有效证据。保存故障不停止消费管道，不改变命令退出码、验收判定或未知容器结果。
+
+每流1MiB、控制Run跨轮24MiB、状态根共256MiB的正文逻辑配额由同一Host事件循环共享，检查和写入结算之间不await；不建立第二个调度器。扫描计入.part和删除失败的残留，无法确认占用则拒绝新增正文。终态/停驻后7天可清理，启动、每次验收前及控制操作收尾触发；活跃产物与非终态Run保护，先记录expired再删除，删除失败记录errno并保留占用。逻辑字节配额不限制空文件数、目录与Event Log元数据，不宣称OS硬磁盘配额。
+
+`read_tool_result` 的可选stream读取保存文本的字符页，先同Session或精确Writer Run/验收call授权，再用内部身份定位；不接收磁盘路径。省略stream的content分页坐标保持不变。读取分块校验整份已存正文摘要，只将当前页留在内存；每页默认4,000/最大12,000字符，stdout/stderr不推断交错顺序。引用及采集状态计入原12,000字符修正反馈。目录排除在源码checkpoint之外；只有元数据可由Event Log重建，日志正文需单独备份。Docker不挂载目录，Local同UID仍要求可信命令，摘要仅检测变化而非强防篡改隔离。设计取舍见ADR-095，配额、过期与回读操作见用户指南。
+
+2026-10-22验收：新增长日志/存储/权限/重启定向21项通过（含真实Docker中段回读），另补最终化路径和创建失败专项；一次后端全量2,002通过/12显式跳过、覆盖93.74%，归档模块94%，Ruff/Mypy及服务/离线smoke通过。原始日志在忽略目录.task_outputs/acceptance-output/；新能力Red和实施中失败分别记录于failure-cases的009–013。不把机制与日志可取回性当真实模型修复率或成本改善。

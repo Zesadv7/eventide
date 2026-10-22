@@ -545,3 +545,12 @@ Injection 为 `{request_id,attempt_id,memories:[{id,revision,scope,project_id,ke
 Session 响应新增 `execution_profile: "local" | "sandbox" | null`（null 表示尚无 Run）和 `sandbox_profile: object | null`。Run 的既有 `execution` 响应在沙箱时为 `{kind:"sandbox", sandbox_id, working_directory, skipped, profile}`。profile 固定字段为 `kind:"sandbox", image:"sha256:…", requested_image, network:"none", memory_mb:512, cpus:1, pids_limit:128, timeout:120, output_limit:25000, disable_mcp:true`。镜像检查仅证明本地镜像存在，不是 Python/项目依赖或完整 Docker Desktop 验收声明。清理未知须继续展示失败/停驻状态。
 
 `GET /api/runs/{run_id}/sandbox-diff` 返回 `text/plain` 和 `Content-Disposition: attachment; filename="candidate.patch"`，`Cache-Control: no-store`。要求本机调用，显式跨站 Origin/Sec-Fetch-Site 拒绝；不存在 Run 为404，非沙箱/产物不安全/超过2MiB/二进制或不支持文件名为422，仍在运行或清理未知为409。补丁对应该 Session 当前共享候选与首次过滤 baseline，可能包含后续 Run 的修改，不能当成所查历史 Run 的固定产物。接口不应用补丁、不改源文件；必须由用户审阅后手动处理源漂移与冲突。
+
+
+### 独立验收的长输出证据 —— 已实现
+
+独立验收check沿用原 `content/is_error/metadata`，metadata新增 `output_evidence={version:1,artifact_id,source_run_id,call_id,streams:{stdout,stderr}}`；Session级 `acceptance.output_started/recorded/expired/cleanup_failed` 通过source_run_id关联控制Run，不重开已终态Run。每流字段为 received_bytes（崩溃恢复为null）、stored_bytes、stored_chars、sha256（无可读快照为null）、sealed、encoding_loss、capture_state、reason；恢复/删除失败可带storage_errno。完整性只描述日志采集，不表示检查通过。
+
+现有模型工具 `read_tool_result(run_id,call_id,offset=0,limit=4000,stream?)` 接受可选stdout/stderr；省略或null沿用原已保存content字符坐标，不隐式解析旧日志分流。新stream坐标是脱敏保存文本的字符数，单页limit最多12,000，页头返回next_offset或end_of_stream、availability、capture_state/reason及encoding_loss。只能读取同Session或控制器冻结的精确Writer Run/call白名单；不提供任意路径或新增下载HTTP入口。
+
+capture_state为complete、quota_exceeded、write_failed、redaction_unavailable、interrupted或not_started；reason细分stream/run/global配额、写入/最终化失败、取消/超时/进程重启等。Docker管理诊断继续原content预览，未派发attach的命令归档为not_started。availability区分available、not_saved、expired、missing、corrupt与corrupt_or_unreadable；available仍可能只含不完整前缀，旧记录显式请求stream返回无分流证据。归档全文不自动灌入事件、SSE或JSONL；原短预览及主动回读的有界页仍按现有工具结果记录与导出。原12,000字符修正反馈和命令退出/人工采纳规则保持。

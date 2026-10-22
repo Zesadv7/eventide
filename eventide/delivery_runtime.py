@@ -316,6 +316,7 @@ class DeliveryController:
             if run_id:
                 host._run_tasks.pop(run_id, None)
             host._active_tasks.discard(task)
+            host.acceptance_output.cleanup()
 
     async def _run_writer(
         self, run_id: str, delivery_id: str, checkout_ws: WorkspaceRecord,
@@ -404,17 +405,6 @@ class DeliveryController:
         source_workspace = host.resolve_or_register_workspace(source)
         async with self._source_owner(source_workspace):
             patch = await host._admission_check(build_patch, source, checkout, receipt)
-        command_executor: CommandExecutor = LocalCommandExecutor(host.settings.command_timeout)
-        if image is not None:
-            from eventide.container_executor import ContainerCommandExecutor
-
-            command_executor = ContainerCommandExecutor(
-                image, timeout=host.settings.command_timeout
-            )
-        command_executor = CoordinatedCommandExecutor(
-            command_executor, host._project_git_locks[source_workspace.project_id],
-        )
-        tools = ToolExecutor({"bash": lambda **_args: ""}, command_executor=command_executor)
         results: list[dict[str, Any]] = []
         verification_id = uuid.uuid4().hex[:16]
         for index, command in enumerate(checks):
@@ -430,40 +420,74 @@ class DeliveryController:
                 },
                 None,
             )
-            execution = asyncio.create_task(
-                tools.execute(call, ToolContext(checkout, run_id, host.policy))
+            identity = host.store.get_run_identity(run_id)
+            assert identity is not None
+            capture = host.acceptance_output.start(
+                identity["session_id"], run_id, call.id,
+                secrets=(host.settings.api_key or "",), clean=host._semantic,
             )
+            outcome = "interrupted"
             try:
-                checked = await asyncio.shield(execution)
-            except asyncio.CancelledError:
-                execution.cancel()
-                while not execution.done():
-                    with suppress(asyncio.CancelledError):
-                        await asyncio.shield(execution)
-                if not execution.cancelled():
-                    settled = execution.result()
-                    if settled.metadata.get("outcome_unknown"):
-                        await host._emit(
-                            run_id,
-                            "tool.outcome_unknown",
-                            {
-                                "call_id": call.id,
-                                "name": "bash",
-                                "readonly": image is not None,
-                                "workspace_id": host.resolve_or_register_workspace(
-                                    checkout
-                                ).workspace_id,
-                                "error": settled.content,
-                            },
-                            None,
-                        )
-                raise
+                command_executor: CommandExecutor = LocalCommandExecutor(
+                    host.settings.command_timeout, output_observer=capture.feed,
+                )
+                if image is not None:
+                    from eventide.container_executor import ContainerCommandExecutor
+
+                    container_executor = ContainerCommandExecutor(
+                        image, timeout=host.settings.command_timeout, output_observer=capture.feed,
+                    )
+                    command_executor = container_executor
+                command_executor = CoordinatedCommandExecutor(
+                    command_executor, host._project_git_locks[source_workspace.project_id],
+                )
+                tools = ToolExecutor(
+                    {"bash": lambda **_args: ""}, command_executor=command_executor,
+                )
+                execution = asyncio.create_task(
+                    tools.execute(call, ToolContext(checkout, run_id, host.policy))
+                )
+                try:
+                    checked = await asyncio.shield(execution)
+                except asyncio.CancelledError:
+                    outcome = "cancelled"
+                    execution.cancel()
+                    while not execution.done():
+                        with suppress(asyncio.CancelledError):
+                            await asyncio.shield(execution)
+                    if not execution.cancelled():
+                        settled = execution.result()
+                        if settled.metadata.get("outcome_unknown"):
+                            await host._emit(
+                                run_id,
+                                "tool.outcome_unknown",
+                                {
+                                    "call_id": call.id,
+                                    "name": "bash",
+                                    "readonly": image is not None,
+                                    "workspace_id": host.resolve_or_register_workspace(
+                                        checkout
+                                    ).workspace_id,
+                                    "error": settled.content,
+                                },
+                                None,
+                            )
+                    raise
+                outcome = (
+                    "outcome_unknown" if checked.metadata.get("outcome_unknown") else
+                    "timeout" if checked.metadata.get("timed_out") else
+                    "complete" if "exit_code" in checked.metadata else "not_started"
+                )
+                if image is not None and not container_executor.attach_dispatched:
+                    outcome = "not_started"
+            finally:
+                output_evidence = capture.finish(outcome)
             evidence = {
                 "call_id": call.id,
                 "name": "bash",
                 "content": checked.content,
                 "is_error": checked.is_error,
-                "metadata": checked.metadata,
+                "metadata": {**checked.metadata, "output_evidence": output_evidence},
             }
             evidence = host._semantic(evidence)
             results.append(evidence)

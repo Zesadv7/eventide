@@ -892,6 +892,37 @@ class RuntimeStore:
             ).fetchall()
         return [self._decode(row) for row in rows]
 
+    def acceptance_output_events(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM runtime_events WHERE partial=0 AND type IN "
+                "('acceptance.output_started','acceptance.output_recorded',"
+                "'acceptance.output_expired','acceptance.output_cleanup_failed') ORDER BY rowid"
+            ).fetchall()
+        return [self._decode(row) for row in rows]
+
+    def get_acceptance_output(
+        self, session_id: str, run_id: str, call_id: str,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json FROM runtime_events WHERE session_id=? "
+                "AND json_extract(payload_json, '$.source_run_id')=? "
+                "AND type='acceptance.output_recorded' AND partial=0 "
+                "AND json_extract(payload_json, '$.call_id')=? ORDER BY session_seq DESC LIMIT 1",
+                (session_id, run_id, call_id),
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def run_terminal_at(self, run_id: str) -> float | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT MAX(ts) FROM runtime_events WHERE run_id=? "
+                "AND type IN ('run.completed','run.failed','run.interrupted')",
+                (run_id,),
+            ).fetchone()
+        return row[0]
+
     def get_tool_result(self, session_id: str, run_id: str, call_id: str) -> dict[str, Any] | None:
         """Return one completed result only when both identities belong to the session."""
         with self._lock:

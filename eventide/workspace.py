@@ -146,7 +146,7 @@ def runtime_checkpoint_directories(state_dir: Path) -> tuple[Path, ...]:
     """Only Runtime artifact namespaces; never project `skills` or arbitrary data."""
     root = state_dir.resolve()
     return tuple(root / name for name in (
-        "attachments", "skill-packages", "execution-snapshots", "evaluations",
+        "attachments", "skill-packages", "execution-snapshots", "evaluations", "acceptance-output",
     ))
 
 

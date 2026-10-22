@@ -114,6 +114,33 @@ def executor(fixture, **options):
     return ContainerCommandExecutor("python:3.12-slim", docker_path=fixture[1], **options)
 
 
+async def test_verifier_creation_failure_is_not_empty_complete_output(fake_docker, tmp_path,
+                                                                    monkeypatch):
+    from eventide.tool_results import reader
+    from tests.test_delivery_runtime import delivery_host
+
+    configure(fake_docker, create_exit=125)
+    monkeypatch.setenv("PATH", str(fake_docker[1].parent) + os.pathsep + os.environ["PATH"])
+    host = delivery_host(tmp_path)
+    try:
+        prepared = await host.manage_delivery("prepare", name="creation-evidence")
+        verified = await host.manage_delivery(
+            "verify", delivery_id=prepared["delivery_id"], checks=["echo never"],
+            image="python:3.12-slim",
+        )
+        check = verified["checks"][0]
+        assert "Image unavailable" in check["content"]
+        assert all(value["capture_state"] == "not_started" for value in
+                   check["metadata"]["output_evidence"]["streams"].values())
+        identity = host.store.get_run_identity(verified["control_run_id"])
+        page = reader(host.store, identity["session_id"], outputs=host.acceptance_output)(
+            verified["control_run_id"], check["call_id"], stream="stderr",
+        )
+        assert "capture_state=not_started" in page and "capture_state=complete" not in page
+    finally:
+        await host.close()
+
+
 async def test_exact_argv_boundary_is_readonly_and_does_not_execute_host_shell(
     fake_docker, tmp_path
 ):

@@ -36,7 +36,11 @@
 | FAIL-006 | 新增搜索工具后旧目录断言未同步 | 自动化测试 / 测试契约更新遗漏 | 已完成：旧目录断言修正，新SHA六项CI通过 |
 | FAIL-007 | 回查集成测试误用 Run 投影字段 | 自动化测试 / 新测试问题 | 已完成：修正投影身份来源，定向通过 |
 | FAIL-008 | master推送的Git HTTPS连接超时 | 发布／Git传输 / 环境或外部故障 | 已完成：代理推送成功；底层根因未明 |
-| FAIL-009 | 超过采集上限的验收中段尚不可回读 | 自动化测试 / 新能力预期 Red | 进行中：已证明旧预览丢弃，归档接线待验收 |
+| FAIL-009 | 超过采集上限的验收中段尚不可回读 | 自动化测试 / 新能力预期 Red | 已完成：Local/Docker中段及边界回读通过 |
+| FAIL-010 | 新归档恢复/清理事实被终态规则拒绝 | 自动化测试 / 新增实现缺陷 | 已完成：会话级维护事实保留原Run终态 |
+| FAIL-011 | 归档打开失败原因被后续快照覆盖 | 自动化测试 / 新增实现缺陷 | 已完成：仅对实际打开的文件取快照 |
+| FAIL-012 | 新归档首轮静态检查未通过 | 静态检查 / 新代码规范问题 | 已完成：Ruff及Mypy通过 |
+| FAIL-013 | 分流参数增加后工具目录超出原预算 | 自动化测试 / 新增接口固定开销 | 已完成：缩短说明，原预算不变 |
 
 ## FAIL-001：长日志截断验收反馈 JSON
 
@@ -121,10 +125,10 @@
 
 ## FAIL-009：超过采集上限的验收中段尚不可回读
 
-- **日期、类型与范围：** 2026-10-22，自动化测试／新能力预期Red；基线7d84f6c加L1新增测试，进行中。不是线上事故，也不追溯改变旧回查能力的验收结果。
+- **日期、类型与范围：** 2026-10-22，自动化测试／新能力预期Red；基线7d84f6c加L1新增测试，已完成。不是线上事故，也不追溯改变旧回查能力的验收结果。
 - **证据与现象：** `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest -q tests/test_acceptance_output.py --tb=short`：1失败，2.53秒；日志 `.task_outputs/acceptance-output/red.log`。真实独立验收命令单个stdout约100KB，中间唯一标记不在首尾；前置断言确认短content及其全部旧分页均无该标记，随后新stream参数因尚未实现而TypeError。这分别证明采集丢失与新契约尚不存在，不能把缺少参数报错单独当作生产缺陷。
-- **原因与处理计划：** `_BoundedOutput`只保留每流25,000字节头尾，Event Log未收到中段；已有约18KB用例只证明反馈层省略可回读。新增独立验收的受控脱敏文件及兼容分流分页，不增加重试/反思调用，不扩大预览。
-- **复验与边界：** 尚待实现后定向验证；全部失败按实际根因追加。Codex编写并运行受控用例，用户指定范围，不虚构真实用户影响或模型修复率收益。
+- **原因与处理：** `_BoundedOutput`只保留每流25,000字节头尾，Event Log未收到中段；已有约18KB用例只证明反馈层省略可回读。新增独立验收的受控脱敏文件及兼容分流分页，不增加重试/反思调用，不扩大预览。
+- **复验与边界：** 实现后首批28通过/1显式Docker跳过（initial-green.log），随后长输出/存储/权限/重启的21项通过，包含真实Docker参数（lifecycle.log，12.20秒）；新增最终化路径故障及Docker创建失败接线也通过（integration.log）。中段标记可回读，短预览仍缺标记；原Red保留，不改判。Codex编写并运行受控用例，用户指定范围，不虚构真实用户影响或模型修复率收益。
 
 ### 同批采集hook的预期Red与定向复验
 
@@ -133,3 +137,35 @@
 - **已证实原因：** 旧 Local／Container 构造函数不接受新增 `output_observer` 参数，五项均为对应 TypeError；这是接口需求尚未实现，不能包装成生产故障，也尚未单凭此轮证明大日志回查已改善。
 - **处理与复验：** 实现默认关闭的可选两流原始字节观察接口，Docker仅向命令采集器传入，不观察inspect/create/rm。随后同一解释器运行 `-m pytest -q tests/test_command_results.py tests/test_container_executor.py --tb=short`，65通过／1项既有真实Docker按开关跳过、退出0，日志 `green.log`；Ruff通过、Mypy两模块通过（各自日志同目录）。原25,000字节预览、计数、取消/超时和Docker控制流程未改变。未运行真实容器或付费模型，回调通过不代替主任务日志归档、脱敏及授权回读的效果验收；本例修复与文档同一提交，以Git历史追溯。
 - **参与与追问：** 用户授权主任务，Codex分工实施；如何确保Docker管理输出不会误归档？为何回调观察与证据最终化需分开？
+
+## FAIL-010：新归档的恢复与清理事实被终态规则拒绝
+
+- **日期、类型与状态：** 2026-10-22，自动化测试／新增实现缺陷，已完成；基线8c0e238加未提交归档接线。不是原版本已发生的事故。
+- **命令与证据：** `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest -q tests/test_acceptance_output_storage.py --tb=short`：10通过、5失败，0.20秒，日志`.task_outputs/acceptance-output/storage-tests.log`。其中4项重启/过期/删除失败场景在追加归档事实时被`Run already terminated`拒绝；另1项错误原因断言见下条。
+- **已证实原因：** 新归档将恢复和清理事实绑定已终态的原控制Run，现有Store禁止终态后追加一般Run事实。日志正文已存在并不等于允许重开运行生命周期；需要保留原规则，只对严格限定的归档维护事实及已开始证据身份设计接收路径。
+- **处理与复验：** 归档事实改为同一Session的独立维护事实，以source_run_id绑定原运行；Store通用终态规则不改，没有伪造新工具完成或重开Run。storage套件随后15项通过（0.12秒，storage-green.log），包含4项原恢复/清理失败；用户指定证据范围，Codex实施并通过新增机制测试暴露问题，未运行真实模型。修复随本轮归档实现提交。
+
+## FAIL-011：归档打开失败的原因被后续快照失败覆盖
+
+- **日期、类型与状态：** 2026-10-22，自动化测试／新增实现缺陷，已完成；同FAIL-010批次和基线。
+- **现象与原因：** 注入ENOSPC后归档文件未创建，finish仍尝试读取该路径，将已明确的open_failed改成snapshot_failed。两者都未声称完整，但丢失了最早有依据的故障原因。
+- **处理与复验：** 仅对实际打开过的文件生成快照，保留首次有依据的打开失败原因；失败后仍计数后续收到字节。同一storage套件15项通过，包含原失败（storage-green.log）；最初失败证据同storage-tests.log首项，不虚构磁盘真的用尽。修复随本轮归档实现提交。
+
+## FAIL-012：新归档首轮静态检查未通过
+
+- **日期、类型与状态：** 2026-10-22，静态检查／新增代码规范问题，已完成；基线8c0e238加未提交归档实现。
+- **证据与原因：** 运行变更文件的`ruff check --fix`后退出1，剩4项：不可在参数默认值中调用OutputLimits（B008），及三处超过100字符（E501）；不是运行时故障。原命令及输出保留本轮维护对话，后续结果写入.task_outputs/acceptance-output/静态日志。
+- **处理：** 使用模块级不可变默认配置并换行，未修改配额或运行语义；Ruff随后通过，8个变更模块Mypy通过，证据分别为ruff.log、mypy.log；未改变运行语义。Codex新增实现并处理规范问题，不虚构用户影响。
+
+
+## FAIL-013：分流参数增加后工具目录超出原预算
+
+- **日期、类型与状态：** 2026-10-22，自动化测试／新增接口固定开销超限，已完成；基线8c0e238加未提交归档接线，不是线上故障。
+- **证据与原因：** `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest -q tests/test_acceptance_output_storage.py::test_finalize_path_error_preserves_both_stream_records tests/test_container_executor.py::test_verifier_creation_failure_is_not_empty_complete_output tests/test_delivery_repair.py tests/test_tool_result_paging.py tests/test_host.py::test_tool_catalog_stays_within_its_budget tests/test_context_builder.py --tb=short`：31通过、1失败、1真实Docker按开关跳过，120.13秒，日志 `.task_outputs/acceptance-output/integration.log`。唯一失败为工具目录4,034字符超过4,000上限；新stream schema及说明带来固定请求开销，日志回读行为断言均通过。
+- **处理与取舍：** 缩短read_tool_result工具说明，保留stream字段、权限及4,000目录上限，不靠提高预算消除断言；修复后仅定向复验该失败，再按计划一次全量收口。Codex实施与定位，未运行真实模型，不宣称Token收益。
+
+- **FAIL-013复验：** 仅复验原目录失败与受中断原因字段调整影响的Local验收用例，共4通过、1显式Docker参数未选中（7.97秒，recheck.log）。目录回到4,000字符上限内；先前真实Docker中段回读已通过，不因本轮缩短说明重复运行。全仓Ruff及124模块Mypy通过（ruff-final.log/mypy-final.log）。
+
+### 本批最终收口（FAIL-009–013）
+
+2026-10-22：同一本地归档实现的一次全量 `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest -q --cov=eventide --cov-fail-under=85` 为2,002通过、12显式跳过、覆盖93.74%（1091.87秒），无新增失败；1条Starlette/AnyIO依赖弃用警告单列，不当失败或隐藏。Ruff全仓、Mypy124模块、服务help/启动冒烟、离线smoke12/12通过；对应日志均在.task_outputs/acceptance-output/。原Red及各次失败保留，修复代码、专项测试和本段同提交，可按本文件与acceptance_output.py的Git历史追溯；无付费模型、用户事故或修复率提升结论。
