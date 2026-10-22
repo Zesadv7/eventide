@@ -26,6 +26,7 @@ def _failure_evidence(metadata: dict[str, Any]) -> bool:
                 and exit_code != 0
                 or isinstance(metadata.get("exception_type"), str)
                 and metadata["exception_type"]
+                or metadata.get("mcp_is_error") is True
             )
         )
     )

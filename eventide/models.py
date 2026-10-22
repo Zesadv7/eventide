@@ -181,6 +181,15 @@ class CommandResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolOutput:
+    """Explicit handler outcome; the executor owns call identity and permissions."""
+
+    content: str
+    is_error: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class ToolResult:
     call_id: str
     name: str

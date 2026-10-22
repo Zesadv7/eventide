@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from eventide.budgets import BudgetExceeded
-from eventide.models import CommandResult, ToolCall, ToolResult
+from eventide.models import CommandResult, ToolCall, ToolOutput, ToolResult
 from eventide.policy import PolicyDecision, PolicyEngine
 from eventide.tool_contracts import (
     BUILTIN_ARGUMENTS,
@@ -383,6 +383,10 @@ class ToolExecutor:
                     metadata["code"] = "timeout" if output.timed_out else "execution_failed"
                 return ToolResult(
                     call.id, call.name, output.render(), output.is_error, metadata
+                )
+            if isinstance(output, ToolOutput):
+                return ToolResult(
+                    call.id, call.name, output.content, output.is_error, output.metadata
                 )
             text = str(output)
             failed = text.startswith("Error:")

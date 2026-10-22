@@ -339,3 +339,10 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | 编号 | 状态 | 内容与验收 |
 |---|---|---|
 | MERGE-1 | 已完成 | 2026-10-22：修正候选918b40a的[六项CI](https://github.com/Zesadv7/eventide/actions/runs/39644102821)全部通过：Python3.10/3.14各1957通过/29跳过，覆盖率93.03%（≥85%）；前端187、浏览器31、真实Docker55、可选扩展60及服务/smoke/wheel/镜像分发通过。首轮1166ca6两版本同一旧目录断言失败完整保留在FAIL-006；只修测试预期，本地Skills4项验证，新SHA按既有门禁验证。master集成沿用已验证的源码、测试和资源，仅补验收Markdown，且AGENTS前4000字符一致；合并提交[skip ci]避免再跑相同整版，合并d16c006首次Git HTTPS推送超时，FAIL-008记录；按命令使用系统已有代理后推送成功，GitHub API已核对d16c006。最终仅补恢复文档并同步，最终HEAD以Git为准。日志/结果在忽略目录.task_outputs/quality-increment/github-ci-fixed.*，无付费模型请求。 |
+
+## MCP 工具故障可观察性与停驻（2026-10-22）
+
+| 编号 | 状态 | 范围与验收 |
+|---|---|---|
+| TC-1 | 已完成 | MCP超时/断连/取消复用unknown停驻，明确isError传递并接既有失败窗口。新16项通过，另62项既有契约/循环及真实本机stdio/HTTP通过；初轮测试接口/断言与两项受控缺陷见FAIL-014/015。Ruff及4模块Mypy通过；architecture/api-contract/user-guide/ADR-096同步，无付费或外部写调用，不新增重试/补偿。证据.task_outputs/tool-outcomes/。 |
+| TC-2 | 待开始 | Run 工具投影及 Web 卡片展示结果待确认，保持已完成/失败语义；定向验证、同步契约和分发资源。 |

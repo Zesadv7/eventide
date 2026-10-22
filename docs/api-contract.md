@@ -32,6 +32,8 @@ Vue设置页通过`durableMutation('probe', ...)`调用此接口，结果独立�
 
 工具调用错误的canonical metadata含稳定code（invalid_arguments、invalid_tool_contract、unknown_tool、permission_denied、timeout、execution_failed、outcome_unknown）。第一次参数错误交回模型修正，再次参数错误结束该Run；错误结果仍保存，不自动重放已执行工具。截断响应的调用不会派发，其未执行事实补齐历史消息。
 
+MCP明确返回的`isError`保存为`tool.completed.payload.is_error`及`metadata.mcp_is_error`；为true时`metadata.code=execution_failed`，正文不增加Error前缀。调用中超时、断连或取消导致无法确认结果时只产生`tool.outcome_unknown`，其error保留经脱敏的异常分类和原因，终态reason为`unknown_tool_outcome`；无自动重试或补偿。该范围不包含调用前的发现失败、参数/权限拒绝。
+
 写请求的Origin必须匹配本机服务源，cross-site/null/异常端口和DNS-rebinding来源拒绝；本机非浏览器客户端可省略Origin。没有放开CORS，开发前端应使用同源代理。
 
 下文“仅回环／仅本机”的管理权限默认仍只接受回环连接。容器部署可通过启动配置 `EVENTIDE_LOCAL_PROXY_PEERS` 显式追加精确 IP；这些额外连接必须同时携带匹配服务端回环 Host 的 Origin，缺失／不匹配返回403，不能利用伪造转发头获得权限。配置在应用创建时固定，不属于模型或运行配置 API。即使未来只读管理路由使用此守卫，额外连接也需满足同样来源检查；现有普通GET契约不变。宿主仅发布回环端口，服务入口禁用代理头解析，不提供公网认证。

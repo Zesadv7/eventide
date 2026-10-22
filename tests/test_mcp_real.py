@@ -24,7 +24,8 @@ async def test_real_stdio_mcp_discovers_and_calls_tools():
         assert "mcp__demo__eventide_demo_echo" in {tool["name"] for tool in manager.tools}
         assert "mcp__demo__eventide_demo_echo" in manager.readonly_tools
         result = await manager.handlers["mcp__demo__eventide_demo_echo"](text="transport-ok")
-        assert "transport-ok" in result
+        assert "transport-ok" in result.content
+        assert not result.is_error
     finally:
         await manager.close()
 
@@ -119,7 +120,9 @@ async def test_real_streamable_http_discovers_and_calls_tools(monkeypatch):
             )
         )
         handler = manager.handlers["mcp__http-demo__eventide_demo_sum"]
-        assert "7" in await handler(a=3, b=4)
+        result = await handler(a=3, b=4)
+        assert "7" in result.content
+        assert not result.is_error
     finally:
         await manager.close()
         process.terminate()

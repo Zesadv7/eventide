@@ -92,7 +92,7 @@ Skill包采用 `SKILL.md`、`references/`、`scripts/` 和 `assets/`。支持本
 
 导入先检查格式、依赖、链接、路径穿越、数量和大小，不执行脚本、不自动装依赖。Run固定正文和资源清单，在途任务不受更新影响。正文与资源按需加载、资源有界分页；脚本必须经过原Executor、Policy和执行后端，Plan不能获得脚本能力。
 
-项目的 `mcp.json` 可参考 [mcp.example.json](../mcp.example.json)，支持官方MCP SDK的stdio与Streamable HTTP；工具名固定为 `mcp__server__tool`，stdio仅传配置中列出的环境变量。动态schema校验禁用网络引用解析，通过参数校验后仍检查权限。
+项目的 `mcp.json` 可参考 [mcp.example.json](../mcp.example.json)，支持官方MCP SDK的stdio与Streamable HTTP；工具名固定为 `mcp__server__tool`，stdio仅传配置中列出的环境变量。动态schema校验禁用网络引用解析，通过参数校验后仍检查权限。 MCP调用中超时、断连或取消可能留下远端副作用：此时Run停驻为“工具结果未确认”，阻止继续与同执行工作区的新写入，重启或abandon不能解除。请先核对远端服务记录和项目实际状态；当前没有应用内自动核销未知结果的入口，不要把重发同一写操作当作恢复。明确返回的工具错误仍反馈给模型；相同错误连续三次且源码没有变化时沿用已有停止规则。
 
 任务计划由模型通过 `todo_write` 更新，页面只读展示服务端计划、summary和工具证据。计划标记完成只说明模型提交了该状态，不代替独立验收。`EVENTIDE_WORKERS=1` 可启用有界Researcher/Reviewer只读子Run；它们使用父任务固定快照、自己的消息与工具/步数额度，不能写入源码。
 

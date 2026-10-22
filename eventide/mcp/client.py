@@ -12,7 +12,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from eventide.models import ToolOutput
+
 _DISALLOWED_CHARS = re.compile(r"[^a-zA-Z0-9_-]")
+
+
+class MCPOutcomeUnknown(RuntimeError):
+    """The call began but transport termination does not prove the remote outcome."""
+
+    outcome_unknown = True
 
 
 def normalize_mcp_name(name: str) -> str:
@@ -22,10 +30,25 @@ def normalize_mcp_name(name: str) -> str:
 
 def _tool_handler(session: Any, tool_name: str, timeout: float | None) -> Callable[..., Any]:
     """Capture transport state lexically, never as model-overridable keywords."""
+    from anyio import BrokenResourceError, ClosedResourceError, EndOfStream
+    from httpx2 import TransportError
+    from mcp.shared.exceptions import MCPError
+    from mcp_types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
-    async def invoke(**kwargs: Any) -> str:
-        request = session.call_tool(tool_name, arguments=kwargs)
-        result = await request if timeout is None else await asyncio.wait_for(request, timeout)
+    async def invoke(**kwargs: Any) -> ToolOutput:
+        try:
+            request = session.call_tool(tool_name, arguments=kwargs)
+            result = await request if timeout is None else await asyncio.wait_for(request, timeout)
+        except MCPError as exc:
+            if exc.code not in {CONNECTION_CLOSED, REQUEST_TIMEOUT}:
+                raise
+            raise MCPOutcomeUnknown(f"MCP {exc.code}: {exc}") from exc
+        except (
+            asyncio.CancelledError, asyncio.TimeoutError, ConnectionError,
+            BrokenResourceError, ClosedResourceError, EndOfStream, TransportError,
+        ) as exc:
+            # Cancellation/timeout can occur after a remote write; never retry it here.
+            raise MCPOutcomeUnknown(f"{type(exc).__name__}: {exc}") from exc
         parts: list[str] = []
         for block in result.content:
             text = getattr(block, "text", None)
@@ -36,7 +59,10 @@ def _tool_handler(session: Any, tool_name: str, timeout: float | None) -> Callab
         if structured:
             parts.append(json.dumps(structured, ensure_ascii=False))
         is_error = getattr(result, "is_error", False) or getattr(result, "isError", False)
-        return ("Error: " if is_error else "") + "\n".join(parts)
+        return ToolOutput(
+            "\n".join(parts), bool(is_error),
+            {"mcp_is_error": bool(is_error), **({"code": "execution_failed"} if is_error else {})},
+        )
 
     return invoke
 

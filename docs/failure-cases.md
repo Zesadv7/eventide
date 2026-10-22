@@ -28,6 +28,8 @@
 
 | 编号 | 问题 | 范围 / 失败类型 | 状态 |
 |---|---|---|---|
+| FAIL-014 | MCP 边界新增测试误用策略构造接口 | 自动化测试 / 新测试问题 | 已完成：修正fixture/拒绝原因断言及格式 |
+| FAIL-015 | MCP丢失响应与文本前缀被错误归类 | 自动化测试 / 受控缺陷复现 | 已完成：停驻与显式结果定向通过 |
 | FAIL-001 | 长日志截断验收反馈 JSON | 自动化测试 / 受控缺陷复现 | 已完成：反馈修复通过定向验证 |
 | FAIL-002 | 新修正提示对旧实现的预期失败 | 自动化测试 / 预期 Red | 已完成：新契约通过定向验证 |
 | FAIL-003 | Python 3.10 无法收集测试 | CI / 测试兼容性问题 | 已完成：修复及历史证据核对 |
@@ -169,3 +171,25 @@
 ### 本批最终收口（FAIL-009–013）
 
 2026-10-22：同一本地归档实现的一次全量 `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest -q --cov=eventide --cov-fail-under=85` 为2,002通过、12显式跳过、覆盖93.74%（1091.87秒），无新增失败；1条Starlette/AnyIO依赖弃用警告单列，不当失败或隐藏。Ruff全仓、Mypy124模块、服务help/启动冒烟、离线smoke12/12通过；对应日志均在.task_outputs/acceptance-output/。原Red及各次失败保留，修复代码、专项测试和本段同提交，可按本文件与acceptance_output.py的Git历史追溯；无付费模型、用户事故或修复率提升结论。
+
+## FAIL-014：MCP 边界新增测试误用策略构造接口
+
+- **日期、类型、基线：** 2026-10-22，自动化测试／新测试问题；05cb80b加TC-1测试，已完成。
+- **证据：** `PYTHON_DOTENV_DISABLED=1 .venv/bin/python -m pytest -q tests/test_mcp_outcomes.py --tb=short`，2失败，0.12秒；`.task_outputs/tool-outcomes/red.log`。两项均在PolicyEngine("agent")构造处TypeError，尚未执行工具。
+- **原因与处理：** 新测试错误猜测策略接口；改用无参数PolicyEngine并显式提供审批处理器。此轮不能证明MCP缺陷，也不是预期Red。Codex编写并定位，不虚构线上影响；复验待补。
+
+## FAIL-015：MCP 丢失响应与文本前缀被错误归类
+
+- **日期、类型、基线：** 2026-10-22，自动化测试／受控缺陷复现；05cb80b加新增测试，已完成。未观察到线上重复副作用。
+- **证据：** 与FAIL-014相同命令修正fixture后2失败，0.12秒；`.task_outputs/tool-outcomes/behavior-red.log`。替身已记一次远端写入后抛ConnectionError，结果只有execution_failed；另一调用明确isError=false，但正文以Error:开头仍被标失败。
+- **原因与处理：** MCP handler将结构化结果压成字符串，未区分调用中失联与明确工具错误；接入已有unknown标记并保留显式isError。两例分别覆盖安全停驻和错误可观察性，不借此宣称远端执行恰好一次；复验待补。
+
+- **FAIL-014追加（同类新增测试接口假定）：** 首批五文件定向运行68通过/10失败（19.32秒，`backend-targeted.log`）。10项均已验证unknown和单次派发，但Continue实际在更早的Workspace门禁以“unresolved tool outcome”拒绝，测试错误匹配后置校验的“Unknown tool outcome”。改为断言实际入口的精确拒绝原因，保留次数、停驻及重启断言，不改生产检查。该问题与FAIL-015的旧实现缺陷分开记录。
+
+- **FAIL-014静态复验追加：** 修正精确错误断言后，变更文件Ruff首次退出1，仅新增测试的三行断言超100字符（`ruff.log`）；换行处理，运行语义不变，后续静态复验待补。
+
+### FAIL-014/015定向复验
+
+修正测试后仅复验`tests/test_mcp_outcomes.py`：16通过、5.93秒（`mcp-recheck.log`）；包含原两项缺陷、8种传输异常、真实等待超时/取消、重启拒绝Continue、明确MCP失败三次停驻和参数/权限/协议拒绝。前批另外62项既有契约/循环/真实本机stdio及HTTP测试通过，不重复运行。三处格式换行后Ruff通过（`ruff-green.log`）。没有真实远端写服务、付费模型或线上事故证据。实现与复验文档同提交，由本文件及mcp/client.py的Git历史追溯。
+
+复述要点：远端已执行不等于本地收到结果；先区分明确失败与结果未知，再决定能否继续。Codex实施与故障注入，用户指定范围；可追问为何取消不能证明撤销、保守停驻会牺牲哪些可用性、显式isError为何比文本前缀可靠。
