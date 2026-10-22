@@ -255,7 +255,7 @@ class LocalSemanticEmbedder:
         return EmbeddingProfile(
             provider="local_semantic", model=self.prepared.fingerprint, base_url="local",
             algorithm_version=(
-                f"sentence-transformers-{LIBRARY_VERSION}-role-prompts-normalized-float32-v2"
+                f"sentence-transformers-{LIBRARY_VERSION}-cpu-fp32-role-prompts-v3"
             ),
             dimension=None,
         )
@@ -276,7 +276,8 @@ class LocalSemanticEmbedder:
             if self._model is None:
                 self._model = _library().SentenceTransformer(
                     str(self.prepared.path), device="cpu", local_files_only=True,
-                    trust_remote_code=False, token=False, model_kwargs={"use_safetensors": True},
+                    trust_remote_code=False, token=False,
+                    model_kwargs={"use_safetensors": True, "dtype": "float32"},
                 )
             vectors = []
             for start in range(0, len(texts), EMBED_BATCH_SIZE):

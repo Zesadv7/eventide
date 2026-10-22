@@ -133,7 +133,7 @@ def test_local_invalid_prompt_configuration_fails_before_inference(tmp_path, fak
     assert not fake_library[1]
 
 
-@pytest.mark.parametrize("change", ["algorithm", "prompt"])
+@pytest.mark.parametrize("change", ["algorithm", "bf16", "prompt"])
 def test_local_prompt_policy_changes_require_index_rebuild(
     tmp_path, prompted, fake_library, change,
 ):
@@ -143,9 +143,11 @@ def test_local_prompt_policy_changes_require_index_rebuild(
     (repo / "code.txt").write_text("query evidence is indexed here\n")
     original = LocalSemanticEmbedder(prompted.path)
     old_profile = original.profile()
-    if change == "algorithm":
+    if change in {"algorithm", "bf16"}:
         old_profile = replace(old_profile, algorithm_version=(
-            f"sentence-transformers-{local_models.LIBRARY_VERSION}-normalized-float32-v1"
+            f"sentence-transformers-{local_models.LIBRARY_VERSION}-"
+            + ("normalized-float32-v1" if change == "algorithm"
+               else "role-prompts-normalized-float32-v2")
         ))
     IndexStore(repo).build(embedder=original, profile=old_profile)
     candidate = original
@@ -315,7 +317,7 @@ def test_embedding_batch_options_and_model_load_are_bounded(prepared, fake_libra
     init = calls[0]
     assert init[0] == "embedding_init" and init[2] == {
         "device": "cpu", "local_files_only": True, "trust_remote_code": False,
-        "token": False, "model_kwargs": {"use_safetensors": True},
+        "token": False, "model_kwargs": {"use_safetensors": True, "dtype": "float32"},
     }
     encoded = [call for call in calls if call[0] == "encode"]
     assert [len(call[1]) for call in encoded] == [16, 16, 3]
