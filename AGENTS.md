@@ -383,8 +383,10 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | 编号 | 状态 | 范围与证据 |
 |---|---|---|
 | RG4-UI | 已完成 | 2026-10-22：对话/每轮 Writer 显式准备、项目注册副本索引目标/状态、持久 retrieval.status 刷新与结构化工具来源完成；旧历史显示未记录，未知接收保留原目标。7文件首轮70项通过；补充SSE恢复后相关首轮53通过/1新增测试失败，修正共享fixture与私有字段断言后该文件12项通过，合计71项不同用例通过。Vue类型检查和diff检查通过；新增测试类型/SSE两类问题已记录 docs/failure-cases.md RG-UI，证据 .task_outputs/retrieval-upgrade/ui/。user-guide/api-contract同步，未跑全量/构建/付费模型；后端集成、真实API浏览器和最终生成资源仍由RG4/RG6验收，不以本子任务替代。 |
+| RG4-E2E | 进行中 | 使用现有隔离真实API/ScriptedProvider服务补源目录、worktree、Writer索引准备及准备锁等待取消/刷新旅程；后端集成后仅跑新增检索浏览器文件，无付费模型。 |
 - RG-CORE / RG4 边界定向子任务：主任务 `root-runtime-v2.patch` 下，65 文件首批远程替身用量超过已观测软限后不派第二批，注册根链接拒绝、缺失源码仍保留历史、外部用户 worktree 注册为实际 Session 后 prepare 均有通过证据。首次 2 通过/3 测试前提或口径失败，修正后仅复验两项通过；最终四项有效场景通过，Ruff/diff 通过。失败与对原 managed-worktree 嵌套状态约束的错误推断已纠正登记，不放宽既有规则；证据 `core/preparation-boundaries*.log`。仅提交新增测试与 Markdown，借用生产补丁不提交，无真实 API 请求。
 ### RG5 评测执行器子任务
 
 - 已完成离线机制：新增受Host管理的40查询远程对照和8题真正Agent双臂入口；20查询只21次替身embedding（1次建库＋20次查询），最多三次本地计时不增加请求，不把60计时样本称60题。ScriptedProvider完整8开发/16留出通过，真实Git副本、过期回查、未知/取消停止扩批、质量失败保留且无需使用RAG均验证。原22项数据验证之外新增资源1项、Runner9项均定向通过（32个不同用例；无全量）；最终两模块Mypy、变更文件Ruff通过。全部失败见RG-EVAL，原始日志`eval-*.log`；不读真实凭据、不发live、不推送。
 - 必须保留的限制：每个Agent Run最多12步/20k已观测Token，前置索引构建另计且纳入总消费；300秒包含构建与调查。不新建逐次运行预算接口或将observed偷换为估算硬限。架构已写开发入口和报告重建口径；真实embedding-3、40查询和24次Agent效果仍待主任务处理外部额度并执行，机制完成不等于RG5整体完成。
+

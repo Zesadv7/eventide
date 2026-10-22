@@ -40,7 +40,7 @@ def main() -> None:
 
     class JourneyProvider(FakeProvider):
         async def complete(self, request):
-            if "交付修复场景" in self._prompt(request):
+            if any(label in self._prompt(request) for label in ("交付修复场景", "检索交付场景")):
                 async for event in self.stream(request):
                     if event.response is not None:
                         return event.response
@@ -50,7 +50,22 @@ def main() -> None:
             prompt = self._prompt(request)
             step = self.counts[prompt] = self.counts.get(prompt, 0) + 1
             usage = {"input_tokens": 100 + step, "output_tokens": 20}
-            if "交付修复场景" in prompt:
+            if "检索旅程" in prompt or "检索交付场景" in prompt:
+                if step == 1:
+                    response = ModelResponse(tool_calls=[self._call("search_knowledge", {
+                        "query": "demo", "k": 5,
+                    })], stop_reason="tool_use", usage=usage)
+                elif step == 2:
+                    response = ModelResponse(tool_calls=[self._call("read_file", {
+                        "path": "src/demo.py",
+                    })], stop_reason="tool_use", usage=usage)
+                elif step == 3 and "检索交付场景" in prompt:
+                    response = ModelResponse(tool_calls=[self._call("write_file", {
+                        "path": "delivery-result.txt", "content": "retrieval accepted\n",
+                    })], stop_reason="tool_use", usage=usage)
+                else:
+                    response = ModelResponse(text="检索调查完成：" + prompt, usage=usage)
+            elif "交付修复场景" in prompt:
                 if step == 1:
                     response = ModelResponse(tool_calls=[self._call("write_file", {
                         "path": "delivery-result.txt", "content": "independently accepted\n",
@@ -126,11 +141,30 @@ def main() -> None:
 
         host_module.build_provider = build_offline_provider
         app = create_app(runtime)
+        held_index_locks: dict[str, asyncio.Lock] = {}
+
+        @app.post("/api/__e2e/retrieval-hold/{workspace_id}")
+        async def hold_retrieval(workspace_id: str):
+            runtime.store.get_workspace(workspace_id)
+            lock = runtime._index_build_locks.setdefault(workspace_id, asyncio.Lock())
+            await lock.acquire()
+            held_index_locks[workspace_id] = lock
+            return {"held": workspace_id}
+
+        @app.post("/api/__e2e/retrieval-release/{workspace_id}")
+        async def release_retrieval(workspace_id: str):
+            held_index_locks.pop(workspace_id).release()
+            return {"released": workspace_id}
+
         server = E2EUvicornServer(
             uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
         )
         print(f"E2E_WORKSPACE={fixtures['main']}", flush=True)
-        server.run()
+        try:
+            server.run()
+        finally:
+            for lock in held_index_locks.values():
+                lock.release()
 
 
 if __name__ == "__main__":
