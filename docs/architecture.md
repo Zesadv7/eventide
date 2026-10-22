@@ -6,6 +6,34 @@
 
 固定两臂：无索引文件工具基线、显式语义检索候选；开发每题各一次共8次，留出各两次共16次，交替首先执行的组别，不因失败替换尝试。该数据集与原16语料40查询检索benchmark、工程修复任务集独立；定向测试通过仅证明数据/判分机制，不说明RAG提升修复率。受Host管理的执行和真实效果证据另按RG5记录。
 
+`rag.upgrade_evaluation.run_remote_comparison` 复用40条冻结查询，每次显式选择development或holdout。构建与每题一次远程embedding都经原Host的Python control Run、模型并发与账本；查询向量复用到最多三次本地计时。FTS5、Hash混合及远程混合都通过生产`retrieval_from_vector`核对当前文件，失效路径提示不算有效命中。质量分母仍为20个问题，本地计时单列至多60个样本；完整查询耗时为远程embedding加一次候选检索，而不是把三种方案所有重复耗时累加。原benchmark入口和历史数据不变。
+
+`rag.agent_evaluation.run_agent_comparison` 在同一隔离Host注册独立fixture项目，使用真实Plan/source Agent循环和权限边界。每个尝试的索引准备与Agent运行共用项目/当日预算，分别有原生Run及唯一attempt；构建后才写入stale fixture，后续使用existing。副本题用真实Git worktree与源checkout的不同同名文件，分别建立候选索引。没有另一套Agent或模型调用适配器；基线没有知识索引，候选仍可独立用文件工具完成。
+
+本轮评测取舍：普通Run尚无逐次覆盖已观测Token限额接口，评测要求Host预设12步、20,000已观测Token、关闭MCP/worker/rewrite/rerank。20,000限制覆盖Agent及其检索查询；**前置构建单列额外用量并并入全部尝试总量，不声称计入该20,000软限**，也不偷换成按字节估算的项目硬预留。每例300秒覆盖索引准备和Agent执行，取消后等待原Host实际收尾。准备未知或模型未知/执行失败停止扩大批次，已知质量失败保留并继续剩余固定题目，失败不补跑。
+
+`control.operation_accepted`固定实验身份、源码、隐藏标签、模型参数和批次；`retrieval.upgrade_query`与`retrieval.agent_result`保存判分事实，工具、生成配置、Skills及用量从原Run事件读取。`remote_comparison_report`/`agent_comparison_report`可重新导出JSON，JSON不用于恢复或预算。报告包含未尝试、结果缺失、当前源码引用、过期/他副本引用、跨Workspace命中和旧片段错误标fresh计数。未知价格保持未知；少量合成调查题不代表真实项目修复效果。
+
+Python开发调用（先在独立Host配置标准API，禁止把密钥写入脚本或报告）：
+
+```python
+from pathlib import Path
+from eventide.rag.upgrade_evaluation import run_remote_comparison
+from eventide.rag.agent_evaluation import run_agent_comparison
+
+report = await run_remote_comparison(
+    host, project_id=host.default_workspace.project_id,
+    output_directory=Path(".task_outputs/rg5-ranking-development"),
+    split="development", confirmed=True,
+)
+agent_report = await run_agent_comparison(
+    host, output_directory=Path(".task_outputs/rg5-agent-development"),
+    split="development", confirmed=True,
+)
+```
+
+输出目录必须新建，保留fixture源码供事后独立核查；原Store是权威记录。候选冻结之后才执行holdout，不根据留出成绩改标签、调参或重新挑批次。通过离线机制不自动推荐语义方案，真实排名/延迟与下游引用门槛须另做判断。
+
 ## 独立验收输出观察接线（L2-hook，2026-10-22）
 
 LocalCommandExecutor 和 ContainerCommandExecutor 提供默认关闭的 `output_observer(stream, data)`，在每次读取命令管道的原始字节后调用；stream 分别为 stdout／stderr，不声明两路输出的精确交错。原有每流25,000字节首尾预览、计数、CommandResult、超时和取消清理不变。Docker 只为 `start --attach` 的命令输出启用观察，inspect/create/rm 控制客户端保持关闭。

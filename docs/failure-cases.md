@@ -197,6 +197,19 @@
 
 TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项及分发2项通过，未新增失败；全仓Ruff与Mypy124模块、Vue类型/构建和变更格式通过。既有Starlette/AnyIO弃用警告单列，不作失败。TC-1/2只运行受影响范围，不把143项不同后端定向通过称为本轮完整CI或模型效果通过。
 
+## RG-EVAL：检索评测冻结与受控执行
+
+- **已完成定向复验与取舍：** 538c450冻结数据阶段Mypy补类型后通过。Runner初次5通过/2失败；只修唯一工具ID后两项参数化Agent测试通过（5.58秒，`eval-agent-recheck.log`），Ruff换行/绑定修正后通过，Mypy两模块通过。随后为区分20题与60本地计时样本、记录跨副本/过期误引用，定向复验受影响3项通过（9.74秒，`eval-metrics-recheck.log`）；新增质量失败不重试/无需RAG、资源跨cwd与旧引用3项通过（1.26秒，`eval-final-targeted.log`），新增Agent取消1项通过（`eval-agent-cancel.log`）。总计原数据22＋资源1＋Runner9＝32个不同用例通过，非全量；未重跑历史测试。所有网络边界使用替身，没有模型效果结论。Runner提交可通过本节与模块Git历史定位。
+- **经验与可追问点：** 脚本替身也要遵守真实协议的唯一调用身份；多次本地计时不能放大质量统计分母；未知模型调用必须停批并留剩余未尝试，不能以零值或补轮掩盖。Codex负责fixture、实现和故障注入；未声称用户事故、真实检索收益或个人人工排障经历。
+
+- **两臂首轮失败定位：** 原Store的`run.failed`明确为 `Duplicate tool call IDs in model response`。新增ScriptedProvider fixture连续两轮未写id，默认均为call_1，触发已有协议检查；改为语义与文件读取各自唯一ID，不改生产检查、标签或脚本响应次序。原始两个隔离Store与report已复制到忽略目录的 `eval-first-failure/` 供复核；仅重跑两项参数化Agent测试。
+
+- **Runner首轮定向：** 借入Root生产接线补丁后运行 `PYTHON_DOTENV_DISABLED=1 /Users/zesadv/Documents/Codex/eventide/.venv/bin/python -m pytest -q tests/test_retrieval_upgrade_evaluation.py --tb=short`，5通过/2失败（6.70秒）；两臂调查在首个候选前停止，原因待查，报告与Store留在pytest临时产物，摘要 `.task_outputs/retrieval-upgrade/eval-runner-tests.log`。同轮Ruff复验仅新增测试两处长行失败，已按100字符规则换行。无付费调用，不把fixture失败当真实模型失败。
+
+- **Runner静态检查追加：** 初次 `ruff check eventide/rag/agent_evaluation.py eventide/rag/upgrade_evaluation.py` 退出1：21处循环回调未显式绑定当前尝试变量及2处长行；日志 `.task_outputs/retrieval-upgrade/eval-runner-ruff.log`。虽然调度逐例await，本次仍改为显式固定回调参数，防后续调度变化串题；不放宽检查。尚未运行模型或新Runner测试，复验记录随后追加。
+
+- **2026-10-22，新代码静态检查问题，基线0a80177：** 新增8题数据和独立判分的22项定向测试、Ruff通过；`PYTHON_DOTENV_DISABLED=1 /Users/zesadv/Documents/Codex/eventide/.venv/bin/python -m mypy eventide/rag/agent_evaluation.py` 首轮退出1，唯一错误为批次列表缺显式类型（`var-annotated`）。证据 `.task_outputs/retrieval-upgrade/eval-contract-mypy.log`。补充列表类型，不改运行行为或冻结标签；仅复验该模块Mypy。此为维护期静态问题，不是线上故障或模型失败；Codex编写、定位和修正，可追问冻结批次为何不能按结果选择重跑。
+
 ## RG-CORE：检索证据与独立索引的预期 Red（2026-10-22）
 
 - 类型：新增能力的预期 Red，非线上事故；基线 `0a80177`（生产实现同 `845a6b0`）。
@@ -206,10 +219,6 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 处理及复验：待实现后追加；计划分离源码与存储、用同一数据库快照记录哈希和代次，再核对最终命中文件。
 - 实际参与与可追问点：维护代理在临时 Git 项目编写并运行确定性测试；无真实模型、用户项目或生产事故影响，不能据此宣称模型效果提高。
 
-
-## RG-EVAL：检索评测冻结与受控执行
-
-- **2026-10-22，新代码静态检查问题，基线0a80177：** 新增8题数据和独立判分的22项定向测试、Ruff通过；`PYTHON_DOTENV_DISABLED=1 /Users/zesadv/Documents/Codex/eventide/.venv/bin/python -m mypy eventide/rag/agent_evaluation.py` 首轮退出1，唯一错误为批次列表缺显式类型（`var-annotated`）。证据 `.task_outputs/retrieval-upgrade/eval-contract-mypy.log`。补充列表类型，不改运行行为或冻结标签；仅复验该模块Mypy。此为维护期静态问题，不是线上故障或模型失败；Codex编写、定位和修正，可追问冻结批次为何不能按结果选择重跑。
 
 - 静态检查问题：首批 59 项和扩展 92 项定向测试通过后，Ruff 在新增的外部索引参数和诊断文本发现 3 处 E501 换行问题；日志 `core/static.log`。原因是本轮新增行超过仓库 100 字符上限，调整换行，不改变行为；复验随下方收口摘要。
 - 已完成处理及定向复验：外部目录保留原有路径检查，源码不再决定唯一存储位置；候选哈希与代次取自同一读快照，最终命中文件核对失败时移除正文，而不是用旧内容补足结果。先 59 项通过，再补齐专项后 92 项通过（11.95 秒），另本地检索/冻结 benchmark/旧离线评测与开发接口 70 项通过、1 项真实模型按开关跳过（4.50 秒）；总计 162 个不同用例。Ruff 和四模块 Mypy 复验通过；保留既有依赖弃用警告，不把跳过算通过。Red 提交 `e28add2`，实现提交由本节和相关源码 Git 历史定位；日志 `core/expanded.log`、`compatibility.log`、`static-green.log`、`mypy.log`。

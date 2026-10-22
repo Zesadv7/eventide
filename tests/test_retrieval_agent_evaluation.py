@@ -1,17 +1,29 @@
 """The Agent investigation contract is frozen before any real-model comparison."""
 
+import hashlib
 import json
+from importlib import resources
 
 import pytest
 from pydantic import ValidationError
 
 from eventide.rag.agent_evaluation import (
+    DATASET_SHA256,
     InvestigationDataset,
     attempt_plan,
     grade_investigation,
     investigation_prompt,
     load_agent_dataset,
 )
+
+
+def test_packaged_dataset_can_be_loaded_without_repository_working_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    body = resources.files("eventide").joinpath(
+        "bundled_evals/retrieval-agent-v1/dataset.json",
+    ).read_bytes()
+    assert hashlib.sha256(body).hexdigest() == DATASET_SHA256
+    assert len(load_agent_dataset().cases) == 8
 
 
 def exact_answer(case):
@@ -98,6 +110,7 @@ def test_stale_or_foreign_citations_fail_against_current_source():
         grade = grade_investigation(json.dumps(answer), case,
                                     {**case.documents, **case.after_index})
         assert grade["facts_correct"] and not grade["passed"]
+        assert grade["stale_or_foreign_quotes"] == len(case.facts)
 
 
 @pytest.mark.parametrize("change", ["path", "fact", "split", "duplicate"])
