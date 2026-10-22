@@ -196,3 +196,11 @@
 复述要点：远端已执行不等于本地收到结果；先区分明确失败与结果未知，再决定能否继续。Codex实施与故障注入，用户指定范围；可追问为何取消不能证明撤销、保守停驻会牺牲哪些可用性、显式isError为何比文本前缀可靠。
 
 TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项及分发2项通过，未新增失败；全仓Ruff与Mypy124模块、Vue类型/构建和变更格式通过。既有Starlette/AnyIO弃用警告单列，不作失败。TC-1/2只运行受影响范围，不把143项不同后端定向通过称为本轮完整CI或模型效果通过。
+# RG-CORE：检索证据与独立索引的预期 Red（2026-10-22）
+
+- 类型：新增能力的预期 Red，非线上事故；基线 `0a80177`（生产实现同 `845a6b0`）。
+- 命令：`PYTHON_DOTENV_DISABLED=1 /Users/zesadv/Documents/Codex/eventide/.venv/bin/python -m pytest -q tests/test_retrieval_evidence.py`；两项失败、0.14 秒。证据：本任务 worktree 忽略目录 `.task_outputs/retrieval-upgrade/core/red.log`。
+- 现象和已证实原因：修改源文件后，旧检索依然返回 `stale_unique_marker` 正文，查询只核对模型指纹，没有核对命中文件内容；指定外部 `index_dir` 产生 TypeError，旧索引路径固定在源码 `.eventide`。两项分别证明旧正文可信性与存储位置缺口，不宣称已复现跨用户数据泄露。
+- 执行包装错误：首次命令用 zsh 只读变量 `status` 保存退出值，报告命令另报 shell 错误；pytest 已完整执行，原日志保留，未为包装错误重复测试。后续使用专属变量或工具直接返回退出码。
+- 处理及复验：待实现后追加；计划分离源码与存储、用同一数据库快照记录哈希和代次，再核对最终命中文件。
+- 实际参与与可追问点：维护代理在临时 Git 项目编写并运行确定性测试；无真实模型、用户项目或生产事故影响，不能据此宣称模型效果提高。

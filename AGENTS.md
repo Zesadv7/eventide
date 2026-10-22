@@ -369,3 +369,5 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | RG6 | 待开始 | 一次后端完整门禁、前端/受影响分发、文档与失败核对；小提交，不推送。 |
 
 每步更新本表及相应稳定文档。原始日志统一保存忽略目录 `.task_outputs/retrieval-upgrade/`；所有失败按现有规范登记，预期Red与外部故障分开，不新增进度文档。
+
+- RG-CORE / RG1：已完成两项预期 Red，基线 `0a80177`；旧检索返回修改前正文，外部 `index_dir` 参数尚不支持。2026-10-22 两项失败 / 0.14 秒，证据 `.task_outputs/retrieval-upgrade/core/red.log`，原因和包装命令错误已记 `docs/failure-cases.md` 的 RG-CORE。这只证明计划缺口，RG2/RG3 实现与验收仍在进行中。
