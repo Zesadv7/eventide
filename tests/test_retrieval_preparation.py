@@ -276,3 +276,29 @@ async def test_agent_sees_stale_diagnostic_then_reads_current_source(tmp_path):
         assert "does not replay" not in str(host.provider.requests[1].messages)
     finally:
         await host.close()
+
+
+@pytest.mark.parametrize("copy_first", [False, True])
+def test_manual_index_key_cannot_change_target_workspace(tmp_path, copy_first):
+    host = host_for(tmp_path)
+    root = source_fixture(host)
+    copy = tmp_path / "copy"
+    subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach", str(copy)],
+                   check=True, capture_output=True)
+    workspace = host.resolve_or_register_workspace(copy)
+    targets = [host.default_workspace.workspace_id, workspace.workspace_id]
+    if copy_first:
+        targets.reverse()
+    project = host.default_workspace.project_id
+    config = IndexController(host).configuration()
+    with TestClient(create_app(host)) as client:
+        body = {"config_hash": config["config_hash"], "workspace_id": targets[0]}
+        endpoint = f"/api/projects/{project}/indexes"
+        first = client.post(endpoint, json=body, headers={"Idempotency-Key": "same-key"})
+        assert first.status_code == 202
+        replay = client.post(endpoint, json=body, headers={"Idempotency-Key": "same-key"})
+        assert replay.status_code == 202 and replay.json() == first.json()
+        changed = client.post(endpoint, json={**body, "workspace_id": targets[1]},
+                              headers={"Idempotency-Key": "same-key"})
+        assert changed.status_code == 409
+        assert len(client.get(endpoint).json()) == 1

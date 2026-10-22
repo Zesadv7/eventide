@@ -354,8 +354,10 @@ class DeliveryController:
         from eventide.delivery_control import is_delivery_control_run, start_owned_writer
 
         owned = is_delivery_control_run(host.store, run_id)
-        contract: dict[str, Any] = next((e["payload"] for e in host.store.delivery_facts(delivery_id)
-                         if e["type"] == "delivery.repair_started"), {})
+        contract: dict[str, Any] = next(
+            (e["payload"] for e in host.store.delivery_facts(delivery_id)
+             if e["type"] == "delivery.repair_started"), {},
+        )
         option = contract.get("knowledge_index", "existing")
         if "retrieval_configuration" in contract:
             from eventide.retrieval_runtime import freeze_configuration

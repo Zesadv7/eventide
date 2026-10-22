@@ -252,6 +252,18 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 
 ## RG-ROOT：任务准备接线的定向验证
 
+- **受控缺陷复现：** 交叉审查发现本轮新增手动索引workspace_id会改变控制Session，原run_receipt因此改变同一项目HTTP请求的去重身份。同一Idempotency-Key改目标可能再次构建；新增两方向测试复现202而非409，证据`index-key-red.log`。这属于本轮未发布实现缺口，不是历史线上事故。修复保持项目级请求身份，实际执行仍绑定具体副本；定向复验另记。
+
+- **幂等复验：** `index-key-green.log` 两项通过（0.87秒），同时保留同目标重放与仅一条构建历史断言。原源目录请求身份算法不变，不增加回执事实源。经验：资源目标放入请求内容，不能随目标一起改变同一HTTP入口的去重范围；修复随主分支本地提交。
+- **最终静态检查：** 全仓Mypy126模块通过；Ruff仅delivery_runtime新补类型的行长101失败（final-ruff.log），换行后复验，不改逻辑。完整Vue199项与类型/构建通过。
+
+- **最终浏览器收口：** 同源构建产物全套35旅程为34通过、1失败；既有生成参数页在查询默认值时超时，单项报告5.9分钟而测试截止45秒，原因尚未证实（final-playwright.log及保留error-context）。本轮新增4条检索旅程全部通过；先保留失败产物，仅复验该参数页，不改变超时、断言或产品逻辑，不把推测的主机暂停/负载写成结论。
+
+- 浏览器原样定向复验1通过（1.1秒，final-playwright-recheck.log）。超时原因没有新增证据，不改写为已确认环境故障；首轮34项通过不重复运行。
+- **安装包构建产物问题：** 本地`uv build --wheel`之后`check_wheel.py`发现过期或缺失前端资源，退出1（final-wheel-check.log）。现有setuptools build目录保留旧哈希资源；先把该目录移动到忽略产物中保存，再全新构建并仅复验wheel。未删除用户源码或放宽资源精确集合校验，不将旧缓存混入发行包。
+
+- 干净构建及wheel隔离资源/服务复验通过（final-wheel-clean-build.log、final-wheel-clean-check.log）；旧缓存保存在`.task_outputs/retrieval-upgrade/pre-clean-build`，原失败包保留在dist，最终通过包在clean-dist。该类问题沿用现有严格打包检查发现和处理，未新增另一套分发机制。
+
 - **2026-10-22／维护期静态检查问题：** RG1已冻结，主链接线尚在实现。变更文件Ruff首轮退出1：4处导入排序、2处行长；`.task_outputs/retrieval-upgrade/root-ruff.log`。仅整理新增导入和换行，不改变边界、预算或验收；复验随本轮定向验证记录。Codex实现和修正，无模型效果或线上故障含义。
 
 - **RG-LIVE 新密钥复验：** 用户提供新的标准API Key后，单独保存到Git忽略且权限0600的本机`.env`，仅设置embedding字段。隔离`probe-02`再次只派发1次，退出2，返回HTTP429、供应商数字码1113；`.task_outputs/retrieval-upgrade/live/probe-02.json`与对应独立Store保留本次证据。未返回usage，1次未知保留；未扩大索引或模型批次。新增安全错误诊断不记录响应原文/密钥，35项embedding定向回归通过（embedding-runtime.log），HTTP401替身验证状态/数字码可见且密钥不泄露。供应商码含义待官方资料核对，不能把所有429都解释成限流。

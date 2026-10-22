@@ -570,6 +570,8 @@ capture_state为complete、quota_exceeded、write_failed、redaction_unavailable
 
 手动 `POST /api/projects/{project_id}/indexes` 新增可选workspace_id；省略为源Workspace，只接受同项目注册且存在的副本。回执和详情新增workspace_id，项目历史聚合副本构建。新 `GET /api/workspaces/{workspace_id}/index-status` 返回status=available|unavailable、workspace_id、location=managed|legacy，以及可选reason/detail/model/generation/embedding_fingerprint/config_hash。字段可为null；available表示匹配索引可用，不代表全部源码都最新。损坏的新位置不回退旧位置。
 
+手动索引幂等身份固定在项目范围；同键改变workspace_id也返回409，不能通过更换控制Session启动第二个构建。执行和查询结果仍归属精确副本；省略目标的旧请求沿用原源目录身份算法。
+
 持久 `retrieval.status` payload含status=preparing|available|unavailable|failed、实际workspace_id、可选location/model/generation/embedding_fingerprint/reason/detail；准备成功可附build统计。Run投影的retrieval直接取最新事件，旧历史为null，SSE重放不能触发准备或消费。`tool.completed.metadata.retrieval` 含workspace_id/index_generation/embedding_fingerprint/mode/diagnostics和hits；命中含file/start_line/end_line/indexed_content_hash/freshness，freshness区分fresh/changed/deleted/unsafe/unreadable/too_large。旧调用缺metadata显示未记录；无命中与索引不可用分别表达。
 
 全文正文仍有界且经统一脱敏。过期命中不携带旧正文；索引中的行号只用于定位，不承诺当前文件同坐标。新鲜度只表示检查时文件哈希一致，不能推断答案充分性或未来稳定性。远程embedding与查询改写继续使用原attempt账本；没有新增证据数据库或响应缓存。

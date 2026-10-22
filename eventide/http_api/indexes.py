@@ -115,7 +115,10 @@ def create_router(context: ApiContext) -> APIRouter:
         payload = body.model_dump()
         if body.workspace_id is None:
             payload.pop("workspace_id")
-        receipt = run_receipt(context.runtime, request, owner, "index", payload)
+        receipt = run_receipt(
+            context.runtime, request, owner, "index", payload,
+            key_scope=controller.owner(project_id, create=False),
+        )
         if not receipt.existing:
             try:
                 await controller.admit(project_id, receipt.run_id, **body.model_dump(),

@@ -68,13 +68,15 @@ def run_receipt(
     session_id: str,
     operation: str,
     payload: dict[str, Any],
+    *,
+    key_scope: str | None = None,
 ) -> RunReceipt:
     key = request.headers.get("idempotency-key")
     if key is None:
         return RunReceipt(f"run_{uuid.uuid4().hex[:16]}", None)
     if not key or len(key) > 128 or any(ord(char) <= 32 or ord(char) >= 127 for char in key):
         raise HTTPException(422, "Idempotency-Key must be 1–128 visible ASCII characters")
-    run_id = "run_" + digest([session_id, operation, key])[:32]
+    run_id = "run_" + digest([key_scope or session_id, operation, key])[:32]
     fingerprint = digest([session_id, operation, payload])
     identity = runtime.store.get_run_identity(run_id)
     if identity is None:
