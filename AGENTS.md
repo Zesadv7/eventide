@@ -383,3 +383,4 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 | 编号 | 状态 | 范围与证据 |
 |---|---|---|
 | RG4-UI | 已完成 | 2026-10-22：对话/每轮 Writer 显式准备、项目注册副本索引目标/状态、持久 retrieval.status 刷新与结构化工具来源完成；旧历史显示未记录，未知接收保留原目标。7文件首轮70项通过；补充SSE恢复后相关首轮53通过/1新增测试失败，修正共享fixture与私有字段断言后该文件12项通过，合计71项不同用例通过。Vue类型检查和diff检查通过；新增测试类型/SSE两类问题已记录 docs/failure-cases.md RG-UI，证据 .task_outputs/retrieval-upgrade/ui/。user-guide/api-contract同步，未跑全量/构建/付费模型；后端集成、真实API浏览器和最终生成资源仍由RG4/RG6验收，不以本子任务替代。 |
+- RG-CORE / RG4 边界定向子任务：主任务 `root-runtime-v2.patch` 下，65 文件首批远程替身用量超过已观测软限后不派第二批，注册根链接拒绝、缺失源码仍保留历史、外部用户 worktree 注册为实际 Session 后 prepare 均有通过证据。首次 2 通过/3 测试前提或口径失败，修正后仅复验两项通过；最终四项有效场景通过，Ruff/diff 通过。失败与对原 managed-worktree 嵌套状态约束的错误推断已纠正登记，不放宽既有规则；证据 `core/preparation-boundaries*.log`。仅提交新增测试与 Markdown，借用生产补丁不提交，无真实 API 请求。

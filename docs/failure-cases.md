@@ -257,3 +257,12 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - RG-ROOT边界修正后的Ruff再次报告3处新增长行及1处可合并if；root-ruff-recheck.log，均只调整新改行的格式，不改判定。
 
 - **RG-ROOT定向复验：** 上述6项原失败全部通过（1.68秒，root-integration-recheck.log）；随后新增source/worktree Continue继承与配置漂移、ScriptedProvider收到过期提示后读取当前源码3项通过（5.36秒，continue-stale.log）。9模块Mypy与受影响Ruff通过；无真实请求。首轮其余46项结果保留，不将本次复验写成重跑全量。
+### RG-CORE：准备边界新增测试的口径及前提错误
+
+- 类型：测试问题及复核推断纠正，非生产回归；基线 `fc666fe` 加借用的主任务 `root-runtime-v2.patch`，未提交借用生产改动。
+- 命令：`PYTHON_DOTENV_DISABLED=1 /Users/zesadv/Documents/Codex/eventide/.venv/bin/python -m pytest -q tests/test_retrieval_preparation_boundaries.py`；2026-10-22 首轮 2 通过、3 失败 / 1.68 秒。日志 `.task_outputs/retrieval-upgrade/core/preparation-boundaries.log`。
+- 已证实原因一：65 文件索引首批已报告 20,001 Token 后确实没有第二次 embedding 请求，Run 正确停驻；测试额外要求账本包含 `output_tokens: 0`，违反已有 embedding 输入型口径。改为只断言实际的 `input_tokens`，仍保留单次请求、已知消费及停驻全部检查。
+- 已证实原因二：新增的两个状态根嵌套场景假设能在源目录内的状态根创建 managed worktree / Writer，但既有 `WorktreeService` 在创建之前就要求状态根位于源 Workspace 之外。此前只读复核未追到此已有前置条件，错误地把新检索源检查视为可达功能缺陷；该推断已撤回，不放宽旧 worktree 安全边界。后续改为准确验证既有约束，并单独检查外部注册副本的实际源码边界。
+- 首轮已通过的范围：注册路径被替换为另一仓库链接时，状态查询不可用且手动构建拒绝；源码临时不可见时，已完成索引历史仍可读取。不为补日志重复运行这两项。
+- 参与与经验：维护代理编写故障注入与测试；错误来自测试对现有口径和前置条件理解不全。可追问 input-only 用量为何不能补造输出字段，以及为什么要检查完整调用链后再认定可复现问题。后续定向复验另追加，不把这一轮称为全通过。
+- 修正后仅复验原预算断言及替换后的实际副本用例：2 通过 / 1.56 秒，`core/preparation-boundaries-recheck.log`；Ruff 与 diff 检查通过。新用例使用用户在源目录外创建的真实 Git worktree，再注册到同项目并直接绑定 Session；源 prepare 拒绝，实际副本 prepare 成功，不借此宣称 Host 可在嵌套状态根创建 managed worktree 或 Writer。最终四项边界各有通过证据，前两项原通过未重复运行；原五项尝试的失败仍保留。
