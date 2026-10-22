@@ -204,3 +204,52 @@ describe("theme and disclosure controls", () => {
     wrapper.unmount();
   });
 });
+
+it("renders retrieval provenance and freshness separately from raw JSON without inventing history", () => {
+  const wrapper = mount(ToolActivity, {
+    props: {
+      tools: {
+        current: {
+          name: "search_knowledge",
+          status: "completed",
+          metadata: {
+            retrieval: {
+              workspace_id: "writer-workspace",
+              index_generation: 4,
+              embedding_fingerprint: "fingerprint",
+              mode: "dense+sparse",
+              diagnostics: ["changed files require current source"],
+              hits: [
+                {
+                  file: "src/取消.py",
+                  start_line: 1,
+                  end_line: 8,
+                  indexed_content_hash: "hash-one",
+                  freshness: "fresh",
+                },
+                {
+                  file: "src/old.py",
+                  start_line: 20,
+                  end_line: 25,
+                  indexed_content_hash: "hash-two",
+                  freshness: "changed",
+                },
+              ],
+            },
+          },
+        },
+        old: { name: "search_knowledge", status: "completed" },
+      },
+    },
+  });
+  const evidence = wrapper.get('[aria-label="检索来源"]');
+  expect(evidence.text()).toContain("writer-workspace");
+  expect(evidence.text()).toContain("索引代次：4");
+  expect(evidence.text()).toContain("src/取消.py · 索引行 1–8");
+  expect(evidence.text()).toContain("核对时一致");
+  expect(evidence.text()).toContain("源码已变化，旧正文不可作为证据");
+  expect(evidence.text()).toContain("hash-two");
+  expect(wrapper.text()).toContain("检索来源：未记录");
+  expect(wrapper.text()).toContain("原始工具记录");
+  wrapper.unmount();
+});

@@ -10,6 +10,7 @@ import SandboxEvidence from "../components/SandboxEvidence.vue";
 import RunMemoryPanel from "../components/RunMemoryPanel.vue";
 import EventideLogo from "../components/EventideLogo.vue";
 import ToolActivity from "../components/ToolActivity.vue";
+import RetrievalStatus from "../components/RetrievalStatus.vue";
 import ComposerMenu from "../components/ComposerMenu.vue";
 import { skillsApi, type SkillStatus } from "../api/skills";
 const store = useWorkbench(),
@@ -18,6 +19,7 @@ const store = useWorkbench(),
   executionTarget = ref<"source" | "snapshot" | "worktree">("source"),
   executionProfile = ref<"local" | "sandbox">("local"),
   sandboxImage = ref(""),
+  prepareIndex = ref(false),
   model = ref(""),
   generation = ref<Generation>({}),
   modelList = ref<string[]>([]),
@@ -121,6 +123,21 @@ watch(
   },
   { immediate: true },
 );
+const canPrepareIndex = computed(
+  () =>
+    executionProfile.value === "local" && executionTarget.value !== "snapshot",
+);
+watch(
+  () => store.selectedSession,
+  () => {
+    prepareIndex.value =
+      store.pending[store.selectedSession]?.body.knowledge_index === "prepare";
+  },
+  { immediate: true },
+);
+watch(canPrepareIndex, (supported) => {
+  if (!supported) prepareIndex.value = false;
+});
 watch(mode, () => {
   if (mode.value !== "plan" && executionTarget.value === "snapshot")
     executionTarget.value = "source";
@@ -239,6 +256,9 @@ async function submit() {
     await store.submit({
       prompt: draft.value,
       mode: mode.value,
+      ...(prepareIndex.value && canPrepareIndex.value
+        ? { knowledge_index: "prepare" as const }
+        : {}),
       ...(executionProfile.value === "sandbox"
         ? {
             execution_profile: "sandbox" as const,
@@ -426,6 +446,7 @@ async function abandon() {
           <h2>这次想完成什么？</h2>
           <p>可以先让 Agent 只读分析项目，再决定修改范围。</p>
         </div>
+        <RetrievalStatus v-if="run" :state="run.retrieval" />
         <ToolActivity
           v-if="run"
           :tools="run.tools || {}"
@@ -659,6 +680,23 @@ async function abandon() {
             {{ store.sending[store.selectedSession] ? "接收中…" : "发送 ↑" }}
           </button>
         </div>
+        <label class="knowledge-option"
+          ><input
+            v-model="prepareIndex"
+            type="checkbox"
+            aria-label="任务开始前准备知识索引"
+            :disabled="
+              !canPrepareIndex || !!pending || isActive || store.creating
+            "
+          />任务开始前准备知识索引</label
+        >
+        <p class="muted">
+          {{
+            canPrepareIndex
+              ? "只准备本次实际副本；未勾选时只用已有匹配索引。远程构建和语义查询可能产生用量。"
+              : "固定快照与 Docker 任务沙箱暂不支持知识索引准备。"
+          }}
+        </p>
         <div v-if="executionProfile === 'sandbox'" class="sandbox-options">
           <label v-if="!boundSandbox"
             >预装依赖的本地 Docker 镜像

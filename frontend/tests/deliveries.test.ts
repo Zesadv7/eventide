@@ -369,3 +369,40 @@ it("clears accepted repair fields when switching to another delivery", async () 
   expect(confirm).not.toHaveBeenCalled();
   wrapper.unmount();
 });
+
+it("passes opt-in preparation to every Writer while allowing Docker verification", async () => {
+  reads();
+  vi.mocked(deliveriesApi.list).mockResolvedValue([
+    {
+      ...detail(),
+      repair: null,
+      repair_result: null,
+      repair_status: null,
+      verification: null,
+    },
+  ]);
+  const submit = vi
+    .spyOn(deliveriesApi, "submit")
+    .mockRejectedValue(new Error("fixture rejection"));
+  const wrapper = await render();
+  const option = wrapper.get('[aria-label="每轮修复前准备知识索引"]');
+  expect((option.element as HTMLInputElement).checked).toBe(false);
+  await option.setValue(true);
+  await wrapper.findAll("textarea")[0]!.setValue("repair source");
+  await wrapper.findAll("textarea")[1]!.setValue("python -m pytest");
+  await wrapper.get("article input:not([type])").setValue("trusted-image");
+  await wrapper.get("article form").trigger("submit");
+  await flushPromises();
+  expect(submit).toHaveBeenCalledWith(project, {
+    action: "repair",
+    delivery: id,
+    body: {
+      goal: "repair source",
+      checks: ["python -m pytest"],
+      image: "trusted-image",
+      max_rounds: 3,
+      knowledge_index: "prepare",
+    },
+  });
+  wrapper.unmount();
+});

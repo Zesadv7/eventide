@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import PanelClose from "../components/PanelClose.vue";
+import RetrievalStatus from "../components/RetrievalStatus.vue";
+import type { RetrievalStatus as Status } from "../api/types";
 const detailClosed = ref(false);
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -19,6 +21,38 @@ const project = computed(
     store.workspaces.find((w) => w.workspace_id === store.selectedWorkspace)
       ?.project_id || "",
 );
+const targets = computed(() =>
+  store.workspaces.filter((w) => w.project_id === project.value),
+);
+const source = computed(
+  () => targets.value.find((w) => w.kind !== "worktree")?.workspace_id || "",
+);
+const target = ref("");
+const targetStatus = ref<Status | null>(null),
+  statusError = ref("");
+let statusRevision = 0;
+async function loadStatus() {
+  const version = ++statusRevision,
+    workspace = target.value;
+  if (!workspace) return;
+  try {
+    const value = await indexesApi.status(workspace);
+    if (mounted && version === statusRevision) {
+      targetStatus.value = value;
+      statusError.value = "";
+    }
+  } catch (e) {
+    if (mounted && version === statusRevision) {
+      targetStatus.value = null;
+      statusError.value = e instanceof Error ? e.message : "索引状态读取失败";
+    }
+  }
+}
+watch(target, () => {
+  targetStatus.value = null;
+  statusError.value = "";
+  void loadStatus();
+});
 const config = ref<IndexConfiguration | null>(null),
   entries = ref<IndexDetail[]>([]),
   detail = ref<IndexDetail | null>(null);
@@ -42,7 +76,11 @@ const labels: Record<string, string> = {
   failed: "构建失败",
 };
 const busy = computed(() =>
-  entries.value.some((e) => ["queued", "running"].includes(e.status)),
+  entries.value.some(
+    (e) =>
+      (e.workspace_id || source.value) === target.value &&
+      ["queued", "running"].includes(e.status),
+  ),
 );
 const locked = computed(() => state.value.active || !!state.value.pending);
 const activeDetail = computed(
@@ -60,6 +98,7 @@ function sync() {
   if (state.value.pending) {
     force.value = state.value.pending.force;
     structured.value = state.value.pending.code_structure;
+    target.value = state.value.pending.workspace_id || source.value;
   }
   const receipt = state.value.receipt;
   if (receipt && receipts.get(project.value) !== receipt.run_id) {
@@ -178,6 +217,7 @@ async function start() {
     config_hash: config.value!.config_hash,
     force: force.value,
     code_structure: structured.value,
+    ...(target.value === source.value ? {} : { workspace_id: target.value }),
   };
   error.value = "";
   try {
@@ -210,6 +250,10 @@ async function stop() {
 }
 function reset() {
   revision++;
+  statusRevision++;
+  targetStatus.value = null;
+  statusError.value = "";
+  target.value = source.value;
   detailRevision++;
   entries.value = [];
   detail.value = null;
@@ -240,7 +284,10 @@ onMounted(() => {
   reset();
   timer = setInterval(() => {
     void loadList();
-    if (activeDetail.value) void loadDetail();
+    if (activeDetail.value) {
+      void loadDetail();
+      void loadStatus();
+    }
   }, 2000);
 });
 onUnmounted(() => {
@@ -260,8 +307,28 @@ function closeDetail() {
   <section class="page indexes">
     <h2>知识索引</h2>
     <p>
-      为当前项目建立可检索的代码与文档索引。构建使用共享队列和预算；刷新或切页不会停止任务。
+      为当前项目的指定副本建立可检索的代码与文档索引。构建使用共享队列和预算；刷新或切页不会停止任务。
     </p>
+    <label
+      >索引目标<select
+        v-model="target"
+        aria-label="索引目标"
+        :disabled="locked"
+      >
+        <option
+          v-for="workspace in targets"
+          :key="workspace.workspace_id"
+          :value="workspace.workspace_id"
+        >
+          {{ workspace.kind === "worktree" ? "工作副本" : "源目录" }} ·
+          {{ workspace.name }} · {{ workspace.workspace_id }}
+        </option>
+      </select></label
+    >
+    <RetrievalStatus v-if="targetStatus" :state="targetStatus" />
+    <p v-else-if="!statusError" class="muted">正在读取所选副本索引状态…</p>
+    <p v-if="statusError" class="inline-error">{{ statusError }}</p>
+    <button :disabled="!target" @click="loadStatus">刷新索引状态</button>
     <p v-if="config">
       模型：{{ config.provider }} / {{ config.model }}。{{
         config.provider === "hash"
@@ -330,6 +397,7 @@ function closeDetail() {
       <PanelClose @close="closeDetail" />
       <h3>{{ labels[detail.status] || detail.status }}</h3>
       <p class="identity">{{ detail.run_id }}</p>
+      <p>索引副本：{{ detail.workspace_id || "未记录" }}</p>
       <button v-if="activeDetail" :disabled="stopping" @click="stop">
         {{ stopping ? "等待清理…" : "停止构建" }}
       </button>

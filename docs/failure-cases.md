@@ -214,3 +214,20 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 静态检查问题：首批 59 项和扩展 92 项定向测试通过后，Ruff 在新增的外部索引参数和诊断文本发现 3 处 E501 换行问题；日志 `core/static.log`。原因是本轮新增行超过仓库 100 字符上限，调整换行，不改变行为；复验随下方收口摘要。
 - 已完成处理及定向复验：外部目录保留原有路径检查，源码不再决定唯一存储位置；候选哈希与代次取自同一读快照，最终命中文件核对失败时移除正文，而不是用旧内容补足结果。先 59 项通过，再补齐专项后 92 项通过（11.95 秒），另本地检索/冻结 benchmark/旧离线评测与开发接口 70 项通过、1 项真实模型按开关跳过（4.50 秒）；总计 162 个不同用例。Ruff 和四模块 Mypy 复验通过；保留既有依赖弃用警告，不把跳过算通过。Red 提交 `e28add2`，实现提交由本节和相关源码 Git 历史定位；日志 `core/expanded.log`、`compatibility.log`、`static-green.log`、`mypy.log`。
 - 取舍及经验：每次只核对最终至多五条命中的当前文件，增加少量有界读取以防止旧正文被误用；不自动重新索引，不提高结果数量，也不能保证文件之后不变。真实模型效果、主链生命周期和页面由主任务另验收，不用此处机制通过替代。
+
+## RG-UI：检索升级前端新增测试的 DOM 类型错误（2026-10-22）
+
+- 类型：测试问题。基线 `0a80177`，本轮新增检索 UI 未提交状态；不是线上故障，也不影响后端验收结论。
+- 失败命令：`cd frontend && npm run typecheck`。70 项相关组件测试此前通过，但 TypeScript 在 `tests/deliveries.test.ts:395` 报 TS2339：通用 `VueNode<Element>` 没有 `type` 属性。原始输出：忽略目录 `.task_outputs/retrieval-upgrade/ui/typecheck.log`。
+- 已证实原因：新测试用 `findAll("article input")` 获得通用 Element，再直接读取 `element.type`；运行时 DOM 有该属性，但静态类型未声明为 HTMLInputElement。
+- 处理与取舍：使用精准 CSS 选择器选择镜像输入，不增加生产类型断言或放宽类型检查。类型定向复验通过，关联交付组件也已通过；提交随 RG4-UI 保存。经验：测试 DOM 选择器应表达所需元素类型，运行时测试通过不能代替静态检查。实际参与为新增页面与测试、定位并修正测试，不虚构用户影响。
+
+### RG-UI 补充：SSE 恢复测试初轮未更新（待查）
+
+- 类型：测试问题／原因待查。仍为 `0a80177` 上的本轮未提交修改。
+- 命令：`npm --prefix frontend test -- tests/indexes.test.ts tests/execution.test.ts tests/deliveries.test.ts tests/sandbox.test.ts tests/workbench.test.ts`。结果 53 通过、1 失败；新用例注入 `retrieval.status` 后仍读到 preparing，未得到 expected available。原始输出 `.task_outputs/retrieval-upgrade/ui/recheck.log`。
+- 先核对事件订阅替身和既有会话身份初始化，不据此认定生产 SSE 有故障；原因和复验待补。
+- 第一次原因已证实：fixture 的 `api.runs.mockResolvedValue([...])` 每次返回同一个数组，生产刷新会替换其中最新 Run；重复使用同一原始引用不等价于 HTTP 每次解析新 JSON，也没有触发 Vue 的数组替换。该新用例改为每次返回新数组后，available 状态断言通过，未修改生产逻辑。
+- 随后单用例复验又暴露测试访问私有 `store.cursors`（未导出）的 TypeError。证据 `.task_outputs/retrieval-upgrade/ui/sse-recheck.log`；改为断言公开 events 中的序号，并复验整个相关测试文件。两次均属新增测试问题，未放宽状态或权限断言。
+
+- 最终复验：`tests/workbench.test.ts` 12 项全部通过（`.task_outputs/retrieval-upgrade/ui/sse-final.log`）；SSE 状态更新及重新创建 Pinia 后读取恢复均通过。前一次相关 53 项通过仍保留，不重新执行无关测试。经验：HTTP 替身每次返回独立 JSON 对象，断言公开接口，避免将测试中的共享引用或私有实现细节误判为生产故障；提交随 RG4-UI 保存。

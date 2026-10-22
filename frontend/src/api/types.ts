@@ -3,10 +3,11 @@ export type Generation = components["schemas"]["GenerationPatch"];
 // Defaults stay optional at the request boundary, including after schema regeneration.
 export type RunInput = Omit<
   components["schemas"]["RunBody"],
-  "execution_profile" | "sandbox_image"
+  "execution_profile" | "sandbox_image" | "knowledge_index"
 > & {
   execution_profile?: "local" | "sandbox";
   sandbox_image?: string | null;
+  knowledge_index?: "existing" | "prepare";
 };
 export type ProviderInput = components["schemas"]["ProviderConfigBody"];
 export interface Workspace {
@@ -20,7 +21,18 @@ export interface Workspace {
   git_branch?: string | null;
   git_head?: string | null;
 }
+export interface RetrievalStatus {
+  status: "preparing" | "available" | "unavailable" | "failed";
+  reason?: string | null;
+  detail?: string | null;
+  workspace_id?: string | null;
+  location?: "managed" | "legacy" | null;
+  generation?: number | null;
+  model?: string | null;
+  embedding_fingerprint?: string | null;
+}
 export interface Run {
+  retrieval?: RetrievalStatus | null;
   run_id: string;
   session_id?: string;
   status: string;

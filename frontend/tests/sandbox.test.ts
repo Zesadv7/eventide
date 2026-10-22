@@ -73,6 +73,17 @@ describe("optional offline sandbox controls", () => {
     await wrapper.get('[aria-label="执行环境"]').setValue("sandbox");
     expect(wrapper.find('[aria-label="执行位置"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="Skills"]').exists()).toBe(false);
+    expect(
+      wrapper
+        .get('[aria-label="任务开始前准备知识索引"]')
+        .attributes("disabled"),
+    ).toBeDefined();
+    expect(
+      (
+        wrapper.get('[aria-label="任务开始前准备知识索引"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false);
     await wrapper.get("form").trigger("submit");
     expect(submit).not.toHaveBeenCalled();
     await wrapper.get('[aria-label="沙箱镜像"]').setValue("  dev:local  ");

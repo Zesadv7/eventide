@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { flushPromises } from "@vue/test-utils";
 import { api, ApiError } from "../src/api/client";
 import { useWorkbench } from "../src/stores/workbench";
 import { session, run, provider } from "./fixtures";
@@ -231,4 +232,47 @@ describe("request identity and UI isolation", () => {
     expect(store.messages[session.session_id]?.[0]?.content).toBe("检查项目");
     store.dispose();
   });
+});
+
+it("refreshes durable retrieval evidence on SSE and restores it through the same Run read", async () => {
+  vi.mocked(api.runs).mockImplementation(async () => [{ ...run }]);
+  const preparing = {
+    status: "preparing" as const,
+    workspace_id: "actual-copy",
+  };
+  vi.mocked(api.run).mockResolvedValue({
+    ...run,
+    status: "running",
+    retrieval: preparing,
+  });
+  const store = useWorkbench();
+  await store.selectSession(session.session_id);
+  expect(store.currentRun?.retrieval).toEqual(preparing);
+  const available = {
+    status: "available" as const,
+    workspace_id: "actual-copy",
+    generation: 7,
+    location: "managed" as const,
+  };
+  vi.mocked(api.run).mockResolvedValue({
+    ...run,
+    status: "running",
+    retrieval: available,
+  });
+  const onEvent = vi.mocked(connectRun).mock.calls.at(-1)![2];
+  onEvent({
+    type: "retrieval.status",
+    run_id: run.run_id,
+    seq: 1,
+    payload: available,
+  });
+  await flushPromises();
+  expect(store.currentRun?.retrieval).toEqual(available);
+  expect(store.events[run.run_id]?.at(-1)?.seq).toBe(1);
+  store.dispose();
+  setActivePinia(createPinia());
+  const restored = useWorkbench();
+  await restored.selectSession(session.session_id);
+  expect(restored.currentRun?.retrieval).toEqual(available);
+  restored.dispose();
 });

@@ -6,6 +6,7 @@ export type Delivery = Omit<RawDelivery, "repair"> & {
   repair:
     | (NonNullable<RawDelivery["repair"]> & {
         limits: { observed_tokens: number };
+        knowledge_index?: "existing" | "prepare";
       })
     | null;
 };
@@ -19,9 +20,10 @@ export type Intent =
       delivery: string;
       body: Omit<
         components["schemas"]["DeliveryRepairBody"],
-        "observed_token_limit"
+        "observed_token_limit" | "knowledge_index"
       > & {
         observed_token_limit?: number;
+        knowledge_index?: "existing" | "prepare";
       };
     }
   | {

@@ -38,6 +38,7 @@ const name = ref(""),
   checks = ref(""),
   image = ref(""),
   rounds = ref(3),
+  prepareIndex = ref(false),
   tokenLimit = ref(60_000);
 const acceptanceTemplate = `验收覆盖清单（待填写，不代表已覆盖）：
 - 预期行为：[待填写] -> 固定验收命令第 [待填写] 条
@@ -51,6 +52,7 @@ const repairSnapshot = () =>
     image.value,
     rounds.value,
     tokenLimit.value,
+    prepareIndex.value,
   ]);
 const cleanRepair = ref(repairSnapshot()),
   cleanName = ref("");
@@ -101,6 +103,7 @@ function choose(id: string, discardConfirmed = false) {
     goal.value = checks.value = image.value = "";
     rounds.value = 3;
     tokenLimit.value = 60_000;
+    prepareIndex.value = false;
     cleanRepair.value = repairSnapshot();
   }
   detailClosed.value = !id;
@@ -191,6 +194,7 @@ function repair() {
         .filter(Boolean),
       image: image.value.trim() || null,
       max_rounds: rounds.value,
+      ...(prepareIndex.value ? { knowledge_index: "prepare" as const } : {}),
       ...(tokenLimit.value === 60_000
         ? {}
         : { observed_token_limit: tokenLimit.value }),
@@ -259,6 +263,7 @@ function reset() {
   image.value = "";
   rounds.value = 3;
   tokenLimit.value = 60_000;
+  prepareIndex.value = false;
   cleanRepair.value = repairSnapshot();
   cleanName.value = "";
   sync();
@@ -305,6 +310,7 @@ function closeDetail() {
   image.value = "";
   rounds.value = 3;
   tokenLimit.value = 60_000;
+  prepareIndex.value = false;
   cleanRepair.value = repairSnapshot();
   closePatch();
   void router.replace({ query: { ...route.query, delivery: undefined } });
@@ -322,6 +328,10 @@ function closeDetail() {
       <span v-if="state.pending.action === 'repair'">
         原请求 Token 软限：{{
           state.pending.body.observed_token_limit ?? 60_000
+        }}。索引准备：{{
+          state.pending.body.knowledge_index === "prepare"
+            ? "每轮 Writer 开始前准备"
+            : "使用已有匹配索引"
         }}。 </span
       ><button :disabled="state.active" @click="submit(state.pending!)">
         重试原交付请求
@@ -421,6 +431,18 @@ function closeDetail() {
             <option :value="3">3</option>
           </select></label
         >
+        <label
+          ><input
+            v-model="prepareIndex"
+            type="checkbox"
+            aria-label="每轮修复前准备知识索引"
+            :disabled="locked || busy"
+          />每轮修复前准备知识索引</label
+        >
+        <p class="muted">
+          在每轮 Writer 的实际副本中增量准备；远程构建和查询计入交付预算。Docker
+          独立验收仍可使用，任务执行期间不自动重建。
+        </p>
         <p class="muted">
           验收命令将在所选执行后端运行。本地执行不提供操作系统隔离。整条交付最多
           36 次模型请求、15 分钟；Token
@@ -445,6 +467,15 @@ function closeDetail() {
         </ol>
         <p class="muted">
           验收命令通过不代表覆盖全部目标；清单为人工说明，未覆盖项仍未验证。
+        </p>
+        <p>
+          索引准备：{{
+            detail.repair.knowledge_index === "prepare"
+              ? "每轮 Writer 开始前准备"
+              : detail.repair.knowledge_index === "existing"
+                ? "使用已有匹配索引"
+                : "未记录"
+          }}
         </p>
         <p>固定 Token 软限：{{ detail.repair.limits.observed_tokens }}</p>
         <div

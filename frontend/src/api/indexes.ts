@@ -1,11 +1,24 @@
 import { ApiError, request } from "./client";
 import { durableMutation } from "./mutations";
 import type { components } from "./schema";
+import type { RetrievalStatus } from "./types";
 
-export type IndexInput = components["schemas"]["IndexBuildBody"];
+export type IndexInput = components["schemas"]["IndexBuildBody"] & {
+  workspace_id?: string;
+};
 export type IndexConfiguration = components["schemas"]["IndexConfiguration"];
-export type IndexDetail = components["schemas"]["IndexDetail"];
-export type IndexReceipt = components["schemas"]["IndexReceipt"];
+export type IndexDetail = Omit<
+  components["schemas"]["IndexDetail"],
+  "workspace_id"
+> & {
+  workspace_id?: string;
+};
+export type IndexReceipt = Omit<
+  components["schemas"]["IndexReceipt"],
+  "workspace_id"
+> & {
+  workspace_id?: string;
+};
 const prefix = "eventide.index-pending.v1.";
 const active = new Set<string>();
 const receipts = new Map<string, IndexReceipt>();
@@ -19,12 +32,17 @@ export function indexRequestState(project: string) {
       value &&
       /^[a-f0-9]{64}$/.test(value.config_hash) &&
       typeof value.force === "boolean" &&
-      typeof value.code_structure === "boolean"
+      typeof value.code_structure === "boolean" &&
+      (value.workspace_id === undefined ||
+        typeof value.workspace_id === "string")
     )
       pending = {
         config_hash: value.config_hash,
         force: value.force,
         code_structure: value.code_structure,
+        ...(value.workspace_id === undefined
+          ? {}
+          : { workspace_id: value.workspace_id }),
       };
   } catch {
     /* Invalid browser state cannot become an executable request. */
@@ -45,6 +63,10 @@ function changed() {
   for (const listener of listeners) listener();
 }
 export const indexesApi = {
+  status: (workspace: string) =>
+    request<RetrievalStatus>(
+      `/api/workspaces/${encodeURIComponent(workspace)}/index-status`,
+    ),
   configuration: () =>
     request<IndexConfiguration>("/api/indexes/configuration"),
   list: (project: string, before?: string) =>
@@ -66,6 +88,9 @@ export const indexesApi = {
       config_hash: input.config_hash,
       force: input.force,
       code_structure: input.code_structure,
+      ...(input.workspace_id === undefined
+        ? {}
+        : { workspace_id: input.workspace_id }),
     };
     const pending = indexRequestState(project).pending;
     if (pending && JSON.stringify(pending) !== JSON.stringify(body))

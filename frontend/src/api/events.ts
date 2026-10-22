@@ -20,6 +20,7 @@ export const eventNames = [
   "skills.snapshot",
   "skill.loaded",
   "run.started",
+  "retrieval.status",
   "message.user",
   "model.request",
   "model.response",

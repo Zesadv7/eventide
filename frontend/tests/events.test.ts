@@ -67,3 +67,22 @@ describe("SSE contract", () => {
     expect(preview).not.toHaveBeenCalled();
   });
 });
+
+it("treats retrieval status as a persistent event with the existing run cursor", () => {
+  vi.stubGlobal("EventSource", Source);
+  const event = vi.fn(),
+    preview = vi.fn();
+  connectRun("run-1", 5, event, preview, vi.fn());
+  const payload = {
+    type: "retrieval.status",
+    run_id: "run-1",
+    seq: 6,
+    payload: { status: "preparing", workspace_id: "writer" },
+  };
+  Source.current.emit("retrieval.status", payload);
+  expect(event).toHaveBeenCalledWith(payload);
+  Source.current.emit("retrieval.status", { ...payload, seq: 5 });
+  Source.current.emit("retrieval.status", { ...payload, run_id: "other" });
+  expect(event).toHaveBeenCalledOnce();
+  expect(preview).not.toHaveBeenCalled();
+});

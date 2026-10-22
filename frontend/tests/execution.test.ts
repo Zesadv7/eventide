@@ -143,3 +143,71 @@ describe("session execution copy controls", () => {
     },
   );
 });
+
+describe("task knowledge preparation", () => {
+  it.each([false, true])(
+    "opts into preparation for source/bound-worktree=%s",
+    async (bound) => {
+      const { wrapper, store } = await setup(bound);
+      const submit = vi.spyOn(store, "submit").mockResolvedValue(undefined);
+      const option = wrapper.get('[aria-label="任务开始前准备知识索引"]');
+      expect((option.element as HTMLInputElement).checked).toBe(false);
+      await option.setValue(true);
+      await wrapper.get("textarea").setValue("调查取消流程");
+      await wrapper.get("form.composer").trigger("submit");
+      expect(submit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          knowledge_index: "prepare",
+          execution_target: bound ? "worktree" : "source",
+        }),
+      );
+      wrapper.unmount();
+    },
+  );
+  it("disables and clears preparation when the target becomes a snapshot", async () => {
+    const { wrapper, store } = await setup(false);
+    const submit = vi.spyOn(store, "submit").mockResolvedValue(undefined);
+    const option = wrapper.get('[aria-label="任务开始前准备知识索引"]');
+    await option.setValue(true);
+    await wrapper.get('[aria-label="运行模式"]').setValue("plan");
+    await wrapper.get('[aria-label="执行位置"]').setValue("snapshot");
+    expect(option.attributes("disabled")).toBeDefined();
+    expect((option.element as HTMLInputElement).checked).toBe(false);
+    await wrapper.get("textarea").setValue("调查快照");
+    await wrapper.get("form.composer").trigger("submit");
+    expect(submit.mock.calls[0]![0]).not.toHaveProperty("knowledge_index");
+    wrapper.unmount();
+  });
+  it("shows historical missing evidence and follows actual preparation states", async () => {
+    const { wrapper, store } = await setup(false);
+    expect(wrapper.get('[aria-label="知识检索状态"]').text()).toBe(
+      "知识检索：未记录",
+    );
+    store.sessions[session.workspace_id]![0]!.latest_run = {
+      run_id: "retrieval-run",
+      status: "running",
+      retrieval: { status: "preparing", workspace_id: "actual-copy" },
+    };
+    await flushPromises();
+    expect(wrapper.get('[aria-label="知识检索状态"]').text()).toContain(
+      "准备中",
+    );
+    expect(wrapper.get('[aria-label="知识检索状态"]').text()).toContain(
+      "actual-copy",
+    );
+    store.sessions[session.workspace_id]![0]!.latest_run = {
+      run_id: "retrieval-run",
+      status: "failed",
+      retrieval: {
+        status: "failed",
+        workspace_id: "actual-copy",
+        reason: "budget_exceeded",
+      },
+    };
+    await flushPromises();
+    expect(wrapper.get('[aria-label="知识检索状态"]').text()).toContain(
+      "budget_exceeded",
+    );
+    wrapper.unmount();
+  });
+});

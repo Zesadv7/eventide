@@ -354,8 +354,12 @@ search_knowledge在启用时最多返回5条，附原查询/改写来源；失�
 
 ### 索引构建控制面
 
+检索升级的前端请求约定：Run 与交付修复可传 `knowledge_index=existing|prepare`，页面默认 existing 时省略字段，保留旧请求指纹；显式勾选发送 prepare。未知接收重试沿用原 body。Run 投影的 `retrieval` 与持久 `retrieval.status` 描述实际副本和准备结果，缺失历史字段显示“未记录”；SSE 使用既有持久游标并触发 Run 查询，不累计临时预览。
+
+`GET /api/workspaces/{workspace_id}/index-status` 提供所选副本状态，页面不得将 available 描述为全仓源码最新。构建可选 `workspace_id`，省略仍指项目源目录；构建回执/详情携带目标身份。前端只提供同项目已注册副本的选择，服务端仍负责权限与归属校验。工具记录的 `metadata.retrieval` 展示实际副本、索引代次、配置指纹及 hits 的路径、索引行号、内容哈希与 freshness；未记录时不补造值。
+
 - `GET /api/indexes/configuration`：返回provider/model/algorithm_version/dimension/config_hash，不返回凭据或endpoint原文。服务端模型资源缺失时409。
-- `POST /api/projects/{project_id}/indexes`：严格body为`config_hash`、`force=false`、`code_structure=false`；必须本机同源及`Idempotency-Key`。持久接收后202，返回run_id/session_id/project_id/status_url/events_url。同键同内容回放，内容冲突409，配置变化或项目构建繁忙409，队列满429。确定未接收的失败附`X-Eventide-Mutation-Outcome: rejected`，未知保持原身份重试。
+- `POST /api/projects/{project_id}/indexes`：严格body为`config_hash`、`force=false`、`code_structure=false`及可选同项目`workspace_id`；必须本机同源及`Idempotency-Key`。持久接收后202，返回run_id/session_id/project_id/workspace_id/status_url/events_url。同键同内容回放，内容冲突409，配置变化或项目构建繁忙409，队列满429。确定未接收的失败附`X-Eventide-Mutation-Outcome: rejected`，未知保持原身份重试。
 - `GET /api/projects/{project_id}/indexes?limit=20&before=<run_id>`：按身份分页，limit最大100。`GET /api/indexes/{run_id}`：运行状态、固定配置/选项、发布证据及错误；`published=null`表示本次无已保存发布证据，不能伪造为0个文件。
 - `POST /api/indexes/{run_id}/cancel`：同源及幂等键，等待精确任务清理；重复停止或终态调用返回同一任务现状。取消排队任务不请求模型、不生成索引。
 

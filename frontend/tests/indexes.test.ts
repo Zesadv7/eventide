@@ -73,6 +73,12 @@ beforeEach(() => {
     },
   ];
   store.selectedWorkspace = "w";
+  vi.spyOn(indexesApi, "status").mockImplementation(async (workspace_id) => ({
+    status: "available",
+    workspace_id,
+    generation: 2,
+    location: "managed",
+  }));
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -214,4 +220,99 @@ it("keeps closed index details closed across polling and a late response without
   expect(cancel).not.toHaveBeenCalled();
   wrapper.unmount();
   vi.useRealTimers();
+});
+
+it("chooses only project workspaces and keeps the build target in the request", async () => {
+  reads();
+  useWorkbench().workspaces.push({
+    workspace_id: "writer",
+    project_id: project,
+    kind: "worktree",
+    name: "Writer",
+    path: "/writer",
+  });
+  const create = vi
+    .spyOn(indexesApi, "create")
+    .mockRejectedValue(new Error("fixture rejected"));
+  const { wrapper } = await render();
+  const select = wrapper.get('[aria-label="索引目标"]');
+  expect((select.element as HTMLSelectElement).value).toBe("w");
+  expect(select.findAll("option")).toHaveLength(2);
+  await select.setValue("writer");
+  await flushPromises();
+  expect(wrapper.get('[aria-label="知识检索状态"]').text()).toContain("writer");
+  await wrapper
+    .findAll("button")
+    .find((b) => b.text() === "建立索引")!
+    .trigger("click");
+  await flushPromises();
+  expect(create).toHaveBeenCalledWith(project, {
+    ...input,
+    workspace_id: "writer",
+  });
+  wrapper.unmount();
+});
+it("restores the exact workspace of an uncertain build and rejects changing it", async () => {
+  reads();
+  useWorkbench().workspaces.push({
+    workspace_id: "writer",
+    project_id: project,
+    kind: "worktree",
+    name: "Writer",
+    path: "/writer",
+  });
+  const body = { ...input, workspace_id: "writer" };
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("lost response")));
+  await expect(indexesApi.create(project, body)).rejects.toThrow(
+    "lost response",
+  );
+  expect(indexRequestState(project).pending).toEqual(body);
+  await expect(
+    indexesApi.create(project, { ...body, workspace_id: "w" }),
+  ).rejects.toThrow("原索引请求");
+  const { wrapper } = await render();
+  expect(
+    (wrapper.get('[aria-label="索引目标"]').element as HTMLSelectElement).value,
+  ).toBe("writer");
+  expect(
+    wrapper.get('[aria-label="索引目标"]').attributes("disabled"),
+  ).toBeDefined();
+  wrapper.unmount();
+});
+it("ignores a late status for another workspace and reports legacy location without freshness claims", async () => {
+  reads();
+  useWorkbench().workspaces.push({
+    workspace_id: "writer",
+    project_id: project,
+    kind: "worktree",
+    name: "Writer",
+    path: "/writer",
+  });
+  const resolvers: ((
+    v: Awaited<ReturnType<typeof indexesApi.status>>,
+  ) => void)[] = [];
+  vi.mocked(indexesApi.status).mockImplementation((workspace_id) =>
+    workspace_id === "w"
+      ? new Promise((resolve) => resolvers.push(resolve))
+      : Promise.resolve({
+          status: "available",
+          workspace_id,
+          location: "legacy",
+          generation: 9,
+        }),
+  );
+  const { wrapper } = await render();
+  await wrapper.get('[aria-label="索引目标"]').setValue("writer");
+  await flushPromises();
+  for (const resolve of resolvers)
+    resolve({ status: "failed", workspace_id: "w", reason: "stale response" });
+  await flushPromises();
+  expect(wrapper.get('[aria-label="知识检索状态"]').text()).toContain(
+    "旧位置（只读）",
+  );
+  expect(wrapper.get('[aria-label="知识检索状态"]').text()).toContain(
+    "不代表全部源码最新",
+  );
+  expect(wrapper.text()).not.toContain("stale response");
+  wrapper.unmount();
 });
