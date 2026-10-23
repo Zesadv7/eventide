@@ -401,3 +401,8 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - RQ-INTEGRATION测试问题补记：新增legacy集成用例首次4通过/1失败，测试误用不存在的IndexStore.db_path属性，尚未进入生产断言。改为实际path属性；只复验该用例，日志integration/legacy-green.log和legacy-recheck.log。锁等待两个受控失败已转绿，未再出现错误发布。
 
 RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log），不改生产行为。57个不同后端定向、31组件、4浏览器旅程、类型/构建/Ruff/Mypy通过；所有本轮失败均已定位并复验，相关实现见本次准备策略提交。维护代理编写与验证，独立审查指出锁及legacy边界；尚无真实模型收益结论。
+### RQ-EVAL：v2评测新增代码行宽检查失败（2026-10-23）
+
+- 类型：开发检查失败，非真实Agent质量或运行故障。独立worktree基线`9768103`；命令`python -m ruff check eventide/rag/agent_evaluation.py tests/test_retrieval_agent_v2.py tests/test_retrieval_upgrade_evaluation.py`退出1，五处新增代码超过100字符。证据`.task_outputs/retrieval-quality/eval/ruff.log`；同批定向pytest为73通过、类型检查通过，没有调用真实模型。
+- 已证实原因：新路径表达式、提示文字和测试断言未按仓库行宽折行。处理仅调整代码换行，保留提示字符串、数据哈希和判分语义；同范围Ruff复验退出0（`ruff-final.log`），仅复验涉及字符串的9项测试通过（`pytest-string-formatting.log`），未重跑全量。实际参与为新增评测契约及定向检查，不描述为修复线上事故或提升模型成绩。
+- 附带只读维护错误：一次`rg`参数误写不存在的`tests/test_distribution.py`，退出2；无测试/模型执行，改用已知的`pyproject.toml`包资源声明核对。它不影响产品或测试结论，不据此新增产品回退。相关修正与本条随v2实现提交。

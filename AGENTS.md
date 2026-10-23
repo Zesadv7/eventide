@@ -436,3 +436,10 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 证据在忽略目录.task_outputs/retrieval-quality/。效果门槛：Recall@5/MRR一升一不降、纯检索p95不超过较好基线2倍、Agent通过及有效引用不下降；未通过保留可选。开发若仍反复错键则不跑留出，不能消耗留出调参。
 
 - RQ2-LEGACY 已完成（核心）：只读评审发现旧`.eventide`位置准备到新受管位置时只核对embedding，未核对旧切块/语料策略。IndexStore.validate_build_configuration复用build策略校验并在同一WAL快照验证embedding/切块/语料身份；缺策略和不匹配明确要求force，不创建/迁移/修改旧索引。22项受影响定向及加强后的并发发布快照1项通过（该项已包含在22中，不重复计数）、单模块Python3.10目标Mypy/Ruff/diff通过。三处换行失败已追加RQ-CORE-STATIC；无全量/模型调用，Host锁内复核和legacy调用由主任务集成。
+### RQ1 / RQ5-AGENT：检索调查评测v2子任务（2026-10-23）
+
+| 编号 | 状态 | 实施与证据 / 剩余条件 |
+|---|---|---|
+| RQ1-AGENT | 已完成 | 独立worktree基线9768103；v1原始字节/提示/判分/8+16批次及历史分数不变。v2新增8个不跨split的项目/家族，每题10文件，四类开发/留出各一题；真实字段模板、明确值形式、预审证据范围及可接受定义点经独立只读评审，带上下文的有效引用可通过交集校验。数据SHA 52597d38…；详情见architecture。 |
+| RQ5-AGENT-实现 | 已完成 | Python显式dataset_version=v2、每split8槽共16槽、分层schema/字段/事实/引文真实性/绑定/整题及实际语义调用统计，原Host/预算/账本和无质量补跑规则保留。73项定向通过，折行后相关9项通过，Ruff/Mypy通过；原日志在.task_outputs/retrieval-quality/eval，行宽失败及复验已记failure-cases。候选code_structure选项转交已验证。 |
+| RQ5-AGENT-效果 | 待开始 | 本子任务没有真实模型调用或历史重判；结构切块的完整Host接线由主任务集成补验。实际开发8槽先行，契约问题未解决不得跑留出；冻结后留出8槽仅一批，由主任务按原模型、预算及索引条件执行，不将离线机制通过当效果提升。 |

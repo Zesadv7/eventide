@@ -1,0 +1,419 @@
+{
+  "schema_version": 2,
+  "version": "retrieval-agent-v2",
+  "cases": [
+    {
+      "id": "notice-idempotency",
+      "split": "development",
+      "category": "identifier",
+      "project": "invoice-harbor",
+      "family": "inbound-deduplication",
+      "question": "Find acknowledge_notice, the invoice notification entry point. Report the exact event attribute used for durable duplicate detection (deduplication_key), and the bare Ledger method name called by that entry point to persist an accepted notification (storage_method). The latter asks for the storage method, not the entry point or the audit logger.",
+      "documents": {
+        "billing/ingress.py": "from billing.validation import require_signature, require_account\nfrom billing.results import Receipt\n\ndef acknowledge_notice(event, ledger, audit, accounts):\n    require_signature(event)\n    account = require_account(accounts, event.account_id)\n    previous = ledger.lookup_delivery(event.delivery_key)\n    if previous is not None:\n        return Receipt(previous.invoice_id, previous.status, replayed=True)\n    if event.currency != account.currency:\n        raise ValueError(\"account currency mismatch\")\n    result = ledger.record_delivery(event.delivery_key, event.invoice_id,\n                                    status=\"accepted\", amount=event.amount)\n    audit.append(\"notice_accepted\", invoice_id=event.invoice_id)\n    return Receipt(result.invoice_id, result.status, replayed=False)\n\ndef preview_notice(event, accounts):\n    account = require_account(accounts, event.account_id)\n    return {\"display_id\": event.trace_id, \"account\": account.label,\n            \"invoice\": event.invoice_id, \"amount\": event.amount}\n",
+        "billing/ledger.py": "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass DeliveryRow:\n    invoice_id: str\n    status: str\n    amount: int\n\nclass Ledger:\n    def __init__(self, database):\n        self.database = database\n\n    def lookup_delivery(self, delivery_key):\n        return self.database.deliveries.get(delivery_key)\n\n    def record_delivery(self, delivery_key, invoice_id, *, status, amount):\n        row = DeliveryRow(invoice_id, status, amount)\n        self.database.deliveries[delivery_key] = row\n        self.database.flush()\n        return row\n\n    def mark_exported(self, invoice_id):\n        self.database.exports.add(invoice_id)\n        self.database.flush()\n",
+        "billing/validation.py": "def require_signature(event):\n    if not event.signature_verified:\n        raise ValueError(\"unverified notice\")\n    if event.amount < 0:\n        raise ValueError(\"negative amount\")\n\ndef require_account(accounts, account_id):\n    account = accounts.get(account_id)\n    if account is None or account.suspended:\n        raise ValueError(\"account unavailable\")\n    return account\n",
+        "billing/results.py": "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass Receipt:\n    invoice_id: str\n    status: str\n    replayed: bool\n",
+        "billing/audit.py": "class AuditLog:\n    def __init__(self, sink):\n        self.sink = sink\n\n    def append(self, action, **fields):\n        record = {\"action\": action, \"fields\": fields}\n        self.sink.write(record)\n        return record\n",
+        "billing/outbox.py": "def dispatch_receipts(outbox, transport):\n    delivered = []\n    for row in outbox.pending():\n        transport.send(row.recipient, row.body)\n        outbox.acknowledge(row.message_id)\n        delivered.append(row.message_id)\n    return delivered\n\ndef preview_receipt(row):\n    return {\"recipient\": row.recipient, \"display_id\": row.message_id}\n",
+        "billing/imports.py": "def import_invoice_rows(rows, database):\n    accepted = []\n    for row in rows:\n        if row.external_number in database.imports:\n            continue\n        database.imports[row.external_number] = row\n        accepted.append(row.external_number)\n    database.flush()\n    return accepted\n",
+        "billing/refunds.py": "def request_refund(invoice, request, refunds):\n    if request.request_id in refunds:\n        return refunds[request.request_id]\n    if request.amount > invoice.paid:\n        raise ValueError(\"refund exceeds payment\")\n    refunds[request.request_id] = request.amount\n    return request.amount\n",
+        "tests/test_billing.py": "def test_preview_does_not_write(ingress, notice, accounts, ledger):\n    before = len(ledger.database.deliveries)\n    shown = ingress.preview_notice(notice, accounts)\n    assert shown[\"invoice\"] == notice.invoice_id\n    assert len(ledger.database.deliveries) == before\n\ndef test_negative_invoice_rejected(validation, notice):\n    notice.amount = -1\n    try:\n        validation.require_signature(notice)\n    except ValueError as exc:\n        assert str(exc) == \"negative amount\"\n",
+        "README.md": "Invoice Harbor accepts signed billing notifications and exports receipts.\nIncoming notices, outbound messages, imports and refunds use separate stores.\nA receipt preview is read-only; operational audit records are not delivery identity.\n"
+      },
+      "after_index": {},
+      "foreign_documents": {},
+      "facts": [
+        {
+          "key": "deduplication_key",
+          "value": "event.delivery_key",
+          "evidence": {
+            "path": "billing/ingress.py",
+            "start_line": 4,
+            "end_line": 15
+          }
+        },
+        {
+          "key": "storage_method",
+          "value": "record_delivery",
+          "evidence": {
+            "path": "billing/ingress.py",
+            "start_line": 4,
+            "end_line": 15
+          }
+        }
+      ],
+      "value_kinds": {
+        "deduplication_key": "attribute",
+        "storage_method": "identifier"
+      },
+      "alternative_evidence": {
+        "storage_method": [
+          {
+            "path": "billing/ledger.py",
+            "start_line": 16,
+            "end_line": 20
+          }
+        ]
+      }
+    },
+    {
+      "id": "catalog-restore-window",
+      "split": "development",
+      "category": "concept",
+      "project": "notebook-garden",
+      "family": "reversible-deletion",
+      "question": "A deleted notebook disappears from the browser immediately, but the user can still bring it back for a limited time. Identify the function that records this deferred destruction (transition_function), and the record attribute that stores the last instant at which restoration is allowed (deadline_attribute). Find the durable transition, not the page filter.",
+      "documents": {
+        "garden/catalog.py": "from garden.permissions import require_owner\nfrom garden.clock import days_from\n\ndef retire_notebook(record, actor, clock, policy, journal):\n    require_owner(record, actor)\n    if record.state == \"buried\":\n        return record\n    record.state = \"buried\"\n    record.restore_until = days_from(clock.now(), policy.recovery_days)\n    record.hidden_by = actor.identity\n    journal.save(record)\n    journal.emit(\"notebook_retired\", record.identity)\n    return record\n\ndef recover_notebook(record, actor, clock, journal):\n    require_owner(record, actor)\n    if record.state != \"buried\" or clock.now() > record.restore_until:\n        raise ValueError(\"recovery window closed\")\n    record.state = \"active\"\n    record.hidden_by = None\n    journal.save(record)\n    return record\n",
+        "garden/sweeper.py": "def collect_buried(journal, clock, storage):\n    removed = []\n    for record in journal.with_state(\"buried\"):\n        if clock.now() <= record.restore_until:\n            continue\n        if journal.has_open_export(record.identity):\n            continue\n        storage.remove_tree(record.storage_key)\n        journal.remove(record.identity)\n        removed.append(record.identity)\n    return removed\n",
+        "garden/browser.py": "def visible_notebooks(records, actor):\n    return [record for record in records\n            if actor.identity in record.readers and record.state == \"active\"]\n\ndef archived_notebooks(records):\n    return [record for record in records if record.pinned is False]\n\ndef sort_notebooks(records):\n    return sorted(records, key=lambda record: record.title.casefold())\n",
+        "garden/permissions.py": "def require_owner(record, actor):\n    if actor.identity != record.owner_id:\n        raise PermissionError(\"only the owner may change lifecycle state\")\n\ndef can_read(record, actor):\n    return actor.identity == record.owner_id or actor.identity in record.readers\n",
+        "garden/clock.py": "from datetime import timedelta\n\ndef days_from(instant, days):\n    return instant + timedelta(days=days)\n\ndef display_day(instant):\n    return instant.isoformat().split(\"T\")[0]\n",
+        "garden/policy.py": "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass GardenPolicy:\n    recovery_days: int = 14\n    export_days: int = 2\n    history_entries: int = 100\n",
+        "garden/exports.py": "def issue_download(record, actor, clock, links):\n    ticket = links.create(record.storage_key, actor.identity)\n    ticket.valid_until = clock.now() + links.lifetime\n    links.save(ticket)\n    return ticket\n\ndef resolve_download(ticket, clock):\n    if clock.now() >= ticket.valid_until:\n        raise ValueError(\"download expired\")\n    return ticket.storage_key\n",
+        "garden/history.py": "def trim_history(entries, maximum):\n    if maximum < 1:\n        raise ValueError(\"history size must be positive\")\n    return entries[-maximum:]\n\ndef restore_revision(record, revision, journal):\n    record.document = revision.document\n    journal.save(record)\n    return record\n",
+        "tests/test_browser.py": "def test_buried_record_is_hidden(browser, record, actor):\n    record.state = \"buried\"\n    assert browser.visible_notebooks([record], actor) == []\n\ndef test_pinned_sort_is_independent(browser, records):\n    ordered = browser.sort_notebooks(records)\n    assert [r.title.casefold() for r in ordered] == sorted(\n        r.title.casefold() for r in records)\n",
+        "README.md": "Notebook Garden separates browsing, notebook lifecycle, revision history and downloads.\nHidden notebooks retain their storage until the sweeper can remove them safely.\nRestoring a revision does not change notebook ownership or lifecycle state.\n"
+      },
+      "after_index": {},
+      "foreign_documents": {},
+      "facts": [
+        {
+          "key": "transition_function",
+          "value": "retire_notebook",
+          "evidence": {
+            "path": "garden/catalog.py",
+            "start_line": 4,
+            "end_line": 13
+          }
+        },
+        {
+          "key": "deadline_attribute",
+          "value": "record.restore_until",
+          "evidence": {
+            "path": "garden/catalog.py",
+            "start_line": 4,
+            "end_line": 13
+          }
+        }
+      ],
+      "value_kinds": {
+        "transition_function": "identifier",
+        "deadline_attribute": "attribute"
+      },
+      "alternative_evidence": {
+        "deadline_attribute": [
+          {
+            "path": "garden/catalog.py",
+            "start_line": 15,
+            "end_line": 22
+          }
+        ]
+      }
+    },
+    {
+      "id": "parcel-cover-chain",
+      "split": "development",
+      "category": "cross_file",
+      "project": "parcel-lantern",
+      "family": "insurance-valuation",
+      "question": "Trace submit_parcel through the insured-value check. Which settings attribute does the entry point pass as the maximum covered value (coverage_setting), and which exception class does the downstream check raise when the declared value exceeds it (coverage_exception)? Weight and daily shipment limits are separate policies.",
+      "documents": {
+        "lantern/intake.py": "from lantern.insurance import ensure_cover\nfrom lantern.routing import choose_route\nfrom lantern.validation import ensure_dimensions\n\ndef submit_parcel(parcel, settings, routes, repository, audit):\n    ensure_dimensions(parcel, settings.max_edge_cm)\n    route = choose_route(routes, parcel.destination, parcel.mass_grams)\n    insured = ensure_cover(parcel.declared_value, settings.coverage_ceiling)\n    receipt = repository.insert(parcel, route=route.code, insured=insured)\n    audit.record(\"parcel_submitted\", receipt.identity)\n    return receipt\n\ndef estimate_parcel(parcel, routes):\n    route = choose_route(routes, parcel.destination, parcel.mass_grams)\n    return {\"route\": route.code, \"base_price\": route.base_price}\n",
+        "lantern/insurance.py": "class UncoveredValue(ValueError):\n    pass\n\ndef ensure_cover(declared, ceiling):\n    if declared < 0:\n        raise ValueError(\"negative declared value\")\n    if declared > ceiling:\n        raise UncoveredValue(\"declared value exceeds available cover\")\n    return declared\n\ndef premium_for(declared, rate):\n    return round(declared * rate, 2)\n",
+        "lantern/routing.py": "class RouteUnavailable(ValueError):\n    pass\n\ndef choose_route(routes, destination, grams):\n    options = [route for route in routes\n               if destination in route.regions and grams <= route.max_grams]\n    if not options:\n        raise RouteUnavailable(destination)\n    return min(options, key=lambda route: route.base_price)\n",
+        "lantern/validation.py": "def ensure_dimensions(parcel, maximum):\n    edges = (parcel.width_cm, parcel.height_cm, parcel.depth_cm)\n    if min(edges) <= 0:\n        raise ValueError(\"invalid parcel dimensions\")\n    if max(edges) > maximum:\n        raise ValueError(\"parcel exceeds sorting-machine dimensions\")\n",
+        "lantern/settings.py": "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass DispatchSettings:\n    coverage_ceiling: int = 5000\n    max_edge_cm: int = 120\n    daily_shipments: int = 200\n    label_retention_days: int = 30\n",
+        "lantern/quotas.py": "class DailyQuotaReached(RuntimeError):\n    pass\n\ndef admit_account(account, settings):\n    if account.today_shipments >= settings.daily_shipments:\n        raise DailyQuotaReached(account.identity)\n    account.today_shipments += 1\n",
+        "lantern/labels.py": "def render_label(receipt, printer):\n    rows = [receipt.identity, receipt.route, receipt.destination]\n    return printer.render(rows)\n\ndef expire_labels(labels, cutoff):\n    return [label for label in labels if label.created_at >= cutoff]\n",
+        "lantern/returns.py": "def accept_return(parcel, reason, returns):\n    if parcel.delivered_at is None:\n        raise ValueError(\"parcel not yet delivered\")\n    ticket = returns.create(parcel.identity, reason)\n    return {\"return_id\": ticket.identity, \"state\": \"requested\"}\n",
+        "tests/test_routing.py": "def test_cheapest_matching_route(routing, routes):\n    route = routing.choose_route(routes, \"north\", 500)\n    assert \"north\" in route.regions\n    assert route.max_grams >= 500\n\ndef test_quote_has_no_receipt(intake, parcel, routes):\n    quoted = intake.estimate_parcel(parcel, routes)\n    assert \"base_price\" in quoted\n    assert \"receipt_id\" not in quoted\n",
+        "README.md": "Parcel Lantern prepares labels and routes shipments after independent checks.\nDeclared value, physical dimensions and account quotas have distinct failure conditions.\nA price estimate does not persist a submitted parcel.\n"
+      },
+      "after_index": {},
+      "foreign_documents": {},
+      "facts": [
+        {
+          "key": "coverage_setting",
+          "value": "settings.coverage_ceiling",
+          "evidence": {
+            "path": "lantern/intake.py",
+            "start_line": 5,
+            "end_line": 11
+          }
+        },
+        {
+          "key": "coverage_exception",
+          "value": "UncoveredValue",
+          "evidence": {
+            "path": "lantern/insurance.py",
+            "start_line": 4,
+            "end_line": 9
+          }
+        }
+      ],
+      "value_kinds": {
+        "coverage_setting": "attribute",
+        "coverage_exception": "identifier"
+      },
+      "alternative_evidence": {}
+    },
+    {
+      "id": "retry-current-checkout",
+      "split": "development",
+      "category": "freshness",
+      "project": "harbor-sync",
+      "family": "scheduled-reissue",
+      "question": "Inspect the current upload retry implementation. Report the integer minute literal returned by retry_delay_minutes (delay_minutes), and the complete expression returned by may_reissue (eligibility_expression). Exclude the return keyword and preserve the expression spelling. Heartbeat and connection timeout settings are not the requested delay.",
+      "documents": {
+        "harbor/retries.py": "def retry_delay_minutes(policy):\n    return 30\n\ndef may_reissue(attempt, policy):\n    return attempt.state == \"failed\"\n\ndef next_retry(attempt, policy, clock):\n    if not may_reissue(attempt, policy):\n        return None\n    return clock.after_minutes(retry_delay_minutes(policy))\n\ndef mark_retry(attempt, receipt, journal):\n    attempt.tries += 1\n    attempt.last_receipt = receipt.identity\n    journal.save(attempt)\n",
+        "harbor/scheduler.py": "from harbor.retries import may_reissue, next_retry\n\ndef schedule_due(attempts, policy, clock, queue):\n    submitted = []\n    for attempt in attempts:\n        if not may_reissue(attempt, policy):\n            continue\n        due = next_retry(attempt, policy, clock)\n        queue.put(attempt.identity, due=due)\n        submitted.append(attempt.identity)\n    return submitted\n",
+        "harbor/policy.py": "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass RetryPolicy:\n    retry_ceiling: int = 4\n    connect_timeout_seconds: int = 20\n    heartbeat_minutes: int = 5\n",
+        "harbor/uploads.py": "def send_payload(transport, payload, policy):\n    receipt = transport.put(payload, timeout=policy.connect_timeout_seconds)\n    if not receipt.accepted:\n        raise ValueError(\"remote rejected payload\")\n    return receipt\n\ndef preview_payload(payload):\n    return {\"bytes\": len(payload.body), \"media_type\": payload.media_type}\n",
+        "harbor/heartbeats.py": "def record_heartbeat(agent, policy, clock, journal):\n    agent.seen_at = clock.now()\n    agent.next_ping = clock.after_minutes(policy.heartbeat_minutes)\n    journal.save(agent)\n    return agent.next_ping\n",
+        "harbor/cleanup.py": "def discard_receipts(receipts, cutoff, store):\n    discarded = []\n    for receipt in receipts:\n        if receipt.created_at < cutoff and receipt.confirmed:\n            store.remove(receipt.identity)\n            discarded.append(receipt.identity)\n    return discarded\n",
+        "harbor/cancellation.py": "def cancel_upload(attempt, queue, journal):\n    queue.remove(attempt.identity)\n    attempt.state = \"cancelled\"\n    journal.save(attempt)\n    return attempt.identity\n\ndef is_terminal(attempt):\n    return attempt.state in {\"completed\", \"cancelled\"}\n",
+        "harbor/history.py": "def recent_attempts(attempts, limit):\n    ordered = sorted(attempts, key=lambda item: item.created_at, reverse=True)\n    return ordered[:limit]\n\ndef attempt_summary(attempt):\n    return {\"state\": attempt.state, \"tries\": attempt.tries,\n            \"last_receipt\": attempt.last_receipt}\n",
+        "tests/test_cancel.py": "def test_cancelled_upload_is_terminal(cancellation, attempt, queue, journal):\n    cancellation.cancel_upload(attempt, queue, journal)\n    assert cancellation.is_terminal(attempt)\n    assert attempt.identity not in queue\n\ndef test_history_has_no_payload(history, attempt):\n    assert \"body\" not in history.attempt_summary(attempt)\n",
+        "README.md": "Harbor Sync records each upload attempt and arranges later dispatch separately.\nRetry timing is independent of heartbeat intervals and network timeouts.\nInspect the current checkout for policy changes; old history is not current configuration.\n"
+      },
+      "after_index": {
+        "harbor/retries.py": "def retry_delay_minutes(policy):\n    return 10\n\ndef may_reissue(attempt, policy):\n    return attempt.state == \"failed\" and attempt.tries < policy.retry_ceiling\n\ndef next_retry(attempt, policy, clock):\n    if not may_reissue(attempt, policy):\n        return None\n    return clock.after_minutes(retry_delay_minutes(policy))\n\ndef mark_retry(attempt, receipt, journal):\n    attempt.tries += 1\n    attempt.last_receipt = receipt.identity\n    journal.save(attempt)\n"
+      },
+      "foreign_documents": {},
+      "facts": [
+        {
+          "key": "delay_minutes",
+          "value": "10",
+          "evidence": {
+            "path": "harbor/retries.py",
+            "start_line": 1,
+            "end_line": 2
+          }
+        },
+        {
+          "key": "eligibility_expression",
+          "value": "attempt.state == \"failed\" and attempt.tries < policy.retry_ceiling",
+          "evidence": {
+            "path": "harbor/retries.py",
+            "start_line": 4,
+            "end_line": 5
+          }
+        }
+      ],
+      "value_kinds": {
+        "delay_minutes": "integer_literal",
+        "eligibility_expression": "expression"
+      },
+      "alternative_evidence": {}
+    },
+    {
+      "id": "archive-page-cursor",
+      "split": "holdout",
+      "category": "identifier",
+      "project": "archive-loom",
+      "family": "paged-archive-reading",
+      "question": "Find load_incremental_window. Report the local variable passed as the after argument to archive.read_window (reader_argument), and the fallback string literal used when the saved bookmark is absent (initial_bookmark). Do not report the UI pagination token.",
+      "documents": {
+        "loom/windows.py": "from loom.validation import checked_page_size\nfrom loom.projection import project_entries\n\ndef load_incremental_window(archive, bookmarks, channel, requested_size):\n    size = checked_page_size(requested_size)\n    saved = bookmarks.get(channel)\n    anchor = saved.position if saved is not None else \"archive-start\"\n    raw = archive.read_window(channel, after=anchor, maximum=size)\n    visible = project_entries(raw.entries)\n    return {\"entries\": visible, \"next\": raw.next_position,\n            \"has_more\": raw.has_more, \"channel\": channel}\n\ndef load_recent_window(archive, channel, requested_size):\n    size = checked_page_size(requested_size)\n    raw = archive.read_recent(channel, maximum=size)\n    return project_entries(raw.entries)\n",
+        "loom/bookmarks.py": "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass Bookmark:\n    channel: str\n    position: str\n    committed_at: str\n\ndef commit_bookmark(store, channel, position, clock):\n    bookmark = Bookmark(channel, position, clock.iso_now())\n    store.replace(channel, bookmark)\n    return bookmark\n",
+        "loom/validation.py": "def checked_page_size(requested):\n    if not isinstance(requested, int) or not 1 <= requested <= 100:\n        raise ValueError(\"page size must be between one and one hundred\")\n    return requested\n\ndef checked_channel(channel):\n    if not channel or \"/\" in channel:\n        raise ValueError(\"invalid archive channel\")\n    return channel\n",
+        "loom/projection.py": "def project_entries(entries):\n    projected = []\n    for entry in entries:\n        if entry.hidden:\n            continue\n        projected.append({\"kind\": entry.kind, \"text\": entry.text,\n                          \"recorded_at\": entry.recorded_at})\n    return projected\n",
+        "loom/browser.py": "def page_link(channel, token):\n    return {\"channel\": channel, \"page_token\": token or \"first-page\"}\n\ndef next_button(window):\n    if not window[\"has_more\"]:\n        return None\n    return page_link(window[\"channel\"], window[\"next\"])\n",
+        "loom/exports.py": "def export_window(window, writer):\n    for entry in window[\"entries\"]:\n        writer.write(entry[\"text\"] + \"\\n\")\n    writer.flush()\n    return len(window[\"entries\"])\n",
+        "loom/maintenance.py": "def compact_channels(archive, channels):\n    summaries = {}\n    for channel in channels:\n        summaries[channel] = archive.compact(channel)\n    return summaries\n\ndef channel_counts(archive, channels):\n    return {name: archive.count(name) for name in channels}\n",
+        "loom/search.py": "def search_titles(index, phrase, maximum):\n    words = phrase.casefold().split()\n    if not words:\n        return []\n    return index.match_titles(words, maximum=maximum)\n",
+        "tests/test_projection.py": "def test_hidden_entries_are_excluded(projection, hidden_entry):\n    hidden_entry.hidden = True\n    assert projection.project_entries([hidden_entry]) == []\n\ndef test_button_absent_at_end(browser):\n    assert browser.next_button({\"has_more\": False}) is None\n",
+        "README.md": "Archive Loom offers incremental reading, recent history, title search and text exports.\nDurable bookmarks belong to channels. Browser page links are presentation values.\nHidden records are filtered after archive reading and do not change source positions.\n"
+      },
+      "after_index": {},
+      "foreign_documents": {},
+      "facts": [
+        {
+          "key": "reader_argument",
+          "value": "anchor",
+          "evidence": {
+            "path": "loom/windows.py",
+            "start_line": 4,
+            "end_line": 11
+          }
+        },
+        {
+          "key": "initial_bookmark",
+          "value": "archive-start",
+          "evidence": {
+            "path": "loom/windows.py",
+            "start_line": 4,
+            "end_line": 11
+          }
+        }
+      ],
+      "value_kinds": {
+        "reader_argument": "identifier",
+        "initial_bookmark": "string_literal"
+      },
+      "alternative_evidence": {}
+    },
+    {
+      "id": "broadcast-final-drain",
+      "split": "holdout",
+      "category": "concept",
+      "project": "wave-orchard",
+      "family": "media-stream-shutdown",
+      "question": "A broadcaster accepts a request to stop, but already buffered audio must reach the listener before the connection closes. Find the function that performs this orderly shutdown (shutdown_function), and the dotted buffer method it awaits before closing the socket (buffer_operation). Return only the method reference, without await or parentheses.",
+      "documents": {
+        "wave/lifecycle.py": "from wave.status import StreamState\n\nasync def retire_stream(stream, journal):\n    if stream.state == StreamState.CLOSED:\n        return stream.last_sequence\n    stream.state = StreamState.DRAINING\n    stream.accept_new_frames = False\n    await stream.producer.finish()\n    await stream.buffer.flush_pending()\n    await stream.socket.close()\n    stream.state = StreamState.CLOSED\n    journal.record(stream.identity, stream.last_sequence)\n    return stream.last_sequence\n\nasync def abort_stream(stream, reason, journal):\n    stream.accept_new_frames = False\n    stream.buffer.discard()\n    await stream.socket.close()\n    stream.state = StreamState.CLOSED\n    journal.record_abort(stream.identity, reason)\n",
+        "wave/buffer.py": "class AudioBuffer:\n    def __init__(self, sender):\n        self.sender = sender\n        self.pending = []\n\n    def append(self, frame):\n        self.pending.append(frame)\n\n    async def flush_pending(self):\n        while self.pending:\n            frame = self.pending.pop(0)\n            await self.sender.send(frame)\n        await self.sender.drain()\n\n    def discard(self):\n        self.pending.clear()\n",
+        "wave/status.py": "from enum import Enum\n\nclass StreamState(str, Enum):\n    LIVE = \"live\"\n    DRAINING = \"draining\"\n    CLOSED = \"closed\"\n",
+        "wave/ingress.py": "def accept_frame(stream, frame):\n    if not stream.accept_new_frames:\n        return False\n    if frame.sequence <= stream.last_sequence:\n        return False\n    stream.buffer.append(frame)\n    stream.last_sequence = frame.sequence\n    return True\n",
+        "wave/preview.py": "def waveform_preview(samples, columns):\n    if not samples:\n        return []\n    stride = max(1, len(samples) // columns)\n    return [max(abs(value) for value in samples[i:i + stride])\n            for i in range(0, len(samples), stride)]\n",
+        "wave/heartbeat.py": "async def ping_stream(stream, clock):\n    await stream.socket.ping()\n    stream.last_ping = clock.now()\n    return stream.last_ping\n\ndef is_stale(stream, clock, threshold):\n    return clock.now() - stream.last_ping > threshold\n",
+        "wave/recording.py": "def save_recording(frames, writer):\n    count = 0\n    for frame in frames:\n        writer.write(frame.payload)\n        count += 1\n    writer.flush()\n    return count\n",
+        "wave/mixer.py": "def mix_channels(left, right, gain):\n    if len(left) != len(right):\n        raise ValueError(\"channel length mismatch\")\n    return [(a + b) * gain / 2 for a, b in zip(left, right)]\n",
+        "tests/test_ingress.py": "def test_no_frames_after_gate_closes(ingress, stream, frame):\n    stream.accept_new_frames = False\n    assert ingress.accept_frame(stream, frame) is False\n\ndef test_old_sequence_is_rejected(ingress, stream, frame):\n    frame.sequence = stream.last_sequence\n    assert ingress.accept_frame(stream, frame) is False\n",
+        "README.md": "Wave Orchard separates live delivery, previews and recording to disk.\nAn orderly stop preserves queued audio; an emergency abort may discard it.\nFlushing a recording writer is unrelated to network stream lifecycle.\n"
+      },
+      "after_index": {},
+      "foreign_documents": {},
+      "facts": [
+        {
+          "key": "shutdown_function",
+          "value": "retire_stream",
+          "evidence": {
+            "path": "wave/lifecycle.py",
+            "start_line": 3,
+            "end_line": 13
+          }
+        },
+        {
+          "key": "buffer_operation",
+          "value": "stream.buffer.flush_pending",
+          "evidence": {
+            "path": "wave/lifecycle.py",
+            "start_line": 3,
+            "end_line": 13
+          }
+        }
+      ],
+      "value_kinds": {
+        "shutdown_function": "identifier",
+        "buffer_operation": "attribute"
+      },
+      "alternative_evidence": {}
+    },
+    {
+      "id": "report-signing-chain",
+      "split": "holdout",
+      "category": "cross_file",
+      "project": "report-cedar",
+      "family": "signed-publication",
+      "question": "Trace publish_report into signing. Report the bare function that signs the serialized report body (signing_function), and the exception class raised before signing when the selected key is past its validity deadline (expired_key_exception). The thumbnail checksum and report filename are unrelated.",
+      "documents": {
+        "cedar/publisher.py": "from cedar.encoding import encode_report\nfrom cedar.signatures import seal_report\nfrom cedar.names import publication_name\n\ndef publish_report(report, keyring, clock, archive):\n    body = encode_report(report)\n    key = keyring.active_for(report.organization_id)\n    envelope = seal_report(body, key, clock.now())\n    filename = publication_name(report)\n    archive.write(filename, envelope)\n    return {\"filename\": filename, \"key_id\": key.identity}\n\ndef preview_report(report):\n    return {\"title\": report.title, \"sections\": len(report.sections)}\n",
+        "cedar/signatures.py": "class SigningKeyExpired(ValueError):\n    pass\n\ndef seal_report(body, key, instant):\n    if instant >= key.valid_until:\n        raise SigningKeyExpired(key.identity)\n    signature = key.sign(body)\n    return {\"body\": body, \"signature\": signature, \"key_id\": key.identity}\n\ndef verify_envelope(envelope, keyring):\n    key = keyring.by_id(envelope[\"key_id\"])\n    return key.verify(envelope[\"body\"], envelope[\"signature\"])\n",
+        "cedar/encoding.py": "import json\n\ndef encode_report(report):\n    content = {\"title\": report.title, \"sections\": report.sections,\n               \"organization\": report.organization_id}\n    return json.dumps(content, sort_keys=True, separators=(\",\", \":\")).encode()\n\ndef decode_report(body):\n    return json.loads(body)\n",
+        "cedar/names.py": "def publication_name(report):\n    day = report.created_at.strftime(\"%Y%m%d\")\n    return f\"{report.organization_id}-{day}-{report.sequence}.json\"\n\ndef display_name(report):\n    return report.title.strip() or \"Untitled report\"\n",
+        "cedar/thumbnails.py": "import hashlib\n\ndef thumbnail_checksum(image):\n    return hashlib.sha256(image.pixels).hexdigest()\n\ndef cache_thumbnail(cache, image):\n    checksum = thumbnail_checksum(image)\n    cache.put(checksum, image.pixels)\n    return checksum\n",
+        "cedar/keyring.py": "class KeyUnavailable(LookupError):\n    pass\n\ndef choose_active(keys, organization_id):\n    matching = [key for key in keys\n                if key.organization_id == organization_id and key.enabled]\n    if not matching:\n        raise KeyUnavailable(organization_id)\n    return max(matching, key=lambda key: key.created_at)\n",
+        "cedar/downloads.py": "def issue_link(archive, filename, principal):\n    if not archive.can_read(principal, filename):\n        raise PermissionError(\"report access denied\")\n    return archive.temporary_link(filename, principal.identity)\n",
+        "cedar/cleanup.py": "def discard_unpublished(drafts, archive):\n    removed = []\n    for draft in drafts:\n        if draft.abandoned and not draft.published:\n            archive.remove_draft(draft.identity)\n            removed.append(draft.identity)\n    return removed\n",
+        "tests/test_encoding.py": "def test_encoding_is_stable(encoding, report):\n    first = encoding.encode_report(report)\n    second = encoding.encode_report(report)\n    assert first == second\n\ndef test_preview_has_no_signature(publisher, report):\n    assert \"signature\" not in publisher.preview_report(report)\n",
+        "README.md": "Report Cedar writes signed report envelopes and separately caches visual previews.\nPublication selects an enabled organizational key; signing checks temporal validity.\nA successful thumbnail checksum does not establish that a report was signed.\n"
+      },
+      "after_index": {},
+      "foreign_documents": {},
+      "facts": [
+        {
+          "key": "signing_function",
+          "value": "seal_report",
+          "evidence": {
+            "path": "cedar/publisher.py",
+            "start_line": 5,
+            "end_line": 11
+          }
+        },
+        {
+          "key": "expired_key_exception",
+          "value": "SigningKeyExpired",
+          "evidence": {
+            "path": "cedar/signatures.py",
+            "start_line": 4,
+            "end_line": 8
+          }
+        }
+      ],
+      "value_kinds": {
+        "signing_function": "identifier",
+        "expired_key_exception": "identifier"
+      },
+      "alternative_evidence": {
+        "signing_function": [
+          {
+            "path": "cedar/signatures.py",
+            "start_line": 4,
+            "end_line": 8
+          }
+        ]
+      }
+    },
+    {
+      "id": "export-copy-profile",
+      "split": "holdout",
+      "category": "freshness",
+      "project": "mosaic-cabinet",
+      "family": "image-export-policy",
+      "question": "Inspect this checkout, which may differ from another registered copy. For full artwork exports, report the default ExportProfile format_name string (format_name) and alpha_policy string (alpha_policy). Return literal contents without quotes. The thumbnail encoder has its own policy and is not the requested export profile.",
+      "documents": {
+        "mosaic/export_profile.py": "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass ExportProfile:\n    format_name: str = \"png\"\n    alpha_policy: str = \"preserve\"\n    maximum_edge: int = 2048\n\ndef active_profile():\n    return ExportProfile()\n\ndef encoder_options(profile):\n    return {\"format\": profile.format_name, \"alpha\": profile.alpha_policy,\n            \"maximum_edge\": profile.maximum_edge}\n",
+        "mosaic/exporter.py": "from mosaic.export_profile import active_profile, encoder_options\nfrom mosaic.resize import fit_within\n\ndef export_artwork(artwork, encoder, storage):\n    profile = active_profile()\n    pixels = fit_within(artwork.pixels, profile.maximum_edge)\n    data = encoder.encode(pixels, **encoder_options(profile))\n    storage.write(artwork.identity, data, suffix=profile.format_name)\n    return {\"format\": profile.format_name, \"size\": len(data)}\n",
+        "mosaic/resize.py": "def fit_within(pixels, maximum):\n    width, height = pixels.size\n    if max(width, height) <= maximum:\n        return pixels\n    scale = maximum / max(width, height)\n    return pixels.resize((round(width * scale), round(height * scale)))\n",
+        "mosaic/thumbnails.py": "def thumbnail_options():\n    return {\"format\": \"jpeg\", \"alpha\": \"flatten\", \"maximum_edge\": 256}\n\ndef thumbnail_name(artwork):\n    return f\"thumb-{artwork.identity}.jpg\"\n",
+        "mosaic/importer.py": "ALLOWED_IMPORTS = {\"png\", \"jpeg\", \"webp\"}\n\ndef decode_import(upload, decoder):\n    if upload.format_name not in ALLOWED_IMPORTS:\n        raise ValueError(\"unsupported upload format\")\n    return decoder.decode(upload.body)\n",
+        "mosaic/palettes.py": "def palette_preview(colors, maximum):\n    seen = set()\n    result = []\n    for color in colors:\n        if color in seen:\n            continue\n        seen.add(color)\n        result.append(color)\n        if len(result) == maximum:\n            break\n    return result\n",
+        "mosaic/catalog.py": "def visible_artworks(records, owner):\n    return [record for record in records if record.owner_id == owner and not record.hidden]\n\ndef rename_artwork(record, title, journal):\n    record.title = title.strip()\n    journal.save(record)\n    return record\n",
+        "mosaic/metadata.py": "def public_metadata(artwork):\n    return {\"title\": artwork.title, \"artist\": artwork.artist,\n            \"width\": artwork.pixels.size[0], \"height\": artwork.pixels.size[1]}\n\ndef file_description(metadata):\n    return f\"{metadata['title']} by {metadata['artist']}\"\n",
+        "tests/test_resize.py": "def test_small_image_is_reused(resize, image):\n    assert resize.fit_within(image, max(image.size)) is image\n\ndef test_thumbnail_policy_is_separate(thumbnails):\n    assert thumbnails.thumbnail_options()[\"maximum_edge\"] == 256\n",
+        "README.md": "Mosaic Cabinet keeps original imports, user exports and browser thumbnails separate.\nEach registered checkout may use a different export profile during review.\nInspect this checkout rather than borrowing format settings from a neighboring copy.\n"
+      },
+      "after_index": {},
+      "foreign_documents": {
+        "mosaic/export_profile.py": "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass ExportProfile:\n    format_name: str = \"jpeg\"\n    alpha_policy: str = \"flatten\"\n    maximum_edge: int = 2048\n\ndef active_profile():\n    return ExportProfile()\n\ndef encoder_options(profile):\n    return {\"format\": profile.format_name, \"alpha\": profile.alpha_policy,\n            \"maximum_edge\": profile.maximum_edge}\n",
+        "mosaic/exporter.py": "from mosaic.export_profile import active_profile, encoder_options\nfrom mosaic.resize import fit_within\n\ndef export_artwork(artwork, encoder, storage):\n    profile = active_profile()\n    pixels = fit_within(artwork.pixels, profile.maximum_edge)\n    data = encoder.encode(pixels, **encoder_options(profile))\n    storage.write(artwork.identity, data, suffix=profile.format_name)\n    return {\"format\": profile.format_name, \"size\": len(data)}\n",
+        "mosaic/resize.py": "def fit_within(pixels, maximum):\n    width, height = pixels.size\n    if max(width, height) <= maximum:\n        return pixels\n    scale = maximum / max(width, height)\n    return pixels.resize((round(width * scale), round(height * scale)))\n",
+        "mosaic/thumbnails.py": "def thumbnail_options():\n    return {\"format\": \"jpeg\", \"alpha\": \"flatten\", \"maximum_edge\": 256}\n\ndef thumbnail_name(artwork):\n    return f\"thumb-{artwork.identity}.jpg\"\n",
+        "mosaic/importer.py": "ALLOWED_IMPORTS = {\"png\", \"jpeg\", \"webp\"}\n\ndef decode_import(upload, decoder):\n    if upload.format_name not in ALLOWED_IMPORTS:\n        raise ValueError(\"unsupported upload format\")\n    return decoder.decode(upload.body)\n",
+        "mosaic/palettes.py": "def palette_preview(colors, maximum):\n    seen = set()\n    result = []\n    for color in colors:\n        if color in seen:\n            continue\n        seen.add(color)\n        result.append(color)\n        if len(result) == maximum:\n            break\n    return result\n",
+        "mosaic/catalog.py": "def visible_artworks(records, owner):\n    return [record for record in records if record.owner_id == owner and not record.hidden]\n\ndef rename_artwork(record, title, journal):\n    record.title = title.strip()\n    journal.save(record)\n    return record\n",
+        "mosaic/metadata.py": "def public_metadata(artwork):\n    return {\"title\": artwork.title, \"artist\": artwork.artist,\n            \"width\": artwork.pixels.size[0], \"height\": artwork.pixels.size[1]}\n\ndef file_description(metadata):\n    return f\"{metadata['title']} by {metadata['artist']}\"\n",
+        "tests/test_resize.py": "def test_small_image_is_reused(resize, image):\n    assert resize.fit_within(image, max(image.size)) is image\n\ndef test_thumbnail_policy_is_separate(thumbnails):\n    assert thumbnails.thumbnail_options()[\"maximum_edge\"] == 256\n",
+        "README.md": "Mosaic Cabinet keeps original imports, user exports and browser thumbnails separate.\nEach registered checkout may use a different export profile during review.\nInspect this checkout rather than borrowing format settings from a neighboring copy.\n"
+      },
+      "facts": [
+        {
+          "key": "format_name",
+          "value": "png",
+          "evidence": {
+            "path": "mosaic/export_profile.py",
+            "start_line": 4,
+            "end_line": 7
+          }
+        },
+        {
+          "key": "alpha_policy",
+          "value": "preserve",
+          "evidence": {
+            "path": "mosaic/export_profile.py",
+            "start_line": 4,
+            "end_line": 7
+          }
+        }
+      ],
+      "value_kinds": {
+        "format_name": "string_literal",
+        "alpha_policy": "string_literal"
+      },
+      "alternative_evidence": {}
+    }
+  ]
+}

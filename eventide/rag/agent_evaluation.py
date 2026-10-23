@@ -25,8 +25,18 @@ CANDIDATE_GUIDANCE = (
 )
 
 DATASET_SHA256 = "26a69ccf2e590f0ad41aeb86cf3411d476c8485031056fbb12b1d73747084ce4"
+DATASET_V2_SHA256 = "52597d38c3574bc5efdc780d96e2300bfb842a8d24499d3d3f90d3be50aa4953"
 Category = Literal["identifier", "concept", "cross_file", "freshness"]
 Split = Literal["development", "holdout"]
+DatasetVersion = Literal["v1", "v2"]
+ValueKind = Literal["identifier", "attribute", "integer_literal", "string_literal", "expression"]
+VALUE_FORMS = {
+    "identifier": "bare Python name only, without qualifiers, parentheses or keywords",
+    "attribute": "dotted source attribute only, without call parentheses or await",
+    "integer_literal": "decimal integer literal as a string, without units",
+    "string_literal": "exact string literal contents, without quote delimiters",
+    "expression": "exact source expression, without an assignment or return prefix",
+}
 
 
 class Fact(BaseModel):
@@ -94,21 +104,80 @@ class InvestigationDataset(BaseModel):
         return self
 
 
-def load_agent_dataset() -> InvestigationDataset:
-    path = Path(__file__).parents[1] / "bundled_evals/retrieval-agent-v1/dataset.json"
+class InvestigationCaseV2(InvestigationCase):
+    project: str = Field(min_length=1)
+    family: str = Field(min_length=1)
+    value_kinds: dict[str, ValueKind]
+    alternative_evidence: dict[str, list[Citation]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> InvestigationCaseV2:
+        expected = {fact.key: fact for fact in self.facts}
+        if self.value_kinds.keys() != expected.keys():
+            raise ValueError("Every requested field needs an explicit value representation")
+        if not self.alternative_evidence.keys() <= expected.keys():
+            raise ValueError("Alternative evidence must belong to a requested field")
+        sources = {**self.documents, **self.after_index}
+        for key, ranges in self.alternative_evidence.items():
+            for evidence in ranges:
+                lines = sources.get(evidence.path, "").splitlines()
+                if (not 1 <= evidence.start_line <= evidence.end_line <= len(lines)
+                        or expected[key].value not in "\n".join(
+                            lines[evidence.start_line - 1:evidence.end_line])):
+                    raise ValueError("Alternative evidence lacks the current source fact")
+        return self
+
+
+class InvestigationDatasetV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: Literal[2]
+    version: Literal["retrieval-agent-v2"]
+    cases: list[InvestigationCaseV2]
+
+    @model_validator(mode="after")
+    def validate_splits(self) -> InvestigationDatasetV2:
+        if len(self.cases) != 8 or len({c.id for c in self.cases}) != 8:
+            raise ValueError("Exactly eight uniquely identified tasks are required")
+        if len({c.question for c in self.cases}) != 8:
+            raise ValueError("Questions must be distinct")
+        for split in ("development", "holdout"):
+            if sorted(c.category for c in self.cases if c.split == split) != [
+                "concept", "cross_file", "freshness", "identifier",
+            ]:
+                raise ValueError("Each split must contain all four categories once")
+        development = [case for case in self.cases if case.split == "development"]
+        holdout = [case for case in self.cases if case.split == "holdout"]
+        for field in ("project", "family"):
+            if ({getattr(case, field) for case in development}
+                    & {getattr(case, field) for case in holdout}):
+                raise ValueError("Development and holdout must not share projects or families")
+        return self
+
+
+AgentDataset = InvestigationDataset | InvestigationDatasetV2
+
+
+def load_agent_dataset(dataset_version: DatasetVersion = "v1") -> AgentDataset:
+    if dataset_version not in {"v1", "v2"}:
+        raise ValueError("Choose Agent dataset v1 or v2 explicitly")
+    path = (Path(__file__).parents[1]
+            / f"bundled_evals/retrieval-agent-{dataset_version}/dataset.json")
     body = path.read_bytes()
-    if hashlib.sha256(body).hexdigest() != DATASET_SHA256:
+    expected = DATASET_SHA256 if dataset_version == "v1" else DATASET_V2_SHA256
+    if hashlib.sha256(body).hexdigest() != expected:
         raise ValueError("Frozen Agent retrieval dataset changed")
-    return InvestigationDataset.model_validate_json(body)
+    model = InvestigationDataset if dataset_version == "v1" else InvestigationDatasetV2
+    return model.model_validate_json(body)
 
 
-def attempt_plan(dataset: InvestigationDataset, split: Split) -> list[dict[str, Any]]:
-    """One development pair and two holdout pairs, alternating first arm across pairs."""
+def attempt_plan(dataset: AgentDataset, split: Split) -> list[dict[str, Any]]:
+    """Alternate paired arms; v1 repeats holdout twice, v2 has one pair per task."""
     if split not in {"development", "holdout"}:
         raise ValueError("Choose development or holdout explicitly")
     rows: list[dict[str, Any]] = []
     for case in (c for c in dataset.cases if c.split == split):
-        for repetition in range(1 if split == "development" else 2):
+        for repetition in range(1 if split == "development" or
+                                dataset.version == "retrieval-agent-v2" else 2):
             arms = ("baseline", "candidate") if len(rows) // 2 % 2 == 0 else (
                 "candidate", "baseline",
             )
@@ -128,8 +197,35 @@ class InvestigationAnswer(BaseModel):
     citations: list[FactCitation] = Field(min_length=1, max_length=10)
 
 
+class InvestigationAnswerV2(InvestigationAnswer):
+    citations: list[FactCitation] = Field(max_length=10)
+
+
 def investigation_prompt(case: InvestigationCase) -> str:
     """Only the question, requested field names and format reach the Agent."""
+    if isinstance(case, InvestigationCaseV2):
+        template = {
+            "facts": {fact.key: f"<{VALUE_FORMS[case.value_kinds[fact.key]]}>"
+                      for fact in case.facts},
+            "citations": [{"fact": fact.key, "path": "<relative source path>",
+                           "start_line": 1, "end_line": 1,
+                           "quote": "<complete current source lines>"}
+                          for fact in case.facts],
+        }
+        return (
+            case.question
+            + "\nInvestigate the current checkout with the available read-only tools. "
+            "Do not change files. Return only a JSON object, without markdown fences. "
+            "Use exactly the facts keys in this task-specific template; replace every "
+            "angle-bracket description with a sourced value, never copy a placeholder. "
+            "Follow the value representation given for each field. For every fact supply "
+            "at least one citation whose fact is that exact field key. A citation must copy "
+            "complete current source lines verbatim and directly support that field's value; "
+            "line numbers are one-based and inclusive. Do not add duplicate or unrelated "
+            "citations. If evidence is missing, use an empty value and omit its citation; "
+            "this records an incomplete answer instead of inventing evidence. Template: "
+            + json.dumps(template, ensure_ascii=False)
+        )
     return (
         case.question + "\nInvestigate the current checkout with the available read-only tools. "
         "Return only JSON, without markdown fences: "
@@ -158,13 +254,26 @@ def grade_investigation(
         raise ValueError("Non-finite JSON constant")
 
     try:
-        answer = InvestigationAnswer.model_validate(json.loads(
+        model = (InvestigationAnswerV2 if isinstance(case, InvestigationCaseV2)
+                 else InvestigationAnswer)
+        answer = model.model_validate(json.loads(
             text, object_pairs_hook=unique_object, parse_constant=invalid_constant,
         ))
     except ValueError:
+        if isinstance(case, InvestigationCaseV2):
+            return {"passed": False, "format_valid": False, "schema_valid": False,
+                    "field_keys_correct": False, "facts_correct": False,
+                    "expected_fact_count": len(case.facts), "present_fact_count": 0,
+                    "correct_fact_count": 0, "authentic_citations": 0,
+                    "valid_citations": 0, "total_citations": 0, "cited_fact_count": 0,
+                    "stale_or_foreign_quotes": 0, "fact_results": {},
+                    "citation_results": [], "failure_reasons": ["invalid_answer_schema"],
+                    "reason": "invalid_answer_schema"}
         return {"passed": False, "format_valid": False, "facts_correct": False,
                 "valid_citations": 0, "total_citations": 0, "stale_or_foreign_quotes": 0,
                 "reason": "invalid_answer_schema"}
+    if isinstance(case, InvestigationCaseV2):
+        return _grade_v2_answer(answer, case, documents)
     expected = {fact.key: fact for fact in case.facts}
     cited: set[str] = set()
     seen: set[tuple[str, str, int, int]] = set()
@@ -198,6 +307,88 @@ def grade_investigation(
             "format_valid": True, "facts_correct": correct, "valid_citations": valid,
             "total_citations": len(answer.citations), "stale_or_foreign_quotes": old_quotes,
             "reason": "frozen_current_source_grade"}
+
+
+def _grade_v2_answer(
+    answer: InvestigationAnswer, case: InvestigationCaseV2, documents: dict[str, str],
+) -> dict[str, Any]:
+    expected = {fact.key: fact for fact in case.facts}
+    cited: set[str] = set()
+    seen: set[tuple[str, str, int, int]] = set()
+    authentic = valid = old_quotes = 0
+    old_sources = case.foreign_documents or (case.documents if case.after_index else {})
+    citation_results = []
+    for citation in answer.citations:
+        lines = documents.get(citation.path, "").splitlines()
+        current_quote = "\n".join(lines[citation.start_line - 1:citation.end_line])
+        is_authentic = (1 <= citation.start_line <= citation.end_line <= len(lines)
+                        and citation.quote == current_quote)
+        authentic += is_authentic
+        old_lines = old_sources.get(citation.path, "").splitlines()
+        old_quotes += (1 <= citation.start_line <= citation.end_line <= len(old_lines)
+                       and citation.quote != current_quote
+                       and citation.quote == "\n".join(
+                           old_lines[citation.start_line - 1:citation.end_line]))
+        fact = expected.get(citation.fact)
+        key = (citation.fact, citation.path, citation.start_line, citation.end_line)
+        if not is_authentic:
+            reason = "not_current_source"
+        elif fact is None:
+            reason = "unknown_fact"
+        elif key in seen:
+            reason = "duplicate_citation"
+        elif not any(
+            citation.path == evidence.path
+            and max(evidence.start_line, citation.start_line)
+            <= min(evidence.end_line, citation.end_line)
+            for evidence in [fact.evidence, *case.alternative_evidence.get(fact.key, [])]
+        ):
+            reason = "outside_reviewed_evidence"
+        elif not any(
+            citation.path == evidence.path
+            and fact.value in "\n".join(lines[
+                max(evidence.start_line, citation.start_line) - 1:
+                min(evidence.end_line, citation.end_line)])
+            for evidence in [fact.evidence, *case.alternative_evidence.get(fact.key, [])]
+        ):
+            reason = "fact_not_in_quote"
+        else:
+            reason = "valid"
+            valid += 1
+            cited.add(citation.fact)
+        seen.add(key)
+        citation_results.append({"fact": citation.fact, "authentic": is_authentic,
+                                 "bound": reason == "valid", "reason": reason})
+    fields_correct = answer.facts.keys() == expected.keys()
+    fact_results = {
+        key: {"present": key in answer.facts, "correct": answer.facts.get(key) == fact.value,
+              "cited": key in cited}
+        for key, fact in expected.items()
+    }
+    present = sum(result["present"] for result in fact_results.values())
+    correct = sum(result["correct"] for result in fact_results.values())
+    facts_correct = fields_correct and correct == len(expected)
+    failures = []
+    if not fields_correct:
+        failures.append("fact_keys_mismatch")
+    if correct != len(expected):
+        failures.append("fact_values_mismatch")
+    if authentic != len(answer.citations):
+        failures.append("inauthentic_citation")
+    if valid != len(answer.citations):
+        failures.append("citation_binding_mismatch")
+    if cited != expected.keys():
+        failures.append("uncited_fact")
+    return {
+        "passed": not failures, "format_valid": True, "schema_valid": True,
+        "field_keys_correct": fields_correct, "facts_correct": facts_correct,
+        "expected_fact_count": len(expected), "present_fact_count": present,
+        "correct_fact_count": correct, "authentic_citations": authentic,
+        "valid_citations": valid, "total_citations": len(answer.citations),
+        "cited_fact_count": len(cited), "stale_or_foreign_quotes": old_quotes,
+        "fact_results": fact_results, "citation_results": citation_results,
+        "failure_reasons": failures, "reason": "frozen_current_source_grade_v2",
+    }
 
 
 def agent_comparison_report(host: RuntimeHost, control_runs: list[str]) -> dict[str, Any]:
@@ -255,9 +446,31 @@ def agent_comparison_report(host: RuntimeHost, control_runs: list[str]) -> dict[
             "latency_p95_ms": percentile(elapsed, .95),
             "results": selected,
         }
+        if identity["version"] == "retrieval-agent-v2":
+            grades = [row["grade"] for row in selected if "grade" in row]
+            expected_facts = sum(grade["expected_fact_count"] for grade in grades)
+            present_facts = sum(grade["present_fact_count"] for grade in grades)
+            correct_facts = sum(grade["correct_fact_count"] for grade in grades)
+            authentic = sum(grade["authentic_citations"] for grade in grades)
+            arms[arm]["quality"] = {
+                "graded_attempts": len(grades), "ungraded_attempts": len(selected) - len(grades),
+                "schema_valid_attempts": sum(grade["schema_valid"] for grade in grades),
+                "field_keys_correct_attempts": sum(grade["field_keys_correct"] for grade in grades),
+                "expected_facts": expected_facts, "present_facts": present_facts,
+                "correct_facts": correct_facts,
+                "field_coverage": present_facts / expected_facts if expected_facts else None,
+                "fact_accuracy": correct_facts / expected_facts if expected_facts else None,
+                "authentic_citations": authentic,
+                "citation_authenticity_ratio": authentic / total if total else None,
+                "semantic_search_calls": sum(call["name"] == "search_knowledge"
+                                             for row in selected for call in row["tool_calls"]),
+                "semantic_search_runs": sum(any(call["name"] == "search_knowledge"
+                                                for call in row["tool_calls"]) for row in selected),
+            }
     terminal = all(host.store.run_is_terminal(run) for run in control_runs)
     return {
-        "schema_version": 1, **identity, "arms": arms,
+        "schema_version": 2 if identity["version"] == "retrieval-agent-v2" else 1,
+        **identity, "arms": arms,
         "status": "completed" if len(rows) == len(plan) and terminal else
                   "aborted" if terminal else "running",
         "remaining": [slot for slot in plan if (
@@ -277,7 +490,8 @@ def agent_comparison_report(host: RuntimeHost, control_runs: list[str]) -> dict[
 
 async def run_agent_comparison(
     host: RuntimeHost, *, output_directory: Path, split: Split = "development",
-    confirmed: bool = False,
+    confirmed: bool = False, dataset_version: DatasetVersion = "v1",
+    code_structure: bool = False,
 ) -> dict[str, Any]:
     """Run frozen file-tool/semantic pairs through the real Host, with no alternate agent."""
     import asyncio
@@ -302,18 +516,21 @@ async def run_agent_comparison(
         raise ValueError("Use an isolated Host with MCP/workers/rewrite/rerank disabled, "
                          "12 steps, 20000 observed Tokens and remote or local semantic embeddings")
     await host.initialize()
-    dataset = load_agent_dataset()
+    dataset = load_agent_dataset(dataset_version)
     plan = attempt_plan(dataset, split)
     output_directory = output_directory.resolve()
     output_directory.mkdir(parents=True, exist_ok=False)
     configuration = host._run_intent(None)
     experiment = {
         "experiment_id": f"agent_retrieval_{uuid.uuid4().hex}",
-        "dataset_sha256": DATASET_SHA256, "version": dataset.version, "split": split,
+        "dataset_sha256": DATASET_SHA256 if dataset_version == "v1" else DATASET_V2_SHA256,
+        "version": dataset.version, "split": split,
         "runtime": runtime_revision(), "model_configuration": configuration,
         "candidate_guidance": CANDIDATE_GUIDANCE, "skills": [], "mcp": False,
         "limits": {"model_steps": 12, "agent_observed_tokens": 20_000, "seconds": 300},
     }
+    if dataset_version == "v2" or code_structure:
+        experiment["code_structure"] = code_structure
     controls: list[str] = []
     by_id = {case.id: case for case in dataset.cases}
     for index, slot in enumerate(plan):
@@ -353,9 +570,13 @@ async def run_agent_comparison(
                                    "workspace_id": workspace.workspace_id}
             try:
                 if slot["arm"] == "candidate":
+                    preparation_options: dict[str, Any] = (
+                        {"code_structure": True} if code_structure else {})
                     if case.foreign_documents:
-                        await prepare_index(host, owned, source_workspace, settings=host.settings)
-                    await prepare_index(host, owned, workspace, settings=host.settings)
+                        await prepare_index(host, owned, source_workspace, settings=host.settings,
+                                            **preparation_options)
+                    await prepare_index(host, owned, workspace, settings=host.settings,
+                                        **preparation_options)
                     if not build_usage_ledger(host.model_usage_events(owned))["complete"]:
                         raise RuntimeError("Index preparation usage unknown; batch stopped")
                 row["preparation_duration_ms"] = (time.perf_counter() - started) * 1000
@@ -369,9 +590,13 @@ async def run_agent_comparison(
                 prompt = investigation_prompt(case)
                 if slot["arm"] == "candidate":
                     prompt += "\n" + CANDIDATE_GUIDANCE
+                run_options: dict[str, Any] = (
+                    {"code_structure": True} if code_structure and slot["arm"] == "candidate"
+                    else {})
                 result = await host.run(RunRequest(
                     prompt, session, run_id=agent_run, mode="plan", selected_skills=[],
                     generation=configuration["generation"], knowledge_index="existing",
+                    **run_options,
                 ))
                 current = {name: (root / name).read_text(encoding="utf-8")
                            for name in case.documents}

@@ -21,6 +21,7 @@ from eventide.rag.upgrade_evaluation import remote_comparison_report, run_remote
 from tests.test_embedding_runtime import Client
 from tests.test_host import make_repo
 from tests.test_retrieval_agent_evaluation import exact_answer
+from tests.test_retrieval_agent_v2 import reviewed_answer
 from tests.test_runtime import settings_for
 
 
@@ -226,6 +227,111 @@ async def test_quality_failure_is_retained_without_retry_and_rag_is_optional(
     assert len(host.provider.requests) == 8
     assert all(row["tool_call_count"] == 0 for arm in report["arms"].values()
                for row in arm["results"])
+
+
+@pytest.mark.parametrize("split", ["development", "holdout"])
+async def test_v2_pairs_report_each_quality_layer_from_canonical_host_events(
+    host, embeddings, tmp_path, split,
+):
+    dataset = load_agent_dataset("v2")
+    cases = {case.id: case for case in dataset.cases}
+    script = []
+    usage = {"input_tokens": 3, "output_tokens": 1}
+    for slot in attempt_plan(dataset, split):
+        case = cases[slot["case_id"]]
+        answer = reviewed_answer(case)
+        if slot["arm"] == "candidate":
+            script.append({"tool_calls": [{"id": "semantic", "name": "search_knowledge",
+                                           "arguments": {"query": case.question}}], "usage": usage})
+        script.append({"tool_calls": [
+            {"id": f"read-{number}", "name": "read_file", "arguments": {"path": path}}
+            for number, path in enumerate(sorted({c["path"] for c in answer["citations"]}))
+        ], "usage": usage})
+        script.append({"text": json.dumps(answer), "usage": usage})
+    host.provider = ScriptedProvider(script)
+    report = await run_agent_comparison(
+        host, output_directory=tmp_path / f"v2-{split}", split=split,
+        confirmed=True, dataset_version="v2",
+    )
+    assert report["schema_version"] == 2 and report["version"] == "retrieval-agent-v2"
+    assert report["code_structure"] is False and report["status"] == "completed"
+    assert not report["remaining"] and not report["missing_results"]
+    assert report["evidence"]["usage"]["complete"]
+    for name, arm in report["arms"].items():
+        assert arm["expected"] == arm["attempted"] == arm["passed"] == 4
+        assert arm["failed"] == arm["cross_workspace_results"] == 0
+        assert arm["stale_hits_marked_fresh"] == arm["stale_or_foreign_quotes"] == 0
+        assert arm["valid_citation_ratio"] == 1
+        quality = arm["quality"]
+        assert quality["graded_attempts"] == quality["schema_valid_attempts"] == 4
+        assert quality["ungraded_attempts"] == 0
+        assert quality["field_keys_correct_attempts"] == 4
+        assert (quality["expected_facts"] == quality["present_facts"]
+                == quality["correct_facts"] == 8)
+        assert quality["field_coverage"] == quality["fact_accuracy"] == 1
+        assert quality["citation_authenticity_ratio"] == 1
+        assert quality["semantic_search_calls"] == (4 if name == "candidate" else 0)
+        assert quality["semantic_search_runs"] == (4 if name == "candidate" else 0)
+    controls = [run for run in report["evidence"]["run_ids"] if run.startswith("investigation_")]
+    assert agent_comparison_report(host, controls) == report
+
+
+async def test_v2_quality_failures_stay_distinct_and_structural_option_is_forwarded(
+    host, embeddings, tmp_path, monkeypatch,
+):
+    from eventide import models, retrieval_runtime
+
+    original_prepare = retrieval_runtime.prepare_index
+    original_request = models.RunRequest
+    prepared = []
+    requested = []
+
+    async def prepare(*args, code_structure=False, **kwargs):
+        prepared.append(code_structure)
+        return await original_prepare(*args, **kwargs)
+
+    def request(*args, **kwargs):
+        requested.append(kwargs.pop("code_structure", False))
+        return original_request(*args, **kwargs)
+
+    # The structural Host implementation is integrated separately. This checks the
+    # evaluation boundary forwards the option only to the candidate arm.
+    monkeypatch.setattr(retrieval_runtime, "prepare_index", prepare)
+    monkeypatch.setattr(models, "RunRequest", request)
+    dataset = load_agent_dataset("v2")
+    cases = {case.id: case for case in dataset.cases}
+    plan = attempt_plan(dataset, "development")
+    script = []
+    for number, slot in enumerate(plan):
+        answer = reviewed_answer(cases[slot["case_id"]])
+        if number == 0:
+            answer["facts"]["requested_key"] = answer["facts"].pop("storage_method")
+        elif number == 1:
+            answer["facts"]["storage_method"] = "append"
+        script.append({"text": json.dumps(answer),
+                       "usage": {"input_tokens": 3, "output_tokens": 1}})
+    host.provider = ScriptedProvider(script)
+    report = await run_agent_comparison(
+        host, output_directory=tmp_path / "v2-forwarding", dataset_version="v2",
+        code_structure=True, confirmed=True,
+    )
+    assert report["status"] == "completed" and report["code_structure"] is True
+    assert prepared == [True] * 4
+    assert requested == [slot["arm"] == "candidate" for slot in plan]
+    assert len(host.provider.requests) == 8
+    baseline = report["arms"]["baseline"]
+    candidate = report["arms"]["candidate"]
+    assert baseline["passed"] == candidate["passed"] == 3
+    assert baseline["quality"]["field_keys_correct_attempts"] == 3
+    assert candidate["quality"]["field_keys_correct_attempts"] == 4
+    for arm in (baseline, candidate):
+        assert arm["quality"]["schema_valid_attempts"] == 4
+        assert arm["quality"]["correct_facts"] == 7
+        assert arm["quality"]["authentic_citations"] == 8
+        assert arm["quality"]["semantic_search_calls"] == 0  # Never a passing prerequisite.
+        assert arm["failed"] == 1
+    assert "fact_keys_mismatch" in baseline["results"][0]["grade"]["failure_reasons"]
+    assert candidate["results"][0]["grade"]["failure_reasons"] == ["fact_values_mismatch"]
 
 
 async def test_cancelled_agent_keeps_unknown_attempt_and_unattempted_slots(host, tmp_path):
