@@ -130,7 +130,7 @@ def test_session_metadata_archive_and_safe_delete(isolated_workspace):
         store.delete_session("history")
     assert store._connection.execute(
         "SELECT MAX(version) FROM schema_migrations"
-    ).fetchone()[0] == 5
+    ).fetchone()[0] == 6
     assert store.get_session("history")["working_directory"] == "."
     store.close()
 

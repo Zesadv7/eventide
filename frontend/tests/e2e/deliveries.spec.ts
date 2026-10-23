@@ -48,7 +48,7 @@ test("delivery survives lost acceptance and refresh, then requires reviewed adop
               `/api/delivery-operations/${state.repair.control_run_id}`,
             )
           ).json();
-          throw new Error(JSON.stringify(op));
+          throw new Error(JSON.stringify({ state, operation: op }));
         }
         return state.repair_status;
       },
@@ -67,9 +67,15 @@ test("delivery survives lost acceptance and refresh, then requires reviewed adop
     page.getByText("固定 Token 软限：200000", { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "查看验收补丁" }).click();
-  await expect(page.locator("pre.patch")).toContainText(
+  await expect(page.locator(".diff-viewer .diff-added")).toContainText(
     "independently accepted",
   );
+  await expect(page.getByLabel("改动文件列表")).toContainText(
+    "delivery-result.txt",
+  );
+  await expect(
+    page.getByRole("button", { name: "撤销本次修改", exact: true }),
+  ).toHaveCount(0);
   const adopt = page.getByRole("button", { name: "采纳已检查的补丁" });
   await expect(adopt).toBeDisabled();
   await page.getByLabel("我已检查此补丁，确认采纳到源项目").check();

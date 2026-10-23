@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from eventide.budgets import BudgetExceeded
+from eventide.file_operations import FileOperations
 from eventide.models import CommandResult, ToolCall, ToolOutput, ToolResult
 from eventide.policy import PolicyDecision, PolicyEngine
 from eventide.tool_contracts import (
@@ -24,6 +25,7 @@ from eventide.tool_contracts import (
     builtin_schema,
     contract_catalog,
 )
+from eventide.tools.filesystem import run_edit, run_write
 from eventide.utils import decode_output
 
 ApprovalHandler = Callable[[str, ToolCall, str], Awaitable[bool]]
@@ -295,8 +297,12 @@ class ToolExecutor:
         command_executor: CommandExecutor | None = None,
         *,
         tools: list[dict[str, Any]] | None = None,
+        file_operations: FileOperations | None = None,
+        workspace_id: str | None = None,
     ):
         self.handlers = dict(handlers)
+        self.file_operations = file_operations
+        self.workspace_id = workspace_id
         self.readonly_tools = set(readonly_tools or ())
         self.command_executor = command_executor or LocalCommandExecutor()
         self.contracts = contract_catalog(
@@ -372,6 +378,16 @@ class ToolExecutor:
             if call.name == "bash":
                 output = await self.command_executor.execute(
                     arguments["command"], context.cwd
+                )
+            elif self.file_operations is not None and (
+                (call.name == "write_file" and handler is run_write)
+                or (call.name == "edit_file" and handler is run_edit)
+            ):
+                assert self.workspace_id is not None
+                output = await asyncio.to_thread(
+                    self.file_operations.write, call.name, arguments,
+                    run_id=context.run_id, call_id=call.id,
+                    workspace_id=self.workspace_id, cwd=context.cwd,
                 )
             elif inspect.iscoroutinefunction(handler):
                 output = await handler(**arguments)

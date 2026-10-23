@@ -62,6 +62,22 @@ schema v5 升级只增加偏好事实索引，但旧程序拒绝打开v5，回�
 
 ## 核心关系
 
+### 单次文件操作恢复（ADR-098）
+
+生产本地 `write_file` / `edit_file` 在 ToolExecutor 完成契约与 Policy 校验后，仅对原内置 handler 身份派发 `FileOperations`；Docker `SandboxFileTools` 与自定义 handler 不被冒名接管。Host 注入实际执行 Workspace，子目录记录相对 cwd；worktree/Writer 不绑定回源 checkout。
+
+数据流：读取实际完整字节/属性 → 验证 UTF-8 与 1 MiB 上限 → SecretBox 加密完整 before/after → 同一个 SQLite 事务保存恢复产物与 `file.operation/prepared` 事实 → 重新校验同一文件 → 原地写入/flush/fsync → 核对后指纹 → 追加 completed/no_change。schema v6 的 `file_operation_backups` 只保存不可变加密产物，不是第二份操作状态；状态仍由唯一追加式 Event Log 重建。安装密钥创建先同步文件及目录，SecretBox 实例按密钥路径共享锁，避免并发首次初始化产生不可恢复备份。
+
+事件保存 operation_id、session_id、run_id、call_id、实际 workspace_id、cwd/path、根目录文件系统身份、前后指纹/属性和状态；大正文不进入事件。工具结果只带 file_operation_id，模型上下文不会从恢复表加载内容。后续审计事实是 Session 级事件，通过 payload.run_id 关联原 Run，不在终态 Run 追加工具结果。
+
+状态为 prepared → completed/no_change，已知写前冲突可 failed；无法确定结果为 needs_review。人工撤销 completed → undo_prepared → undone；当前指纹不符保留 completed 并记录冲突，未覆盖文件。prepared/undo_prepared 遗留启动时转 needs_review，不推断“当前 hash 一样就已完成”。撤销先解密并校验完整恢复依据，再变更文件；已撤销状态只回放结果，不重执行文件或原工具调用。SQLite 提交、文件写入和 HTTP 回执不构成跨资源事务，回执未知沿既有 mutation 禁止重放契约。
+
+服务用 POSIX 目录描述符逐层 nofollow，拒绝链接、硬链接、特殊文件、越界与受保护 Runtime/Git 路径，读取与新建有界。检查按实际 Workspace 根保护嵌套状态目录，不把 state 内的合法受管 worktree 源码一并禁止；大小写与 Unicode 路径别名保守统一。写入与撤销按同一规范路径线程锁覆盖整个临界区；撤销另复用会话/Workspace 执行锁及 Host 线程收尾所有权。原地写入保留 inode/owner/扩展属性，崩溃可部分写入但不在源码留下明文恢复临时文件；mode/mtime可恢复，核验读取可改变 atime。
+
+仅本机同源 HTTP 控制面可按原 Session/Run 的实际执行绑定取 diff 或撤销；不接收任意磁盘备份路径，没有模型 undo 工具。保密依赖安装密钥和可信本地用户；现有同 UID Shell、localhost 管理 API 不是强身份隔离，外部进程不受路径锁控制。备份随状态保留，恢复需完整数据库与原密钥；旧版拒绝 schema v6。checkpoint、普通单次 diff、交付候选 patch 和整批采纳是不同能力。
+
+Vue `DiffViewer` 分别接原交付补丁与受控操作完整前后生成的 diff，使用文本插值、旧新行号、红绿行、上下文，按文件/行展开并设解析上限。`FileOperationPanel` 按需读取服务状态、详情与幂等撤销，不把 UI 缓存当事实或提供交付采纳撤销。当前不支持 Windows、Docker/任意 Shell、二进制/超限文本、自定义 handler、历史操作补造及不确定状态自动修复。
+
 ```text
 RuntimeHost
   └─ Project（源码项目）
@@ -916,3 +932,5 @@ Agent v2开发批次（36a7ad3，2026-10-23）8槽均完成：文件工具基线
 Agent v2留出在第5槽遇到Coding Plan HTTP429/1308五小时限额，退出2并停止扩大；16计划槽实际13尝试，12正常完成、1外部未知、3未尝试。开发3/4对4/4；留出基线1/3尝试（1质量失败、1外部失败），候选1/2（1质量失败）。正常完成答案schema/字段12/12、事实22/24、真实引文24/24、绑定23/24；两个留出质量失败都漏了表达式stream.前缀。外部失败诊断不算模型schema退步，原底层grade仍保留。两臂语义调用始终0，不足以证明RAG收益；本轮下游验收未完整完成，保留待外部验证。43次attempt已报告输入74023/输出2237，另1次unknown，总用量不完整；不把Coding Plan配额换算成实际费用。原始报告和combined-summary在agent-live，未改判、未补跑。
 
 RQ工程收口：一次完整后端2201通过/1旧幂等测试预期失败/12显式跳过，覆盖93.81%；仅更新旧预期后，与最后v2质量归类修正合计17项定向通过，未再全量。前端全量200项已通过，末尾实际结构/回退展示新增2例后只跑索引页12项通过；类型/构建/格式、4条真实API检索旅程及构建静态页单项、最终干净wheel资源/隔离服务/冻结数据hash通过。全仓Ruff、128模块Mypy、服务/help/离线smoke12通过，最后变更一模块Mypy和相关Ruff复验通过。实际模型额度阻塞和未达推荐门槛不由工程验证替代。最后显示和统计修正不改变真实任务输入/答案/底层grade，未重跑已执行实验或用户生产索引。
+
+文件操作整合复核（2026-10-23）：明确写前冲突记录failed；写入后的读取核验冲突进入needs_review与tool.outcome_unknown，Host停驻，不把已发生副作用的未知结果当普通工具失败继续执行。

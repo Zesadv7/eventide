@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import FileOperationPanel from "./FileOperationPanel.vue";
 interface RetrievalEvidence {
   workspace_id: string;
   index_generation?: number | null;
@@ -26,6 +27,7 @@ const props = defineProps<{
   tools: Record<string, unknown>;
   count?: number;
   active?: boolean;
+  sessionId?: string;
 }>();
 const entries = computed(() =>
   Object.entries(props.tools).map(([id, value]) => {
@@ -46,7 +48,7 @@ function status(data: Record<string, unknown>) {
 }
 </script>
 <template>
-  <details v-if="entries.length || count" class="tool-activity">
+  <details v-if="entries.length || count || sessionId" class="tool-activity">
     <summary>
       <span
         class="activity-glyph"
@@ -115,6 +117,12 @@ function status(data: Record<string, unknown>) {
       <p v-if="!entries.length" class="muted">
         工具明细尚未返回，可在运行证据中查看事件记录。
       </p>
+      <FileOperationPanel
+        v-if="sessionId"
+        :key="sessionId"
+        :session-id="sessionId"
+        :revision="tools"
+      />
     </div>
   </details>
 </template>

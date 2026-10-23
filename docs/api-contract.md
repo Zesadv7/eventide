@@ -577,3 +577,11 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 持久 `retrieval.status` payload含status=preparing|available|unavailable|failed、实际workspace_id、可选location/model/generation/embedding_fingerprint/reason/detail；准备成功可附build统计。Run投影的retrieval直接取最新事件，旧历史为null，SSE重放不能触发准备或消费。`tool.completed.metadata.retrieval` 含workspace_id/index_generation/embedding_fingerprint/mode/diagnostics和hits；命中含file/start_line/end_line/indexed_content_hash/freshness，freshness区分fresh/changed/deleted/unsafe/unreadable/too_large。旧调用缺metadata显示未记录；无命中与索引不可用分别表达。
 
 全文正文仍有界且经统一脱敏。过期命中不携带旧正文；索引中的行号只用于定位，不承诺当前文件同坐标。新鲜度只表示检查时文件哈希一致，不能推断答案充分性或未来稳定性。远程embedding与查询改写继续使用原attempt账本；没有新增证据数据库或响应缓存。
+
+## 单次本地文件操作
+
+- `GET /api/sessions/{session_id}/file-operations` 返回 `{operations:[...]}`。每条含 `operation_id/session_id/run_id/call_id/workspace_id/cwd/path/tool/before/after/status/change_kind`；before/after 是存在性、SHA-256、字节数与基本属性，没有正文。status 为 `prepared|completed|no_change|failed|needs_review|undo_prepared|undone`，change_kind 为 `added|modified|unchanged`。旧历史不补造操作。
+- `GET /api/sessions/{session_id}/file-operations/{operation_id}` 复核原 Session/Run 与实际 Workspace/cwd、根身份和当前路径后返回同一记录，加 `patch/diff_status/diff_message`。只从该次加密完整 before/after 生成 unified diff，不比较 Git HEAD。合计超过200,000字符/4,000换行则 `patch=null,diff_status=too_large`，完整备份保留；正常为 available。不可读取或不安全路径明确报错，不通过历史记录绕开边界。
+- `POST /api/sessions/{session_id}/file-operations/{operation_id}/undo` 无正文，要求 `Idempotency-Key`，返回新的记录。沿用本机、严格同源、内容绑定 mutation 回执；无模型工具入口。只允许 completed，当前存在性/内容/权限指纹须等于该次 after，原文件恢复 before，新文件只删除自身。相同操作已 undone 直接返回既有状态，不重执行；无变化、待核验、活动 Workspace 或后续修改冲突返回409，明确拒绝时带 `X-Eventide-Mutation-Outcome: rejected`。不可授权403；恢复结果未知503，回执故障可能500，同键未知不重放，用GET核对当前状态。
+
+新 `file.operation` 为 Session 级审计事实，payload.run_id/call_id 指向原工具；tool.completed.metadata.file_operation_id 仅是小引用。大备份不在 SSE/UI 事件、JSONL 或模型消息中；人工详情 diff 是有界的受控本机读取。服务重启将 prepared/undo_prepared 标 needs_review，禁止盲目撤销。API 不接受任意备份磁盘路径；本地同 UID Shell 的既有宿主权限不是模型身份隔离。交付 patch/apply 契约不变，没有新增整批交付撤销。

@@ -480,13 +480,14 @@ def test_schema_four_memory_migration_is_append_only(isolated_workspace):
     original = [tuple(row) for row in store._connection.execute("SELECT * FROM runtime_events")]
     store.close()
     with sqlite3.connect(path) as connection:
-        connection.execute("DELETE FROM schema_migrations WHERE version=5")
+        connection.execute("DELETE FROM schema_migrations WHERE version>=5")
         connection.execute("DROP INDEX memory_fact_types")
+        connection.execute("DROP TABLE file_operation_backups")
     reopened = RuntimeStore(path)
     try:
         assert (
             reopened._connection.execute("SELECT max(version) FROM schema_migrations").fetchone()[0]
-            == 5
+            == 6
         )
         assert [
             tuple(row) for row in reopened._connection.execute("SELECT * FROM runtime_events")

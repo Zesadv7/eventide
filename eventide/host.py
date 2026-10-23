@@ -34,6 +34,7 @@ from eventide.executor import (
     ToolContext,
     ToolExecutor,
 )
+from eventide.file_operations import FileOperations
 from eventide.generation import (
     GenerationCapabilities,
     GenerationPatch,
@@ -53,7 +54,7 @@ from eventide.models import (
     WorkspaceTarget,
 )
 from eventide.normalization import normalize, redact
-from eventide.policy import PolicyEngine
+from eventide.policy import PolicyDecision, PolicyEngine
 from eventide.preference_memory import PreferenceMemory
 from eventide.previews import PreviewStore, SafeTextBuffer
 from eventide.projections import TaskPlanProjection
@@ -216,6 +217,8 @@ class RuntimeHost:
                 checkpoint_directories=self._checkpoint_directories,
             )
             self._recover_interrupted_runs()
+            self.file_operations = FileOperations(self.store, self.state_dir)
+            self.file_operations.recover()
             self.acceptance_output = AcceptanceOutputs(self.store, self.state_dir)
             self.acceptance_output.recover()
             self._secret_box = SecretBox(self.settings.state_dir)
@@ -1283,6 +1286,40 @@ class RuntimeHost:
 
     def workspace_busy(self, workspace_id: str) -> bool:
         return workspace_id in self._admissions or self._workspace_locks[workspace_id].locked()
+
+    def authorize_file_operation(self, session_id: str, operation_id: str) -> dict[str, Any]:
+        record = self.file_operations.get(session_id, operation_id)
+        identity = self.store.get_run_identity(record["run_id"])
+        if identity is None or identity["session_id"] != session_id:
+            raise PermissionError("File operation Run does not belong to this session")
+        workspace = self.sessions.workspace(session_id)
+        binding = self._execution_binding(record["run_id"])
+        if binding:
+            if binding["kind"] != "worktree":
+                raise PermissionError("This execution environment does not support file undo")
+            workspace = self.store.get_workspace(binding["execution_workspace_id"])
+            _, cwd = self._execution_paths(binding)
+        else:
+            cwd = self.sessions.working_directory(session_id)
+        if workspace.workspace_id != record["workspace_id"] or (
+            cwd.relative_to(Path(workspace.path)).as_posix() != record["cwd"]
+        ):
+            raise PermissionError("File operation workspace binding mismatch")
+        decision = self.policy.evaluate(record["tool"], {"path": record["path"]}, cwd)
+        if decision.decision != PolicyDecision.ALLOW:
+            raise PermissionError("File operation is no longer permitted by policy")
+        self.file_operations.validate(record)
+        return record
+
+    async def undo_file_operation(self, session_id: str, operation_id: str) -> dict[str, Any]:
+        """Human control-plane action; never advertised in the model tool catalog."""
+        record = self.authorize_file_operation(session_id, operation_id)
+        workspace_id = record["workspace_id"]
+        if self.session_busy(session_id) or self.workspace_busy(workspace_id):
+            raise ValueError("工作区正在执行任务，请等待结束后撤销")
+        async with self._session_locks[session_id], self._workspace_execution(workspace_id):
+            self.authorize_file_operation(session_id, operation_id)
+            return await self._admission_check(self.file_operations.undo, session_id, operation_id)
 
     async def manage_delivery(self, action: str, **arguments: Any) -> dict[str, Any]:
         from eventide.delivery_runtime import DeliveryController
@@ -3307,6 +3344,8 @@ class RuntimeHost:
                 },
                 command_executor,
                 tools=tools,
+                file_operations=self.file_operations if not sandbox_execution else None,
+                workspace_id=execution_workspace.workspace_id,
             )
             runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)
             if worker_tools:

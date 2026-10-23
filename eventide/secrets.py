@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
-from contextlib import suppress
+import threading
+from collections import defaultdict
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
+
+_KEY_LOCKS: defaultdict[Path, threading.RLock] = defaultdict(threading.RLock)
 
 
 class SecretKeyError(RuntimeError):
@@ -18,6 +21,7 @@ class SecretBox:
 
     def __init__(self, state_dir: Path):
         self.key_path = state_dir / "secret.key"
+        self._lock = _KEY_LOCKS[self.key_path.resolve()]
         self._fernet: Fernet | None = None
 
     def _load(self, *, create: bool = True) -> Fernet:
@@ -38,10 +42,18 @@ class SecretBox:
             self.key_path.parent.mkdir(parents=True, exist_ok=True)
             raw_key = Fernet.generate_key()
             temporary = self.key_path.with_suffix(".tmp")
-            temporary.write_bytes(raw_key + b"\n")
-            with suppress(OSError):
+            with temporary.open("wb") as output:
                 temporary.chmod(0o600)
+                output.write(raw_key + b"\n")
+                output.flush()
+                os.fsync(output.fileno())
             os.replace(temporary, self.key_path)
+            if os.name == "posix":
+                directory = os.open(self.key_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
         else:
             raise SecretKeyError(
                 "已保存的 API Key 缺少解密密钥；请恢复 secret.key 或 EVENTIDE_SECRET_KEY"
@@ -55,11 +67,13 @@ class SecretBox:
         return self._fernet
 
     def encrypt(self, value: str) -> str:
-        return self._load().encrypt(value.encode("utf-8")).decode("ascii")
+        with self._lock:
+            return self._load().encrypt(value.encode("utf-8")).decode("ascii")
 
     def decrypt(self, value: str) -> str:
         try:
-            return self._load(create=False).decrypt(value.encode("ascii")).decode("utf-8")
+            with self._lock:
+                return self._load(create=False).decrypt(value.encode("ascii")).decode("utf-8")
         except (InvalidToken, UnicodeError, ValueError) as exc:
             raise SecretKeyError(
                 "已保存的 API Key 无法解密；请恢复原 EVENTIDE_SECRET_KEY 或重新保存密钥"

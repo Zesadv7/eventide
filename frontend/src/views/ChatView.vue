@@ -461,6 +461,7 @@ async function abandon() {
         <ToolActivity
           v-if="run"
           :tools="run.tools || {}"
+          :session-id="store.selectedSession"
           :count="run.tool_calls"
           :active="isActive"
         />
