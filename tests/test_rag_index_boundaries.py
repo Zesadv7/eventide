@@ -332,7 +332,10 @@ def test_each_embedding_identity_field_prevents_old_vector_reuse(index, field):
 
 
 @pytest.mark.parametrize(
-    "field", ["embedding_fingerprint", "chunking_profile", "chunking_fingerprint"],
+    "field", [
+        "embedding_fingerprint", "chunking_profile", "chunking_fingerprint",
+        "source_selection_profile", "source_selection_fingerprint",
+    ],
 )
 def test_corrupt_fingerprint_is_not_silently_repaired_by_reusing_vectors(index, field):
     with sqlite3.connect(index.path) as connection:

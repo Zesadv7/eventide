@@ -41,7 +41,7 @@ def chunking_identity(*, code_structure: bool = False) -> str:
     """Stable identity for window policy and explicitly enabled source parsers."""
     return json.dumps(
         {
-            "version": "windows-v1",
+            "version": "windows-v2",
             "min_chars": MIN_CHUNK_CHARS,
             "max_chars": MAX_CHUNK_CHARS,
             "overlap_chars": OVERLAP_CHARS,
@@ -84,11 +84,8 @@ def _preferred_end(text: str, start: int) -> int:
 
 def _overlap_start(text: str, start: int, end: int) -> int:
     desired = max(start + 1, end - OVERLAP_CHARS)
-    previous_newline = text.rfind("\n", start, desired)
-    candidate = previous_newline + 1 if previous_newline >= start else desired
-    if candidate <= start:
-        candidate = desired
-    return min(candidate, end)
+    newline = text.find("\n", desired, end)
+    return newline + 1 if newline >= desired else desired
 
 
 def _window_chunks(
@@ -105,7 +102,8 @@ def _window_chunks(
         local = text[cursor:section_end]
         end = cursor + _preferred_end(local, 0)
         if not text[cursor:end].strip():
-            break
+            cursor = end
+            continue
         chunks.append(
             Chunk(
                 file=file,
@@ -117,10 +115,7 @@ def _window_chunks(
         )
         if end >= section_end:
             break
-        next_cursor = cursor + _overlap_start(local, 0, end - cursor)
-        if next_cursor <= cursor:
-            next_cursor = end
-        cursor = next_cursor
+        cursor += _overlap_start(local, 0, end - cursor)
     return chunks
 
 

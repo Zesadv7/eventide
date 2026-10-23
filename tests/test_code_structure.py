@@ -288,7 +288,7 @@ def test_index_build_reports_missing_parser_and_unsupported_language(
     assert store.sparse_search("def", limit=5)[0].chunk.heading == ""
 
 
-def test_old_window_index_can_add_metadata_without_reembedding(
+def test_old_window_index_requires_force_without_chunking_metadata(
     isolated_workspace: Path,
 ) -> None:
     store = _workspace(isolated_workspace)
@@ -297,9 +297,12 @@ def test_old_window_index_can_add_metadata_without_reembedding(
     with sqlite3.connect(store.path) as connection:
         connection.execute("DELETE FROM meta WHERE key LIKE 'chunking_%'")
 
-    assert store.build().rebuilt_files == 0
+    assert store.sparse_search("def", limit=5)
+    with pytest.raises(ValueError, match="Chunking configuration changed"):
+        store.build()
     with pytest.raises(ValueError, match="Chunking configuration changed"):
         store.build(code_structure=True)
+    assert store.build(force=True).rebuilt_files == 1
 
 
 def test_parser_configuration_drift_rolls_back_index_rebuild(
@@ -351,3 +354,22 @@ def test_retrieval_eval_reports_actual_structure_and_same_corpus_identity(
     assert hit["heading"] == "Worker > process"
     assert (hit["start_line"], hit["end_line"]) == (2, 3)
     assert window["passed"] == structure["passed"] == 1
+
+
+def test_long_unicode_function_keeps_symbol_and_bounded_overlap() -> None:
+    _require_parser("tree_sitter_python")
+    payload = "".join(chr(0x4E00 + i) for i in range(1800))
+    text = f'def 读取():\n    return "{payload}"\n'
+    document = chunk_document("unicode.py", text, code_structure=True)
+    assert document.structured and document.fallback_reason is None
+    cursor = 0
+    previous_end = 0
+    for chunk in document.chunks:
+        start = text.index(chunk.text, cursor)
+        assert 0 <= previous_end - start <= 100
+        assert chunk.heading == "读取"
+        assert len(chunk.text) <= MAX_CHUNK_CHARS
+        assert (chunk.start_line, chunk.end_line) == (1 if start == 0 else 2, 2)
+        previous_end = start + len(chunk.text)
+        cursor = start + 1
+    assert text[previous_end:].strip() == ""

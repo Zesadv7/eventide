@@ -8,10 +8,12 @@ import os
 import sqlite3
 import stat as stat_module
 import time
+from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 from eventide.rag.chunker import (
     Chunk,
@@ -26,6 +28,12 @@ from eventide.rag.embedding import (
     HashEmbedder,
     vector_from_blob,
     vector_to_blob,
+)
+from eventide.rag.source_selection import (
+    SourceScope,
+    exclusion_reason,
+    source_selection_fingerprint,
+    source_selection_identity,
 )
 from eventide.workspace import canonical_workspace, git
 
@@ -85,6 +93,9 @@ class BuildStats:
     structure_fallbacks: dict[str, int] = field(default_factory=dict)
     chunking_fingerprint: str = ""
     generation: int = 0
+    source_scope: SourceScope = "code"
+    source_selection_fingerprint: str = ""
+    skipped_reasons: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +139,7 @@ class _Scan:
     signature: tuple[tuple[str, str], ...]
     structured_files: int = 0
     structure_fallbacks: tuple[tuple[str, int], ...] = ()
+    skipped_reasons: tuple[tuple[str, int], ...] = ()
 
 
 class IndexStore:
@@ -283,17 +295,24 @@ class IndexStore:
         )
         return sorted(os.fsdecode(item) for item in raw.split(b"\0") if item)
 
-    def _scan(self, *, include_chunks: bool, code_structure: bool = False) -> _Scan:
+    def _scan(
+        self, *, include_chunks: bool, code_structure: bool = False,
+        source_scope: SourceScope = "code",
+    ) -> _Scan:
         self._validate_workspace()
         sources: list[_SourceFile] = []
         signature: list[tuple[str, str]] = []
-        skipped = 0
+        skipped_reasons: Counter[str] = Counter()
         structured_files = 0
         structure_fallbacks: dict[str, int] = {}
         for raw_path in self._git_paths():
             relative = PurePosixPath(raw_path).as_posix()
             parts = PurePosixPath(relative).parts
             if not parts or parts[0] in {".git", ".eventide"}:
+                continue
+            if source_scope == "code" and (reason := exclusion_reason(relative)):
+                skipped_reasons[reason] += 1
+                signature.append((relative, reason))
                 continue
             candidate = self.workspace / Path(*parts)
             try:
@@ -305,7 +324,7 @@ class IndexStore:
                     or candidate.resolve(strict=True) != candidate
                     or not candidate.is_file()
                 ):
-                    skipped += 1
+                    skipped_reasons["path_boundary"] += 1
                     signature.append((relative, "skipped"))
                     continue
                 flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
@@ -316,7 +335,7 @@ class IndexStore:
                         or candidate.resolve(strict=True) != candidate
                         or self._identity(candidate) != (stat.st_dev, stat.st_ino)
                     ):
-                        skipped += 1
+                        skipped_reasons["path_boundary"] += 1
                         signature.append((relative, "skipped"))
                         continue
                     body = (
@@ -324,26 +343,29 @@ class IndexStore:
                         if stat.st_size <= MAX_SOURCE_BYTES else b""
                     )
                     if stat.st_size > MAX_SOURCE_BYTES or len(body) > MAX_SOURCE_BYTES:
-                        skipped += 1
+                        skipped_reasons["too_large"] += 1
                         size = max(stat.st_size, len(body))
                         signature.append((relative, f"large:{stat.st_mtime_ns}:{size}"))
                         continue
             except (OSError, RuntimeError):
-                skipped += 1
+                skipped_reasons["unreadable"] += 1
                 signature.append((relative, "unreadable"))
                 continue
             content_hash = hashlib.sha256(body).hexdigest()
             if b"\0" in body:
-                skipped += 1
+                skipped_reasons["binary"] += 1
                 signature.append((relative, f"binary:{content_hash}"))
                 continue
             try:
                 text = body.decode("utf-8")
             except UnicodeDecodeError:
-                skipped += 1
+                skipped_reasons["non_utf8"] += 1
                 signature.append((relative, f"non-utf8:{content_hash}"))
                 continue
             signature.append((relative, content_hash))
+            if source_scope == "code" and (reason := exclusion_reason(relative, header=text)):
+                skipped_reasons[reason] += 1
+                continue
             chunks: tuple[Chunk, ...] = ()
             if include_chunks:
                 document = chunk_document(relative, text, code_structure=code_structure)
@@ -364,10 +386,11 @@ class IndexStore:
         self._validate_workspace()
         return _Scan(
             tuple(sources),
-            skipped,
+            sum(skipped_reasons.values()),
             tuple(signature),
             structured_files,
             tuple(sorted(structure_fallbacks.items())),
+            tuple(sorted(skipped_reasons.items())),
         )
 
     @staticmethod
@@ -418,12 +441,16 @@ class IndexStore:
         embedder: EmbeddingProvider | None = None,
         profile: EmbeddingProfile | None = None,
         code_structure: bool = False,
+        source_scope: str = "code",
         check_cancelled: Callable[[], None] | None = None,
     ) -> BuildStats:
         """Incrementally rebuild changed files and commit the new snapshot atomically."""
         started = time.perf_counter()
         if check_cancelled:
             check_cancelled()
+        selection_profile = source_selection_identity(source_scope)
+        selected_scope = cast(SourceScope, source_scope)
+        selection_digest = source_selection_fingerprint(selection_profile)
         chunking_profile = chunking_identity(code_structure=code_structure)
         chunking_digest = chunking_fingerprint(chunking_profile)
         if embedder is None:
@@ -460,14 +487,28 @@ class IndexStore:
             ):
                 raise ValueError("Knowledge index chunking fingerprint is invalid; rebuild --force")
             if (
-                existing
+                (existing or stored_chunking is not None)
                 and not force
                 and (
                     (stored_chunking is not None and stored_chunking != chunking_digest)
-                    or (stored_chunking is None and code_structure)
+                    or stored_chunking is None
                 )
             ):
                 raise ValueError("Chunking configuration changed; rebuild with --force")
+            stored_selection = meta.get("source_selection_fingerprint")
+            stored_selection_profile = meta.get("source_selection_profile")
+            if not force and (
+                (stored_selection is None) != (stored_selection_profile is None)
+                or (
+                    stored_selection_profile is not None
+                    and source_selection_fingerprint(stored_selection_profile) != stored_selection
+                )
+            ):
+                raise ValueError("Source selection fingerprint is invalid; rebuild with --force")
+            if (existing or stored_selection is not None) and not force and (
+                stored_selection != selection_digest
+            ):
+                raise ValueError("Source selection configuration changed; rebuild with --force")
             chunk_total, null_total = connection.execute(
                 "SELECT COUNT(*), SUM(CASE WHEN vec IS NULL THEN 1 ELSE 0 END) FROM chunks"
             ).fetchone()
@@ -507,10 +548,8 @@ class IndexStore:
                     and not force
                 ):
                     raise ValueError("Embedding configuration changed; rebuild with --force")
-            scan = (
-                self._scan(include_chunks=True, code_structure=True)
-                if code_structure
-                else self._scan(include_chunks=True)
+            scan = self._scan(
+                include_chunks=True, code_structure=code_structure, source_scope=selected_scope,
             )
             current = {source.path: source for source in scan.sources}
             changed = [
@@ -540,7 +579,7 @@ class IndexStore:
                     check_cancelled()
                 if self._generation(connection) != generation:
                     raise RuntimeError("Knowledge index changed during build; retry")
-                verified = self._scan(include_chunks=False)
+                verified = self._scan(include_chunks=False, source_scope=selected_scope)
                 if verified.signature != scan.signature:
                     raise RuntimeError("Workspace changed during index build; retry")
                 if chunking_identity(code_structure=code_structure) != chunking_profile:
@@ -603,6 +642,8 @@ class IndexStore:
                     "embedding_fingerprint": resolved_profile.fingerprint(),
                     "chunking_profile": chunking_profile,
                     "chunking_fingerprint": chunking_digest,
+                    "source_selection_profile": selection_profile,
+                    "source_selection_fingerprint": selection_digest,
                 }
                 connection.executemany(
                     "INSERT INTO meta(key, value) VALUES (?, ?) "
@@ -635,6 +676,9 @@ class IndexStore:
             structure_fallbacks=dict(scan.structure_fallbacks),
             chunking_fingerprint=chunking_digest,
             generation=generation + 1,
+            source_scope=selected_scope,
+            source_selection_fingerprint=selection_digest,
+            skipped_reasons=dict(scan.skipped_reasons),
         )
 
     def sparse_search(self, query: str, *, limit: int) -> list[SparseCandidate]:

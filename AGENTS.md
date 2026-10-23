@@ -410,3 +410,11 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 - 真实24次已完成：开发baseline0/4、candidate1/4；留出baseline0/8、candidate1/8，有效引用15/19→12/17。两臂都未调用search_knowledge，不能归因本地Qwen；没有达到默认晋升条件。失败保留且未改提示/标签/补跑。完整结果及22个质量失败见architecture/failure-cases，原始证据在agent-local/development、holdout及combined.json。
 - 全项目BF16/CPU首批慢于小样本，采样后主动停止未发布构建（143），保留旧索引；ceea5d7只固定实例CPU float32、v3算法指纹，不加全局SDPA开关或MPS平台。6项加载/角色/旧索引拒绝定向、Ruff/3.10目标Mypy和禁止网络的真实Host冒烟通过；FP32首次11.23秒/RSS2.792GB。原16文档向量新旧最低余弦.999833，历史BF16报告保留，未重跑留出或付费24次。失败和性能证据见RG-INDEX。
 - 实际显式重建已完成：冻结源码ceea5d7，通过原IndexController(force=True)向真实默认状态根发布源Workspace的v3/1024维索引，492文件/10849片段、generation1，3637.58秒、峰值RSS5.838GB。492文件索引哈希与构建前后源码逐一一致，工作区状态不变，Provider用量为空；无聊天或远程embedding请求。Run为qwen_eventide_force_fp32_20261023，报告agent-local/project-index-force-fp32.json。其他副本未重建，首次大项目CPU构建仍昂贵；文档收口会改变少量源码，须沿用同一入口增量刷新，不能沿用原新鲜度断言。
+
+
+## RQ2 / RQ3-CORE 检索语料与切块（2026-10-23）
+
+| 编号 | 状态 | 范围与证据 |
+|---|---|---|
+| RQ2 | 已完成（核心） | 基线9768103，独立codex/retrieval-chunks-v2。IndexStore.build默认code排除明确依赖锁/产物目录与压缩资源/标准生成头，all显式纳入；保留普通JSON/YAML/d.ts、build目录和无生成标记的OpenAPI，未硬编码用户项目路径。规则/profile/指纹与有界原因计数已落库，规则或scope变更需force；安全/UTF8/大小边界及用户忽略不变。与RQ3-CORE合计87个不同定向用例通过、3模块Mypy/Ruff/diff通过。architecture/ADR-099同步，API/任务冻结/页面及效果由主任务收口。 |
+| RQ3-CORE | 已完成 | windows-v2重叠严格≤100字符，在该范围内尽量对齐行首；600/800字符窗口、原行号和Markdown标题边界保留，纯空白窗口推进避免丢后文。复用原tree-sitter长函数/符号及明确fallback，无新解析框架。两项受控缺陷复现后修复；首批80项、补边界14项（去重87）及3模块Mypy/Ruff/diff通过，日志.task_outputs/retrieval-quality/core/，格式失败另记failure-cases。旧窗口/缺身份索引仍可查询，准备必须force；不重跑模型/全量，不宣称召回或速度改善，任务接线由集成任务完成。 |

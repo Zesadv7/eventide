@@ -366,3 +366,20 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 
 - 最终处理与复验：代码提交 `ceea5d7`，全量显式重建新Run `qwen_eventide_force_fp32_20261023` 退出0、completed、实际发布generation1。492文件/10849片段/1024维，3637.58秒、峰值RSS5.838GB；492文件索引哈希与构建前后源码全相符、Git状态不变、Provider用量为空。旧中断Run已恢复为interrupted，未自动重放或删除旧索引；报告 `agent-local/project-index-force-fp32.json` 及日志保留。后续收口Markdown变化须另作增量刷新。原BF16未完成证据不覆盖、不声称提速倍数；完整项目首次FP32构建仍约61分钟，内存/CPU和增量更新是当前维护取舍，不代表检索质量提升。
 - 附带环境诊断：一次只读 `ps -p 47990 -o pid=,etime=,%cpu=,rss=` 被本机沙箱拒绝，退出1；未据此判断构建失败，也未扩大权限重跑。最终使用原Host报告及命令真实退出状态确认完成。实际参与为采样定位、实例精度最小修正和真实索引核验，可追问为何计算策略进入指纹、如何避免中断发布和实验条件偷换。
+
+
+## RQ-CORE：切块重叠和空白窗口的受控复现（2026-10-23）
+
+- **范围/类型/状态：** 自动化测试；受控缺陷复现，已完成。基线9768103，隔离分支codex/retrieval-chunks-v2。新增长行与空白前缀夹具，不声称线上事故。
+- **证据：** `PYTHONPATH=$PWD PYTHON_DOTENV_DISABLED=1 /Users/zesadv/Documents/Codex/eventide/.venv/bin/python -m pytest -q tests/test_rag_chunker.py -k 'long_line_after or whitespace_window' tests/test_rag_source_selection.py --tb=short`，2失败/9未选；原始输出`.task_outputs/retrieval-quality/core/red.log`。源码选择测试被-k筛掉，未执行不算失败。
+- **已证实原因：** 旧窗口为对齐行首向前回退，本例800字符首块与次块重叠793字符，超过名义100；窗口遇到800字符纯空白直接break，1700空白后的非空正文消失。
+- **处理与取舍：** 实施严格100字符上限，在上限内向后选行首；遇到纯空白窗口推进游标，保留后续正文，不将空白送入embedding。窗口指纹改为windows-v2，已有索引显式force才能增量准备，历史查询继续可读。相关提交为包含本节的RQ2/RQ3-CORE提交（可由Git追溯）。
+- **复验与边界：** chunker/source_selection/index/boundaries/code_structure首批80项通过（targeted.log），后补身份及Unicode边界14项通过（boundaries.log），去重共87项。Python3.10目标三个变更模块Mypy通过；未运行历史模型实验、生产索引重建或全量，不宣称检索质量提高。
+- **经验与参与：** 用户授权最小语料/切块优化，Codex构造边界、定位并实现；可追问字符/行边界取舍、配置指纹为何阻止混用。
+
+
+## RQ-CORE-STATIC：新增语料测试的格式失败（2026-10-23）
+
+- **范围/类型/状态：** 静态检查；新测试格式问题，已完成。基线9768103加本轮核心修改；Ruff定向检查只有新测试一行103字符超过100字符规则，生产逻辑和80+14项定向结果未失败。证据`.task_outputs/retrieval-quality/core/ruff.log`。
+- **处理与复验：** 将检索结果赋值与断言分两行，不改断言语义；同一变更文件范围Ruff复验通过，见ruff-green.log；Git差异检查通过。相关提交为包含本节的RQ2/RQ3-CORE提交，不重新运行功能测试。
+- **经验与参与：** Codex编写及修正测试格式；不包装成生产故障或性能收益，无遗留问题。

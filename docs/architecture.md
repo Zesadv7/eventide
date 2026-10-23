@@ -869,3 +869,14 @@ Event Log 保存 `acceptance.output_started/recorded/expired/cleanup_failed` Ses
 `read_tool_result` 的可选stream读取保存文本的字符页，先同Session或精确Writer Run/验收call授权，再用内部身份定位；不接收磁盘路径。省略stream的content分页坐标保持不变。读取分块校验整份已存正文摘要，只将当前页留在内存；每页默认4,000/最大12,000字符，stdout/stderr不推断交错顺序。引用及采集状态计入原12,000字符修正反馈。目录排除在源码checkpoint之外；只有元数据可由Event Log重建，日志正文需单独备份。Docker不挂载目录，Local同UID仍要求可信命令，摘要仅检测变化而非强防篡改隔离。设计取舍见ADR-095，配额、过期与回读操作见用户指南。
 
 2026-10-22验收：新增长日志/存储/权限/重启定向21项通过（含真实Docker中段回读），另补最终化路径和创建失败专项；一次后端全量2,002通过/12显式跳过、覆盖93.74%，归档模块94%，Ruff/Mypy及服务/离线smoke通过。原始日志在忽略目录.task_outputs/acceptance-output/；新能力Red和实施中失败分别记录于failure-cases的009–013。不把机制与日志可取回性当真实模型修复率或成本改善。
+
+
+### RQ2 / RQ3：语料选择与有界切块
+
+`IndexStore.build(source_scope="code" | "all", code_structure=False)` 默认code；all用于明确包含常见产物和做同条件对照，仍遵守原Git可见范围、路径/链接、1MiB、UTF-8与二进制边界。code只过滤固定依赖锁文件名，dist/node_modules/coverage/.next/.nuxt/.vite/__pycache__目录，.min.js/.min.css/.js.map/.css.map资源，以及TS/Go文件前2048字符中标准openapi-typescript或Go自动生成声明。不会按扩展名排除全部JSON、YAML或d.ts，不猜测OpenAPI文件来源、不排除宽泛build目录，不修改用户忽略规则。没有新增配置平台，明确需要产物时选择all。
+
+选择规则完整身份和SHA256写入`meta.source_selection_profile/source_selection_fingerprint`；BuildStats返回`source_scope/source_selection_fingerprint/skipped_reasons`。原因只使用固定枚举：dependency_lock/build_output/generated_artifact/path_boundary/too_large/unreadable/binary/non_utf8，统计总和等于skipped；不累积文件路径列表。规则/scope变化或已有索引缺身份必须显式force，不能保留旧向量假装使用新选择政策；旧索引查询不依赖这些新字段。
+
+窗口策略为windows-v2：仍按Python字符计数，优先在600–800字符内以空行/行尾结束，最长800；相邻窗口最多重叠100字符，只在这个范围内向后选行首，无法对齐则使用精确字符边界。纯空白窗口不生成embedding片段，但继续向前调查，避免前部空白使后续源码消失。Markdown一级至三级标题各自分段，围栏内伪标题不分段；短片段允许小于600。可选tree-sitter复用原Python/JS/TS符号段，长函数仍分窗口、保留符号heading及真实行号，缺解析器/不支持/语法失败仍明确fallback。没有增加路径/符号embedding前缀、去重或索引服务。窗口版本变化和旧索引缺切块身份均需force；历史读取继续可用。
+
+核心验证为87个不同定向用例、Ruff和Python3.10目标三模块Mypy；两项受控复现及一次测试格式失败留在failure-cases。测试证明选择/兼容/引用/窗口边界，不证明实际语义检索收益；本步骤未运行全量、模型或重建生产索引。

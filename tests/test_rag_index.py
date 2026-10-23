@@ -71,7 +71,7 @@ def test_non_git_workspace_is_rejected(isolated_workspace: Path) -> None:
         raise AssertionError("non-Git Workspace was accepted")
 
 
-def test_p1_index_is_backfilled_atomically_on_next_build(isolated_workspace: Path) -> None:
+def test_p1_index_requires_force_before_new_chunking(isolated_workspace: Path) -> None:
     root = _git_workspace(isolated_workspace)
     source = root / "legacy.txt"
     source.write_text("legacy searchable text", encoding="utf-8")
@@ -93,9 +93,12 @@ def test_p1_index_is_backfilled_atomically_on_next_build(isolated_workspace: Pat
     finally:
         connection.close()
 
-    stats = store.build()
+    assert store.sparse_search("searchable", limit=5)
+    with pytest.raises(ValueError, match="Chunking configuration changed"):
+        store.build()
+    stats = store.build(force=True)
 
-    assert stats.rebuilt_files == 0
+    assert stats.rebuilt_files == 1
     check = sqlite3.connect(store.path)
     try:
         assert check.execute("PRAGMA user_version").fetchone()[0] == 2
@@ -189,7 +192,7 @@ def test_manifest_verification_holds_write_lock_and_rolls_back(
     source.write_text("changed needle", encoding="utf-8")
     original_scan = store._scan
 
-    def scan(*, include_chunks):
+    def scan(*, include_chunks, **kwargs):
         if not include_chunks:
             with (
                 closing(sqlite3.connect(store.path, timeout=0)) as contender,
@@ -197,7 +200,7 @@ def test_manifest_verification_holds_write_lock_and_rolls_back(
             ):
                 contender.execute("BEGIN IMMEDIATE")
             source.write_text("modified during build", encoding="utf-8")
-        return original_scan(include_chunks=include_chunks)
+        return original_scan(include_chunks=include_chunks, **kwargs)
 
     monkeypatch.setattr(store, "_scan", scan)
     with pytest.raises(RuntimeError, match="Workspace changed"):

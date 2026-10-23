@@ -41,3 +41,32 @@ def test_empty_text_has_no_chunks_and_long_line_keeps_accurate_line() -> None:
     chunks = chunk_text("single.py", "x" * 900)
     assert [(chunk.start_line, chunk.end_line) for chunk in chunks] == [(1, 1), (1, 1)]
 
+
+
+def test_long_line_after_newline_does_not_expand_overlap() -> None:
+    text = "header\n" + "".join(chr(0x4E00 + i) for i in range(1800))
+    chunks = chunk_text("unicode.txt", text)
+    cursor = 0
+    previous_end = 0
+    for chunk in chunks:
+        start = text.index(chunk.text, cursor)
+        assert 0 <= previous_end - start <= 100
+        assert len(chunk.text) <= 800
+        previous_end = start + len(chunk.text)
+        cursor = start + 1
+    assert previous_end == len(text)
+
+
+def test_whitespace_window_does_not_hide_later_content() -> None:
+    text = " " * 1700 + "尾部必须保留\n"
+    chunks = chunk_text("whitespace.txt", text)
+    assert any("尾部必须保留" in chunk.text for chunk in chunks)
+    assert all(len(chunk.text) <= 800 for chunk in chunks)
+
+
+def test_markdown_long_sections_do_not_overlap_across_headings() -> None:
+    text = "# 第一章\n" + "甲" * 1700 + "\n## 第二章\nshort\n"
+    chunks = chunk_text("guide.md", text)
+    assert all("第二章" not in chunk.text for chunk in chunks if chunk.heading == "第一章")
+    assert chunks[-1].heading == "第一章 > 第二章"
+    assert chunks[-1].text == "## 第二章\nshort\n"
