@@ -461,4 +461,4 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 
 | 编号 | 状态 | 内容与验收 |
 |---|---|---|
-| MERGE-2 | 进行中 | 多Agent核实79个原本地分支及六个旧脏工作区，无遗漏的独有必要实现；基线master 0c88dd1、检索83bbd07、文件操作42b3414。两项功能已整合，接口/静态资源统一生成；复核发现写后核验冲突未停驻，三项受控复现后最小修正，见MERGE-FILE-01。143项不同后端定向、12项分发/服务测试、66项前端、8条built真实API旅程通过；Ruff收口、Python3.10目标Mypy130模块、Vue类型/构建/格式、help/服务/smoke12及干净wheel隔离检查通过。未重复全量、Docker或付费实验；旧工作区、实验副本及.video_agent保持，RQ5外部限制及效果未达门槛不改。原始证据.task_outputs/local-integration/；整合验证完成，待本地master快进，不推送GitHub。 |
+| MERGE-2 | 已完成 | 多Agent核实79个原本地分支及六个旧脏工作区，无遗漏的独有必要实现；基线master 0c88dd1、检索83bbd07、文件操作42b3414。两项功能已整合，接口/静态资源统一生成；复核发现写后核验冲突未停驻，三项受控复现后最小修正，见MERGE-FILE-01。143项不同后端定向、12项分发/服务测试、66项前端、8条built真实API旅程通过；Ruff收口、Python3.10目标Mypy130模块、Vue类型/构建/格式、help/服务/smoke12及干净wheel隔离检查通过。未重复全量、Docker或付费实验；旧工作区、实验副本及.video_agent保持，RQ5外部限制及效果未达门槛不改。原始证据.task_outputs/local-integration/；合并提交3ddb960包含检索83bbd07及文件操作42b3414，master已从0c88dd1快进且主目录已切换master；最终文档收口身份以Git为准。未推送GitHub，最新整合SHA尚无远端CI，不沿用旧绿灯声称通过。 |

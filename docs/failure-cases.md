@@ -544,7 +544,7 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 复现命令：python -m pytest -q 'tests/test_file_operations.py::test_post_write_failure_parks_actual_host[verification_conflict]' tests/test_file_operations.py::test_prewrite_conflict_records_failure_without_mutation（设置PYTHON_DOTENV_DISABLED=1、PYTHONPATH为当前隔离目录）。2026-10-23三项失败，日志.task_outputs/local-integration/file-conflict-red.log。
 - 已证实原因：写后核验的FileOperationConflict被外层直接传播，Executor当普通失败，实际Host最终completed；写前读取/打开阶段同类冲突未记录failed，投影停在prepared。
 - 修正：写后核验冲突转现有FileOperationUnknown并复用needs_review/Host停驻；明确写前冲突统一记录failed。不自动重试、撤销或新增恢复抽象。
-- 验证：文件操作43项通过，含三项原失败；其他关联文件100项此前已通过，不重复运行。静态复核确认异常边界，合并提交身份在MERGE-2收口补记。
+- 验证：文件操作43项通过，含三项原失败；其他关联文件100项此前已通过，不重复运行。静态复核确认异常边界，修正随合并提交3ddb960保存，原始文件操作提交42b3414保留。
 - 维护执行问题：首次写入修正的内联脚本报Non-UTF-8 SyntaxError，未修改代码；该命令未启用失败即停，随后关联测试在未修正代码上启动，结果保留在backend-targeted.log。后续改用项目解释器及ASCII转义脚本，并将编辑与验证分开，不把这次重复运行称为修复后的复验。
 - 实际参与及可追问点：Agent静态复核提出缺口，维护者构造故障注入并修复。可解释相同异常在副作用前后为何采用不同状态；不能描述成线上丢数据事故。
 
