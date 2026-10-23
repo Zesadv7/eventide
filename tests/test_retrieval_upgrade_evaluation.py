@@ -196,14 +196,30 @@ async def test_actual_agent_pairs_use_current_files_after_semantic_search(
     assert agent_comparison_report(host, controls) == report
 
 
-async def test_agent_missing_usage_aborts_without_replacement_attempt(host, embeddings, tmp_path):
-    case = load_agent_dataset().cases[0]
+@pytest.mark.parametrize("dataset_version", ["v1", "v2"])
+async def test_agent_missing_usage_aborts_without_replacement_attempt(
+    host, embeddings, tmp_path, dataset_version,
+):
+    case = load_agent_dataset(dataset_version).cases[0]
     host.provider = ScriptedProvider([{"text": json.dumps(exact_answer(case))}])
-    report = await run_agent_comparison(host, output_directory=tmp_path / "unknown", confirmed=True)
+    report = await run_agent_comparison(
+        host, output_directory=tmp_path / "unknown", confirmed=True,
+        dataset_version=dataset_version,
+    )
     assert report["status"] == "aborted" and len(report["remaining"]) == 7
     assert report["arms"]["baseline"]["results"][0]["status"] == "usage_unknown"
     assert report["evidence"]["usage"]["unknown_attempts"] == 1
     assert not embeddings
+    arm = report["arms"]["baseline"]
+    assert arm["attempted"] == arm["failed"] == 1 and arm["passed"] == 0
+    assert arm["results"][0]["grade"]["passed"]  # Preserve the valid but incomplete attempt.
+    if dataset_version == "v2":
+        quality = arm["quality"]
+        assert quality["graded_attempts"] == 0 and quality["ungraded_attempts"] == 1
+        assert quality["schema_valid_attempts"] == quality["authentic_citations"] == 0
+        assert quality["fact_accuracy"] is quality["citation_authenticity_ratio"] is None
+    else:
+        assert "quality" not in arm
 
 
 async def test_quality_failure_is_retained_without_retry_and_rag_is_optional(
@@ -378,3 +394,36 @@ async def test_explicit_confirmation_prevents_any_request_or_artifact(host, embe
         await run_agent_comparison(host, output_directory=tmp_path / "agent")
     assert not embeddings and not (tmp_path / "remote").exists()
     assert not (tmp_path / "agent").exists()
+
+
+async def test_v2_quality_excludes_unknown_attempt_but_retains_completed_schema_failure(
+    host, embeddings, tmp_path,
+):
+    dataset = load_agent_dataset("v2")
+    notice, catalog = dataset.cases[:2]
+    usage = {"input_tokens": 10, "output_tokens": 5}
+    host.provider = ScriptedProvider([
+        {"text": "not a JSON answer", "usage": usage},
+        {"text": json.dumps(reviewed_answer(notice)), "usage": usage},
+        {"text": json.dumps(reviewed_answer(catalog))},
+    ])
+    report = await run_agent_comparison(
+        host, output_directory=tmp_path / "mixed-quality",
+        dataset_version="v2", confirmed=True,
+    )
+    assert report["status"] == "aborted" and len(report["remaining"]) == 5
+    baseline = report["arms"]["baseline"]
+    assert baseline["failed"] == baseline["quality"]["graded_attempts"] == 1
+    assert baseline["quality"]["schema_valid_attempts"] == 0
+    candidate = report["arms"]["candidate"]
+    assert candidate["attempted"] == 2 and candidate["passed"] == candidate["failed"] == 1
+    assert candidate["results"][1]["status"] == "usage_unknown"
+    assert candidate["results"][1]["grade"]["passed"]
+    quality = candidate["quality"]
+    assert quality["graded_attempts"] == quality["ungraded_attempts"] == 1
+    assert quality["schema_valid_attempts"] == 1
+    assert quality["expected_facts"] == quality["correct_facts"] == 2
+    assert quality["authentic_citations"] == 2 and quality["citation_authenticity_ratio"] == 1
+    assert report["evidence"]["usage"]["unknown_attempts"] == 1
+    controls = [run for run in report["evidence"]["run_ids"] if run.startswith("investigation_")]
+    assert agent_comparison_report(host, controls) == report

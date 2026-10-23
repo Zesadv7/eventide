@@ -347,7 +347,8 @@ def test_local_admission_keeps_legacy_idempotency_fingerprint(tmp_path):
         run_id = accepted.json()["run_id"]
         assert wait_for_run(client, run_id)["status"] == "completed"
         legacy = RunBody(**body).model_dump(
-            exclude={"execution_profile", "sandbox_image", "knowledge_index"},
+            exclude={"execution_profile", "sandbox_image", "knowledge_index",
+                     "code_structure", "source_scope"},
         )
         legacy["generation"] = {}
         assert host._admitted_intent(run_id)["request_fingerprint"] == digest(

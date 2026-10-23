@@ -433,3 +433,35 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 整批中间导出可能标aborted，不能仅凭该快照宣称进程已失败；批次退出和最终状态另行核实。与一次后端全量同时执行，耗时会受本机CPU争用影响，不据此作严格性能收益结论。开发契约检查结束前不进入留出。
 
 - 开发最终8槽完成、退出0：baseline3/4、candidate4/4；两臂JSON/schema及字段键各4/4，facts各8/8，引用真实性各8/8。唯一失败catalog基线的transition_function事实正确，但引用garden/catalog.py:8–9仅含状态/期限赋值，漏了第4行函数定义名；属于证据绑定不足，不是引文幻觉、过期或错键。有效绑定7/8对8/8，unknown0，无外部失败或未尝试。两臂search_knowledge均0；差异不能归因Qwen或结构切块，不改判或补跑。已满足开发契约门槛，按冻结计划进入一次留出8槽。
+
+- 留出阶段追加（7d58f91，批次仍进行中）：candidate broadcast-final-drain 的schema/字段正确，两个引文均真实且有效绑定，但buffer_operation值不匹配冻结答案，判fact_values_mismatch（1/2事实正确）。实际值与题意原因待核对；保留原判分和report/Store，不重跑或调整标签。
+
+- 留出继续追加：baseline broadcast-final-drain 同样出现buffer_operation精确值不符；baseline report-signing-chain的空输出初步显示invalid_answer_schema，后核实为下述外部配额中断，不能归为已完成模型答案的格式退步。不增加尝试或修改原报告判分。证据仍为同一holdout/report.json及其逐任务Store。
+
+- 已证实原因：broadcast两臂都回答buffer.flush_pending，冻结题面要求源码完整属性表达式stream.buffer.flush_pending；引用真实且包含完整表达式，但facts漏了stream前缀，因此严格值判分失败。这是值表示不满足已公开题面契约，不能简单归因检索未找到。
+
+### RQ-EXTERNAL：Coding Plan五小时配额耗尽中断留出（2026-10-23）
+
+- 类型：环境/外部服务限额，基线7d58f91。第五槽baseline report-signing-chain的第二次模型请求HTTP429、业务码1308，供应商返回五小时使用上限及重置时间2026-10-23 22:12:37；本次usage未知保留，剩余3槽未尝试。原run.failed及report在agent-live/holdout的唯一Store和导出，密钥未写日志。
+- 影响与处理：空回答被底层grader标invalid_answer_schema，但它来自未完成的Provider请求，应在分析中单列外部中断，不能宣称模型结构回归。沿已有停批规则停止扩大，不重试、不换Key/供应商、不把未尝试算成功；最终进程退出2，状态aborted、无缺失结果；16计划槽合计13尝试（开发8、留出5），12正常完成、1外部未知、3未尝试。继续离线收口，剩余实际效果待外部额度恢复后另行明确批次安排。
+
+### RQ-FULL：本轮唯一全量出现失败，待定位（2026-10-23）
+
+- 类型待查；Python实现指纹e020f09d、测试基线36a7ad3（期间仅追加结果Markdown）。命令PYTHON_DOTENV_DISABLED=1 PYTHONPATH=$PWD python -m pytest -q --cov=eventide --cov-fail-under=85，使用既有.venv Python3.12。进度78%后出现一个F，完整进程仍在运行，具体用例/原因和退出状态待最终摘要；证据.task_outputs/retrieval-quality/integration/full-backend.log。先保留失败，不启动第二轮全量，结束后只复验受影响范围。
+
+- 最终合并：正常完成12次中9通过、3质量失败；schema/字段12/12，事实22/24，引文真实性24/24、绑定23/24。全部43次模型attempt中已报告输入74023/输出2237、缓存读51840、推理95，另1次unknown，因此总用量不完整。两臂语义调用均0；未执行槽为candidate report-signing-chain、candidate export-copy-profile、baseline export-copy-profile。combined-summary.json单列已完成质量及外部状态，原始批次报告不覆写；不能宣称全16槽完成、RAG收益或跨版本提升。供应商时间未独立核对时区/账户，不据此自动续跑。
+
+### RQ-METRICS：外部故障诊断被计入答案质量分母（2026-10-23）
+
+- 类型：评测报告口径缺陷，由上述真实配额中断暴露；v2汇总只检查grade存在，没有区分Run终态。Host在失败时返回error or output，Provider诊断文字因此进入底层grader并产生invalid_answer_schema，不是模型生成了坏JSON。原始事件/尝试/grade全部保留；修正仅针对派生quality汇总：只纳入completed且有grade，引用真实性分母一致；其他计ungraded（可有完整答案），原尝试/失败和v1不变。新增真实Host三槽混合回归覆盖真正JSON错误、完成正确答案及未知用量正确答案，17项关联复验通过，Ruff/单模块Mypy通过；未重跑真实批次或覆盖旧报告。
+
+- 全量最终退出1：2201通过、1失败、12显式跳过，覆盖93.81%。唯一失败test_local_admission_keeps_legacy_idempotency_fingerprint用最新RunBody生成旧指纹预期，却未剔除新增code_structure/source_scope默认字段；生产路由已正确省略默认值，实际保持旧身份。本次只更新测试排除列表，不改生产幂等逻辑；复验此用例及新增报告分类范围，不重跑全量。
+
+- RQ-INTEGRATION环境补记：最后两份前端文件的prettier检查首次在写入受管worktree日志时被沙箱拒绝（operation not permitted），检查程序尚未执行，不是格式回归。改用获授权的同一工作树执行后复验；命令、退出状态在本轮工具记录，复验日志integration/final-frontend-format.log。
+
+- RQ-FULL最终复验：唯一旧断言修正后通过；连同v2报告专项共17项通过（integration/final-targeted.log），不重复全量；原完整失败保留。RQ-INTEGRATION页面复核发现请求结构不代表实际结构，现展示已有structured_files和structure_fallbacks，索引页12项含2个实际回退用例通过；类型/构建、格式以及最终wheel通过。先前沙箱重定向失败已在授权环境执行同一检查且退出0。
+- 本轮收口责任与取舍：维护代理实现、编写定向测试、执行真实与离线对照；独立复核指出锁内配置、legacy预检与页面实际结果问题。没有声称线上事故、自动消除外部限额或RAG质量收益；修正随包含本记录的本地收口提交，可由Git追溯。仍待外部处理的仅RQ5模型余量及未执行槽，相关质量失败保留原判。
+
+### RQ-DOC：收口脚本误覆盖设计决策文档（2026-10-23）
+
+- 类型：本地文档意外回归，未推送。最后维护脚本复用变量s，在追加ADR摘要后将failure-cases正文写入decisions.md；提交差异统计出现1357行变化，复查定位到该写入。恢复本次收口前的设计决策原文，只追加上述测量结论；核对原文逐字前缀一致、最终差异仅一段新增并修正尚未发布的本地提交。代码及模型产物不变，无需重跑测试。实际参与为维护代理自身误写、差异复查和修复，不虚构为线上事故或产品能力；经验是文档脚本使用明确目标且收口同时检查内容和差异规模。

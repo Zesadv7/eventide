@@ -359,7 +359,7 @@ search_knowledge在启用时最多返回5条，附原查询/改写来源；失�
 `GET /api/workspaces/{workspace_id}/index-status` 提供所选副本状态，页面不得将 available 描述为全仓源码最新。构建可选 `workspace_id`，省略仍指项目源目录；构建回执/详情携带目标身份。前端只提供同项目已注册副本的选择，服务端仍负责权限与归属校验。工具记录的 `metadata.retrieval` 展示实际副本、索引代次、配置指纹及 hits 的路径、索引行号、内容哈希与 freshness；未记录时不补造值。
 
 - `GET /api/indexes/configuration`：返回provider/model/algorithm_version/dimension/config_hash，不返回凭据或endpoint原文。服务端模型资源缺失时409。
-- `POST /api/projects/{project_id}/indexes`：严格body为`config_hash`、`force=false`、`code_structure=false`及可选同项目`workspace_id`；必须本机同源及`Idempotency-Key`。持久接收后202，返回run_id/session_id/project_id/workspace_id/status_url/events_url。同键同内容回放，内容冲突409，配置变化或项目构建繁忙409，队列满429。确定未接收的失败附`X-Eventide-Mutation-Outcome: rejected`，未知保持原身份重试。
+- `POST /api/projects/{project_id}/indexes`：严格body为`config_hash`、`force=false`、`code_structure=false`、`source_scope=code|all`（默认code）及可选同项目`workspace_id`；必须本机同源及`Idempotency-Key`。持久接收后202，返回run_id/session_id/project_id/workspace_id/status_url/events_url。同键同内容回放，内容冲突409，配置变化或项目构建繁忙409，队列满429。确定未接收的失败附`X-Eventide-Mutation-Outcome: rejected`，未知保持原身份重试。
 - `GET /api/projects/{project_id}/indexes?limit=20&before=<run_id>`：按身份分页，limit最大100。`GET /api/indexes/{run_id}`：运行状态、固定配置/选项、发布证据及错误；`published=null`表示本次无已保存发布证据，不能伪造为0个文件。
 - `POST /api/indexes/{run_id}/cancel`：同源及幂等键，等待精确任务清理；重复停止或终态调用返回同一任务现状。取消排队任务不请求模型、不生成索引。
 
@@ -374,7 +374,7 @@ Python `RuntimeHost.manage_delivery("repair", delivery_id, goal, checks, image?,
 ### Web 交付接收和人工采纳
 
 - `POST /api/projects/{project_id}/deliveries`：`{name}`，1–48个小写字母/数字/连字符，创建独立副本。
-- `POST /api/deliveries/{delivery_id}/repair`：`{goal,checks,image?,max_rounds?,observed_token_limit?,knowledge_index?}`，目标1–20000字符，1–4个最多2000字符的明确验收命令，最多1–3轮（默认3）；已报告Token软限为1–1,000,000的严格整数，默认60,000。接收后冻结到原`limits.observed_tokens`，36次模型尝试及900秒保持固定。固定后不允许改验收条件、额度或重启同一修复流程。
+- `POST /api/deliveries/{delivery_id}/repair`：`{goal,checks,image?,max_rounds?,observed_token_limit?,knowledge_index?,code_structure?,source_scope?}`，目标1–20000字符，1–4个最多2000字符的明确验收命令，最多1–3轮（默认3）；已报告Token软限为1–1,000,000的严格整数，默认60,000。接收后冻结到原`limits.observed_tokens`，36次模型尝试及900秒保持固定。固定后不允许改验收条件、额度或重启同一修复流程。
 - `POST /api/deliveries/{delivery_id}/apply`：`{patch_sha256}`，必须与当前通过验收的补丁一致。持久接收和执行时均检查，源码漂移仍由原采纳检查拒绝。
 - 以上写入严格禁止额外字段，要求本机同源和`Idempotency-Key`；202返回run_id/delivery_id/project_id/status_url/events_url。同键同正文返回原身份，不重放；同键不同正文409。确定未接收的繁忙/冲突409或队列满429附`X-Eventide-Mutation-Outcome: rejected`，未知结果保留原键。
 - `GET /api/projects/{project_id}/deliveries`、`GET /api/deliveries/{delivery_id}`：已准备交付、固定修复条件、轮次、独立验收与采纳状态。

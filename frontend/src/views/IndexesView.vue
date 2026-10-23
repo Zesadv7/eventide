@@ -13,6 +13,13 @@ const skipReasonLabels: Record<string, string> = {
   binary: "二进制文件",
   non_utf8: "非 UTF-8 文本",
 };
+const structureFallbackLabels: Record<string, string> = {
+  unsupported_language: "不支持该语言",
+  dependency_unavailable: "未安装解析依赖",
+  parser_unavailable: "解析器不可用",
+  parse_error: "源码解析失败",
+  structure_error: "结构识别失败",
+};
 const detailClosed = ref(false);
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -416,7 +423,8 @@ function closeDetail() {
       </button>
       <p v-if="detail.error" class="inline-error">{{ detail.error }}</p>
       <p>
-        切分：{{ detail.code_structure ? "代码结构" : "文本分段" }}； 范围：{{
+        请求的切分方式：{{ detail.code_structure ? "代码结构" : "文本分段" }}；
+        范围：{{
           detail.source_scope === "code"
             ? "代码调查"
             : detail.source_scope === "all"
@@ -434,6 +442,23 @@ function closeDetail() {
       <p v-else class="muted">
         本次尚无已保存的发布证据。重启后的任务不会自动重放，请明确发起新构建。
       </p>
+      <template v-if="detail.code_structure && detail.published">
+        <p>
+          实际结构切分：{{ detail.published.stats.structured_files }} 个文件
+        </p>
+        <dl>
+          <template
+            v-for="(count, reason) in detail.published.stats
+              .structure_fallbacks"
+            :key="reason"
+          >
+            <dt>
+              回退为文本分段：{{ structureFallbackLabels[reason] ?? reason }}
+            </dt>
+            <dd>{{ count }} 个文件</dd>
+          </template>
+        </dl>
+      </template>
       <dl v-if="detail.published?.stats.skipped_reasons">
         <template
           v-for="(count, reason) in detail.published.stats.skipped_reasons"

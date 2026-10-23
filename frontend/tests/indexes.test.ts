@@ -345,3 +345,23 @@ it("preserves scope and structure when retrying an unknown acceptance", async ()
   ).toBeDefined();
   wrapper.unmount();
 });
+
+it.each([
+  { structured: 0, reason: "dependency_unavailable", label: "未安装解析依赖" },
+  { structured: 2, reason: "unsupported_language", label: "不支持该语言" },
+])(
+  "distinguishes requested structure from actual fallback: $reason",
+  async ({ structured, reason, label }) => {
+    const read = reads();
+    const result = detail("structured-build", { code_structure: true });
+    result.published!.stats.structured_files = structured;
+    result.published!.stats.structure_fallbacks = { [reason]: 3 - structured };
+    read.mockResolvedValue(result);
+    const { wrapper } = await render();
+    expect(wrapper.text()).toContain("请求的切分方式：代码结构");
+    expect(wrapper.text()).toContain(`实际结构切分：${structured} 个文件`);
+    expect(wrapper.text()).toContain(`回退为文本分段：${label}`);
+    expect(wrapper.text()).toContain(`${3 - structured} 个文件`);
+    wrapper.unmount();
+  },
+);

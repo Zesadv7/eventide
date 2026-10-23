@@ -447,11 +447,13 @@ def agent_comparison_report(host: RuntimeHost, control_runs: list[str]) -> dict[
             "results": selected,
         }
         if identity["version"] == "retrieval-agent-v2":
-            grades = [row["grade"] for row in selected if "grade" in row]
+            grades = [row["grade"] for row in selected
+                      if row["status"] == "completed" and "grade" in row]
             expected_facts = sum(grade["expected_fact_count"] for grade in grades)
             present_facts = sum(grade["present_fact_count"] for grade in grades)
             correct_facts = sum(grade["correct_fact_count"] for grade in grades)
             authentic = sum(grade["authentic_citations"] for grade in grades)
+            graded_citations = sum(grade["total_citations"] for grade in grades)
             arms[arm]["quality"] = {
                 "graded_attempts": len(grades), "ungraded_attempts": len(selected) - len(grades),
                 "schema_valid_attempts": sum(grade["schema_valid"] for grade in grades),
@@ -461,7 +463,8 @@ def agent_comparison_report(host: RuntimeHost, control_runs: list[str]) -> dict[
                 "field_coverage": present_facts / expected_facts if expected_facts else None,
                 "fact_accuracy": correct_facts / expected_facts if expected_facts else None,
                 "authentic_citations": authentic,
-                "citation_authenticity_ratio": authentic / total if total else None,
+                "citation_authenticity_ratio": (
+                    authentic / graded_citations if graded_citations else None),
                 "semantic_search_calls": sum(call["name"] == "search_knowledge"
                                              for row in selected for call in row["tool_calls"]),
                 "semantic_search_runs": sum(any(call["name"] == "search_knowledge"
