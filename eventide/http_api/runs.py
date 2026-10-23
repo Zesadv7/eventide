@@ -123,6 +123,10 @@ def create_router(context: ApiContext) -> APIRouter:
         payload = {**body.model_dump(), "generation": body.generation.patch()}
         if body.knowledge_index == "existing":
             payload.pop("knowledge_index")
+        if not body.code_structure:
+            payload.pop("code_structure")
+        if body.source_scope == "code":
+            payload.pop("source_scope")
         if body.execution_profile == "local" and body.sandbox_image is None:
             # Preserve outstanding legacy local request identities across this upgrade.
             payload.pop("execution_profile")
@@ -144,6 +148,7 @@ def create_router(context: ApiContext) -> APIRouter:
                     mode=body.mode,
                     execution_target=body.execution_target,
                     knowledge_index=body.knowledge_index,
+                    code_structure=body.code_structure, source_scope=body.source_scope,
                     execution_profile=body.execution_profile,
                     sandbox_image=body.sandbox_image,
                     attachment_ids=list(body.attachment_ids),

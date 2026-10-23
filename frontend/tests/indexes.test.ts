@@ -249,6 +249,7 @@ it("chooses only project workspaces and keeps the build target in the request", 
   expect(create).toHaveBeenCalledWith(project, {
     ...input,
     workspace_id: "writer",
+    source_scope: "code",
   });
   wrapper.unmount();
 });
@@ -314,5 +315,33 @@ it("ignores a late status for another workspace and reports legacy location with
     "不代表全部源码最新",
   );
   expect(wrapper.text()).not.toContain("stale response");
+  wrapper.unmount();
+});
+
+it("preserves scope and structure when retrying an unknown acceptance", async () => {
+  reads();
+  const original = {
+    ...input,
+    code_structure: true,
+    source_scope: "all" as const,
+  };
+  sessionStorage.setItem(
+    `eventide.index-pending.v1.${project}`,
+    JSON.stringify(original),
+  );
+  const { wrapper } = await render();
+  expect(indexRequestState(project).pending).toEqual(original);
+  expect(
+    (wrapper.get('[aria-label="索引范围"]').element as HTMLSelectElement).value,
+  ).toBe("all");
+  expect(
+    (
+      wrapper.get(".index-preparation-options input")
+        .element as HTMLInputElement
+    ).checked,
+  ).toBe(true);
+  expect(
+    wrapper.get(".index-preparation-options").attributes("disabled"),
+  ).toBeDefined();
   wrapper.unmount();
 });

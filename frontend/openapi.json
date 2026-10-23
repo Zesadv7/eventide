@@ -15204,6 +15204,17 @@
             "enum": ["existing", "prepare"],
             "title": "Knowledge Index",
             "default": "existing"
+          },
+          "code_structure": {
+            "type": "boolean",
+            "title": "Code Structure",
+            "default": false
+          },
+          "source_scope": {
+            "type": "string",
+            "enum": ["code", "all"],
+            "title": "Source Scope",
+            "default": "code"
           }
         },
         "additionalProperties": false,
@@ -16328,6 +16339,12 @@
             "title": "Code Structure",
             "default": false
           },
+          "source_scope": {
+            "type": "string",
+            "enum": ["code", "all"],
+            "title": "Source Scope",
+            "default": "code"
+          },
           "workspace_id": {
             "anyOf": [
               {
@@ -16418,6 +16435,18 @@
           "code_structure": {
             "type": "boolean",
             "title": "Code Structure"
+          },
+          "source_scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["code", "all"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Scope"
           },
           "published": {
             "anyOf": [
@@ -16557,6 +16586,43 @@
           "generation": {
             "type": "integer",
             "title": "Generation"
+          },
+          "source_scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["code", "all"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Scope"
+          },
+          "source_selection_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Selection Fingerprint"
+          },
+          "skipped_reasons": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped Reasons"
           }
         },
         "type": "object",
@@ -16974,6 +17040,17 @@
             "enum": ["existing", "prepare"],
             "title": "Knowledge Index",
             "default": "existing"
+          },
+          "code_structure": {
+            "type": "boolean",
+            "title": "Code Structure",
+            "default": false
+          },
+          "source_scope": {
+            "type": "string",
+            "enum": ["code", "all"],
+            "title": "Source Scope",
+            "default": "code"
           },
           "sandbox_image": {
             "anyOf": [

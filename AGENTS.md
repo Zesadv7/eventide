@@ -416,5 +416,23 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
 | 编号 | 状态 | 范围与证据 |
 |---|---|---|
-| RQ2 | 已完成（核心） | 基线9768103，独立codex/retrieval-chunks-v2。IndexStore.build默认code排除明确依赖锁/产物目录与压缩资源/标准生成头，all显式纳入；保留普通JSON/YAML/d.ts、build目录和无生成标记的OpenAPI，未硬编码用户项目路径。规则/profile/指纹与有界原因计数已落库，规则或scope变更需force；安全/UTF8/大小边界及用户忽略不变。与RQ3-CORE合计87个不同定向用例通过、3模块Mypy/Ruff/diff通过。architecture/ADR-099同步，API/任务冻结/页面及效果由主任务收口。 |
+| RQ2-CORE | 已完成 | 基线9768103，独立codex/retrieval-chunks-v2。IndexStore.build默认code排除明确依赖锁/产物目录与压缩资源/标准生成头，all显式纳入；保留普通JSON/YAML/d.ts、build目录和无生成标记的OpenAPI，未硬编码用户项目路径。规则/profile/指纹与有界原因计数已落库，规则或scope变更需force；安全/UTF8/大小边界及用户忽略不变。与RQ3-CORE合计87个不同定向用例通过、3模块Mypy/Ruff/diff通过。architecture/ADR-099同步，API/任务冻结/页面及效果由主任务收口。 |
 | RQ3-CORE | 已完成 | windows-v2重叠严格≤100字符，在该范围内尽量对齐行首；600/800字符窗口、原行号和Markdown标题边界保留，纯空白窗口推进避免丢后文。复用原tree-sitter长函数/符号及明确fallback，无新解析框架。两项受控缺陷复现后修复；首批80项、补边界14项（去重87）及3模块Mypy/Ruff/diff通过，日志.task_outputs/retrieval-quality/core/，格式失败另记failure-cases。旧窗口/缺身份索引仍可查询，准备必须force；不重跑模型/全量，不宣称召回或速度改善，任务接线由集成任务完成。 |
+
+
+## 检索质量与结构切分（2026-10-23）
+
+基线9768103；主目录另有文件对比/撤销未提交改动，本轮在隔离worktree实施，集成不夹带或覆盖。保留旧40查询、retrieval-agent-v1及历史成绩；不调用标准API，不增加新框架/向量库/检索Agent或默认重排。保留5段/800字符/4000正文边界和权限、预算、源码核对。
+
+| 编号 | 状态 | 实施与验收 / 证据 |
+|---|---|---|
+| RQ1 | 进行中 | 新版明确字段/题意/引用契约，独立正反例验证判分器；v1不改判。 |
+| RQ2 | 已完成 | 2026-10-23：核心1e0f359，窄范围过滤/全量文本选项、固定规则身份/跳过原因/显式重建落地，87项不同核心定向通过。详细证据见本文件RQ-CORE与architecture/ADR-099；真实收益另验。 |
+| RQ3 | 已完成 | 2026-10-23：手动/Run/Continue/Writer及页面冻结同一结构/范围/规则策略；取得构建锁后复验，旧位置策略变更须force且不修改旧库。57个不同关联后端通过/1既有Docker显式跳过，31不同组件、4真实API旅程、类型/构建及12模块Mypy（最终2模块复核）/Ruff通过，独立复核发现的两个边界已修。guide/api-contract/architecture/ADR-099同步；失败闭环见RQ-INTEGRATION，最终全量/新效果另验。 |
+| RQ4 | 待开始 | 测量重复、符号上下文和构建阶段耗时；证据支持才改，不预先删模型校验。 |
+| RQ5 | 待开始 | 新24条代码查询(开发/留出各12)；新8题Agent(各4)、两臂每题一次共16尝试。先开发契约再冻结留出，同一FP32模型/参数/预算，失败不补跑，记录实际RAG调用。不外推修复率。 |
+| RQ6 | 待开始 | 定向通过后一次全量及受影响前端/分发；同步文档、失败案例、本地提交。必要源索引仅一次force加文档后增量，不推送。 |
+
+证据在忽略目录.task_outputs/retrieval-quality/。效果门槛：Recall@5/MRR一升一不降、纯检索p95不超过较好基线2倍、Agent通过及有效引用不下降；未通过保留可选。开发若仍反复错键则不跑留出，不能消耗留出调参。
+
+- RQ2-LEGACY 已完成（核心）：只读评审发现旧`.eventide`位置准备到新受管位置时只核对embedding，未核对旧切块/语料策略。IndexStore.validate_build_configuration复用build策略校验并在同一WAL快照验证embedding/切块/语料身份；缺策略和不匹配明确要求force，不创建/迁移/修改旧索引。22项受影响定向及加强后的并发发布快照1项通过（该项已包含在22中，不重复计数）、单模块Python3.10目标Mypy/Ruff/diff通过。三处换行失败已追加RQ-CORE-STATIC；无全量/模型调用，Host锁内复核和legacy调用由主任务集成。

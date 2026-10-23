@@ -27,7 +27,7 @@ class IndexBuildCancelled(RuntimeError):
 async def build_index(
     host: RuntimeHost, run_id: str, workspace: Path, *, settings: Settings,
     profile: EmbeddingProfile, embedder: EmbeddingProvider | None = None,
-    force: bool = False, code_structure: bool = False,
+    force: bool = False, code_structure: bool = False, source_scope: str = "code",
     index_dir: Path | None = None,
 ) -> BuildStats:
     """No second Store or request queue: worker thread waits for the owning event loop."""
@@ -80,7 +80,7 @@ async def build_index(
     worker = asyncio.create_task(asyncio.to_thread(
         IndexStore(workspace, index_dir=index_dir).build,
         force=force, embedder=Bridge(), profile=profile,
-        code_structure=code_structure, check_cancelled=check_cancelled,
+        code_structure=code_structure, source_scope=source_scope, check_cancelled=check_cancelled,
     ))
     cancelled = False
     while not worker.done():

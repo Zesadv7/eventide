@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IndexPreparationOptions from "../components/IndexPreparationOptions.vue";
 import PanelClose from "../components/PanelClose.vue";
 import {
   useUnsavedChanges,
@@ -39,6 +40,8 @@ const name = ref(""),
   image = ref(""),
   rounds = ref(3),
   prepareIndex = ref(false),
+  structuredIndex = ref(false),
+  indexScope = ref<"code" | "all">("code"),
   tokenLimit = ref(60_000);
 const acceptanceTemplate = `验收覆盖清单（待填写，不代表已覆盖）：
 - 预期行为：[待填写] -> 固定验收命令第 [待填写] 条
@@ -104,6 +107,8 @@ function choose(id: string, discardConfirmed = false) {
     rounds.value = 3;
     tokenLimit.value = 60_000;
     prepareIndex.value = false;
+    structuredIndex.value = false;
+    indexScope.value = "code";
     cleanRepair.value = repairSnapshot();
   }
   detailClosed.value = !id;
@@ -194,7 +199,13 @@ function repair() {
         .filter(Boolean),
       image: image.value.trim() || null,
       max_rounds: rounds.value,
-      ...(prepareIndex.value ? { knowledge_index: "prepare" as const } : {}),
+      ...(prepareIndex.value
+        ? {
+            knowledge_index: "prepare" as const,
+            code_structure: structuredIndex.value,
+            source_scope: indexScope.value,
+          }
+        : {}),
       ...(tokenLimit.value === 60_000
         ? {}
         : { observed_token_limit: tokenLimit.value }),
@@ -264,6 +275,8 @@ function reset() {
   rounds.value = 3;
   tokenLimit.value = 60_000;
   prepareIndex.value = false;
+  structuredIndex.value = false;
+  indexScope.value = "code";
   cleanRepair.value = repairSnapshot();
   cleanName.value = "";
   sync();
@@ -311,6 +324,8 @@ function closeDetail() {
   rounds.value = 3;
   tokenLimit.value = 60_000;
   prepareIndex.value = false;
+  structuredIndex.value = false;
+  indexScope.value = "code";
   cleanRepair.value = repairSnapshot();
   closePatch();
   void router.replace({ query: { ...route.query, delivery: undefined } });
@@ -439,6 +454,12 @@ function closeDetail() {
             :disabled="locked || busy"
           />每轮修复前准备知识索引</label
         >
+        <IndexPreparationOptions
+          v-if="prepareIndex"
+          v-model:structured="structuredIndex"
+          v-model:scope="indexScope"
+          :disabled="locked || busy"
+        />
         <p class="muted">
           在每轮 Writer 的实际副本中增量准备；远程构建和查询计入交付预算。Docker
           独立验收仍可使用，任务执行期间不自动重建。

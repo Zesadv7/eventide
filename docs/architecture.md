@@ -250,7 +250,7 @@ RG2/RG3 核心接口将源码根与索引目录分开：`IndexStore(workspace, i
 
 核心机制定向验证：两项预期 Red 转绿；新旧索引、路径与增量、同大小同时间戳变更、同快照重建、当前副本和改写绑定、输出上限及本地重排/既有离线评测共 162 项通过、1 项真实本地模型按既有开关跳过。该数值不表示真实模型效果或 RG4 生命周期验收；Host/Web 与真实 embedding 对照由本轮其余步骤继续集成。
 
-Run 接收固定 `knowledge_index` 与不含凭据的 embedding 配置摘要；Continue 继承并重新核对，旧 Run 缺字段不补造。source、普通 worktree 和 Writer 按实际 Workspace 取得状态根下的索引；准备在 admission 复核和副本所有权之后、工具组装之前进行。手动构建与任务准备共用 Workspace 构建锁，等待不占模型槽；远程批次复用唯一 attempt 和项目/交付预算，并在下一批前检查 Run 已报告 Token 软限。失败或取消持久记录 retrieval.status 并结束或停驻，不进入聊天循环或自动重放。
+Run 接收固定 `knowledge_index`、`code_structure`、`source_scope`、切分/文件选择规则身份及不含凭据的 embedding 配置摘要；Continue 继承并重新核对，旧 Run 缺字段不补造。source、普通 worktree 和 Writer 按实际 Workspace 取得状态根下的索引；准备在 admission 复核和副本所有权之后、工具组装之前进行。手动构建与任务准备共用 Workspace 构建锁，等待不占模型槽；远程批次复用唯一 attempt 和项目/交付预算，并在下一批前检查 Run 已报告 Token 软限。失败或取消持久记录 retrieval.status 并结束或停驻，不进入聊天循环或自动重放。
 
 实际 Workspace 根缺失或被替换成链接时明确拒绝；状态根位于实际源码内时拒绝准备。既有 WorktreeService 还要求状态根在源项目外，该创建约束不放宽。索引历史查询不依赖目录当前是否存在；真正允许删除的执行副本同时清理受控派生索引，原有 Session 历史保护不变。新位置损坏不回退旧库，旧位置只读，prepare 只向新位置发布；配置不匹配需用户显式 force 重建。
 
@@ -880,3 +880,7 @@ Event Log 保存 `acceptance.output_started/recorded/expired/cleanup_failed` Ses
 窗口策略为windows-v2：仍按Python字符计数，优先在600–800字符内以空行/行尾结束，最长800；相邻窗口最多重叠100字符，只在这个范围内向后选行首，无法对齐则使用精确字符边界。纯空白窗口不生成embedding片段，但继续向前调查，避免前部空白使后续源码消失。Markdown一级至三级标题各自分段，围栏内伪标题不分段；短片段允许小于600。可选tree-sitter复用原Python/JS/TS符号段，长函数仍分窗口、保留符号heading及真实行号，缺解析器/不支持/语法失败仍明确fallback。没有增加路径/符号embedding前缀、去重或索引服务。窗口版本变化和旧索引缺切块身份均需force；历史读取继续可用。
 
 核心验证为87个不同定向用例、Ruff和Python3.10目标三模块Mypy；两项受控复现及一次测试格式失败留在failure-cases。测试证明选择/兼容/引用/窗口边界，不证明实际语义检索收益；本步骤未运行全量、模型或重建生产索引。
+
+准备策略接线验证：手动构建、普通source/worktree、Continue及两轮Writer使用同一冻结策略，排队时规则漂移在模型执行前拒绝。57个不同关联后端通过、1项既有Docker显式跳过，31个不同组件用例和4条真实API浏览器旅程通过；类型检查通过。测试只使用Hash与脚本模型，不表示真实检索效果。完整收口与新冻结对照另行记录。
+
+`IndexStore.validate_build_configuration(profile, *, code_structure=False, source_scope="code")`供旧位置迁往新受管位置前只读预检；单一WAL快照复用现有embedding检查及build的切块/选择策略检查，缺策略、不匹配和指纹损坏明确要求force。该方法不创建新目录、不迁移或更新旧索引；查询仍可使用历史索引。Host仅在非force准备时调用，不能因新目标不存在就绕过已存在旧索引的策略变更确认。22项定向覆盖正常读取、全部身份变化、缺身份/缺索引及并发发布时的一致快照；Host等待锁后的冻结复验单列集成验收。

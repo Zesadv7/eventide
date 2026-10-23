@@ -3,11 +3,17 @@ export type Generation = components["schemas"]["GenerationPatch"];
 // Defaults stay optional at the request boundary, including after schema regeneration.
 export type RunInput = Omit<
   components["schemas"]["RunBody"],
-  "execution_profile" | "sandbox_image" | "knowledge_index"
+  | "execution_profile"
+  | "sandbox_image"
+  | "knowledge_index"
+  | "code_structure"
+  | "source_scope"
 > & {
   execution_profile?: "local" | "sandbox";
   sandbox_image?: string | null;
   knowledge_index?: "existing" | "prepare";
+  code_structure?: boolean;
+  source_scope?: "code" | "all";
 };
 export type ProviderInput = components["schemas"]["ProviderConfigBody"];
 export interface Workspace {

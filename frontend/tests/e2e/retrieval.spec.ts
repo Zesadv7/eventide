@@ -109,6 +109,8 @@ test("source preparation exposes real retrieval provenance and restores it after
 }) => {
   await page.getByLabel("运行模式", { exact: true }).selectOption("plan");
   await page.getByLabel("任务开始前准备知识索引", { exact: true }).check();
+  await page.getByLabel("按函数与类切分", { exact: true }).check();
+  await page.getByLabel("索引范围", { exact: true }).selectOption("all");
   const id = await submit(page, "检索旅程 source");
   const run = await completedRun(page, id);
   expect(run.retrieval).toMatchObject({
@@ -167,6 +169,8 @@ test("ordinary worktree preparation uses its own modified source and index", asy
 }) => {
   await page.getByLabel("执行位置", { exact: true }).selectOption("worktree");
   await page.getByLabel("任务开始前准备知识索引", { exact: true }).check();
+  await page.getByLabel("按函数与类切分", { exact: true }).check();
+  await page.getByLabel("索引范围", { exact: true }).selectOption("all");
   const first = await completedRun(
     page,
     await submit(page, "检索旅程 worktree first"),
@@ -241,6 +245,8 @@ test("delivery Writer prepares and queries its own index before independent acce
     .getByLabel("验收命令", { exact: false })
     .fill('test "$(cat delivery-result.txt)" = "retrieval accepted"');
   await page.getByLabel("每轮修复前准备知识索引", { exact: true }).check();
+  await page.getByLabel("按函数与类切分", { exact: true }).check();
+  await page.getByLabel("索引范围", { exact: true }).selectOption("all");
   await page.getByRole("button", { name: "开始有界修复", exact: true }).click();
   await expect
     .poll(
@@ -290,6 +296,8 @@ test("cancelling a preparation waiting for its workspace lock consumes no model 
   expect(held.ok()).toBe(true);
   try {
     await page.getByLabel("任务开始前准备知识索引", { exact: true }).check();
+    await page.getByLabel("按函数与类切分", { exact: true }).check();
+    await page.getByLabel("索引范围", { exact: true }).selectOption("all");
     const id = await submit(page, "检索旅程 cancel waiting");
     await expect(
       page.getByRole("status", { name: "知识检索状态" }),

@@ -1536,6 +1536,17 @@ export interface components {
        * @enum {string}
        */
       knowledge_index: "existing" | "prepare";
+      /**
+       * Code Structure
+       * @default false
+       */
+      code_structure: boolean;
+      /**
+       * Source Scope
+       * @default code
+       * @enum {string}
+       */
+      source_scope: "code" | "all";
     };
     /** DeliveryRepairResult */
     DeliveryRepairResult: {
@@ -2020,6 +2031,12 @@ export interface components {
        * @default false
        */
       code_structure: boolean;
+      /**
+       * Source Scope
+       * @default code
+       * @enum {string}
+       */
+      source_scope: "code" | "all";
       /** Workspace Id */
       workspace_id?: string | null;
     };
@@ -2056,6 +2073,8 @@ export interface components {
       force: boolean;
       /** Code Structure */
       code_structure: boolean;
+      /** Source Scope */
+      source_scope?: ("code" | "all") | null;
       published: components["schemas"]["IndexPublication"] | null;
       /** Error */
       error: string | null;
@@ -2107,6 +2126,14 @@ export interface components {
       chunking_fingerprint: string;
       /** Generation */
       generation: number;
+      /** Source Scope */
+      source_scope?: ("code" | "all") | null;
+      /** Source Selection Fingerprint */
+      source_selection_fingerprint?: string | null;
+      /** Skipped Reasons */
+      skipped_reasons?: {
+        [key: string]: number;
+      } | null;
     };
     /** MemoryCreate */
     MemoryCreate: {
@@ -2275,6 +2302,17 @@ export interface components {
        * @enum {string}
        */
       knowledge_index: "existing" | "prepare";
+      /**
+       * Code Structure
+       * @default false
+       */
+      code_structure: boolean;
+      /**
+       * Source Scope
+       * @default code
+       * @enum {string}
+       */
+      source_scope: "code" | "all";
       /** Sandbox Image */
       sandbox_image?: string | null;
       /** Attachment Ids */

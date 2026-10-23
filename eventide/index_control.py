@@ -11,7 +11,13 @@ from typing import TYPE_CHECKING, Any
 from eventide.budgets import BudgetExceeded
 from eventide.config import Settings
 from eventide.models import RunResult
-from eventide.retrieval_runtime import configuration, prepare_index, validate_preparation
+from eventide.retrieval_runtime import (
+    configuration,
+    freeze_configuration,
+    prepare_index,
+    validate_frozen_configuration,
+    validate_preparation,
+)
 
 if TYPE_CHECKING:
     from eventide.host import RuntimeHost
@@ -72,7 +78,8 @@ class IndexController:
 
     async def admit(
         self, project_id: str, run_id: str, *, config_hash: str, force: bool = False,
-        code_structure: bool = False, request_fingerprint: str | None = None,
+        code_structure: bool = False, source_scope: str = "code",
+        request_fingerprint: str | None = None,
         workspace_id: str | None = None,
     ) -> str:
         from eventide.host import _Admission
@@ -81,6 +88,8 @@ class IndexController:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", run_id):
             raise ValueError("Invalid index Run identity")
         config = self.configuration()
+        frozen = freeze_configuration(self.host.settings, "prepare",
+                                      code_structure=code_structure, source_scope=source_scope)
         if config_hash != config["config_hash"]:
             raise ValueError("Index configuration changed; refresh before starting")
         owner = self.owner(project_id, workspace_id=workspace_id)
@@ -101,7 +110,7 @@ class IndexController:
             self.store.admit_run(run_id, owner, [
                 ("run.admitted", intent, "system", "runtime"),
                 ("index.accepted", {"configuration": config, "force": force,
-                                    "code_structure": code_structure}, "system", "runtime"),
+                                    **frozen}, "system", "runtime"),
             ])
             self._settings[run_id] = self.host.settings
             self.host._admission_done[run_id] = _Admission(owner, asyncio.Event())
@@ -152,9 +161,11 @@ class IndexController:
             try:
                 if self.store.workspace_has_unknown_outcome(workspace.workspace_id):
                     raise ValueError("Source Workspace has an unresolved tool outcome")
+                validate_frozen_configuration(settings, accepted)
                 stats = await prepare_index(
                     self.host, run_id, workspace, settings=settings, force=accepted["force"],
                     code_structure=accepted["code_structure"],
+                    source_scope=accepted["source_scope"], frozen_configuration=accepted,
                 )
                 self.store.append_event(run_id, "index.published", {
                     "stats": asdict(stats), "generation": stats.generation,
@@ -188,7 +199,8 @@ class IndexController:
                 "project_id": workspace.project_id, "workspace_id": workspace.workspace_id,
                 "status": run["status"],
                 "configuration": accepted["configuration"], "force": accepted["force"],
-                "code_structure": accepted["code_structure"], "published": published,
+                "code_structure": accepted["code_structure"],
+                "source_scope": accepted.get("source_scope"), "published": published,
                 "error": run["error"], "events_url": f"/api/runs/{run_id}/events"}
 
     def list(self, project_id: str, *, limit: int = 20, before: str | None = None

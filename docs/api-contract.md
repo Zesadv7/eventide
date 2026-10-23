@@ -568,6 +568,8 @@ capture_state为complete、quota_exceeded、write_failed、redaction_unavailable
 
 普通Run与交付repair请求新增 `knowledge_index: existing|prepare`，默认existing。省略与显式existing保持同一幂等内容；prepare与existing是不同意图，同键不同意图409。接收时冻结选择和embedding配置摘要；Continue继承并复验，历史缺字段不补造。snapshot/sandbox的prepare在接收前拒绝；只读worker不提供索引工具。每轮Writer准备属于自身Run，无额外根任务。准备失败不进入模型循环，取消/预算/未知沿既有语义，重启不自动重放。
 
+Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、`source_scope: code|all=code`。布尔值严格校验；省略与显式默认值保持原幂等内容，非默认选项参与请求身份。canonical admission冻结 `index_configuration.chunking_profile/source_selection_profile`，启动及Continue复核规则版本；规则改变或历史prepare缺少策略身份时明确拒绝并要求新任务，历史existing不补造身份。交付每轮Writer继承相同选项。手动构建详情source_scope及旧统计新增字段允许null；新build含source_scope、source_selection_fingerprint及skipped_reasons（原因→文件数）。原索引可查询，构建策略不一致必须显式force。
+
 手动 `POST /api/projects/{project_id}/indexes` 新增可选workspace_id；省略为源Workspace，只接受同项目注册且存在的副本。回执和详情新增workspace_id，项目历史聚合副本构建。新 `GET /api/workspaces/{workspace_id}/index-status` 返回status=available|unavailable、workspace_id、location=managed|legacy，以及可选reason/detail/model/generation/embedding_fingerprint/config_hash。字段可为null；available表示匹配索引可用，不代表全部源码都最新。损坏的新位置不回退旧位置。
 
 手动索引幂等身份固定在项目范围；同键改变workspace_id也返回409，不能通过更换控制Session启动第二个构建。执行和查询结果仍归属精确副本；省略目标的旧请求沿用原源目录身份算法。

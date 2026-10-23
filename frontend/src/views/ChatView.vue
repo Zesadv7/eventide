@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IndexPreparationOptions from "../components/IndexPreparationOptions.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useWorkbench } from "../stores/workbench";
@@ -20,6 +21,8 @@ const store = useWorkbench(),
   executionProfile = ref<"local" | "sandbox">("local"),
   sandboxImage = ref(""),
   prepareIndex = ref(false),
+  structuredIndex = ref(false),
+  indexScope = ref<"code" | "all">("code"),
   model = ref(""),
   generation = ref<Generation>({}),
   modelList = ref<string[]>([]),
@@ -132,6 +135,10 @@ watch(
   () => {
     prepareIndex.value =
       store.pending[store.selectedSession]?.body.knowledge_index === "prepare";
+    structuredIndex.value =
+      store.pending[store.selectedSession]?.body.code_structure ?? false;
+    indexScope.value =
+      store.pending[store.selectedSession]?.body.source_scope ?? "code";
   },
   { immediate: true },
 );
@@ -257,7 +264,11 @@ async function submit() {
       prompt: draft.value,
       mode: mode.value,
       ...(prepareIndex.value && canPrepareIndex.value
-        ? { knowledge_index: "prepare" as const }
+        ? {
+            knowledge_index: "prepare" as const,
+            code_structure: structuredIndex.value,
+            source_scope: indexScope.value,
+          }
         : {}),
       ...(executionProfile.value === "sandbox"
         ? {
@@ -690,6 +701,12 @@ async function abandon() {
             "
           />任务开始前准备知识索引</label
         >
+        <IndexPreparationOptions
+          v-if="prepareIndex"
+          v-model:structured="structuredIndex"
+          v-model:scope="indexScope"
+          :disabled="!!pending || isActive || store.creating"
+        />
         <p class="muted">
           {{
             canPrepareIndex

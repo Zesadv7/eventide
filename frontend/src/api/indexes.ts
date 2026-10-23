@@ -3,7 +3,11 @@ import { durableMutation } from "./mutations";
 import type { components } from "./schema";
 import type { RetrievalStatus } from "./types";
 
-export type IndexInput = components["schemas"]["IndexBuildBody"] & {
+export type IndexInput = Omit<
+  components["schemas"]["IndexBuildBody"],
+  "source_scope"
+> & {
+  source_scope?: "code" | "all";
   workspace_id?: string;
 };
 export type IndexConfiguration = components["schemas"]["IndexConfiguration"];
@@ -33,6 +37,9 @@ export function indexRequestState(project: string) {
       /^[a-f0-9]{64}$/.test(value.config_hash) &&
       typeof value.force === "boolean" &&
       typeof value.code_structure === "boolean" &&
+      (value.source_scope === undefined ||
+        value.source_scope === "code" ||
+        value.source_scope === "all") &&
       (value.workspace_id === undefined ||
         typeof value.workspace_id === "string")
     )
@@ -40,6 +47,9 @@ export function indexRequestState(project: string) {
         config_hash: value.config_hash,
         force: value.force,
         code_structure: value.code_structure,
+        ...(value.source_scope === undefined
+          ? {}
+          : { source_scope: value.source_scope }),
         ...(value.workspace_id === undefined
           ? {}
           : { workspace_id: value.workspace_id }),
@@ -88,6 +98,9 @@ export const indexesApi = {
       config_hash: input.config_hash,
       force: input.force,
       code_structure: input.code_structure,
+      ...(input.source_scope === undefined
+        ? {}
+        : { source_scope: input.source_scope }),
       ...(input.workspace_id === undefined
         ? {}
         : { workspace_id: input.workspace_id }),

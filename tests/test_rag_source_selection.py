@@ -3,12 +3,14 @@
 import json
 import sqlite3
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from eventide.rag import source_selection
 from eventide.rag.chunker import chunking_fingerprint
+from eventide.rag.embedding import HashEmbedder
 from eventide.rag.index import IndexStore
 
 
@@ -131,3 +133,68 @@ def test_generated_headers_are_bounded_and_not_filename_guesses(store: IndexStor
     stats = store.build()
     assert stats.files == 3 and stats.skipped_reasons == {"generated_artifact": 1}
     assert store.build(source_scope="all", force=True).files == 4
+
+
+def test_build_configuration_checks_legacy_location_without_writing(store: IndexStore) -> None:
+    (store.workspace / "code.py").write_text("legacy_location_needle", encoding="utf-8")
+    legacy = IndexStore(store.workspace)
+    legacy.build(source_scope="all", code_structure=True)
+    profile = legacy.embedding_profile()
+    before = legacy.path.read_bytes()
+    assert legacy.validate_build_configuration(
+        profile, source_scope="all", code_structure=True,
+    ) == profile
+    for requested, options, message in [
+        (profile, {"source_scope": "code", "code_structure": True}, "Source selection"),
+        (profile, {"source_scope": "all", "code_structure": False}, "Chunking"),
+        (replace(profile, model="changed"),
+         {"source_scope": "all", "code_structure": True}, "Embedding"),
+    ]:
+        with pytest.raises(ValueError, match=message + " configuration changed"):
+            legacy.validate_build_configuration(requested, **options)
+    assert legacy.path.read_bytes() == before
+    assert legacy.generation() == 1 and not store.path.exists()
+
+
+@pytest.mark.parametrize("prefix", ["chunking", "source_selection"])
+def test_readonly_build_configuration_requires_recorded_policy(
+    store: IndexStore, prefix: str,
+) -> None:
+    (store.workspace / "code.py").write_text("unchanged_needle", encoding="utf-8")
+    store.build()
+    profile = store.embedding_profile()
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DELETE FROM meta WHERE key LIKE ?", (prefix + "_%",))
+    with pytest.raises(ValueError, match="rebuild with --force"):
+        store.validate_build_configuration(profile)
+    assert store.sparse_search("unchanged_needle", limit=5)
+    assert store.generation() == 1
+
+
+def test_readonly_build_configuration_does_not_create_missing_index(store: IndexStore) -> None:
+    (store.workspace / "code.py").write_text("needle", encoding="utf-8")
+    store.build()
+    missing = IndexStore(store.workspace)
+    with pytest.raises(ValueError, match="No knowledge index"):
+        missing.validate_build_configuration(store.embedding_profile())
+    assert not missing.path.parent.exists()
+
+
+def test_readonly_build_configuration_uses_one_generation(
+    store: IndexStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (store.workspace / "code.py").write_text("originalneedle", encoding="utf-8")
+    store.build()
+    profile = store.embedding_profile()
+    original = IndexStore.validate_profile
+
+    def change_after_policy_read(reader, requested):
+        store.build(source_scope="all", force=True, embedder=HashEmbedder(),
+                    profile=replace(profile, model="changed"))
+        return original(reader, requested)
+
+    monkeypatch.setattr(IndexStore, "validate_profile", change_after_policy_read)
+    assert store.validate_build_configuration(profile) == profile
+    assert store.generation() == 2
+    with pytest.raises(ValueError, match="Source selection configuration changed"):
+        store.validate_build_configuration(profile)

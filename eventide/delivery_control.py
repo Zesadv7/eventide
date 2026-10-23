@@ -96,6 +96,8 @@ class WebDeliveryController:
         max_rounds: int = 3,
         observed_token_limit: int = 60_000,
         knowledge_index: str = "existing",
+        code_structure: bool = False,
+        source_scope: str = "code",
         patch_sha256: str | None = None,
         request_fingerprint: str | None = None,
     ) -> str:
@@ -113,7 +115,10 @@ class WebDeliveryController:
         if action == "repair":
             from eventide.retrieval_runtime import freeze_configuration, validate_preparation
 
-            retrieval = freeze_configuration(self.host.settings, knowledge_index)
+            retrieval = freeze_configuration(
+                self.host.settings, knowledge_index,
+                code_structure=code_structure, source_scope=source_scope,
+            )
             if not goal or not goal.strip() or len(goal) > 20_000:
                 raise ValueError("Repair goal must contain 1-20000 characters")
             if (
@@ -245,6 +250,9 @@ class WebDeliveryController:
                 max_rounds=accepted["max_rounds"],
                 observed_token_limit=accepted.get("observed_token_limit", 60_000),
                 knowledge_index=accepted.get("knowledge_index", "existing"),
+                code_structure=accepted.get("code_structure", False),
+                source_scope=accepted.get("source_scope", "code"),
+                _index_configuration=accepted.get("index_configuration"),
                 _retrieval_configuration=accepted.get("retrieval_configuration"),
                 _control_run_id=run_id,
             )

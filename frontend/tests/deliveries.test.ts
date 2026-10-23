@@ -388,6 +388,8 @@ it("passes opt-in preparation to every Writer while allowing Docker verification
   const option = wrapper.get('[aria-label="每轮修复前准备知识索引"]');
   expect((option.element as HTMLInputElement).checked).toBe(false);
   await option.setValue(true);
+  await wrapper.get(".index-preparation-options input").setValue(true);
+  await wrapper.get('[aria-label="索引范围"]').setValue("all");
   await wrapper.findAll("textarea")[0]!.setValue("repair source");
   await wrapper.findAll("textarea")[1]!.setValue("python -m pytest");
   await wrapper.get("article input:not([type])").setValue("trusted-image");
@@ -402,6 +404,8 @@ it("passes opt-in preparation to every Writer while allowing Docker verification
       image: "trusted-image",
       max_rounds: 3,
       knowledge_index: "prepare",
+      code_structure: true,
+      source_scope: "all",
     },
   });
   wrapper.unmount();

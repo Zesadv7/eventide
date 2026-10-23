@@ -64,6 +64,7 @@ from eventide.retrieval_runtime import (
     configure_run_retrieval,
     freeze_configuration,
     managed_index_dir,
+    validate_frozen_configuration,
     validate_preparation,
 )
 from eventide.run_dispatch import RunDispatch
@@ -1766,9 +1767,10 @@ class RuntimeHost:
             execution_config = prior.get("execution_config") or {}
             old_intent = self._admitted_intent(source_id) or {}
             if "knowledge_index" in old_intent:
-                retrieval = freeze_configuration(self.settings, old_intent["knowledge_index"])
-                if retrieval["retrieval_configuration"] != old_intent["retrieval_configuration"]:
-                    raise ValueError("Embedding configuration changed; Continue refused")
+                try:
+                    retrieval = validate_frozen_configuration(self.settings, old_intent)
+                except ValueError as exc:
+                    raise ValueError(f"{exc}; Continue refused") from exc
             if old_intent.get("execution_profile_config"):
                 execution_config = validate_sandbox_profile(old_intent["execution_profile_config"])
             skill_snapshot = old_intent.get("skill_snapshot") or next((
@@ -1778,6 +1780,8 @@ class RuntimeHost:
         if not source_id:
             retrieval = freeze_configuration(
                 self.settings, request.knowledge_index if request else "existing",
+                code_structure=request.code_structure if request else False,
+                source_scope=request.source_scope if request else "code",
             )
         if not isinstance(model, str) or len(model) > 256:
             raise ValueError("Model name cannot exceed 256 characters")

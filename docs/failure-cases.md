@@ -383,3 +383,21 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - **范围/类型/状态：** 静态检查；新测试格式问题，已完成。基线9768103加本轮核心修改；Ruff定向检查只有新测试一行103字符超过100字符规则，生产逻辑和80+14项定向结果未失败。证据`.task_outputs/retrieval-quality/core/ruff.log`。
 - **处理与复验：** 将检索结果赋值与断言分两行，不改断言语义；同一变更文件范围Ruff复验通过，见ruff-green.log；Git差异检查通过。相关提交为包含本节的RQ2/RQ3-CORE提交，不重新运行功能测试。
 - **经验与参与：** Codex编写及修正测试格式；不包装成生产故障或性能收益，无遗留问题。
+
+
+### RQ-INTEGRATION：准备策略接线验证（2026-10-23）
+
+- 类型：测试问题。基线9768103，隔离分支codex/retrieval-quality，核心提交1e0f359。
+- 失败：受影响组件三文件首轮31项中30通过，indexes.test.ts「chooses only project workspaces」失败。页面正确提交新增默认source_scope=code，旧精确参数断言漏了此字段；不是跨副本串线。证据.task_outputs/retrieval-quality/integration/components.log。
+- 处理：只补该断言的默认范围，不改旧pending请求的省略字段或幂等内容；该项定向复验1通过（components-recheck.log），31个不同组件用例均通过。其他通过用例未为此重复。
+- 维护代理完成定位与修正；前端类型检查已通过，真实模型效果尚未验证。
+
+- RQ-INTEGRATION静态检查补记：首次Ruff报2处新增import排序和1处101字符行宽；仅格式问题，日志integration/ruff.log。已调整，受影响两文件Ruff复验通过（ruff-recheck.log）。
+
+- RQ-INTEGRATION受控缺陷复现：锁等待期间变更已冻结规则，两个新增边界用例均失败（普通任务错误完成、手动构建未拒绝），证据integration/lock-drift-red.log。原因：复验位于拿锁前；拿锁后未再次比较admission。补为锁内实际构建前统一复验，2项定向转绿（lock-drift-green.log），后续legacy关联复验也通过。这是新增契约的受控复现，不是线上事故。
+
+- RQ-CORE-STATIC追加（RQ2-LEGACY）：新增只读预检接口后，`ruff check eventide/rag/index.py tests/test_rag_source_selection.py`首次仅三处101–103字符行超限，日志`core/legacy-ruff.log`。按相同根因合并；只调整换行后同范围复验通过（legacy-ruff-green.log），22项定向与1项加强快照复验及Mypy原本通过，未重复功能测试。相关提交为本次legacy策略预检提交。
+
+- RQ-INTEGRATION测试问题补记：新增legacy集成用例首次4通过/1失败，测试误用不存在的IndexStore.db_path属性，尚未进入生产断言。改为实际path属性；只复验该用例，日志integration/legacy-green.log和legacy-recheck.log。锁等待两个受控失败已转绿，未再出现错误发布。
+
+RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log），不改生产行为。57个不同后端定向、31组件、4浏览器旅程、类型/构建/Ruff/Mypy通过；所有本轮失败均已定位并复验，相关实现见本次准备策略提交。维护代理编写与验证，独立审查指出锁及legacy边界；尚无真实模型收益结论。

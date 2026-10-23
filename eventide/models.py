@@ -67,6 +67,8 @@ class RunRequest:
     execution_profile: str = "local"
     sandbox_image: str | None = None
     knowledge_index: str = "existing"
+    code_structure: bool = False
+    source_scope: str = "code"
 
 
 @dataclass(frozen=True, slots=True)

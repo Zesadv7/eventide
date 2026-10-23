@@ -476,39 +476,11 @@ class IndexStore:
                 str(row["path"]): str(row["content_hash"])
                 for row in connection.execute("SELECT path, content_hash FROM files")
             }
-            stored_chunking = meta.get("chunking_fingerprint")
-            stored_chunking_profile = meta.get("chunking_profile")
-            if not force and (
-                (stored_chunking is None) != (stored_chunking_profile is None)
-                or (
-                    stored_chunking_profile is not None
-                    and chunking_fingerprint(stored_chunking_profile) != stored_chunking
+            if not force:
+                self._validate_build_policy(
+                    meta, chunking_profile=chunking_profile, selection_profile=selection_profile,
+                    initialized=bool(existing) or generation > 0,
                 )
-            ):
-                raise ValueError("Knowledge index chunking fingerprint is invalid; rebuild --force")
-            if (
-                (existing or stored_chunking is not None)
-                and not force
-                and (
-                    (stored_chunking is not None and stored_chunking != chunking_digest)
-                    or stored_chunking is None
-                )
-            ):
-                raise ValueError("Chunking configuration changed; rebuild with --force")
-            stored_selection = meta.get("source_selection_fingerprint")
-            stored_selection_profile = meta.get("source_selection_profile")
-            if not force and (
-                (stored_selection is None) != (stored_selection_profile is None)
-                or (
-                    stored_selection_profile is not None
-                    and source_selection_fingerprint(stored_selection_profile) != stored_selection
-                )
-            ):
-                raise ValueError("Source selection fingerprint is invalid; rebuild with --force")
-            if (existing or stored_selection is not None) and not force and (
-                stored_selection != selection_digest
-            ):
-                raise ValueError("Source selection configuration changed; rebuild with --force")
             chunk_total, null_total = connection.execute(
                 "SELECT COUNT(*), SUM(CASE WHEN vec IS NULL THEN 1 ELSE 0 END) FROM chunks"
             ).fetchone()
@@ -822,6 +794,40 @@ class IndexStore:
         if not fields_match or not dimension_matches:
             raise ValueError("Embedding configuration changed; rebuild with --force")
         return stored
+
+    @staticmethod
+    def _validate_build_policy(
+        meta: dict[str, str], *, chunking_profile: str, selection_profile: str, initialized: bool,
+    ) -> None:
+        for prefix, label, requested, fingerprint in (
+            ("chunking", "Chunking", chunking_profile, chunking_fingerprint),
+            ("source_selection", "Source selection",
+             selection_profile, source_selection_fingerprint),
+        ):
+            stored = meta.get(f"{prefix}_fingerprint")
+            stored_profile = meta.get(f"{prefix}_profile")
+            if (
+                (stored is None) != (stored_profile is None)
+                or (stored_profile is not None and fingerprint(stored_profile) != stored)
+            ):
+                raise ValueError(f"{label} fingerprint is invalid; rebuild with --force")
+            if (initialized or stored is not None) and stored != fingerprint(requested):
+                raise ValueError(f"{label} configuration changed; rebuild with --force")
+
+    def validate_build_configuration(
+        self, profile: EmbeddingProfile, *, code_structure: bool = False,
+        source_scope: str = "code",
+    ) -> EmbeddingProfile:
+        """Read one published snapshot before preparing an index in another location."""
+        selection_profile = source_selection_identity(source_scope)
+        chunking_profile = chunking_identity(code_structure=code_structure)
+        with self.snapshot() as snapshot:
+            with snapshot._reader() as connection:
+                self._validate_build_policy(
+                    self._meta(connection), chunking_profile=chunking_profile,
+                    selection_profile=selection_profile, initialized=True,
+                )
+            return snapshot.validate_profile(profile)
 
     def dense_search(self, vector: list[float], *, limit: int) -> list[DenseCandidate]:
         """Rank every stored float32 vector by cosine similarity."""

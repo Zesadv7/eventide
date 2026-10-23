@@ -49,11 +49,17 @@ async def run_repair(
     observed_token_limit: int = 60_000,
     knowledge_index: str = "existing",
     retrieval_configuration: dict[str, Any] | None = None,
+    *, code_structure: bool = False, source_scope: str = "code",
+    index_configuration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     host = controller.host
     from eventide.retrieval_runtime import freeze_configuration, validate_preparation
 
-    retrieval = freeze_configuration(host.settings, knowledge_index)
+    retrieval = freeze_configuration(
+        host.settings, knowledge_index, code_structure=code_structure, source_scope=source_scope,
+    )
+    if index_configuration is not None and retrieval["index_configuration"] != index_configuration:
+        raise ValueError("Index preparation rules changed since repair admission")
     if knowledge_index == "prepare":
         validate_preparation(host, checkout_ws)
     if retrieval_configuration is not None and (

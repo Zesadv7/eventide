@@ -103,6 +103,9 @@ class DeliveryController:
         max_rounds: int = 3,
         observed_token_limit: int = 60_000,
         knowledge_index: str = "existing",
+        code_structure: bool = False,
+        source_scope: str = "code",
+        _index_configuration: dict[str, Any] | None = None,
         _retrieval_configuration: dict[str, Any] | None = None,
         _control_run_id: str | None = None,
     ) -> dict[str, Any]:
@@ -242,6 +245,8 @@ class DeliveryController:
                             self, run_id, delivery_id, source, checkout_ws, receipt,
                             goal or "", checks or [], image, max_rounds, observed_token_limit,
                             knowledge_index, _retrieval_configuration,
+                            code_structure=code_structure, source_scope=source_scope,
+                            index_configuration=_index_configuration,
                         )
                     elif action == "run":
                         if not goal or not goal.strip() or len(goal) > 20_000:
@@ -360,13 +365,14 @@ class DeliveryController:
         )
         option = contract.get("knowledge_index", "existing")
         if "retrieval_configuration" in contract:
-            from eventide.retrieval_runtime import freeze_configuration
+            from eventide.retrieval_runtime import validate_frozen_configuration
 
-            if freeze_configuration(host.settings, option)["retrieval_configuration"] != (
-                contract["retrieval_configuration"]
-            ):
-                raise ValueError("Embedding configuration changed between Writer rounds")
-        request = RunRequest(goal, child_session, child_id, knowledge_index=option)
+            validate_frozen_configuration(host.settings, contract)
+        request = RunRequest(
+            goal, child_session, child_id, knowledge_index=option,
+            code_structure=contract.get("code_structure", False),
+            source_scope=contract.get("source_scope", "code"),
+        )
         if owned:
             child = await start_owned_writer(host, run_id, child_session, child_id, request, config)
         else:

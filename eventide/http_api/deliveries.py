@@ -26,6 +26,8 @@ class DeliveryRepairBody(BaseModel):
     max_rounds: int = Field(default=3, ge=1, le=3)
     observed_token_limit: int = Field(default=60_000, ge=1, le=1_000_000)
     knowledge_index: Literal["existing", "prepare"] = "existing"
+    code_structure: bool = Field(default=False, strict=True)
+    source_scope: Literal["code", "all"] = "code"
 
 
 class DeliveryApplyBody(BaseModel):
@@ -175,6 +177,8 @@ def create_router(context: ApiContext) -> APIRouter:
             body.model_dump(exclude=(
                 ({"observed_token_limit"} if body.observed_token_limit == 60_000 else set())
                 | ({"knowledge_index"} if body.knowledge_index == "existing" else set())
+                | ({"code_structure"} if not body.code_structure else set())
+                | ({"source_scope"} if body.source_scope == "code" else set())
             )),
             request, delivery_id,
         )

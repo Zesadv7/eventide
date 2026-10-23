@@ -20,6 +20,7 @@ class IndexBuildBody(BaseModel):
     config_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     force: bool = False
     code_structure: bool = False
+    source_scope: Literal["code", "all"] = "code"
     workspace_id: str | None = None
 
 
@@ -51,6 +52,9 @@ class IndexStatistics(BaseModel):
     structure_fallbacks: dict[str, int]
     chunking_fingerprint: str
     generation: int
+    source_scope: Literal["code", "all"] | None = None
+    source_selection_fingerprint: str | None = None
+    skipped_reasons: dict[str, int] | None = None
 
 
 class IndexPublication(BaseModel):
@@ -67,6 +71,7 @@ class IndexDetail(BaseModel):
     configuration: IndexConfiguration
     force: bool
     code_structure: bool
+    source_scope: Literal["code", "all"] | None = None
     published: IndexPublication | None
     error: str | None
     events_url: str
@@ -113,6 +118,8 @@ def create_router(context: ApiContext) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from exc
         payload = body.model_dump()
+        if body.source_scope == "code":
+            payload.pop("source_scope")
         if body.workspace_id is None:
             payload.pop("workspace_id")
         receipt = run_receipt(

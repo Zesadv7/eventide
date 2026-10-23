@@ -1,7 +1,18 @@
 <script setup lang="ts">
+import IndexPreparationOptions from "../components/IndexPreparationOptions.vue";
 import PanelClose from "../components/PanelClose.vue";
 import RetrievalStatus from "../components/RetrievalStatus.vue";
 import type { RetrievalStatus as Status } from "../api/types";
+const skipReasonLabels: Record<string, string> = {
+  dependency_lock: "依赖锁文件",
+  build_output: "构建产物",
+  generated_artifact: "带生成标记的文件",
+  path_boundary: "路径边界限制",
+  too_large: "文件过大",
+  unreadable: "无法读取",
+  binary: "二进制文件",
+  non_utf8: "非 UTF-8 文本",
+};
 const detailClosed = ref(false);
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -62,6 +73,7 @@ const error = ref(""),
   configError = ref("");
 const force = ref(false),
   structured = ref(false),
+  sourceScope = ref<"code" | "all">("code"),
   loading = ref(false),
   stopping = ref(false),
   more = ref(false),
@@ -98,6 +110,7 @@ function sync() {
   if (state.value.pending) {
     force.value = state.value.pending.force;
     structured.value = state.value.pending.code_structure;
+    sourceScope.value = state.value.pending.source_scope ?? "code";
     target.value = state.value.pending.workspace_id || source.value;
   }
   const receipt = state.value.receipt;
@@ -217,6 +230,7 @@ async function start() {
     config_hash: config.value!.config_hash,
     force: force.value,
     code_structure: structured.value,
+    source_scope: sourceScope.value,
     ...(target.value === source.value ? {} : { workspace_id: target.value }),
   };
   error.value = "";
@@ -268,6 +282,7 @@ function reset() {
   stopping.value = false;
   force.value = false;
   structured.value = false;
+  sourceScope.value = "code";
   sync();
   void loadConfig();
   void loadList();
@@ -347,13 +362,11 @@ function closeDetail() {
           :disabled="locked"
         />重新构建全部内容</label
       >
-      <label
-        ><input
-          v-model="structured"
-          type="checkbox"
-          :disabled="locked"
-        />代码结构切块</label
-      >
+      <IndexPreparationOptions
+        v-model:structured="structured"
+        v-model:scope="sourceScope"
+        :disabled="locked"
+      />
       <button
         :disabled="
           !project || state.active || (!state.pending && (!config || busy))
@@ -402,6 +415,15 @@ function closeDetail() {
         {{ stopping ? "等待清理…" : "停止构建" }}
       </button>
       <p v-if="detail.error" class="inline-error">{{ detail.error }}</p>
+      <p>
+        切分：{{ detail.code_structure ? "代码结构" : "文本分段" }}； 范围：{{
+          detail.source_scope === "code"
+            ? "代码调查"
+            : detail.source_scope === "all"
+              ? "全部文本"
+              : "未记录"
+        }}
+      </p>
       <p v-if="detail.published">
         发布代次 {{ detail.published.generation }} ·
         {{ detail.published.stats.files }} 个文件 /
@@ -412,6 +434,15 @@ function closeDetail() {
       <p v-else class="muted">
         本次尚无已保存的发布证据。重启后的任务不会自动重放，请明确发起新构建。
       </p>
+      <dl v-if="detail.published?.stats.skipped_reasons">
+        <template
+          v-for="(count, reason) in detail.published.stats.skipped_reasons"
+          :key="reason"
+        >
+          <dt>{{ skipReasonLabels[reason] ?? reason }}</dt>
+          <dd>{{ count }} 个文件</dd>
+        </template>
+      </dl>
       <RouterLink :to="{ path: '/usage', query: { run: detail.run_id } }"
         >查看用量与预算</RouterLink
       >

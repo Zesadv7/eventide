@@ -153,11 +153,15 @@ describe("task knowledge preparation", () => {
       const option = wrapper.get('[aria-label="任务开始前准备知识索引"]');
       expect((option.element as HTMLInputElement).checked).toBe(false);
       await option.setValue(true);
+      await wrapper.get(".index-preparation-options input").setValue(true);
+      await wrapper.get('[aria-label="索引范围"]').setValue("all");
       await wrapper.get("textarea").setValue("调查取消流程");
       await wrapper.get("form.composer").trigger("submit");
       expect(submit).toHaveBeenCalledWith(
         expect.objectContaining({
           knowledge_index: "prepare",
+          code_structure: true,
+          source_scope: "all",
           execution_target: bound ? "worktree" : "source",
         }),
       );
