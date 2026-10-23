@@ -14,7 +14,7 @@ v2报告schema为2，分别记录JSON结构、字段集合/覆盖、事实正确
 
 v2每split为4题×2臂×1次=8槽，合计16槽，交替先运行的组别。调用`run_agent_comparison(..., dataset_version="v2", code_structure=True)`时，仅候选的索引准备和Agent Run接收结构切块选项；默认False不向旧调用增加新关键字。实验身份保存数据哈希、结构选项与原模型配置，沿用同一Host/权限/用量账本、12步/20,000已观测Token/300秒限制。先独立手写判分正反例和脚本Host验证，再执行开发批次；开发提示或判分契约存在未解决问题时不安排真实留出。候选冻结后留出只跑一次计划，不按质量补跑，不改历史分数。入口仍显式接受split；批次先后由维护任务调度，不新增自动实验平台。
 
-本子任务定向73项通过（含v1回归、全部8题独立答案、结构/事实/引用分项、预审范围交集、过期和跨副本引用、完整Host两split与报告重建）；折行后只复验相关9项通过，Ruff和Python3.10目标Mypy通过。`code_structure=True`在独立分支只验证入口转交，结构索引实际算法与Host集成由主任务补验；没有真实模型调用，不能据此宣称效果提高。
+本子任务定向73项通过（含v1回归、全部8题独立答案、结构/事实/引用分项、预审范围交集、过期和跨副本引用、完整Host两split与报告重建）；折行后只复验相关9项通过，Ruff和Python3.10目标Mypy通过。`code_structure=True`在独立分支只验证入口转交，主集成另将该用例升级为实际Host构建，4候选索引structure/code身份均核实，单项脚本链通过；没有真实模型调用，不能据此宣称效果提高。
 
 `rag.upgrade_evaluation.run_remote_comparison` 复用40条冻结查询，每次显式选择development或holdout。构建与每题一次远程embedding都经原Host的Python control Run、模型并发与账本；查询向量复用到最多三次本地计时。FTS5、Hash混合及远程混合都通过生产`retrieval_from_vector`核对当前文件，失效路径提示不算有效命中。质量分母仍为20个问题，本地计时单列至多60个样本；完整查询耗时为远程embedding加一次候选检索，而不是把三种方案所有重复耗时累加。原benchmark入口和历史数据不变。
 

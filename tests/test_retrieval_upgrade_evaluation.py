@@ -3,6 +3,7 @@
 import asyncio
 import json
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -288,14 +289,13 @@ async def test_v2_quality_failures_stay_distinct_and_structural_option_is_forwar
 
     async def prepare(*args, code_structure=False, **kwargs):
         prepared.append(code_structure)
-        return await original_prepare(*args, **kwargs)
+        return await original_prepare(*args, code_structure=code_structure, **kwargs)
 
     def request(*args, **kwargs):
-        requested.append(kwargs.pop("code_structure", False))
+        requested.append(kwargs.get("code_structure", False))
         return original_request(*args, **kwargs)
 
-    # The structural Host implementation is integrated separately. This checks the
-    # evaluation boundary forwards the option only to the candidate arm.
+    # Exercise actual Host construction and index metadata as well as forwarding.
     monkeypatch.setattr(retrieval_runtime, "prepare_index", prepare)
     monkeypatch.setattr(models, "RunRequest", request)
     dataset = load_agent_dataset("v2")
@@ -319,6 +319,18 @@ async def test_v2_quality_failures_stay_distinct_and_structural_option_is_forwar
     assert prepared == [True] * 4
     assert requested == [slot["arm"] == "candidate" for slot in plan]
     assert len(host.provider.requests) == 8
+    from eventide.rag.index import IndexStore
+
+    for row in report["arms"]["candidate"]["results"]:
+        workspace = host.store.get_workspace(row["workspace_id"])
+        index = IndexStore(
+            Path(workspace.path),
+            index_dir=retrieval_runtime.managed_index_dir(host, workspace),
+        )
+        with index.snapshot() as snapshot, snapshot._reader() as connection:
+            meta = snapshot._meta(connection)
+        assert json.loads(meta["chunking_profile"])["code_structure"] is True
+        assert json.loads(meta["source_selection_profile"])["source_scope"] == "code"
     baseline = report["arms"]["baseline"]
     candidate = report["arms"]["candidate"]
     assert baseline["passed"] == candidate["passed"] == 3
