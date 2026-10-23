@@ -406,3 +406,11 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 类型：开发检查失败，非真实Agent质量或运行故障。独立worktree基线`9768103`；命令`python -m ruff check eventide/rag/agent_evaluation.py tests/test_retrieval_agent_v2.py tests/test_retrieval_upgrade_evaluation.py`退出1，五处新增代码超过100字符。证据`.task_outputs/retrieval-quality/eval/ruff.log`；同批定向pytest为73通过、类型检查通过，没有调用真实模型。
 - 已证实原因：新路径表达式、提示文字和测试断言未按仓库行宽折行。处理仅调整代码换行，保留提示字符串、数据哈希和判分语义；同范围Ruff复验退出0（`ruff-final.log`），仅复验涉及字符串的9项测试通过（`pytest-string-formatting.log`），未重跑全量。实际参与为新增评测契约及定向检查，不描述为修复线上事故或提升模型成绩。
 - 附带只读维护错误：一次`rg`参数误写不存在的`tests/test_distribution.py`，退出2；无测试/模型执行，改用已知的`pyproject.toml`包资源声明核对。它不影响产品或测试结论，不据此新增产品回退。相关修正与本条随v2实现提交。
+## RQ5-RETRIEVAL：新代码题库准备与定向验证
+
+- **日期、类型、状态：** 2026-10-23；评测夹具准备 / 测试问题；已完成（夹具准备和离线机制）。基线 `9768103`，不是线上检索事故。
+- **初次失败：** `.venv/bin/python .task_outputs/retrieval-quality/benchmark/prepare_manifest.py` 在读取固定 Git blob 时退出 1；脚本把现有 `openai_compatible.py` 误写成不存在的 `openai_chat.py`。原始错误保留在本轮工具输出；同时按真实目录改正 `schema.d.ts` 名称，并核对预算标签原文。没有生成或运行任何真实模型结果。
+- **处理与取舍：** 读取实际目录和冻结源文件后修正一次性夹具生成脚本；生产实现、原 40 题及历史报告不变。冻结语料生成成功，独立审查收紧三题题意/证据；新增29项离线Hash与合成策略夹具定向测试全部通过，日志 `manifest.log`、`targeted.log`、`policy.log` 位于 `.task_outputs/retrieval-quality/benchmark/`。这不代表真实模型收益。
+- **经验与参与：** Codex 编写夹具时应先核实固定提交的路径和标签，不靠记忆拼文件名；用户确定改进范围，未参与这次脚本排错。
+
+- **静态检查环境失败：** 首次 Ruff 无法在本隔离 worktree 新建默认 `.ruff_cache`（sandbox write permission，退出2），未开始代码检查；改用 `--no-cache`，不更改权限或共享依赖。初次错误保留工具输出。无缓存首次检查发现5处新增测试行超100字符（`ruff.log`），只拆行修正；这是测试格式问题，复验通过；后续报告字段和中断文案追加行长问题，仅拆行或缩短文字后复验。一次文档编辑脚本在stdin UTF-8解析阶段失败，尚未执行文件写入；改用显式解释器及Unicode转义继续，原失败保留在工具输出，未据此推断生产编码问题。最终31项不同定向用例全部通过（final-targeted.log），Python3.10目标Mypy一模块通过，Ruff及diff检查通过。未进行真实模型实验、全量门禁或历史重跑；相关commit为本条新增提交。
