@@ -366,3 +366,74 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 
 - 最终处理与复验：代码提交 `ceea5d7`，全量显式重建新Run `qwen_eventide_force_fp32_20261023` 退出0、completed、实际发布generation1。492文件/10849片段/1024维，3637.58秒、峰值RSS5.838GB；492文件索引哈希与构建前后源码全相符、Git状态不变、Provider用量为空。旧中断Run已恢复为interrupted，未自动重放或删除旧索引；报告 `agent-local/project-index-force-fp32.json` 及日志保留。后续收口Markdown变化须另作增量刷新。原BF16未完成证据不覆盖、不声称提速倍数；完整项目首次FP32构建仍约61分钟，内存/CPU和增量更新是当前维护取舍，不代表检索质量提升。
 - 附带环境诊断：一次只读 `ps -p 47990 -o pid=,etime=,%cpu=,rss=` 被本机沙箱拒绝，退出1；未据此判断构建失败，也未扩大权限重跑。最终使用原Host报告及命令真实退出状态确认完成。实际参与为采样定位、实例精度最小修正和真实索引核验，可追问为何计算策略进入指纹、如何避免中断发布和实验条件偷换。
+
+## FILE-UI：前端子任务准备命令路径错误（2026-10-23）
+
+- 类型：维护命令问题；基线9768103与本轮未提交UI。首次在frontend目录执行`cat > frontend/tests/file-operations.test.ts`，重复了目录前缀，文件未创建；后续Prettier因缺少该文件返回2。尚未运行测试，无生产或用户文件受损。
+- 处理：改用当前目录的`tests/file-operations.test.ts`，随后再运行定向用例和类型检查；结果待补。修改限于独立worktree，不提交或推送。
+
+- FILE-UI首次定向验证：`npm run test -- tests/file-operations.test.ts tests/deliveries.test.ts tests/chat-experience.test.ts`，39通过、1失败；`npm run typecheck`通过。失败是新增冲突用例期望list两次、实际三次；证据`.task_outputs/file-operations/ui/tests.log`。已证实测试同时设置details.open（触发原生toggle）并手动派发toggle，导致重复读取；删除重复测试事件，不修改撤销冲突行为。复验仅运行该原失败，再补新增案例；原交付/聊天24项通过保留。
+
+- FILE-UI复验收口：原冲突失败单独1通过；随后补多文件分页及重挂载用例，共17项文件操作组件/API、11项交付组件通过（最终28项），原14项聊天组件首轮已通过，合计42个不同前端用例有通过证据。Vue/TypeScript类型检查与git diff --check通过；`.task_outputs/file-operations/ui/conflict-recheck.log`、`tests-final.log`、`typecheck-final.log`。未运行浏览器、构建、后端或付费模型；不提交/推送，主任务继续统一集成验收。实际参与为UI实现与定向验证，失败是维护路径/测试事件问题，不是线上事故。
+
+## FILE-CORE：新增文件操作静态检查首轮失败（2026-10-23）
+
+- 类型：新增实现的静态检查问题；基线9768103加本轮未提交修改。`.venv/bin/python -m ruff check eventide tests examples`首轮报17项导入顺序/Iterator导入/长行问题，测试首轮30项通过；证据`.task_outputs/file-operations/ruff-first.log`与`backend-first.log`。包装命令末尾cat使shell退出0，实际Ruff检查明确失败，不能记为通过。
+- 原因已证实为新增代码尚未整理格式；修正仅涉及本轮变更，定向和完整门禁结果待补。无模型调用或用户项目破坏性测试；本轮按用户要求不创建提交。
+
+- FILE-CORE静态修正：自动整理只处理导入，第二次仍有新增长行检查失败（同根因，`ruff-fix.log`）；随后仅格式化三个新增文件，复验待补。
+
+## FILE-ENV：OpenAPI导出使用了缺依赖的系统Python（2026-10-23）
+
+- 类型：维护环境问题，基线9768103加本轮修改。`npm run api:generate`退出1，系统python3导入FastAPI失败；证据`.task_outputs/file-operations/api-generate.log`。尚未生成有效新契约，不属于接口测试通过。
+- 处理：使用已有项目`.venv/bin`加入本次命令PATH，不安装依赖或更改系统配置；随后重新导出，结果待补。本轮没有真实模型或用户状态读写。
+
+## FILE-INTEGRATION：交付回归与新增副本用例失败（2026-10-23）
+
+- 类型：意外集成回归及新增测试问题；基线9768103加本轮实现。定向`pytest tests/test_executor.py tests/test_runtime.py tests/test_host.py tests/test_workspace_store.py tests/test_preference_memory.py tests/test_delivery_repair.py tests/test_sandbox_execution.py`退出1，98通过/15交付失败/1显式Docker跳过，交付多为no_source_progress；证据`.task_outputs/file-operations/regression-first.log`。原因待查，不能声称交付无回归。
+- 新增六项故障/副本定向5通过/1失败：测试错误使用Host.create_session(cwd=...)，实际API参数尚待核对；`backend-extra.log`。新增测试样式检查另报长行，格式化后待复验（`test-style.log`，同FILE-CORE）。修复与定向复验继续进行，无用户项目破坏性测试、无付费调用、无提交。
+
+- FILE-INTEGRATION原因已证实：新增state目录保护把位于state/worktrees中的受管Writer也当成状态文件拒绝；临时失败Store的tool.completed明确PermissionError。保护改为仅当state嵌在当前cwd中才拒绝该子树，数据库/密钥/lease仍逐文件拒绝；执行副本cwd自身位于state内时允许其源码路径。新副本测试参数改为既有working_directory；将定向复验两处原失败及所有交付修复用例，不放宽测试或验收判定。
+
+## FILE-E2E：独立worktree静态检查缓存权限（2026-10-23）
+
+- 类型：环境权限问题；基线9768103加本轮UI及E2E未提交改动。`<主项目.venv>/bin/python -m ruff check frontend/scripts/e2e_server.py`退出2，默认沙箱无法在独立worktree建立`.ruff_cache`，尚未报告源码诊断。
+- 处理：后续使用`--no-cache`复验脚本，并按独立worktree所需权限运行浏览器；不修改生产权限或安装依赖。真实浏览器尚未开始，结果待补。
+- FILE-E2E脚本无缓存检查退出1：新增provider分支两处行长137/103超过100，证据`.task_outputs/file-operations/ui/e2e-ruff.log`。只换行修正新增语句，不调整脚本模型行为，后续定向复验。
+
+## FILE-E2E：交付浏览器回归未通过（2026-10-23）
+
+- 类型：待查；独立UI worktree9768103加本轮UI/E2E，实际后端导入主checkout本轮file-operation未提交实现。命令`EVENTIDE_E2E_REPOSITORY=<主checkout> EVENTIDE_PYTHON=<主.venv>/bin/python PYTHON_DOTENV_DISABLED=1 npm run test:e2e -- tests/e2e/file-operations.spec.ts tests/e2e/deliveries.spec.ts`退出1，3项新文件操作通过、既有交付1项失败，10.6秒。
+- 现象：交付控制Run已completed，但repair_status为stopped，未达到补丁展示/采纳断言。失败日志`.task_outputs/file-operations/ui/e2e-first.log`，浏览器error-context存于忽略test-results。新旅程实际验证dirty内容恢复、刷新/重复撤销、新文件删除及外部修改冲突通过；不把这3项通过当作交付通过。
+- TypeScript检查及新增fixture Ruff复验通过；交付原因待查，保留原始证据后仅复验失败项，不跑整套或付费模型。
+
+- FILE-E2E交付原因已证实：主任务保留的失败Store中`tool.completed`为`Runtime state cannot be changed by builtin file tools`；新file-operation保护将state根下管理的Writer源码也一并拒绝。主任务已收窄为当前源码内嵌状态子树及精确运行状态文件保护，保留受管worktree合法写入。这里只修改浏览器失败诊断以保留完整delivery state，不放宽通过条件。
+- 修正后只复验原delivery旅程，1/1通过／12.3秒，证据`.task_outputs/file-operations/ui/e2e-delivery-recheck.log`；涵盖丢回执同键重试/刷新、Writer写入、独立验收、共享红绿补丁、显式采纳、后续只读Run、用量刷新和320px。新3项普通文件操作首轮已过不重复；合计4个不同真实API旅程通过，无付费模型。新增脚本Ruff、Vue TypeScript与前端变更格式及diff检查通过；缓存权限和行长两项失败保留。不提交/推送，未运行整套浏览器/构建/后端或进程重启测试（后者由主任务后端专项覆盖）。实际参与是新增隔离旅程、保留失败与复验，生产边界修复由主任务完成。
+
+- FILE-UI最终只读复核发现Hash Router与diff文件锚点冲突（此前未点击文件列表），已改为打开差异并滚动的按钮，不修改路由；新增路由保持与超多短行解析上限用例通过。修改后原长差异用例因泛指第一个button（现为文件按钮）失败，18通过/1失败，`ui-last.log`；已证实是旧选择器不足，改为精确“再显示200行”按钮后定向复验，未放宽行数断言。状态目录cwd/大小写保护同时补齐，新边界1项通过（`state-boundary.log`）。
+
+- FILE-UI构建首轮退出2：新路由保持用例直接访问通用VueNode.open，TypeScript要求HTMLDetailsElement类型，证据`.task_outputs/file-operations/build.log`。仅修测试DOM类型断言，构建待复验；组件运行断言此前已通过，不将其代替构建成功。
+
+## FILE-ENV：最终静态页面浏览器启动被沙箱拒绝（2026-10-23）
+
+- 类型：环境权限故障。最终源码重建后，`EVENTIDE_E2E_BUILT=1 ... npm run test:e2e -- ... -g 'ordinary edit|delivery survives'`退出1，临时FastAPI在127.0.0.1随机端口bind收到EPERM，场景尚未运行；证据`.task_outputs/file-operations/e2e-built.log`。将按同一临时项目测试范围请求执行权限复验，不更改服务监听范围或测试断言；此前4项独立worktree浏览器证据仍保留。
+
+## FILE-FULL：全量收口出现失败（2026-10-23）
+
+- 类型：待查。基线9768103加本轮未提交实现；唯一一次`.venv/bin/python -m pytest -q --cov=eventide --cov-fail-under=85`运行中在约16%出现两项F，尚无最终退出状态/异常明细；证据`.task_outputs/file-operations/full.log`。不称全量通过，待保留完整输出后定位并只复验受影响范围；不重复全量。
+
+## FILE-MIGRATION：schema升级在DDL后中断不能重开（2026-10-23）
+
+- 类型：受控缺陷复现/预期Red。基线9768103加本轮v6实现，检查SQLite DDL与版本写入的崩溃窗口；新增临时数据库用例模拟恢复表已存在但版本仍5，`pytest ... -k interrupted_schema`退出1，`table file_operation_backups already exists`；证据`.task_outputs/file-operations/migration-red.log`。
+- 已证实原因：新表创建没有沿用既有建表的IF NOT EXISTS，DDL成功而版本事实未提交时重启会重复建表失败。采用原Store幂等DDL习惯补齐，不删除内容或重放文件操作；将定向验证此窗口、原schema迁移及文件操作范围。全量正在执行的字节码仍是修正前SQL，最终结果将如实区分，不重跑全量替代定位。
+
+- FILE-INTEGRATION最终安全复核：仅按工具相对路径检查.git还会漏过Session cwd='.git'的情况，未发生实际Git损坏；改为检查相对实际Workspace根的完整组件，补同一临时目录边界测试。状态目录判断也已从cwd改为Workspace根并统一NFD/casefold，保留受管副本源码写入；不修改原路径策略或Shell权限。定向复验继续，新增分支不重复全量。
+
+- FILE-CORE补充：新增属性核对错误假设macOS Python带os.setxattr，属性定向退出1/AttributeError，证据`attributes-green.log`；此前mode/inode/mtime核对均通过。改用macOS自带xattr命令在临时文件核对，Linux仍用os API；不更改生产写入。新增迁移用例另有一个局部导入空行Ruff失败（`ruff-last.log`），仅格式修正待复验。
+- FILE-FULL运行中新增三项失败已定位身份：原有本机MCP HTTP测试，以及两个旧schema3迁移测试；未获得最终异常前原因不下结论。原始日志继续保留，schema中断修正的97项定向已通过，最终逐项对照全量输出。
+
+- FILE-FULL约63%另有三项setup E，仍待完整异常输出；不将其当成功或静默跳过。两个Shell取消原失败按原断言在允许ps的执行环境下单独2项通过（`command-cancel-recheck.log`），但原全量结果仍保留。属性验证已改用本机标准xattr命令并通过（`attributes-final.log`），Ruff最终通过见`ruff-last-green.log`。
+
+- FILE-FULL最终结果：唯一全量退出1，2133通过/5失败/3setup错误/12显式可选跳过/1依赖弃用警告，1030.81秒；覆盖93.59%达到85%（17368语句/1113未覆盖），不称该次全量全绿。完整异常确认：2个Shell取消用例因沙箱禁止ps，1个MCP HTTP及3个Provider wire因禁止本机端口bind；原断言在允许所需本机权限后分别2项和4项通过（`command-cancel-recheck.log`、`network-recheck.log`），没有改生产或测试断言。另2个schema3迁移失败是同FILE-MIGRATION的恢复表重复创建，已修为幂等DDL；原失败与40项新增、schema/记忆/状态范围共97项通过（`migration-green.log`）。全量进程在SQL修正前已导入模块，异常行展示磁盘新文本但实际仍运行旧字节码，不据此误判修正无效。后增.git cwd保护定向1项通过，mode/inode/mtime/xattr核对1项通过；不重复全量。
+- FILE-CORE/ENV/INTEGRATION/MIGRATION最终收口：Ruff全仓及浏览器fixture、Mypy128模块通过；既有服务/help与scripted smoke12/12通过；API导出改用已有venv后成功。原15项交付回归及副本/故障范围修正后58通过/1既有Docker显式跳过，新故障2项通过；迁移与全部40新后端用例见97项，不相加成互不重叠总数。最终schema中断Red已Green，状态/Git子目录与大小写别名保护都有通过证据；无未处理的已知本轮失败。实际参与为实现、故障注入、边界复核及原断言复验，没有用户项目破坏性测试、线上事故或模型效果收益，不创建提交。
+- FILE-UI/E2E最终收口：前端216项全量通过，后增路由保持/超多短行2项通过；原长差异选择器精确化后单独1项通过，新测试DOM类型修正后Vue类型/Vite生产重建及4资源打包通过。最终生产静态页面2条旅程（含文件列表点击路由不变、撤销脏文件和交付采纳）在允许本机端口后通过（`e2e-built-green.log`），连同之前新建文件/后续外部修改冲突共4个不同浏览器旅程均有通过证据。Prettier/diff通过，未重跑整套浏览器、真实Docker或付费模型；独立worktree日志/截图逐文件摘要核对并保留到主忽略目录，工作副本干净归档。

@@ -55,7 +55,7 @@ class RuntimeStore:
                 version = self._connection.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 ).fetchone()[0]
-                if version not in {1, 2, 3, 4, 5}:
+                if version not in {1, 2, 3, 4, 5, 6}:
                     raise ValueError(f"Unsupported runtime schema version: {version}")
             self._connection.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -164,6 +164,34 @@ class RuntimeStore:
                 self._connection.execute(
                     "INSERT OR IGNORE INTO schema_migrations VALUES (5, unixepoch())"
                 )
+            if version < 6:
+                self._connection.execute(
+                    "CREATE TABLE IF NOT EXISTS file_operation_backups ("
+                    "operation_id TEXT PRIMARY KEY, encrypted_content TEXT NOT NULL)"
+                )
+                self._connection.execute(
+                    "INSERT INTO schema_migrations VALUES (6, unixepoch())"
+                )
+
+    def prepare_file_operation(self, record: dict[str, Any], encrypted_content: str) -> None:
+        """Commit the complete recovery artifact and its preparation fact together."""
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            self._connection.execute(
+                "INSERT INTO file_operation_backups VALUES (?,?)",
+                (record["operation_id"], encrypted_content),
+            )
+            self._append_fact_locked(record["session_id"], "file.operation", record)
+
+    def file_operation_backup(self, operation_id: str) -> str:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT encrypted_content FROM file_operation_backups WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+        if row is None:
+            raise ValueError("File operation backup is missing")
+        return str(row[0])
 
     def _bind_project(
         self, row: dict[str, Any], source: Path, common: str | None,

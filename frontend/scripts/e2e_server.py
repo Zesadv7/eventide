@@ -40,7 +40,9 @@ def main() -> None:
 
     class JourneyProvider(FakeProvider):
         async def complete(self, request):
-            if any(label in self._prompt(request) for label in ("交付修复场景", "检索交付场景")):
+            if any(label in self._prompt(request) for label in (
+                "交付修复场景", "检索交付场景", "文件操作编辑场景", "文件操作新建场景",
+            )):
                 async for event in self.stream(request):
                     if event.response is not None:
                         return event.response
@@ -65,6 +67,22 @@ def main() -> None:
                     })], stop_reason="tool_use", usage=usage)
                 else:
                     response = ModelResponse(text="检索调查完成：" + prompt, usage=usage)
+            elif "文件操作编辑场景" in prompt:
+                if step == 1:
+                    response = ModelResponse(tool_calls=[self._call("edit_file", {
+                        "path": "app.py", "old_text": 'value = "original"',
+                        "new_text": 'value = "<script>alert(1)</script>"',
+                    })], stop_reason="tool_use", usage=usage)
+                else:
+                    response = ModelResponse(text="文件操作编辑完成", usage=usage)
+            elif "文件操作新建场景" in prompt:
+                if step == 1:
+                    response = ModelResponse(tool_calls=[self._call("write_file", {
+                        "path": "new-created.txt",
+                        "content": "created <img src=x onerror=alert(1)>\n",
+                    })], stop_reason="tool_use", usage=usage)
+                else:
+                    response = ModelResponse(text="文件操作新建完成", usage=usage)
             elif "交付修复场景" in prompt:
                 if step == 1:
                     response = ModelResponse(tool_calls=[self._call("write_file", {

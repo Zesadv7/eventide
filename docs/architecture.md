@@ -52,6 +52,22 @@ schema v5 升级只增加偏好事实索引，但旧程序拒绝打开v5，回�
 
 ## 核心关系
 
+### 单次文件操作恢复（ADR-098）
+
+生产本地 `write_file` / `edit_file` 在 ToolExecutor 完成契约与 Policy 校验后，仅对原内置 handler 身份派发 `FileOperations`；Docker `SandboxFileTools` 与自定义 handler 不被冒名接管。Host 注入实际执行 Workspace，子目录记录相对 cwd；worktree/Writer 不绑定回源 checkout。
+
+数据流：读取实际完整字节/属性 → 验证 UTF-8 与 1 MiB 上限 → SecretBox 加密完整 before/after → 同一个 SQLite 事务保存恢复产物与 `file.operation/prepared` 事实 → 重新校验同一文件 → 原地写入/flush/fsync → 核对后指纹 → 追加 completed/no_change。schema v6 的 `file_operation_backups` 只保存不可变加密产物，不是第二份操作状态；状态仍由唯一追加式 Event Log 重建。安装密钥创建先同步文件及目录，SecretBox 实例按密钥路径共享锁，避免并发首次初始化产生不可恢复备份。
+
+事件保存 operation_id、session_id、run_id、call_id、实际 workspace_id、cwd/path、根目录文件系统身份、前后指纹/属性和状态；大正文不进入事件。工具结果只带 file_operation_id，模型上下文不会从恢复表加载内容。后续审计事实是 Session 级事件，通过 payload.run_id 关联原 Run，不在终态 Run 追加工具结果。
+
+状态为 prepared → completed/no_change，已知写前冲突可 failed；无法确定结果为 needs_review。人工撤销 completed → undo_prepared → undone；当前指纹不符保留 completed 并记录冲突，未覆盖文件。prepared/undo_prepared 遗留启动时转 needs_review，不推断“当前 hash 一样就已完成”。撤销先解密并校验完整恢复依据，再变更文件；已撤销状态只回放结果，不重执行文件或原工具调用。SQLite 提交、文件写入和 HTTP 回执不构成跨资源事务，回执未知沿既有 mutation 禁止重放契约。
+
+服务用 POSIX 目录描述符逐层 nofollow，拒绝链接、硬链接、特殊文件、越界与受保护 Runtime/Git 路径，读取与新建有界。检查按实际 Workspace 根保护嵌套状态目录，不把 state 内的合法受管 worktree 源码一并禁止；大小写与 Unicode 路径别名保守统一。写入与撤销按同一规范路径线程锁覆盖整个临界区；撤销另复用会话/Workspace 执行锁及 Host 线程收尾所有权。原地写入保留 inode/owner/扩展属性，崩溃可部分写入但不在源码留下明文恢复临时文件；mode/mtime可恢复，核验读取可改变 atime。
+
+仅本机同源 HTTP 控制面可按原 Session/Run 的实际执行绑定取 diff 或撤销；不接收任意磁盘备份路径，没有模型 undo 工具。保密依赖安装密钥和可信本地用户；现有同 UID Shell、localhost 管理 API 不是强身份隔离，外部进程不受路径锁控制。备份随状态保留，恢复需完整数据库与原密钥；旧版拒绝 schema v6。checkpoint、普通单次 diff、交付候选 patch 和整批采纳是不同能力。
+
+Vue `DiffViewer` 分别接原交付补丁与受控操作完整前后生成的 diff，使用文本插值、旧新行号、红绿行、上下文，按文件/行展开并设解析上限。`FileOperationPanel` 按需读取服务状态、详情与幂等撤销，不把 UI 缓存当事实或提供交付采纳撤销。当前不支持 Windows、Docker/任意 Shell、二进制/超限文本、自定义 handler、历史操作补造及不确定状态自动修复。
+
 ```text
 RuntimeHost
   └─ Project（源码项目）

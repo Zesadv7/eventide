@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PanelClose from "../components/PanelClose.vue";
+import DiffViewer from "../components/DiffViewer.vue";
 import {
   useUnsavedChanges,
   confirmDiscard,
@@ -524,7 +525,7 @@ function closeDetail() {
       </button>
       <template v-if="patch">
         <PanelClose label="关闭补丁预览" @close="closePatch" />
-        <pre class="patch">{{ patch.patch }}</pre>
+        <DiffViewer :patch="patch.patch" />
         <p>补丁 SHA-256：{{ patch.patch_sha256 }}</p>
         <label v-if="!detail.applied && detail.repair_status === 'passed'"
           ><input

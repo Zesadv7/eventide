@@ -374,6 +374,12 @@ uv run python -m tests.check_offline_evaluations evals/smoke.yaml
 
 每步更新本表及相应稳定文档。原始日志统一保存忽略目录 `.task_outputs/retrieval-upgrade/`；所有失败按现有规范登记，预期Red与外部故障分开，不新增进度文档。
 
+## 单次文件改动对比与安全撤销（2026-10-23）
+
+| 编号 | 状态 | 范围与验收 |
+|---|---|---|
+| FU-1 | 已完成 | 2026-10-23：本地内置write/edit真实前后内容加密恢复表（schema6）、单路径锁/指纹/状态/实际副本授权及人工幂等撤销完成；共享红绿diff/行号/按需展示接普通聊天与交付，原采纳不变。40项新增后端用例有通过证据，含迁移/状态相关97项通过；前端全量216通过，随后新增2项及受影响用例定向通过，4条真实API旅程通过，最终静态页面2条复验通过。唯一全量2133通过/5失败/3错误/12显式跳过、覆盖93.59%；6项本机ps/端口权限故障原断言定向通过，2项迁移失败修正后包含在97项通过中，未重复全量。Ruff/Mypy128、类型/构建/格式、服务/help/smoke12、diff检查通过；失败与复验见failure-cases FILE系列，证据.task_outputs/file-operations/。不支持Windows、Docker/任意Shell/远程/二进制/超大文件或整批交付撤销，崩溃待核验不盲重放；同UID Shell仍是可信宿主边界。README/guide/architecture/api-contract/ADR-098同步；按用户明确指令未提交/推送，基线9768103，保留.video_agent/；只用临时项目/脚本模型，未打开实际用户状态或调用付费模型。 |
+
 - RG-CORE / RG1：已完成两项预期 Red，基线 `0a80177`；旧检索返回修改前正文，外部 `index_dir` 参数尚不支持。2026-10-22 两项失败 / 0.14 秒，证据 `.task_outputs/retrieval-upgrade/core/red.log`，原因和包装命令错误已记 `docs/failure-cases.md` 的 RG-CORE。这只证明计划缺口，RG2/RG3 实现与验收仍在进行中。
 
 ### RG1 评测数据冻结子任务

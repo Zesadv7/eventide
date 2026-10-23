@@ -87,7 +87,7 @@ function reads() {
   vi.spyOn(deliveriesApi, "patch").mockResolvedValue({
     delivery_id: id,
     patch_sha256: "a".repeat(64),
-    patch: "+fix",
+    patch: "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-broken\n+fixed\n",
   });
 }
 it("requires explicit patch inspection and review before adoption", async () => {
@@ -102,6 +102,13 @@ it("requires explicit patch inspection and review before adoption", async () => 
     .find((b) => b.text() === "查看验收补丁")!
     .trigger("click");
   await flushPromises();
+  expect(wrapper.find(".diff-removed").text()).toContain("broken");
+  expect(wrapper.find(".diff-added").text()).toContain("fixed");
+  expect(
+    wrapper
+      .findAll("button")
+      .some((button) => button.text() === "撤销本次修改"),
+  ).toBe(false);
   const apply = wrapper
     .findAll("button")
     .find((b) => b.text() === "采纳已检查的补丁")!;
