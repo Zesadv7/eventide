@@ -426,3 +426,10 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 
 - 留出追加（faa1fc3，Python代码指纹与cdc2468相同）：一次预定12题，FTS完整4/12、历史窗口8/12、结构7/12；历史/结构Recall@5为.7917/.7500、MRR为.6736/.6903。跨文件完整命中1/4降为0/4，概念题均4/4；前5片段覆盖不足仍在，不能将排名略升解释为整体改善。纯检索p95为44.22/47.99ms，含首次冷加载的完整查询p95为4.740/4.743秒。全部执行完成，未知/中断0；证据experiments/holdout.json与measurement-summary.json。
 - 留出结论：未达到预定推荐门槛，结构保持显式可选，不调参、不改标签、不重跑本批次。实现完成与效果达标分别报告；Agent下游另验。当前只证实重复减少与跨文件漏召回，不把未定位的排序原因写成模型规模问题。
+
+### RQ-AGENT-V2：开发批次的引用绑定失败（2026-10-23）
+
+- 类型：真实Agent任务质量失败；基线36a7ad3、冻结v2、GLM-5.3-Flash Coding Plan及本地Qwen FP32，未调用标准embedding API。开发批次进行中，已完成的baseline catalog-restore-window判定citation_binding_mismatch及uncited_fact，原因待逐项核对；此前三槽已通过。证据.task_outputs/retrieval-quality/agent-live/development/report.json及原Store，未重跑失败题。
+- 整批中间导出可能标aborted，不能仅凭该快照宣称进程已失败；批次退出和最终状态另行核实。与一次后端全量同时执行，耗时会受本机CPU争用影响，不据此作严格性能收益结论。开发契约检查结束前不进入留出。
+
+- 开发最终8槽完成、退出0：baseline3/4、candidate4/4；两臂JSON/schema及字段键各4/4，facts各8/8，引用真实性各8/8。唯一失败catalog基线的transition_function事实正确，但引用garden/catalog.py:8–9仅含状态/期限赋值，漏了第4行函数定义名；属于证据绑定不足，不是引文幻觉、过期或错键。有效绑定7/8对8/8，unknown0，无外部失败或未尝试。两臂search_knowledge均0；差异不能归因Qwen或结构切块，不改判或补跑。已满足开发契约门槛，按冻结计划进入一次留出8槽。
