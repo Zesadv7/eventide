@@ -1,6 +1,7 @@
 """Actual per-operation recovery, fault windows and control-plane boundaries."""
 
 import asyncio
+import hashlib
 import json
 import os
 import stat
@@ -736,3 +737,45 @@ def test_prewrite_conflict_records_failure_without_mutation(host, monkeypatch, w
         write(host)
     assert target.read_text() == "old"
     assert host.file_operations.records()[0]["status"] == "failed"
+
+
+def test_edit_ambiguity_missing_and_empty_change_nothing(host):
+    target = host.settings.workdir / "code.py"
+    target.write_text("alpha\nkeep\nalpha\nalpha\n")
+    with pytest.raises(ValueError, match=r"matches 3 locations in code\.py \(lines 1, 3, 4\)"):
+        write(host, tool="edit_file", old_text="alpha", new_text="beta")
+    with pytest.raises(ValueError, match="old_text not found in code.py"):
+        write(host, tool="edit_file", old_text="missing", new_text="beta")
+    with pytest.raises(ValueError, match="old_text must not be empty"):
+        write(host, tool="edit_file", old_text="", new_text="beta")
+    assert target.read_text() == "alpha\nkeep\nalpha\nalpha\n"
+    assert host.file_operations.records() == []
+
+
+def test_edit_many_matches_report_bounded_locations(host):
+    target = host.settings.workdir / "code.py"
+    target.write_text("".join(f"dup {index}\n" for index in range(8)))
+    with pytest.raises(
+        ValueError, match=r"matches at least 8 locations .*\(lines 1, 2, 3, 4, 5; more matches\)"
+    ):
+        write(host, tool="edit_file", old_text="dup", new_text="x")
+    assert "dup 7" in target.read_text()
+    assert host.file_operations.records() == []
+
+
+def test_edit_expected_version_conflict_and_success_keeps_undo_chain(host):
+    target = host.settings.workdir / "code.py"
+    target.write_text("hello\n")
+    good = hashlib.sha256(target.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match="Content version conflict in code.py"):
+        write(host, tool="edit_file", old_text="hello", new_text="hi",
+              expected_sha256="0" * 64)
+    assert target.read_text() == "hello\n"
+    assert host.file_operations.records() == []
+    record = write(host, tool="edit_file", old_text="hello", new_text="hi",
+                   expected_sha256=good)
+    assert record["status"] == "completed"
+    assert target.read_text() == "hi\n"
+    undone = host.file_operations.undo(record["session_id"], record["operation_id"])
+    assert undone["status"] == "undone"
+    assert target.read_text() == "hello\n"

@@ -263,8 +263,10 @@ class SandboxWorkspaces:
 # handlers participate in the operation. All user data is a literal JSON argument.
 _CONTAINER_FILE_HELPER = r'''
 import fnmatch
+import hashlib
 import json
 import os
+import re
 import stat
 import sys
 from pathlib import PurePosixPath
@@ -276,6 +278,9 @@ MAX_ENTRIES = 50000
 ROOT = "/workspace"
 PROTECTED = {".git", ".eventide", ".nexus", ".ssh", ".aws", "mcp.json", "secret.key",
              "credentials.json", "credentials", "id_rsa", "id_ed25519"}
+READ_PAGE_CHARS = 10000
+PAGE_RESERVE_CHARS = 400
+TOKEN_PATTERN = re.compile(r"^evtfile1:(\d+):(\d+):([0-9a-f]{16}):([0-9a-f]{64})$")
 
 
 def protected(parts):
@@ -390,29 +395,107 @@ def matches(path, pattern):
                 and fnmatch.fnmatchcase(path[0], pattern[0]) and matches(path[1:], pattern[1:]))
 
 
-def read_page(text, path, offset=0, limit=None):
+def path_id(cwd_abs, rel_path):
+    material = "evtfile1\x00" + cwd_abs + "\x00" + rel_path
+    return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
+def edit_match_diagnostics(path, old_text, text):
+    count = text.count(old_text)
+    if count == 0:
+        return (f"old_text not found in {path}; the file is unchanged. Check exact whitespace, "
+                "indentation and line endings; CRLF files include the carriage-return "
+                "characters.")
+    lines = []
+    start = text.find(old_text)
+    while start != -1 and len(lines) < 5:
+        lines.append(text.count("\n", 0, start) + 1)
+        start = text.find(old_text, start + 1)
+    listed = ", ".join(str(number) for number in lines)
+    count_label = str(len(lines)) if start == -1 else f"at least {max(count, len(lines) + 1)}"
+    more = "" if start == -1 else "; more matches"
+    return (f"old_text matches {count_label} locations in {path} (lines {listed}{more}); "
+            "the file is unchanged. Extend old_text with surrounding context so "
+            "exactly one location matches.")
+
+
+def version_conflict_message(path, sha):
+    return (f"Content version conflict in {path}: the file changed since it was read (current "
+            f"sha256 starts with {sha[:12]}); re-read the file; no change was applied.")
+
+
+def read_page(text, sha, cwd_abs, rel_path, path, offset=0, limit=None, continuation=None):
     lines = text.splitlines()
-    total, start = len(lines), max(int(offset or 0), 0)
-    if total and start >= total:
-        return f"[{path} — {total} lines total; offset {start} is past the end]"
-    remaining = [f"{number}: {line}" for number, line in enumerate(lines[start:], start + 1)]
-    page, used = [], 0
-    for line in remaining:
-        if limit is not None and len(page) >= limit:
-            break
-        if limit is None and page and used + len(line) + 1 > 10000:
-            break
-        page.append(line)
-        used += len(line) + 1
-    cut = len(remaining) - len(page)
-    body = "\n".join(page)
-    if not cut and start == 0:
-        return body
-    end = start + len(page)
-    where = f"showing lines {start + 1}-{end}" if page else "no lines returned"
-    hint = f"continue with offset={end}" if cut else "end of file"
-    header = f"[{path} — {total} lines total; {where}; {hint}]"
-    footer = f"... ({cut} more lines)" if cut else ""
+    total = len(lines)
+    if continuation is not None:
+        if offset:
+            return "Error: pass either continuation or a line offset, not both."
+        match = TOKEN_PATTERN.fullmatch(continuation)
+        if match is None:
+            return "Error: Invalid continuation token; re-read the file from offset 0."
+        start_line, start_char = int(match.group(1)), int(match.group(2))
+        if match.group(3) != path_id(cwd_abs, rel_path):
+            return ("Error: Continuation token was issued for a different file or working "
+                    "copy; re-read this file from offset 0.")
+        if match.group(4) != sha:
+            return "Error: File changed since the previous page; re-read it from offset 0."
+        if start_line >= total:
+            return (f"[{path} — {total} lines total; sha256={sha}; continuation is past the "
+                    "end of the file; re-read from offset 0]")
+        if start_char > len(lines[start_line]):
+            return ("Error: Continuation character offset is beyond that line; re-read the "
+                    "file from offset 0.")
+    else:
+        if not total:
+            return f"[{path} — 0 lines total; empty file; sha256={sha}]"
+        start_line, start_char = max(int(offset or 0), 0), 0
+        if start_line >= total:
+            return (f"[{path} — {total} lines total; sha256={sha}; "
+                    f"offset {start_line} is past the end]")
+    page_limit = None if limit is None else int(limit)
+    budget = READ_PAGE_CHARS - PAGE_RESERVE_CHARS - len(path)
+    entries = []
+    index, char, entered = start_line, start_char, 0
+    while index < total and budget >= 2 and (page_limit is None or entered < page_limit):
+        rest = lines[index][char:]
+        prefix = f"{index + 1}: " if char == 0 else f"{index + 1}:{char}: "
+        if len(prefix) + len(rest) + 1 <= budget:
+            entries.append((index, char, rest, True))
+            budget -= len(prefix) + len(rest) + 1
+            index += 1
+            char = 0
+        else:
+            available = budget - len(f"{index + 1}:{char}: ") - 1
+            if available <= 0:
+                break
+            entries.append((index, char, lines[index][char:char + available], False))
+            char += available
+            budget = 0
+        entered += 1
+    if not entries:
+        return f"[{path} — {total} lines total; sha256={sha}; no lines returned]"
+    body = "\n".join(
+        f"{number + 1}: {segment}" if whole and at == 0
+        else f"{number + 1}:{at}: {segment}"
+        for number, at, segment, whole in entries
+    )
+    end_of_file = index >= total
+    if end_of_file and start_line == 0 and start_char == 0:
+        header = f"[{path} — {total} lines total; sha256={sha}]"
+    else:
+        span = f"showing lines {entries[0][0] + 1}-{entries[-1][0] + 1}"
+        if end_of_file:
+            header = f"[{path} — {total} lines total; sha256={sha}; {span}; end of file]"
+        else:
+            token = f"evtfile1:{index}:{char}:{path_id(cwd_abs, rel_path)}:{sha}"
+            header = (f"[{path} — {total} lines total; sha256={sha}; {span}; "
+                      f"continue with continuation {token}]")
+    if end_of_file:
+        footer = ""
+    elif entries[-1][3]:
+        footer = f"... ({total - index} more lines)"
+    else:
+        footer = f"... (line {entries[-1][0] + 1} continues at char {char})"
     return "\n".join(part for part in (header, body, footer) if part)
 
 
@@ -420,6 +503,7 @@ def main():
     request = json.loads(sys.argv[1])
     operation, cwd, args = request["operation"], request["cwd"], request["arguments"]
     cwd_parts = relative(cwd, ".")
+    cwd_abs = request["workspace_identity"] + "/" + "/".join(cwd_parts)
     cwd_fd = open_directory(cwd_parts)
     os.close(cwd_fd)
     files, paths, total = scan()
@@ -434,13 +518,27 @@ def main():
     if operation in {"read_file", "edit_file"}:
         parent = open_directory(parts[:-1])
         try:
-            text = read_at(parent, parts[-1]).decode("utf-8")
+            raw = read_at(parent, parts[-1])
         finally:
             os.close(parent)
+        sha = hashlib.sha256(raw).hexdigest()
         if operation == "read_file":
-            return read_page(text, args["path"], args.get("offset", 0), args.get("limit"))
-        if args["old_text"] not in text:
-            raise ValueError("text not found in " + args["path"])
+            return read_page(raw.decode("utf-8"), sha, cwd_abs, "/".join(parts),
+                             args["path"], args.get("offset", 0), args.get("limit"),
+                             args.get("continuation"))
+        if not args["old_text"]:
+            raise ValueError("old_text must not be empty.")
+        expected = args.get("expected_sha256")
+        if expected is not None:
+            expected = expected.lower()
+            if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+                raise ValueError("expected_sha256 must be a 64-character lowercase sha256.")
+            if expected != sha:
+                raise ValueError(version_conflict_message(args["path"], sha))
+        text = raw.decode("utf-8")
+        first = text.find(args["old_text"])
+        if first < 0 or text.find(args["old_text"], first + 1) >= 0:
+            raise ValueError(edit_match_diagnostics(args["path"], args["old_text"], text))
         content = text.replace(args["old_text"], args["new_text"], 1)
     elif operation == "write_file":
         content = args["content"]
@@ -509,7 +607,8 @@ class SandboxFileTools:
             if _identity(descriptor) != self.filesystem_identity:
                 raise ValueError("Sandbox directory identity changed")
         payload = json.dumps(
-            {"operation": operation, "cwd": str(relative), "arguments": arguments},
+            {"operation": operation, "cwd": str(relative), "arguments": arguments,
+             "workspace_identity": f"{self.root}:{self.filesystem_identity!r}"},
             ensure_ascii=True, separators=(",", ":"),
         )
         command = shlex.join(["python3", "-I", "-c", _CONTAINER_FILE_HELPER, payload])
@@ -523,9 +622,13 @@ class SandboxFileTools:
         raise RuntimeError("Sandbox container did not return a command result")
 
     async def read_file(
-        self, path: str, limit: int | None = None, offset: int = 0, cwd: Path | None = None,
+        self, path: str, limit: int | None = None, offset: int = 0,
+        continuation: str | None = None, cwd: Path | None = None,
     ) -> str | CommandResult:
-        return await self._execute("read_file", cwd, path=path, limit=limit, offset=offset)
+        return await self._execute(
+            "read_file", cwd, path=path, limit=limit, offset=offset,
+            continuation=continuation,
+        )
 
     async def glob(self, pattern: str, cwd: Path | None = None) -> str | CommandResult:
         return await self._execute("glob", cwd, pattern=pattern)
@@ -536,8 +639,10 @@ class SandboxFileTools:
         return await self._execute("write_file", cwd, path=path, content=content)
 
     async def edit_file(
-        self, path: str, old_text: str, new_text: str, cwd: Path | None = None,
+        self, path: str, old_text: str, new_text: str, expected_sha256: str | None = None,
+        cwd: Path | None = None,
     ) -> str | CommandResult:
         return await self._execute(
             "edit_file", cwd, path=path, old_text=old_text, new_text=new_text,
+            expected_sha256=expected_sha256,
         )

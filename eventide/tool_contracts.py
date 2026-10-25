@@ -42,6 +42,9 @@ class ReadFileArguments(_Arguments):
     path: NonemptyText
     offset: Annotated[int, Field(ge=0)] = 0
     limit: Annotated[int, Field(ge=1)] | None = None
+    continuation: (
+        Annotated[str, Field(pattern=r"^evtfile1:\d+:\d+:[0-9a-f]{16}:[0-9a-f]{64}$")] | None
+    ) = None
 
 
 class WriteFileArguments(_Arguments):
@@ -53,6 +56,7 @@ class EditFileArguments(_Arguments):
     path: NonemptyText
     old_text: NonemptyText
     new_text: str
+    expected_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
 
 
 class GlobArguments(_Arguments):

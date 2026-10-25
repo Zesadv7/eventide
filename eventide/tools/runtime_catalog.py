@@ -19,7 +19,11 @@ TOOLS = [
     _tool(
         "read_file",
         "Read text with one-based source line numbers (display only, not file content). "
-        "Offset is zero-based. Long files report total lines and next offset.",
+        "Offset is zero-based. The header carries the file sha256; pass it to edit_file as "
+        "expected_sha256 to fail when the file changed since this read. Long files return a "
+        "continuation token bound to this working copy and content version; pass it back as "
+        "continuation for the next page, which is rejected if the file changed. Very long "
+        "lines are split as line:char segments with exact source coordinates.",
     ),
     _tool(
         "write_file",
@@ -27,7 +31,9 @@ TOOLS = [
     ),
     _tool(
         "edit_file",
-        "Replace text once in a workspace file.",
+        "Replace the single unique occurrence of old_text. Empty, missing or ambiguous "
+        "matches change nothing and report bounded match locations. Pass expected_sha256 "
+        "from read_file to reject the edit when the file changed since that read.",
     ),
     _tool("glob", "Find workspace paths."),
     _tool(

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -206,8 +207,12 @@ async def test_file_operations_run_fixed_helper_only_and_mount_whole_root(tmp_pa
         "Wrote 8 bytes to sub/new.txt"
     )
     assert await files.edit_file("sub/new.txt", "two", "three", cwd=cwd) == "Edited sub/new.txt"
-    assert await files.read_file("sub/new.txt", cwd=cwd) == "1: one\n2: three"
-    assert await files.read_file("/workspace/nested/sub/new.txt", cwd=cwd) == "1: one\n2: three"
+    assert (await files.read_file("sub/new.txt", cwd=cwd)).splitlines()[1:] == [
+        "1: one", "2: three",
+    ]
+    assert (await files.read_file("/workspace/nested/sub/new.txt", cwd=cwd)).splitlines()[1:] == [
+        "1: one", "2: three",
+    ]
     assert await files.glob("**/*.txt", cwd=cwd) == "sub/new.txt"
     assert all(call_cwd == root for _payload, call_cwd in backend.calls)
     assert all(payload["cwd"] == "nested" for payload, _cwd in backend.calls)
@@ -226,7 +231,7 @@ async def test_file_tools_keep_builtin_signatures_through_executor(tmp_path):
     read = await executor.execute(ToolCall("r", "read_file", {"path": "new.txt"}), context)
     assert not written.is_error
     assert not read.is_error
-    assert read.content == "1: hello"
+    assert read.content.splitlines()[1:] == ["1: hello"]
     assert len(backend.calls) == 2
 
 
@@ -273,8 +278,13 @@ async def test_container_glob_recursion_hidden_paths_and_read_paging(tmp_path):
     assert await files.glob(".*.py") == ".hidden.py"
     page = await files.read_file("nested/second.py", offset=1, limit=1)
     assert isinstance(page, str)
-    assert "3 lines total; showing lines 2-2; continue with offset=2" in page
-    assert "2: b" in page
+    assert "3 lines total; sha256=" in page
+    assert "showing lines 2-2; continue with continuation " in page
+    token = re.search(r"continue with continuation (\S+)\]", page).group(1)
+    rest = await files.read_file("nested/second.py", continuation=token)
+    assert isinstance(rest, str)
+    assert "3: c" in rest
+    assert "end of file" in rest
     assert "past the end" in await files.read_file("nested/second.py", offset=4)
     assert await files.glob("missing*") == "(no matches)"
 
@@ -284,7 +294,7 @@ async def test_container_python_isolated_mode_ignores_workspace_modules(tmp_path
     (root / "json.py").write_text("raise RuntimeError('workspace module was imported')\n")
     (root / "sitecustomize.py").write_text("raise RuntimeError('site module was imported')\n")
     files = SandboxFileTools(FakeContainer(), root)
-    assert await files.read_file("sample.py") == "1: value = 1"
+    assert (await files.read_file("sample.py")).splitlines()[1:] == ["1: value = 1"]
 
 
 async def test_cleanup_unknown_propagates_without_retry(tmp_path):
@@ -380,7 +390,7 @@ async def test_container_edit_then_read_and_export_keeps_source_unchanged(tmp_pa
     service, binding, source, root, _cwd = sandbox(tmp_path)
     files = SandboxFileTools(FakeContainer(), root)
     assert await files.edit_file("sample.py", "value = 1", "value = 2") == "Edited sample.py"
-    assert await files.read_file("sample.py") == "1: value = 2"
+    assert (await files.read_file("sample.py")).splitlines()[1:] == ["1: value = 2"]
     assert not (root / "__pycache__").exists()
     patch = service.diff(binding)
     result = subprocess.run(

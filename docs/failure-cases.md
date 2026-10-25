@@ -618,3 +618,19 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 当前候选会把缺少元数据的version=1响应补成默认字段后标兼容，并把body读取失败称为版本不兼容；两者都缺事实依据。修复和复验待补充，不计验收完成。
 
 - 已完成修复：严格验证返回字段，读取和解析故障保持unavailable；真实版本差异才给升级提示。增加页面卸载后的异步启动隔离。迁移副本测试改用真实PreferenceMemory写入和快照，并验证恢复后的state/context可用，替代只能证明原始事件复制的手工假记忆。7项后端定向、含两个独立复现的18项前端定向及新增卸载用例通过（14项契约文件复验，合计19个不同前端用例）；Vue类型检查、受改测试Ruff通过。日志review-backend.log、review-frontend.log、unmount.log、review-typecheck.log；相关提交见本节修正提交。主代理独立检查与修正，不虚构线上影响或恢复效果。
+
+## MKFILES-REVIEW：唯一编辑与过期分页独立复核（2026-10-26）
+
+- 分类：受控缺陷复现。基线5acba20加ZCode未提交文件候选，主代理运行共享Python `-m pytest -q tests/test_file_evidence_review.py tests/test_file_page_versions.py` 退出1。证据`.task_outputs/maka-upgrade/files/review-red.log`。
+- 主代理新增重叠匹配和文件变空后续页用例，候选未完整通过；原因、修复及复验待补齐，不计验收完成。
+
+- 后续关联范围首次复验仍退出1：命令pytest覆盖file_evidence_review/file_page_versions/file_operations/tools/execution_sandbox_files，证据files/core.log。继续定位，不计完成；此前三项原失败和本次失败均保留，原因/处理待补齐。
+
+- 静态检查首次退出1：Ruff检查5个生产模块与5个测试文件，证据files/ruff.log；逐项修正后定向复验。未把格式或未使用导入的问题算作功能通过。
+
+- Ruff第一次拆分字符串后仍有行长错误，第二次静态检查退出1，原输出保留ruff-green.log（虽命名green仍以实际退出码为准）；继续拆分，不计通过。关联runtime测试及Mypy已完成，具体数量见后续收口。
+
+- 已证实原因：str.count只计非重叠位置，旧凭据校验前提前返回空页，及新增测试缺失第二副本父目录。改为查找第二个可能重叠位置、先验证凭据后处理空文件、补齐测试前提。另静态复核发现容器挂载路径不足以区分副本、页预算漏计行号和标题；补宿主可信身份及渲染预算，保持路径边界和原文件。
+- 关联首次124通过、5失败均为旧测试断言未纳入新的sha256页头；更新断言后只重跑失败5项均通过（container-recheck.log），原内容和隔离验证未削弱。关联工具契约/Runtime/沙箱57项通过（runtime.log），Mypy5模块和最终Ruff通过。独立复现、129项核心、关联57项为不同范围；真实Docker/模型未执行，仍待最终平台验收。所有首次失败保留，相关提交由本节所在提交定位。
+
+- 工作区API追加11项通过（workspace-api.log），含运行目录内实际read_file输出版本头；本切片合计197个不同后端用例通过。无扩大到全仓，也未改变冻结模型验收。

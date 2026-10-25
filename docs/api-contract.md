@@ -682,3 +682,7 @@ model.retry保留request_id/attempt_id/attempt，增加category；retryable表�
 model.preview增加可选attempt_id，不拼接不同尝试草稿。attempt_started/finished、预算和最终response仍是唯一持久事实。取消和半截工具不产生完整响应。完整恢复页面和动作矩阵仍待MK-08F，不新增隐藏执行入口。
 
 MK-00复核补充：兼容响应必须有有效schema_version、runtime_version及完整字符串capabilities列表，不补默认值冒充兼容。响应体读取/解析失败、字段残缺显示“无法确认兼容性”，不推断版本不匹配。capabilities表示此版本已实现的能力，不表示本机已安装对应依赖或已授权执行。页面离开后，迟到的兼容查询不会再启动工作台轮询。
+
+### MK-01/02 文件工具增量契约
+
+read_file新增可选continuation，带凭据时不能同时传非零offset；每页头返回sha256，尚有内容时给下一continuation。凭据属于模型工具接口，HTTP工具结果仍通过原持久tool.completed查询；界面不能把不同版本的页拼为同一证据。edit_file新增可选expected_sha256，版本不符、空目标、未命中和多处（含重叠）匹配均返回错误且不修改文件。大范围歧义只展示前5处并明确数量下界。具体行内偏移以返回凭据为准，不依赖固定分页长度。

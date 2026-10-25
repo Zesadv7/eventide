@@ -19,6 +19,11 @@ from typing import Any
 from eventide.models import ToolOutput
 from eventide.secrets import SecretBox
 from eventide.store import RuntimeStore
+from eventide.tools.filesystem import (
+    SHA256_PATTERN,
+    edit_match_diagnostics,
+    version_conflict_message,
+)
 from eventide.workspace import runtime_checkpoint_files
 
 MAX_FILE_BYTES = 1_048_576
@@ -242,9 +247,25 @@ class FileOperations:
             if tool == "edit_file":
                 if not before["exists"]:
                     raise FileNotFoundError(str(path))
+                if not arguments["old_text"]:
+                    raise ValueError("old_text must not be empty.")
+                expected = arguments.get("expected_sha256")
+                if expected is not None:
+                    expected = str(expected).lower()
+                    if not SHA256_PATTERN.fullmatch(expected):
+                        raise ValueError(
+                            "expected_sha256 must be a 64-character lowercase sha256."
+                        )
+                    if expected != before["sha256"]:
+                        raise ValueError(
+                            version_conflict_message(str(path), before["sha256"])
+                        )
                 text = self._text(before_raw)
-                if arguments["old_text"] not in text:
-                    raise ValueError(f"Text not found in {path}")
+                first = text.find(arguments["old_text"])
+                if first < 0 or text.find(arguments["old_text"], first + 1) >= 0:
+                    raise ValueError(
+                        edit_match_diagnostics(str(path), arguments["old_text"], text)
+                    )
                 after_raw = text.replace(arguments["old_text"], arguments["new_text"], 1).encode()
             else:
                 after_raw = arguments["content"].encode("utf-8")

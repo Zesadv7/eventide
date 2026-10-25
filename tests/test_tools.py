@@ -17,21 +17,25 @@ def test_decode_output_handles_utf8_and_console_encoding(monkeypatch):
 
 def test_run_write_and_read(isolated_workspace):
     assert run_write("test.txt", "hello", cwd=isolated_workspace) == "Wrote 5 bytes to test.txt"
-    assert run_read("test.txt", cwd=isolated_workspace) == "1: hello"
+    output = run_read("test.txt", cwd=isolated_workspace)
+    header, body = output.splitlines()
+    assert body == "1: hello"
+    assert re.fullmatch(r"\[test\.txt — 1 lines total; sha256=[0-9a-f]{64}\]", header)
 
 
 def test_run_read_pages_large_files_and_reports_extent(isolated_workspace):
     lines = [f"line {index} " + "x" * 60 for index in range(200)]
     (isolated_workspace / "big.txt").write_text("\n".join(lines), encoding="utf-8")
     first = run_read("big.txt", cwd=isolated_workspace)
-    assert first.startswith("[big.txt — 200 lines total; showing lines 1-")
-    assert "continue with offset=" in first
-    assert "more lines)" in first
+    assert first.startswith("[big.txt — 200 lines total; sha256=")
+    assert "showing lines 1-" in first
+    assert re.search(r"\.\.\. \((\d+ more lines|line \d+ continues at char \d+)\)", first)
     assert len(first) < 10_200
-    offset = int(re.search(r"offset=(\d+)", first).group(1))
-    second = run_read("big.txt", offset=offset, cwd=isolated_workspace)
-    assert second.startswith(f"[big.txt — 200 lines total; showing lines {offset + 1}-")
+    token = re.search(r"continue with continuation (\S+)\]", first).group(1)
+    second = run_read("big.txt", continuation=token, cwd=isolated_workspace)
+    assert second.startswith("[big.txt — 200 lines total; sha256=")
     assert "line 0 " not in second
+    assert "end of file" in second
 
 
 def test_run_read_explicit_limit_reports_page(isolated_workspace):
@@ -50,7 +54,7 @@ def test_run_read_keeps_a_medium_source_file_in_one_page(isolated_workspace):
     (isolated_workspace / "source.py").write_text("\n".join(lines))
     out = run_read("source.py", cwd=isolated_workspace)
     assert out.splitlines()[-1] == f"183: {lines[-1]}"
-    assert "continue with offset=" not in out
+    assert "continue with" not in out
     assert len(out) <= 10_000
 
 
@@ -60,8 +64,8 @@ def test_run_read_preserves_source_coordinates_across_pages(isolated_workspace):
     )
     first = run_read("source.py", limit=2, cwd=isolated_workspace)
     assert "1: first\n2: " in first
-    assert "continue with offset=2" in first
-    second = run_read("source.py", offset=2, cwd=isolated_workspace)
+    token = re.search(r"continue with continuation (\S+)\]", first).group(1)
+    second = run_read("source.py", continuation=token, cwd=isolated_workspace)
     assert '3: 变量 = "值"\n4: last' in second
     assert "showing lines 3-4; end of file" in second
     assert "1: first" not in second
@@ -70,7 +74,8 @@ def test_run_read_preserves_source_coordinates_across_pages(isolated_workspace):
 def test_run_edit(isolated_workspace):
     run_write("edit.txt", "old world", cwd=isolated_workspace)
     assert run_edit("edit.txt", "old", "new", cwd=isolated_workspace) == "Edited edit.txt"
-    assert run_read("edit.txt", cwd=isolated_workspace) == "1: new world"
+    output = run_read("edit.txt", cwd=isolated_workspace)
+    assert output.endswith("\n1: new world")
 
 
 def test_run_glob(isolated_workspace):
