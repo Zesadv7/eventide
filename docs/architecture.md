@@ -1093,7 +1093,7 @@ API 只按受授权的产物身份读取，支持有界文本分页及类型正�
 
 API/UI 增加“已记住：内容/作用域/来源/撤销”和建议卡，保留现有管理、编辑、版本冲突与实际注入记录。验收“这次”和“以后”、否定/引用、多个偏好、同义冲突、重复投递及撤销，区分抽取正确率和真正被模型采用。
 
-**已实现边界（2026-10-26，确定性有限语法切片）：** `eventide/memory_intake.py` 只识别声明的有限句式，不是自由语言理解：意图必须开头（可选标记词后接 记住/remember），直接保存需要长期标记词（以后/永久/长期/每次/from now on/permanently/always）或既有 `记住：…：key=content` 结构；裸“记住X”只记观察、同会话原样重复才生成 pending 建议。“这次/本次/this time”触发拒绝回执；否定（别记/不要记住/don't remember）、引文/反引号/尖括号/多行、非开头意图一律不保存。全局作用域仅当原话出现 全局/global 等词且后随分隔符；否则默认当前项目并在回执标注 `scope_defaulted`。自然语句主题 key 由 `nl_<scope+content摘要>` 确定派生（不做语义主题抽取）；来源记录 `span:{start,end}` 绑定原用户消息偏移，与保存内容逐字一致。授权只来自 `PreferenceMemory.observe_run` 读取的 user 作者 message.user 事实（无附件、非控制/子 Run），模型/工具输出与任何 trusted 标志都无法进入该路径。同事件重复投递、撤销后同来源重放均不重复保存；同内容新消息命中既有主题冲突回执。
+**已实现边界（2026-10-26，确定性有限语法切片）：** `eventide/memory_intake.py` 只识别声明的有限句式，不是自由语言理解：意图必须开头（可选标记词后接 记住/remember），直接保存需要长期标记词（以后/永久/长期/每次/from now on/permanently/always）或既有 `记住：…：key=content` 结构；裸“记住X”只记观察、同会话原样重复才生成 pending 建议。“这次/本次/this time”触发拒绝回执；否定（别记/不要记住/don't remember）、引文/反引号/尖括号/多行、非开头意图一律不保存。全局作用域仅当原话出现 全局/global 等词且后随分隔符；否则默认当前项目并在回执标注 `scope_defaulted`。明确中文/英文回答偏好统一使用response_language主题以提示冲突，其余自然语句主题 key 由 `nl_<scope+content摘要>` 确定派生（不做通用语义主题抽取）；来源记录 `span:{start,end}` 绑定原用户消息偏移，与保存内容逐字一致。授权只来自 `PreferenceMemory.observe_run` 读取的 user 作者 message.user 事实（无附件、非控制/子 Run），模型/工具输出与任何 trusted 标志都无法进入该路径。同事件重复投递、撤销后同来源重放均不重复保存；同内容新消息命中既有主题冲突回执。
 
 ### MK-19：可读故障报告
 
@@ -1236,3 +1236,5 @@ read_file每页带原始字节SHA256及范围。continuation绑定工作目录�
 MK-08B页面接线：RuntimeStateProjection从原model.retry派生当前等待，HTTP刷新可重建同一截止时间，下一attempt/终态清除；Chat显示分类原因、自动尝试序号、倒计时和停止说明。2项投影、21项前端关联、1条built真实API浏览器（scripted模型断连→刷新→原Run完成、2次attempt）通过。模型服务重试与浏览器SSE重连分开展示；持久宿主恢复和未知工具核查仍待MK-08C/D。
 
 MK-08A快照接线：Store.run_snapshot在同一读锁中得到Run投影与事件高水位，API实例代次在创建时冻结。每次SSE连接先发送stream.state，快照不推进正常重放游标；若游标超前则明确reset到现有高水位并刷新状态，旧代次preview不显示。14项后端、22项前端、1条built断网/恢复/刷新旅程、类型/构建/Ruff/Mypy3模块通过。当前日志无裁剪，不把Session序号跨Run间隔误报为缺事件。写入未知回执统一核查及恢复中心仍在后续。
+
+MK-18主代理补齐：支持用户确认示例“以后这个项目都用中文”及同类有限语言指令（普通未来事实不保存）；中文/英文矛盾偏好命中同主题冲突，不自动双存。保存回执卡在聊天中直接可见，历史内容保持原样，current_status/current_revision来自最新记忆事实；撤销后刷新仍显示已撤销、已编辑旧版本引导设置核对，撤销临时失败保留重试入口。source.span为Unicode字符偏移，不是UTF-8字节偏移。

@@ -698,3 +698,5 @@ Vue 新增 `/runs/:runId/diagnostics` 报告页（历史页运行详情提供入
 MK-08B等待状态：Run投影新增可空`model_retry`，含原始attempt/next_attempt/category和绝对`retry_at`（事件ts加delay_seconds）。GET恢复当前等待，不以浏览器重新打开时间重置倒计时；下一次attempt开始、完整response或Run终态清除。旧历史未记录等待时返回null，不猜时间。Vue区分模型请求重试与页面连接重试，仍可停止原任务。
 
 MK-08A快照与服务代次：新增只读`GET /api/runs/{id}/snapshot`，返回`run_id/epoch/high_water/state`；Store同一锁内读取状态与事件高水位。SSE首次发送无事件游标的`stream.state`帧，结构相同并附`reset`；客户端游标大于现存高水位时reset=true，页面重建当前状态并从该位置续接，绝不重发Run写请求。正常重连仍重放after之后的事件，不用快照跳过未处理事实。epoch为本次API实例身份，临时preview带epoch，旧代次预览丢弃。当前事件日志不裁剪；未凭数字间隔臆测缺失（同Session不同Run的seq可以不连续）。历史API、SSE持久事实不因重连更改。
+
+MK-18回执当前状态：run memory receipts保留原content/revision，附可选current_status/current_revision用于区分历史保存与当前撤销/编辑；旧历史无关联事实不编造。source.span使用Unicode字符起止（左闭右开）。

@@ -735,3 +735,9 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 已证实原因与处理：均为新测试编写问题；生产实现无改动。复验：`pytest tests/test_memory_intake.py tests/test_preference_memory.py` 56 项通过；`vitest run tests/memory.test.ts` 14 项通过；Ruff（2 生产模块+新测试）、Mypy 2 模块、vue-tsc 通过。Ruff 首轮 3 项 E501/类型收窄（mypy 4 项）同步修正，属同批静态问题。
 - 经验：记忆 state 投影按作用域过滤，断言必须带明确 project_id；包含刷新按钮的面板用文本定位目标按钮。
 - 实际参与及可追问点：本切片子代理独立实现与复验；可解释 intake 分类器令牌循环与 span 偏移换算；未调用付费模型、未跑全量/浏览器。
+
+### MK18-REVIEW — 撤销后历史保存提示缺少当前状态
+
+- 2026-10-26 基线315e0eb受控复现；新增test_saved_receipt_keeps_historical_content_but_exposes_current_revocation失败，证据 `.task_outputs/maka-upgrade/memory-intake/review-red.log`。保存回执是历史事实，页面重载不能仅凭回执显示仍有效；需附当前状态/版本，不改历史。复核同时发现撤销网络失败被当作撤销完成而隐藏按钮，正在修正。
+- 主代理新增已知语言主题识别后复验57通过/1失败，为旧断言仍要求语言主题散列key；现语言偏好统一response_language以拦截“中文/英文”矛盾自动双存，更新断言。前端15项通过，但typecheck发现子代理旧测试mock仅给{id}冒充完整MemoryRecord（review-typecheck.log），替换为现有完整record fixture；不改生产类型。
+- 修复后58项不同后端用例全部通过（review-green.log 57通过+review-key-green.log重验1），15项前端、typecheck、Ruff/Mypy2模块通过。明确语言主题冲突、历史回执的当前撤销态、失败重试及默认可见提示已覆盖；仍不宣称通用语言抽取准确率。

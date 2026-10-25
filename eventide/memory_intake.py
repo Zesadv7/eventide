@@ -4,7 +4,10 @@ This is a deliberately finite grammar, not free-language understanding. Only the
 exact patterns below are recognised; every other message returns ``None`` and is
 never remembered:
 
-- intent must open the message: optional marker/scope words, then ``记住``/``remember``;
+- the direct language preference "以后这个项目都用中文" and its declared
+  Chinese/English variants are explicit project preferences; other future facts
+  do not match;
+- otherwise intent must open the message: optional marker/scope words, then ``记住``/``remember``;
 - explicit long-term save requires a long-term marker word (以后/永久/长期/每次/
   from now on/permanently/always) or the structured ``记住：…：key=content`` form
   handled by ``PreferenceMemory.parse``;
@@ -43,11 +46,18 @@ TOKEN = re.compile(
     r"全局|整个安装|所有项目|global|记住|remember",
     re.I,
 )
+LANGUAGE_PREFERENCE = re.compile(
+    r"(?:(?:这个|本|所有)项目)?(?:都|请|一律)?(?:用|使用)(?:中文|英文)"
+    r"(?:回答|回复|交流)?[。！.!]?"
+)
+DIRECT_LANGUAGE = re.compile(r"^(?:以后|今后)(?P<content>.+)$")
 SEPARATOR = re.compile(r"[\s，,、：:]*")
 
 
 def natural_key(scope: str, content: str) -> str:
-    """Stable digest key: distinct contents never collide, resends hit conflict."""
+    """Known language preferences share a topic; other text uses a stable digest."""
+    if LANGUAGE_PREFERENCE.fullmatch(content):
+        return "response_language"
     return "nl_" + hashlib.sha256(f"{scope}\0{content}".encode()).hexdigest()[:12]
 
 
@@ -80,7 +90,14 @@ def classify(text: str) -> dict[str, Any] | None:
             global_scope = True
         else:
             saw_remember = True
-    if not saw_remember or pos >= len(body):
+    if not saw_remember:
+        directive = DIRECT_LANGUAGE.fullmatch(body)
+        if directive is None or not LANGUAGE_PREFERENCE.fullmatch(directive["content"]):
+            return None
+        pos = directive.start("content")
+        long_term = True
+        global_scope = directive["content"].startswith("所有项目")
+    if pos >= len(body):
         return None
     if TEMPORARY.search(body):
         return {

@@ -55,6 +55,8 @@ export interface RunMemory {
     content?: string;
     scope?: MemoryScope;
     scope_defaulted?: boolean;
+    current_status?: string;
+    current_revision?: number;
   }[];
 }
 export interface MemoryCreate {

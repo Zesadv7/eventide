@@ -530,6 +530,16 @@ class PreferenceMemory:
         if self.host.store.get_run_identity(run_id) is None:
             raise ValueError("Run not found")
         events = self.host.store.run_events(run_id)
+        current = {r["id"]: r for r in fold(self.host.store.facts_by_type(TYPES))["memories"]}
+        receipts = []
+        for event in events:
+            if event["type"] not in {"memory.saved", "memory.suggested", "memory.rejected"}:
+                continue
+            receipt = {"type": event["type"], **event["payload"]}
+            if receipt.get("memory_id") in current:
+                record = current[receipt["memory_id"]]
+                receipt.update(current_status=record["status"], current_revision=record["revision"])
+            receipts.append(receipt)
         return {
             "snapshotted": any(e["type"] == "memory.snapshot" for e in events),
             "snapshot": next(
@@ -537,9 +547,5 @@ class PreferenceMemory:
                 None,
             ),
             "injections": [e["payload"] for e in events if e["type"] == "memory.injected"],
-            "receipts": [
-                {"type": e["type"], **e["payload"]}
-                for e in events
-                if e["type"] in {"memory.saved", "memory.suggested", "memory.rejected"}
-            ],
+            "receipts": receipts,
         }

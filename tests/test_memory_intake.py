@@ -11,7 +11,8 @@ from tests.test_runtime import settings_for
 
 def host_with(isolated_workspace, replies=1):
     return RuntimeHost(
-        settings_for(isolated_workspace), ScriptedProvider([{"text": "ok"}] * replies),
+        settings_for(isolated_workspace),
+        ScriptedProvider([{"text": "ok"}] * replies),
         enable_mcp=False,
     )
 
@@ -23,7 +24,7 @@ def host_with(isolated_workspace, replies=1):
         "帮我记住这个用法",
         "记不住这个函数名",
         "记住",
-        "记住 别用双引号 \"quote\"",
+        '记住 别用双引号 "quote"',
         "记住 ``code`` 以后",
         "多行\n记住以后都用中文",
     ],
@@ -74,14 +75,18 @@ async def test_explicit_natural_save_span_and_default_scope_receipt(isolated_wor
         assert len(state["memories"]) == 1
         record = state["memories"][0]
         assert record["content"] == "都用中文回复"
-        assert record["key"].startswith("nl_")
+        assert record["key"] == "response_language"
         assert record["source"]["type"] == "explicit"
         assert record["scope"] == "project" and record["project_id"] == project_id
         source = next(
             e for e in host.store.facts_by_type(("message.user",)) if e["author"] == "user"
         )
-        assert source["payload"]["message"]["content"][record["source"]["span"]["start"]:
-            record["source"]["span"]["end"]] == record["content"]
+        assert (
+            source["payload"]["message"]["content"][
+                record["source"]["span"]["start"] : record["source"]["span"]["end"]
+            ]
+            == record["content"]
+        )
         receipt = host.memory.run_details(run.run_id)["receipts"][0]
         assert receipt["type"] == "memory.saved"
         assert receipt["scope_defaulted"] is True
@@ -181,4 +186,39 @@ async def test_unsafe_natural_content_rejected_with_receipt(isolated_workspace):
 def test_natural_key_is_stable_and_distinct():
     assert natural_key("project", "都用中文回复") == natural_key("project", "都用中文回复")
     assert natural_key("project", "a") != natural_key("global", "a")
-    assert natural_key("project", "都用中文回复").startswith("nl_")
+    assert natural_key("project", "都用中文回复") == "response_language"
+    assert natural_key("project", "都用英文回复") == "response_language"
+
+
+async def test_saved_receipt_keeps_historical_content_but_exposes_current_revocation(
+    isolated_workspace,
+):
+    host = host_with(isolated_workspace)
+    try:
+        result = await host.run(RunRequest("记住以后都用中文回复"))
+        receipt = host.memory.run_details(result.run_id)["receipts"][0]
+        host.memory.mutate("delete", {"expected_revision": 1}, target=receipt["memory_id"])
+        current = host.memory.run_details(result.run_id)["receipts"][0]
+        assert current["content"] == receipt["content"]
+        assert current["current_status"] == "revoked"
+        assert current["current_revision"] == 2
+    finally:
+        await host.close()
+
+
+async def test_direct_language_instruction_and_opposite_preference_require_conflict_review(
+    isolated_workspace,
+):
+    host = host_with(isolated_workspace)
+    try:
+        result = await host.run(RunRequest("以后这个项目都用中文"))
+        state = host.memory.state(host.default_workspace.project_id)
+        assert len(state["memories"]) == 1
+        assert state["memories"][0]["key"] == "response_language"
+        assert host.memory.run_details(result.run_id)["receipts"][0]["type"] == "memory.saved"
+        result = await host.run(RunRequest("记住以后都用英文回复"))
+        assert host.memory.run_details(result.run_id)["receipts"][0]["type"] == "memory.rejected"
+        assert len(host.memory.state(host.default_workspace.project_id)["memories"]) == 1
+        assert classify("以后这个项目都会删除") is None
+    finally:
+        await host.close()

@@ -339,7 +339,9 @@ it("saved receipt shows scope/source and revoke clears later injection", async (
   });
   const revoke = vi
     .spyOn(memoryApi, "revoke")
-    .mockResolvedValue({ memory: { id: "mem1" } });
+    .mockResolvedValue({
+      memory: record({ id: "mem1", revision: 2, status: "revoked" }),
+    });
   const wrapper = mount(RunMemoryPanel, {
     props: { runId: "r1" },
     global: { stubs: { RouterLink: true } },
@@ -355,9 +357,9 @@ it("saved receipt shows scope/source and revoke clears later injection", async (
   await flushPromises();
   expect(revoke).toHaveBeenCalledWith("mem1", 1);
   expect(wrapper.text()).toContain("已撤销");
-  expect(
-    wrapper.findAll("button").some((b) => b.text().includes("撤销")),
-  ).toBe(false);
+  expect(wrapper.findAll("button").some((b) => b.text().includes("撤销"))).toBe(
+    false,
+  );
   wrapper.unmount();
 });
 it("historical panel discards late response when run changes", async () => {
@@ -401,5 +403,44 @@ it("provides accessible top close for new/edit forms and guards dirty drafts", a
   confirm.mockReturnValue(true);
   await wrapper.find('button[aria-label="关闭偏好编辑"]').trigger("click");
   expect(wrapper.find(".memory-editor").exists()).toBe(false);
+  wrapper.unmount();
+});
+
+it("a revoked receipt survives reload and a failed revoke remains retryable", async () => {
+  const receipt = {
+    type: "memory.saved",
+    memory_id: "m",
+    revision: 1,
+    content: "偏好",
+    current_status: "active",
+    current_revision: 1,
+  };
+  const report = vi.spyOn(memoryApi, "run").mockResolvedValue({
+    snapshotted: false,
+    injections: [],
+    receipts: [receipt],
+  });
+  vi.spyOn(memoryApi, "revoke").mockRejectedValue(new Error("临时网络失败"));
+  const wrapper = mount(RunMemoryPanel, {
+    props: { runId: "r" },
+    global: { stubs: { RouterLink: true } },
+  });
+  await flushPromises();
+  const button = () =>
+    wrapper.findAll("button").find((b) => b.text().includes("撤销"));
+  expect(wrapper.find("section > article").exists()).toBe(true);
+  await button()!.trigger("click");
+  await flushPromises();
+  expect(wrapper.text()).toContain("临时网络失败");
+  expect(button()).toBeDefined();
+  report.mockResolvedValue({
+    snapshotted: false,
+    injections: [],
+    receipts: [{ ...receipt, current_status: "revoked", current_revision: 2 }],
+  });
+  await wrapper.setProps({ refreshKey: 2 });
+  await flushPromises();
+  expect(wrapper.text()).toContain("已撤销");
+  expect(button()).toBeUndefined();
   wrapper.unmount();
 });
