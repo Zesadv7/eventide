@@ -1265,3 +1265,23 @@ MK-19 的报告不是新的任务状态，也不是可变产物：它是 `(run_i
 **取舍：** 结构化契约提高单次摘要被拒的概率（模型输出不合规即回退旧历史），换取证据可追溯、否定/失败不被静默丢弃和旧历史不被覆盖；被拒摘要的 token 已按原账本记账，不重试。逐字引文使摘要大于等义缩写，渲染时截断控制上下文成本。有界读取使超长文件的精确总字符数未知，以 stat 字节数如实呈现而不是补造精度。Host 侧"本次模型看到了什么"逐尝试输入清单、目录作用域规则和 API/UI 摘要比较属后续切片，不在本 ADR 声称完成。
 
 **验证：** 142 项受影响定向测试通过（新增 test_context_summary.py 27 项含无效摘要不覆盖、引用越界拒绝、否定/失败保留、工具配对与旧 checkpoint 透传；既有 7 处纯文本摘要响应按新契约更新为合法结构化摘要），Ruff 全部通过，Mypy（py310 目标）2 模块通过。未运行全量、前端、容器或真实模型；首轮 12 项预期失败及根因见 failure-cases MKCTX-ZCODE。
+
+## ADR-105：原生隔离平台后端库与显式失败语义（MK-21 切片 1）
+
+**状态：Proposed（2026-10-26；实现已落地并通过离线定向验证，真实内核边界验证未做，暂不作为可信隔离依据）。**
+
+**背景：** MK-21 要求 macOS（Seatbelt/sandbox-exec）与 Linux（bubblewrap/namespace）原生命令和文件 worker 共处同一 OS 限制，文件工具不能继续在宿主进程执行；平台不能表达所选规则时必须显式拒绝，不静默无隔离重试（继承 ADR-093 的"明确失败不回退"取舍）。本切片只交付集中后端库 `eventide/native_sandbox/`，不接线 `ToolExecutor`/`PolicyEngine`/HTTP/前端。
+
+**决策：**
+
+- 策略输入唯一且严格类型化：`NativeSandboxPolicy` 冻结数据类（profile、workspace/tmp/只读/受保护根，全部 realpath 规范化），支持 `read-only` 与 `workspace-write` 两种 profile。`allow_network` 与 `allow_subprocess` 本切片对两个后端一律 `UnsupportedPolicyError`：loopback 守护（保护本机管理 API）没有离线可验证的表达，宁缺毋滥。
+- 能力矩阵逐项声明 `full/partial/unsupported`：Seatbelt 的 `subprocess_deny` 为 full（`deny process-exec*` + 解释器 literal 放行），bubblewrap 为 partial（不挂载 shell 但解释器可执行）；受保护根位于 workspace 内时 Seatbelt 用更具体 deny 切块、bubblewrap 用空 tmpfs 遮蔽（内容不可见而非报错）；bubblewrap 不能表达"workspace 内的只读依赖根"（遮蔽会藏掉内容），显式拒绝。
+- 探测只做只读存在性检查（平台 + PATH + 可执行位），返回结构化 `BackendDetection`，并明确"工具存在不是隔离有效"；profile/argv 构造是纯函数，离线可测。
+- 文件 worker 是固定 Eventide 代码（纯标准库），经 `<python> -I -c <bootstrap> <包父目录>` 启动，授权以 base64 JSON grant 放环境变量；协议为有界 JSON 行（16 MiB/行），操作限于 ping/stat/list_dir/read_file/open_read/read_page/close_handle/write_file/remove/shutdown；资源句柄是不透明 token；路径先 realpath 再授权，符号链接逃逸、受保护根、越界一律 `path_denied`；read-only profile 拒写。worker 不是工具执行器，无模型、策略或宿主状态访问。
+- `NativeSandboxRunner` 是本切片唯一进程生成点：后端缺失、策略不支持、spawn 失败、握手失败均抛显式异常，不存在无沙箱回退；`launcher` 构造参数是测试专用注入（离线协议验证用真 worker 子进程但不经 OS 包装），生产调用方必须保持默认沙箱启动。
+
+**取舍：** Seatbelt profile 采用 targeted-deny（写/网络/进程白名单 + 受保护根切块、读默认放行）而非 deny-default：deny-default 对 Python 运行时的完整 allow 集无法离线验证，宁可如实声明 targeted-deny 的边界并把真实内核验证列为 MK-21 后续门禁。bubblewrap 挂载表即白名单，未验证内核禁用非特权 user namespace 时的行为。句柄/分页读写为 MK-02 续页留接口，本切片不含写入句柄。
+
+**接线契约（后续主任务实施）：** 文件工具执行点从宿主实现切换为：`ToolExecutor` 按会话冻结的 `NativeSandboxPolicy`（含 `default_protected_paths` 派生的状态根/共享 Git 保护）构造 `NativeSandboxRunner`，`start()` 后以 `call(op, **params)` 执行文件操作，`aclose()` 收尾；`NativeSandboxUnavailableError`/`UnsupportedPolicyError` 必须作为明确的工具/会话失败呈现，不得降级到宿主执行；Profile/argv/profile 文本与 worker 版本进入工具指纹与审计证据。API/OpenAPI/页面与实机验证清单见 [架构](architecture.md#native-sandbox-slice)。
+
+**验证：** 44 项离线定向测试（策略边界、能力矩阵、profile/argv 文本、协议与输入边界、真子进程握手与显式失败）、Ruff、Mypy 7 模块（py310 目标）通过；无网络、无模型调用。真实 OS 越界验证（文件/网络/子进程/符号链接/受保护目录/本机管理 API/取消清理）按 MK-21 在本机统一执行。

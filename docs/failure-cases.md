@@ -676,3 +676,12 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 复验命令曾误写两个测试文件名，pytest退出4、未收集（review-green.log当次，已保留为review-command-error.log）。按真实tests/test_summary_reliability.py、test_summary_throttle.py修正命令；不算实现回归。
 - 引用修复后的Ruff检查报提示词长行（review-ruff.log），已拆分字符串，功能无改。正文引用复验58项通过；检查/提交记录随后追加。
 - 修复后58项摘要/ContextBuilder/节流/Runtime定向、Ruff及Mypy2模块通过；证据review-green/review-ruff-green/review-mypy.log。引用现在只匹配解码正文、工具结果及调用参数的实际文本值，不接受字段名；真实模型摘要保真率仍待最终评测。
+
+## MKNATIVE-ZCODE-01：原生沙箱切片 1 开发期测试失败（2026-10-26）
+
+- 类型：新增测试首轮失败（开发期 Red 与测试自身缺陷），无生产回归、无线上影响；基线为本分支 a5f3dc6 之上的干净工作区。
+- 命令：`python -m pytest tests/test_native_sandbox_policy.py tests/test_native_sandbox_launchers.py tests/test_native_sandbox_worker.py tests/test_native_sandbox_runner.py -q`。首轮 6 失败/38 通过；日志 `.task_outputs/maka-upgrade/native/slice1.log` 仅保留最终通过轮，首轮输出随会话记录保留（未单独存档，此为记录缺口，不虚构文件）。
+- 已证实原因（全部为测试侧，逐项）：测试把目录当文件写入（`state/secret.txt` 先 mkdir 后 write_text）；句柄关闭后再用同 token 断言参数校验顺序；对空目录 `remove` 误期 `io_error`（设计允许删空目录）；子进程测试向 bootstrap 传了 `eventide/` 目录而非仓库根导致 `import eventide` 失败、stdout 为空；Seatbelt 引号转义 f-string 语法错误；runner 测试用 tuple 与 list 比较。另 `oversized_line` 测试参数（16 字节上限连 shutdown 行都超）二轮失败一次后修正。
+- 处理：仅改测试文件与断言顺序；生产模块同时修复 ruff/mypy 报告的行长、`contextlib.suppress`、except 变量重名与元组类型标注（静态问题，非行为变更）。
+- 复验：最终 44 项全部通过、Ruff 全过、Mypy 7 模块（py310 目标）无问题、`python -m eventide --help` 正常；日志 `.task_outputs/maka-upgrade/native/slice1.log`。
+- 经验：`-I -c` bootstrap 的 `sys.argv[1]` 必须是 `eventide` 包的父目录（仓库根/site-packages），传包目录本身会静默启动失败；monkeypatch 协议上限时要保证测试消息行在上限之下。未涉及失败的其他套件未重跑，无遗留未验证项。

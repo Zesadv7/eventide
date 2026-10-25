@@ -495,7 +495,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-18 | 待开始 | 自然语言长期记忆、可信原话/作用域、推测确认、撤销；保存提示/建议/管理联动。 |
 | MK-19 | 进行中 | 2026-10-26切片一：`eventide/diagnostics.py`事实投影+`GET /api/runs/{id}/diagnostics`及`download?format=json\|markdown`，报告绑定`(run_id, high_water)`、`report_version=1`，旧版本不随后续事件漂移；中文五段摘要（发生/停驻/完成/未知/下一步）、已知原因与待查分列、事件文本有界脱敏、缺事件明确不可用；生成不调用模型、不执行工具、不追加事件、不自动外发。Vue报告页`/runs/:runId/diagnostics`+历史页运行详情入口，覆盖加载/错误/缺事实/重新生成与高水位绑定下载。后端12项、前端6项定向、vue-tsc/Vite构建/OpenAPI/schema重生成/4资源打包、Ruff、3.10目标Mypy通过；验证失败已登记MK19-ZCODE。ADR-107、api-contract/architecture切片小节同步；恢复动作入口、证据跳转、Graph/恢复关系、产物化导出未实现，不宣称故障报告完成。 |
 | MK-20 | 待开始 | 自主Graph/依赖/领取/恢复/公平预算/独立写副本/候选整合/Verifier/人工采纳；任务图与列表。 |
-| MK-21 | 进行中 | macOS/Linux原生命令+文件worker隔离、网络/环境/后台/Skills/Graph矩阵、Docker并存；环境页/扩权审批和实机证据。 |
+| MK-21 | 进行中 | 2026-10-26切片1：`eventide/native_sandbox/`集中库落地（严格类型policy与能力矩阵、probe只读探测、Seatbelt profile/argv、bubblewrap挂载白名单argv、纯stdlib有界JSON行协议文件worker、无回退runner及测试注入点声明）；allow_network/allow_subprocess本切片显式拒绝，探测存在≠隔离有效。44项离线定向（策略/路径边界、矩阵、argv文本、协议与输入边界、真子进程握手/写读/shutdown、显式失败）、Ruff、Mypy(py310目标)7模块通过，无网络无模型。宿主接线（executor/policy/HTTP/前端/Skill与Shell同边界/Docker并存）及真实OS越界验证未做，清单见architecture#native-sandbox-slice与ADR-105；完整MK-21仍含网络/环境/后台/Skills/Graph矩阵、环境页/扩权审批和实机证据。 |
 | MK-22 | 待开始 | API/Vue/分发统一、一次全量收口、真实浏览器与本机平台边界、最终真实模型比较；缺平台/额度与效果未达标分开记录。 |
 
 依赖批次：A MK-00及原生能力预检 → B MK-08/19基础/07/09 → C MK-01/02/05/10/11/15/16/14/21 → D MK-03/04/06/17/18及07/09完善 → E MK-20/12/19完善 → F MK-13真实比较/MK-22。MK-13离线数据与比较器可提前准备；前端随每批实现，不集中拖到最后。

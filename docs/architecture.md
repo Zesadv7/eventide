@@ -1129,6 +1129,24 @@ API/UI 增加“已记住：内容/作用域/来源/撤销”和建议卡，保�
 
 **验证：** macOS 原生文件/子进程/网络/软硬链接/保护目录/本机 API 访问/取消清理；Linux 在本机 Linux VM 或其他明确 Linux 环境运行相同契约，记录内核/namespace 配置。先做离线策略生成和启动参数验证，最终真实内核限制验证与受控越界测试不可省。Apple Silicon Docker 结果只证明容器环境；若无 Linux VM，Linux 保持待外部验证，整体报告注明平台缺口。资源限制与磁盘配额按平台实际能力声明，不承诺统一硬限。
 
+<a id="native-sandbox-slice"></a>
+
+### MK-21 切片 1：原生隔离平台后端库（2026-10-26，进行中）
+
+新增集中库 `eventide/native_sandbox/`（policy/probe/seatbelt/bubblewrap/worker/runner），严格类型、离线可用、无网络与可选依赖。设计取舍见 [ADR-105](decisions.md#adr-105)。当前边界：
+
+- 策略：`NativeSandboxPolicy` 只有 `read-only` / `workspace-write` 两种 profile 与 realpath 规范化路径根；`allow_network`、`allow_subprocess` 对两个后端一律 `UnsupportedPolicyError`（loopback 守护保护本机管理 API 尚无离线可验证表达）。`default_protected_paths` 覆盖执行副本内 `.eventide`、Runtime 状态根与共享 Git common dir。
+- 能力矩阵：Seatbelt `subprocess_deny=full`、bubblewrap `partial`（不挂 shell，解释器可执行）；受保护根在 workspace 内 Seatbelt 用 deny 切块、bubblewrap 用空 tmpfs 遮蔽；bubblewrap 拒绝表达 workspace 内只读依赖根与系统库目录下受保护根。
+- 探测仅做平台 + 可执行存在性检查，"存在"不等于"隔离有效"；Seatbelt profile 为 targeted-deny（网络 deny、`deny process-exec*` + 解释器 literal 放行、写白名单 tmp/workspace、受保护根读/写 deny），bubblewrap 以挂载表为白名单（系统库 ro-bind-try、解释器/前缀 ro-bind、tmp rw、workspace 按策略、`--unshare-all`）。
+- 文件 worker 为固定纯标准库代码：有界 JSON 行协议 v1（请求/响应 16 MiB 上限），操作 ping/stat/list_dir/read_file/open_read/read_page/close_handle/write_file/remove/shutdown，不透明句柄、realpath 授权、大小与条目上限；grant 经环境变量传入，无模型/策略/宿主访问，不是第二套工具执行器。
+- runner 为唯一进程生成点，缺失/不支持/握手失败全部显式异常，无无沙箱回退；`launcher` 参数仅供离线测试注入真 worker 子进程，生产必须走默认沙箱启动。
+
+**已验证：** 44 项离线定向测试（策略与路径边界、能力矩阵、profile/argv 文本、协议与输入边界、真子进程 ping/写读/shutdown、显式失败路径）、Ruff、Mypy 7 模块（py310 目标）通过；未调用模型。
+
+**尚未完成（接线由主任务实施）：** `ToolExecutor`/`PolicyEngine` 接入（会话冻结策略、工具指纹与审计）、HTTP/OpenAPI/环境设置页能力矩阵展示、Skill 脚本与 Shell 命令的同边界执行、Docker 并存选择。
+
+**实机验证清单（MK-21 门禁，当前未做）：** macOS sandbox-exec 真实生效（写/网络/子进程越界拒绝、受保护根不可读、符号链接逃逸、本机管理 API 不可达、取消与清理）；Linux bubblewrap 在真实内核（含非特权 user namespace 可用性）执行同一契约；验证通过前本库不得作为可信隔离启用。
+
 ### 后端、接口与前端的共同完成标准
 
 每一项都走同一交付顺序：领域事实/权限 → HTTP/OpenAPI/SSE → Vue 状态与交互 → 定向验证 → 稳定文档。不能以“接口已写好”宣布功能完成。每个用户动作都定义正常、等待、失败、未知、刷新、重复点击、取消和过期状态；由后端返回可行动作。
