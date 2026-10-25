@@ -101,16 +101,12 @@ def _ref(event: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]
 def _tool_events(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
     tools: dict[str, dict[str, Any]] = {}
     order: list[str] = []
-    truncated = False
     for event in events:
         payload = event["payload"]
         kind = event["type"]
         if kind == "tool.prepared":
             call_id = str(payload.get("call_id", ""))
             if not call_id or call_id in tools:
-                continue
-            if len(order) >= _TOOL_LIMIT:
-                truncated = True
                 continue
             order.append(call_id)
             tools[call_id] = {
@@ -143,8 +139,8 @@ def _tool_events(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bo
             else:
                 current["status"] = "abandoned"
                 current["detail"] = "调用被放弃，未记录结果"
-    listed = [tools[call_id] for call_id in order[:_TOOL_LIMIT]]
-    return listed, truncated
+    listed = [tools[call_id] for call_id in order]
+    return listed, len(listed) > _TOOL_LIMIT
 
 
 def _attempt_facts(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]] | None, bool]:
@@ -164,7 +160,6 @@ def _attempt_facts(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]] |
     if not started and not finished:
         return [], False
     rows: list[dict[str, Any]] = []
-    truncated = False
 
     def row(attempt_id: str, start: dict[str, Any] | None, end: dict[str, Any] | None) -> dict:
         event = start or end
@@ -193,18 +188,12 @@ def _attempt_facts(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]] |
         }
 
     for attempt_id, start in started.items():
-        if len(rows) >= _ATTEMPT_LIMIT:
-            truncated = True
-            break
         rows.append(row(attempt_id, start, finished.get(attempt_id)))
     for attempt_id, end in finished.items():
         if attempt_id in started:
             continue
-        if len(rows) >= _ATTEMPT_LIMIT:
-            truncated = True
-            break
         rows.append(row(attempt_id, None, end))
-    return rows, truncated
+    return rows, len(rows) > _ATTEMPT_LIMIT
 
 
 def build_run_diagnostics(
@@ -301,7 +290,7 @@ def build_run_diagnostics(
                 event,
             )
     for tool in tools:
-        if tool["status"] == "unresolved":
+        if tool["status"] == "unresolved" and len(pending) < _LIST_LIMIT:
             pending.append(
                 {
                     "code": "tool_unresolved",
@@ -397,7 +386,7 @@ def build_run_diagnostics(
     if not facts_available:
         what = "没有可用的事件记录，无法生成事实摘要。"
         completed = "无可用事实。"
-        where = None
+        where = "没有可用事件，无法确认停止位置。"
         unknowns = ["事件记录缺失，无法确认执行过程。"]
         next_steps = ["没有可依据的事件事实；请先确认 Run 身份或查看历史页。"]
     else:
@@ -457,8 +446,8 @@ def build_run_diagnostics(
         },
         "known_causes": known_causes,
         "pending": pending,
-        "tools": tools,
-        "attempts": attempts or [],
+        "tools": tools[:_TOOL_LIMIT],
+        "attempts": attempts[:_ATTEMPT_LIMIT],
         "unavailable": unavailable,
         "notes": [_NOT_IN_SLICE],
         "truncated": truncated,

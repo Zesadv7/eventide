@@ -652,3 +652,9 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 ### MK-INTEGRATE — 生成命令路径修正
 
 - 2026-10-26 故障报告集成时从仓库根误用 `python scripts/export_openapi.py`，退出2、文件不存在；实际脚本在 frontend/scripts/export_openapi.py。未生成产物，修正工作目录后重新生成；这是命令问题，不是服务运行故障。
+
+### MK19-REVIEW — 报告展示限额误作总数与缺事实假正常
+
+- 2026-10-26 主代理受控复现，基线382bf6b；`python -m pytest -q tests/test_diagnostics_review.py` 2失败，证据 `.task_outputs/maka-upgrade/diagnostics/review-red.log`。
+- 已证实：工具/attempt在聚合前裁掉100条之后事实，使102次报告成100；无事件的where_stopped为None，被Markdown的正常结束默认文案误读。当前修正中，未做真实模型验证。
+- 修复后14项后端定向、6项前端报告组件、Ruff及Mypy2模块通过（review-green/review-frontend/review-ruff/review-mypy.log）。汇总现在使用完整事实，明细才裁剪；缺失事实明确不能确认停止位置。无真实模型或平台测试，后续恢复中心关联仍待实现。
