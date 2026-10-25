@@ -759,3 +759,9 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - MK-INTEGRATE-CONTEXT追加第三批：基线dda6bda，7文件定向118通过/4失败（integration/phase3-backend.log）。搜索schema增添mode/case/context及说明后目录再次增长，原紧凑机制fixture低于固定底座，涉及runtime compaction/Host目录/长结果/重开checkpoint；正在按实际增量定位修正，未改生产预算。
 
 - MK-INTEGRATE-CONTEXT第三批复验4/4通过（integration/phase3-context-recheck.log）：实测目录5191字符，目录哨兵5400、请求fixture底座5850、长结果fixture16900；生产预算及冻结模型评测不改。与首轮118项合计122个不同用例通过，未重复全仓。
+
+### MK-ZCODE-405 — 并行子任务遭服务端网关拦截
+
+- 2026-10-26 03:02（Asia/Shanghai），工具目录、命令日志、旁枝提问三路ZCode返回ok:false / HTTP405 Method Not Allowed，响应为网关阻断HTML。证据分别位于maka-tool-directory、maka-command-logs、maka-side-questions工作副本的`.task_outputs/maka-upgrade/zcode/{result.jsonl,progress.log}`；调用均指定既定Node/run.mjs、--cwd、UTF-8 --prompt-file、--mode yolo、Flash/max。
+- 分类：环境/外部服务故障。网关页说明请求被拦截，具体触发原因未知；不是429并发限制，也没有额度耗尽证据，因此没有切换模型/套餐、修改桥接或绕过拦截。三路停止且未形成可验收提交：工具目录留有3份未完成修改，其余尚无运行代码改动。
+- 主代理保留现场及任务文件，继续集成此前已交回切片。该外部依赖恢复前，不宣称后续子任务完成或并行仍运行；不把wrapper进程退出0当任务成功。

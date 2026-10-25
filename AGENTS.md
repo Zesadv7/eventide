@@ -479,7 +479,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-02 | 进行中 | 文件版本绑定续页、超长行、跨副本校验；页面范围/变化提示。 |
 | MK-03 | 进行中 | 摘要目标/约束/事实/假设/检查/证据，结构和来源校验；上下文版本对照。 |
 | MK-04 | 进行中 | 规则来源/作用域/截断及attempt输入清单；请求诊断面板不串轮。 |
-| MK-05 | 待开始 | 普通Shell/Skill/后台长日志归档回读，保留配额/脱敏/退出事实；页面分页与缺失状态。 |
+| MK-05 | 受阻 | 普通Shell/Skill/后台长日志归档回读，保留配额/脱敏/退出事实；页面分页与缺失状态。 |
 | MK-06 | 进行中 | 运行中补充/下一轮、结构化问题与持久回答；安全边界消费、刷新/迟到/停止回归。 |
 | MK-07 | 进行中 | 实际参数生成可读审批，冻结版本/边界/副本；过期与扩权校验。 |
 | MK-08 | 进行中 | 整体恢复重做：A连接与回执、B模型分类重试、C持久恢复、D未知结果只读核查、E源码变化重新建立基线、F恢复UI；故障注入矩阵。B首批主调用10次分类重试/Retry-After/等待释放槽/用量预算/尝试预览隔离实现，179项定向、Ruff和Mypy11模块通过，ADR-101及MK08B-REVIEW记录。仍待页面和持久恢复，不计整项完成，无真实模型验收。 |
@@ -491,7 +491,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-14 | 待开始 | 版本化模型/端点能力目录、配置/连接/工具验证分开；设置页能力卡。 |
 | MK-15 | 进行中 | 2026-10-26 后端切片（ZCode 子agent）：`search_text` 新增 mode=literal/regex、case_sensitive、context_lines(0–10)；regex 需本机 rg（eventide/tools/regex_backend.py），缺失返回能力错误不降级，子进程带 wall-clock 截止+16MiB 输出上限并 kill/reap，命中行逐行与边界内读取字节核对后才采信，不引入边界外内容；命中 path:line: 与上下文 path:line- 区分、同文件区间合并去重、长行 240 字符窗口标注省略；每来源带实际搜索字节 sha256（与 read_file/edit_file 版本凭据一致）；扫描/跳过/超时/核对计数显式，空结果不声称全仓无匹配；路径边界与隐藏规则沿用原实现，regex 不扩大权限；沙箱任务副本本轮仍不提供 search_text，不谎报覆盖。定向验证：tests/test_text_search.py 29 项（真实 rg 接线、超时 kill/reap、伪造输出核对排除、路径注入、sha256 与 edit_file 绑定、严格契约/接线）包含关联在内共159项通过（另1项旧基线失败单列），Ruff 全仓、Mypy 133 模块、服务 help 通过；日志 .task_outputs/maka-upgrade/search/。既有 test_runtime_retries_and_compacts 失败为 3898ffc 引入、已登记 failure-cases MK15-ZCODE，与本切片无关。剩余：源码定位 UI、OpenAPI 集成重建及 MK-22 整体效果验收。 |
 | MK-16 | 进行中 | 2026-10-26纵向最小切片：`tool_discovery.py`确定性目录快照（版本指纹/来源/效果/环境/状态）与四级排序分页搜索；`tool_discover`/`tool_load`模型工具加载精确schema回执并绑定目录版本，Host在存在MCP工具且非沙箱/只读时把MCP工具改为按需投影（host.py工具组装块），未加载调用被Unknown tool拒绝、加载不改变Policy审批；`ToolExecutor.register_discovered_tool`只解锁同快照schema。新增5项定向、executor/contracts/tools/worker/mcp关联76项通过，host26项中3项为基线3898ffc既有失败（failure-cases MK16-BASELINE），Ruff/Mypy4模块通过；`GET /api/workspaces/{id}/tools`提供常备基础目录，不伪造已加载。ADR-109；已加载面板/加载事实持久化/Run已加载查询API及真实Host+MCP端到端旅程待后续。 |
-| MK-17 | 待开始 | 独立只读旁枝、主任务已提交快照、用户选择回传；聊天侧栏及消息幂等接线。 |
+| MK-17 | 受阻 | 独立只读旁枝、主任务已提交快照、用户选择回传；聊天侧栏及消息幂等接线。 |
 | MK-18 | 进行中 | 2026-10-26 纵向切片已落地：新增 eventide/memory_intake.py 确定性有限语法（声明支持：意图开头 记住/remember + 长期标记 以后/永久/长期/每次/always 等才直接保存；裸“记住X”仅观察、同会话重复才成 pending 建议；“这次/本次/this time”给拒绝回执不保存；否定/引文/反引号/尖括号/多行/非开头意图一律不记；全局需原话明确 全局/global 词且后随分隔符，否则默认项目并在回执标 scope_defaulted）。经 PreferenceMemory.observe_run 可信接收路径接线（仅 user 作者、无附件、非控制/子 Run），来源含 span:{start,end} 精确绑定原文偏移，自然语句 key 为 nl_<sha256前缀> 稳定派生；同事件重复投递与撤销后原来源均不重复保存，同内容新投递命中冲突回执。RunMemoryPanel 新增已记住卡片（内容/作用域/默认说明/来源/撤销按钮），memory.ts 回执类型扩充，vue-tsc 通过。定向验证：test_memory_intake.py 18 项 + test_preference_memory.py 38 项通过（旧用例“记住：以后用中文回答”按新语法迁为正例），Ruff/Mypy 2 模块通过，前端 memory.test.ts 14 项通过。主代理补齐直接“以后这个项目都用中文”、已知语言偏好冲突键及撤销后的当前状态。聊天流内已显示卡片；29项前端关联及1条built实际API浏览器保存/撤销/刷新旅程通过，类型/构建与资源同步；全量及付费模型未做。证据 .task_outputs/maka-upgrade/integration/memory-*。|
 | MK-19 | 进行中 | 2026-10-26切片一：`eventide/diagnostics.py`事实投影+`GET /api/runs/{id}/diagnostics`及`download?format=json\|markdown`，报告绑定`(run_id, high_water)`、`report_version=1`，旧版本不随后续事件漂移；中文五段摘要（发生/停驻/完成/未知/下一步）、已知原因与待查分列、事件文本有界脱敏、缺事件明确不可用；生成不调用模型、不执行工具、不追加事件、不自动外发。Vue报告页`/runs/:runId/diagnostics`+历史页运行详情入口，覆盖加载/错误/缺事实/重新生成与高水位绑定下载。后端12项、前端6项定向、vue-tsc/Vite构建/OpenAPI/schema重生成/4资源打包、Ruff、3.10目标Mypy通过；验证失败已登记MK19-ZCODE。ADR-107、api-contract/architecture切片小节同步；恢复动作入口、证据跳转、Graph/恢复关系、产物化导出未实现，不宣称故障报告完成。 |
 | MK-20 | 待开始 | 自主Graph/依赖/领取/恢复/公平预算/独立写副本/候选整合/Verifier/人工采纳；任务图与列表。 |
@@ -523,3 +523,5 @@ MK-08B等待界面已接线：Run事实投影保存绝对retry_at，Chat显示�
 MK-08A快照/代次已补：原子Run快照、首次SSE状态、超前游标reset、旧代次preview拒绝；14项后端/22项前端/1条built实际API断网与刷新通过，类型/构建/OpenAPI/Ruff/Mypy3模块完成。工具发现主代理修复后43项Host/目录/HTTP回归通过（integration/discovery.log），旧3898ffc的目录固定预算失败已按MK-INTEGRATE-CONTEXT修复。
 
 第三批集成定向122项不同后端用例均通过：118项首轮通过，4项因目录增加到5191字符触发机制fixture底座不足，修正fixture后4项通过；未改生产预算和冻结评测。MK06/07/09 ZCode实施已启动；MK08C交回待主代理复核，MK16持久目录/API/UI后续并行中。
+
+ZCode后续3路（MK16目录UI、MK05命令日志、MK17旁枝）于03:02返回网关405，非额度耗尽，未绕过或切套餐；未完成现场保留，failure-cases#MK-ZCODE-405及本地dispatch清单可追溯。已交回切片继续主代理复核集成。
