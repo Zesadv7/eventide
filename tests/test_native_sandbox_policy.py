@@ -106,7 +106,7 @@ def test_seatbelt_accepts_protected_root_inside_workspace(tmp_path: Path) -> Non
 
 
 def test_support_matrix_matches_documented_levels() -> None:
-    assert SUPPORT_MATRIX[(NativeBackendKind.SEATBELT, "subprocess_deny")] == "full"
+    assert SUPPORT_MATRIX[(NativeBackendKind.SEATBELT, "subprocess_deny")] == "partial"
     assert SUPPORT_MATRIX[(NativeBackendKind.BUBBLEWRAP, "subprocess_deny")] == "partial"
     for backend in NativeBackendKind:
         assert SUPPORT_MATRIX[(backend, "network_allow_loopback_guard")] == "unsupported"

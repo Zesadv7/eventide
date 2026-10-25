@@ -10,8 +10,8 @@ Current boundary (MK-21 slice 1, 2026-10-26):
 - Profiles: ``read-only`` and ``workspace-write`` only.
 - Network access is always denied; ``allow_network=True`` has no verified
   loopback guard for the local management API and is refused by every backend.
-- Subprocess spawning is refused: Seatbelt can deny ``process-exec*`` fully,
-  bubblewrap only approximates it by not mounting shells (partial), so workers
+- Subprocess spawning is refused: Both launchers retain executable interpreters
+  and only offer partial process-exec restrictions, so workers
   never get an allow.
 - Enforcement correctness on a real kernel is verified separately; tool
   presence is only an availability probe, not proof of isolation.
@@ -160,12 +160,12 @@ SUPPORT_MATRIX: dict[tuple[NativeBackendKind, str], str] = {
     (NativeBackendKind.SEATBELT, "write_allowlist"): "full",
     (NativeBackendKind.SEATBELT, "network_deny"): "full",
     (NativeBackendKind.SEATBELT, "network_allow_loopback_guard"): "unsupported",
-    (NativeBackendKind.SEATBELT, "subprocess_deny"): "full",
+    (NativeBackendKind.SEATBELT, "subprocess_deny"): "partial",
     (NativeBackendKind.SEATBELT, "protected_inside_workspace"): "full",
     (NativeBackendKind.BUBBLEWRAP, "write_allowlist"): "full",
     (NativeBackendKind.BUBBLEWRAP, "network_deny"): "full",
     (NativeBackendKind.BUBBLEWRAP, "network_allow_loopback_guard"): "unsupported",
-    # No shell or extra binaries are mounted, but the interpreter itself stays
+    # Interpreter prefixes may include other binaries; the interpreter itself stays
     # executable; bwrap has no per-syscall exec filter without a seccomp BPF.
     (NativeBackendKind.BUBBLEWRAP, "subprocess_deny"): "partial",
     # Shadow tmpfs hides the subtree; content is invisible rather than erroring.

@@ -685,3 +685,10 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 处理：仅改测试文件与断言顺序；生产模块同时修复 ruff/mypy 报告的行长、`contextlib.suppress`、except 变量重名与元组类型标注（静态问题，非行为变更）。
 - 复验：最终 44 项全部通过、Ruff 全过、Mypy 7 模块（py310 目标）无问题、`python -m eventide --help` 正常；日志 `.task_outputs/maka-upgrade/native/slice1.log`。
 - 经验：`-I -c` bootstrap 的 `sys.argv[1]` 必须是 `eventide` 包的父目录（仓库根/site-packages），传包目录本身会静默启动失败；monkeypatch 协议上限时要保证测试消息行在上限之下。未涉及失败的其他套件未重跑，无遗留未验证项。
+
+### MKNATIVE-REVIEW — Linux启动契约与Mac只读依赖保护遗漏
+
+- 2026-10-26 主代理受控复现，基线efc409a；`python -m pytest -q tests/test_native_review.py` 2失败，证据 `.task_outputs/maka-upgrade/native/review-red.log`。
+- 已证实：bubblewrap的clearenv丢弃worker授权配置，且未挂载安装源码；Seatbelt工作区写授权没有对内部只读依赖加禁止写规则。补明确setenv/只读安装路径挂载和依赖写拒绝。另复核发现解释器可再次exec，Seatbelt subprocess_deny不能标full；两平台暂仅partial，内核实测仍未完成。
+- 首次修复复验45通过/1失败，为旧能力矩阵断言仍期望full；review-green.log保留为review-matrix-old.log。已将断言与真实partial边界同步，无放宽执行权限。
+- 修复后46项离线定向、Ruff、Mypy7模块通过（review-green/review-ruff/review-mypy.log）。启动文本验证不能代替内核实测，原生模块尚未接入生产ToolExecutor，未宣称可用安全隔离；实际可执行权限范围仍须后续收紧及平台验收。

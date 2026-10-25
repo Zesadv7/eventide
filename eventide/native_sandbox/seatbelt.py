@@ -50,6 +50,8 @@ def build_seatbelt_profile(policy: NativeSandboxPolicy, interpreter: Path) -> st
     ]
     if policy.profile.value == "workspace-write":
         lines.append(f"(allow file-write* {_subpath(policy.workspace_root)})")
+    for root in policy.read_only_roots:
+        lines.append(f"(deny file-write* {_subpath(root)})")
     for root in policy.protected_roots:
         lines.append(f"(deny file-read* {_subpath(root)})")
         lines.append(f"(deny file-write* {_subpath(root)})")

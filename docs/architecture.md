@@ -1136,7 +1136,7 @@ API/UI 增加“已记住：内容/作用域/来源/撤销”和建议卡，保�
 新增集中库 `eventide/native_sandbox/`（policy/probe/seatbelt/bubblewrap/worker/runner），严格类型、离线可用、无网络与可选依赖。设计取舍见 [ADR-105](decisions.md#adr-105)。当前边界：
 
 - 策略：`NativeSandboxPolicy` 只有 `read-only` / `workspace-write` 两种 profile 与 realpath 规范化路径根；`allow_network`、`allow_subprocess` 对两个后端一律 `UnsupportedPolicyError`（loopback 守护保护本机管理 API 尚无离线可验证表达）。`default_protected_paths` 覆盖执行副本内 `.eventide`、Runtime 状态根与共享 Git common dir。
-- 能力矩阵：Seatbelt `subprocess_deny=full`、bubblewrap `partial`（不挂 shell，解释器可执行）；受保护根在 workspace 内 Seatbelt 用 deny 切块、bubblewrap 用空 tmpfs 遮蔽；bubblewrap 拒绝表达 workspace 内只读依赖根与系统库目录下受保护根。
+- 能力矩阵：Seatbelt/bubblewrap `subprocess_deny=partial`（解释器可再次执行，Linux解释器前缀还可能含其它程序）；受保护根在 workspace 内 Seatbelt 用 deny 切块、bubblewrap 用空 tmpfs 遮蔽；bubblewrap 拒绝表达 workspace 内只读依赖根与系统库目录下受保护根。
 - 探测仅做平台 + 可执行存在性检查，"存在"不等于"隔离有效"；Seatbelt profile 为 targeted-deny（网络 deny、`deny process-exec*` + 解释器 literal 放行、写白名单 tmp/workspace、受保护根读/写 deny），bubblewrap 以挂载表为白名单（系统库 ro-bind-try、解释器/前缀 ro-bind、tmp rw、workspace 按策略、`--unshare-all`）。
 - 文件 worker 为固定纯标准库代码：有界 JSON 行协议 v1（请求/响应 16 MiB 上限），操作 ping/stat/list_dir/read_file/open_read/read_page/close_handle/write_file/remove/shutdown，不透明句柄、realpath 授权、大小与条目上限；grant 经环境变量传入，无模型/策略/宿主访问，不是第二套工具执行器。
 - runner 为唯一进程生成点，缺失/不支持/握手失败全部显式异常，无无沙箱回退；`launcher` 参数仅供离线测试注入真 worker 子进程，生产必须走默认沙箱启动。

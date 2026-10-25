@@ -3,8 +3,8 @@
 The mount list is the allowlist: only explicitly bound paths exist inside the
 namespace, so everything else (including protected runtime state and the shared
 Git dir) is unreachable. ``--unshare-all`` removes the network and PID
-namespaces. Subprocess denial is partial: no shell or other binaries are
-mounted, but the interpreter itself stays executable because the worker needs
+namespaces. Subprocess denial is partial: interpreter prefixes may contain executable
+programs and the interpreter itself stays executable because the worker needs
 it. Generated offline; real-kernel verification is a separate MK-21 step.
 """
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from eventide.native_sandbox.policy import NativeSandboxPolicy, UnsupportedPolicyError
-from eventide.native_sandbox.worker import WORKER_BOOTSTRAP
+from eventide.native_sandbox.worker import GRANT_ENV_VAR, WORKER_BOOTSTRAP
 
 BUBBLEWRAP_NAME = "bwrap"
 
@@ -62,6 +62,9 @@ def build_bubblewrap_launch(
         "--setenv",
         "TMPDIR",
         str(policy.tmp_root),
+        "--setenv",
+        GRANT_ENV_VAR,
+        policy.grant().encode_env(),
     ]
     for lib in LIB_BIND_PATHS:
         argv.extend(["--ro-bind-try", lib, lib])
@@ -69,6 +72,7 @@ def build_bubblewrap_launch(
     argv.extend(["--ro-bind", str(base_prefix), str(base_prefix)])
     if prefix != base_prefix:
         argv.extend(["--ro-bind", str(prefix), str(prefix)])
+    argv.extend(["--ro-bind", str(package_parent), str(package_parent)])
     for root in policy.read_only_roots:
         argv.extend(["--ro-bind", str(root), str(root)])
     argv.extend(["--bind", str(policy.tmp_root), str(policy.tmp_root)])
@@ -84,6 +88,7 @@ def build_bubblewrap_launch(
         *policy.read_only_roots,
         base_prefix,
         prefix,
+        package_parent,
     ]
     shadows = [
         root
