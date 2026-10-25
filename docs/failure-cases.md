@@ -330,6 +330,8 @@ TC-2收口：存储/Host/Runtime/Trace61项、原unknown恢复2项、前端13项
 - 已证实环境变化：主任务安装本地retrieval可选依赖，新增的NumPy类型文件引发语法不兼容；本子任务没有改动依赖。先完成3.12目标三模块检查，再使用主任务提供的既有 `.task_outputs/publish-py310/bin/python` 保留默认3.10目标复核，三模块均通过。证据 `local-roles/mypy-py312.log`、`mypy-py310.log`；没有放宽仓库门槛或改生产代码，原失败保留。
 - 经验与范围：区分类型环境解析失败与项目类型错误，复用已有最小检查环境；没有重跑全仓或为修测试重新安装依赖。记录随本地角色适配同提交，真实模型推理另验收。
 
+- 2026-10-26 MK08A 续接路由复发：基线 `5acba20` 加本轮改动，共享 Python `-m mypy eventide/http_api/streams.py` 同样退出 2。证据 `.task_outputs/maka-upgrade/connection/mypy.log`；复用上述隔离环境按默认目标检查通过，证据 `mypy-py310.log`，未降低门槛或改共享依赖。相关实现提交 `983f0c4`。
+
 ### RG-LOCAL：冻结检索留出集仍有漏召回（2026-10-23）
 
 - 类型：真实本地模型／检索效果失败，非运行异常。基线 `9318396`；固定Qwen3-Embedding-0.6B revision `97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3`、官方query提示、CPU、无重排/改写。原16语料40查询不改，开发20先执行，再一次留出20；质量分母按题计，三次重复仅测本地排序时间。
@@ -568,14 +570,9 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 
 - 分类：测试问题。基线 `5acba20` 加本轮页面续接改动；命令为共享环境 Python `-m ruff check eventide/http_api/streams.py tests/test_stream_reconnect.py`，退出 1。
 - 现象及已证实原因：新增测试第 33、36、38 行超过 100 字符，三条 E501；功能定向测试此前通过。原始结果见本轮工具输出。
-- 处理：按项目格式拆分断言；Ruff 定向复验通过，8 项后端续接/流式测试通过。相关提交见本节首次提交。实际排障为主代理执行，未涉及模型效果或生产故障。
+- 处理：按项目格式拆分断言；Ruff 定向复验通过，8 项后端续接/流式测试通过。相关提交 `983f0c4`。实际排障为主代理执行，未涉及模型效果或生产故障。
 
 ## MK08A-UI-TEST：重连提示定向测试失败（2026-10-26）
 
-- 分类：待查。基线 `5acba20` 加本轮页面续接改动；命令 `node node_modules/vitest/vitest.mjs run tests/events.test.ts tests/workbench.test.ts tests/chat-experience.test.ts tests/connection-notice.test.ts`，frontend 目录运行，退出 1。
-- 原始证据：`.task_outputs/maka-upgrade/connection/frontend-red.log`。已确认失败在卸载后全局计时器数量断言（预期 0、实测 1）；该断言把测试框架/DOM 的计时器也算入了组件责任。改为验证组件创建的 interval 身份确实被 clearInterval 清理，保留倒计时和离线文案行为断言；4 文件 36 项前端定向复验通过，证据 `connection/frontend.log`。相关提交见本节首次提交。
-
-## MK08A-MYPY：续接路由类型检查未通过（2026-10-26）
-
-- 分类：环境/外部依赖故障，与既有 RG-LOCAL-MYPY 的 NumPy 类型语法问题相同。基线 `5acba20` 加本轮页面续接改动；共享环境 Python `-m mypy eventide/http_api/streams.py` 退出 2。
-- 原始证据：`.task_outputs/maka-upgrade/connection/mypy.log`。NumPy 使用 Python 3.12 类型别名语法，与项目 3.10 检查目标不兼容；改用已有隔离 `.task_outputs/publish-py310/bin/python`，不改仓库门槛或共享依赖，按默认目标检查通过，证据 `mypy-py310.log`。主代理核查与复验，未改生产行为。
+- 分类：测试问题。基线 `5acba20` 加本轮页面续接改动；命令 `node node_modules/vitest/vitest.mjs run tests/events.test.ts tests/workbench.test.ts tests/chat-experience.test.ts tests/connection-notice.test.ts`，frontend 目录运行，退出 1。
+- 原始证据：`.task_outputs/maka-upgrade/connection/frontend-red.log`。已确认失败在卸载后全局计时器数量断言（预期 0、实测 1）；全局计时器来源未逐一归属，该断言超出了本组件的清理责任。改为验证组件创建的 interval 身份确实被 clearInterval 清理，保留倒计时和离线文案行为断言；4 文件 36 项前端定向复验通过，证据 `connection/frontend.log`。相关提交 `983f0c4`。
