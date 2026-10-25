@@ -482,7 +482,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-05 | 受阻 | 普通Shell/Skill/后台长日志归档回读，保留配额/脱敏/退出事实；页面分页与缺失状态。 |
 | MK-06 | 进行中 | 2026-10-26 切片1（自由文本运行中补充，基线0c86c75）：`interaction.supplement`/`consumed` 只落唯一EventLog（新interactions.py+Store三窄方法），Host仅每步context_builder.build前消费一次并同事务追加带前缀message.user，工具不倒带；POST/GET /api/runs/{id}/supplements复用本机来源+write receipts/origin幂等，终态后收据记late不自动续跑、不建Run、同Session其他Run不消费；Vue RunSupplementPanel挂ChatView。后端4项定向（边界单次消费/同键重放与409/迟到隔离/4xx）、前端4项组件+39项chat/memory/sandbox回归、vue-tsc、Ruff全仓、Mypy(py310)5模块通过；首轮测试迭代失败已记MK-06-SLICE1，日志.task_outputs/maka-upgrade/interactions/。ADR-112、architecture/api-contract同步。结构化提问持久等待/回答（切片2）未实现，OpenAPI/schema.d.ts未重新生成，不计整项完成。 |
 | MK-07 | 进行中 | 2026-10-26 切片1：attention.py 从冻结参数+run_execution绑定派生命令/目标/cwd/执行位置/影响范围，网络与权限显示未声明；approval_id与原始参数原样透传，动作复用既有审批端点，取消后过期审批保留显示且仍被拒绝（404/409）。后端5项+test_api 25项、前端3项组件、Ruff/Mypy4模块/vue-tsc/Prettier通过，日志.task_outputs/maka-upgrade/attention/。ADR-113 Proposed；operation/revision绑定与批准前参数失效待后续切片，未跑全量/浏览器/真实平台。 |
-| MK-08 | 进行中 | 整体恢复重做：A连接与回执、B模型分类重试、C持久恢复、D未知结果只读核查、E源码变化重新建立基线、F恢复UI；故障注入矩阵。B首批主调用10次分类重试/Retry-After/等待释放槽/用量预算/尝试预览隔离实现，179项定向、Ruff和Mypy11模块通过，ADR-101及MK08B-REVIEW记录。仍待页面和持久恢复，不计整项完成，无真实模型验收。 |
+| MK-08 | 进行中 | 整体恢复重做：A连接与回执、B模型分类重试、C持久恢复、D未知结果只读核查、E源码变化重新建立基线、F恢复UI；故障注入矩阵。B首批主调用10次分类重试/Retry-After/等待释放槽/用量预算/尝试预览隔离实现，179项定向、Ruff和Mypy11模块通过，ADR-101及MK08B-REVIEW记录。已补等待页面及无终态Run的持久恢复；未知核查/正常服务关闭恢复/恢复中心仍待，不计整项完成，无真实模型验收。 |
 | MK-09 | 进行中 | 2026-10-26 切片1：GET /api/attention与/api/projects/{id}/attention纯事实投影（待审批/失败停驻运行/待采纳交付候选），去重键approval:{id}、run:{id}:{status}、delivery:{id}；Vue /attention独立页+导航，动作复用既有接口不自动采纳，待回答类别明示不支持。后端5项+前端3项定向通过（证据同MK-07），ADR-113 Proposed；待回答/核查不明类别、项目筛选UI与多标签旅程待后续切片。 |
 | MK-10 | 待开始 | 后台命令身份/日志/就绪/停止/重启核查；进程树清理与UI。 |
 | MK-11 | 待开始 | 可信无依赖只读工具并行、共享调度、稳定结果及部分失败；批次展示。 |
@@ -529,3 +529,7 @@ ZCode后续3路（MK16目录UI、MK05命令日志、MK17旁枝）于03:02返回�
 MK-08C持久恢复首批切片（2026-10-26，子agent，ADR-111）：接收冻结recovery_policy，旧历史不自动升级；重启按事实投影判定（控制类执行/未知工具/未闭合协议对/待审批/缺post-tool checkpoint/源码checkpoint漂移均停驻），可恢复Run经store.claim_run_recovery单事务领取（recovery.claimed冻结后继身份+run.interrupted收尾），重复initialize/连续重启不产生两个后继；initialize()复核冻结provider/model/Skill快照后走既有Continue调度原顺序重派发，预算按recovery_of上溯原根Run不重置。4项真实Host重启定向、91项恢复/调度/预算/Continue回归、73项host/retry/stream回归、Ruff/Mypy通过；失败与复验见failure-cases MK08C-ZCODE，日志.task_outputs/maka-upgrade/recovery/。仍待08D未知核查、恢复API/页面、控制类执行恢复与真实验收；MK-08整体仍进行中。
 
 MK08C主代理复核：61cf634后发现并修复claim与initialize间再次崩溃遗漏、普通worktree/snapshot误停、显式模型/Skill误比默认的问题；保留相同后继身份、原副本及预算根。105个不同恢复/调度/预算/副本用例通过，最后25项调度复验与Ruff/Mypy通过，failure-cases MK08C-REVIEW可追溯。MK08仍未完成：未知工具自动核查、源码变化重新建立基线、恢复中心UI及控制执行恢复未交付。
+
+本批集成（2026-10-26）：恢复61cf634+7bf4be6→53e6d8f；补充6f7f7ca+05c9383→4c73b0b；待处理d5bef36+b12e7cc+e65c557→3ece870。主集成另修API恢复后新审批接Broker、补充可见位置及精确输入框测试定位。142项后端组合、32项恢复/API、59项前端、1条built实际API审批/补充/刷新旅程、Ruff/Mypy8、typecheck/build/契约生成通过；最后收口提交包含产物。MK00–21均按各自切片状态，不将已开发当整项完成。正常close已取消任务不自动恢复；MK08D/E/F、MK06结构化问题、MK16持久目录/UI、MK17/20/21生产边界和MK22最终验收等仍未完成。当前后续ZCode调用因外部网关405受阻，无额度耗尽证据，待服务恢复；没有推送或采纳到原项目。
+
+本批附加分发复核：runtime contract与workbench资源定向11项通过（integration/phase4-distribution.log），源项目仍在a5f3dc6且仅既有.video_agent/未跟踪，未采纳候选。外部agent的实际wrapper退出均为1，任务ok:false，三路停止。

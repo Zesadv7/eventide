@@ -57,7 +57,7 @@ async function setup(value: Partial<Session> = {}, pending = false) {
     global: { plugins: [router], stubs: { GenerationEditor: true } },
   });
   const submit = vi.spyOn(store, "submit").mockResolvedValue(undefined);
-  await wrapper.get("textarea").setValue("检查项目");
+  await wrapper.get('textarea[aria-label="任务输入"]').setValue("检查项目");
   return { store, wrapper, submit };
 }
 describe("optional offline sandbox controls", () => {

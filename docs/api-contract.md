@@ -633,7 +633,7 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 | MK-03 摘要 | `GET /api/runs/{run_id}/context/summaries`；只读查看，生成由 Runtime 调度 | covered_seq、来源 digest、schema_version、证据引用、校验结果 | 上下文侧栏显示替换范围、失败原因、原文入口；刷新保持同一版本 |
 | MK-04 输入与规则 | `GET /api/runs/{run_id}/attempts/{attempt_id}/context`；项目规则来源查询 | 规则/Skill/记忆/工具目录及裁剪清单、大小、来源/版本；脱敏有效投影 | “本次模型看到了什么”面板，切换尝试不串数据；截断和未加载明显区分 |
 | MK-05 长日志 | `GET /api/runs/{run_id}/tools/{call_id}/output?stream=stdout&cursor=...`；复用归档授权与分页 | capture_state、availability、偏移/下一页、退出码、超时、省略量 | 工具卡日志展开/分页/缺失提示；中间错误能找到，过期不显示为空成功 |
-| MK-06 补充与提问 | `POST /api/sessions/{id}/messages` 带 current/next 意图；`GET /api/sessions/{id}/questions`；`POST /api/questions/{id}/answer` | `message.accepted/consumed`、question opened/answered/expired、来源 Run/revision、生效 attempt | 输入区选择补充/下一轮；问题卡含选择与自由回答；刷新、重复回答、停止后迟到答复有明确结果 |
+| MK-06 补充与提问 | 已实现 `POST/GET /api/runs/{id}/supplements`；以下为后续计划：`POST /api/sessions/{id}/messages` 带 current/next 意图；`GET /api/sessions/{id}/questions`；`POST /api/questions/{id}/answer` | `message.accepted/consumed`、question opened/answered/expired、来源 Run/revision、生效 attempt | 输入区选择补充/下一轮；问题卡含选择与自由回答；刷新、重复回答、停止后迟到答复有明确结果 |
 | MK-07 审批 | 切片 1 已实现：`GET /api/attention`/`GET /api/projects/{id}/attention` 返回结构化审批卡，动作仍走既有 `POST /api/runs/{run_id}/approvals/{approval_id}`；扩展现有 approval GET/resolve DTO，不另造授权通道 | command/cwd/paths、effect、执行边界、参数 digest、revision、scope | 可读审批卡及原始详情；源/副本/native/Docker 一目了然；过期批准拒绝 |
 | MK-08 恢复 | `GET /api/runs/{id}/recovery`；`POST /api/runs/{id}/recovery/actions`；扩展现有 Run 状态/SSE/停止 | recovery_id、classification、检查项、next_retry_at、attempt/max_attempts、claim、successor、核查证据、available_actions | 聊天恢复条+恢复详情；断网接回、倒计时、重启自动续跑、未知核查、停止、双标签去重 |
 | MK-09 待处理 | 切片 1 已实现：`GET /api/attention`（全局）与 `GET /api/projects/{id}/attention`（按项目），无 cursor 分页；动作跳对应对象接口，`awaiting_answers` 明示不支持 | attention_id、type、source/version、reason、actions；解决状态由源事实派生 | 项目待办入口和筛选，点击旧卡复核；隐藏不等于解决，不卡住其他会话 |
@@ -702,3 +702,7 @@ MK-08B等待状态：Run投影新增可空`model_retry`，含原始attempt/next_
 MK-08A快照与服务代次：新增只读`GET /api/runs/{id}/snapshot`，返回`run_id/epoch/high_water/state`；Store同一锁内读取状态与事件高水位。SSE首次发送无事件游标的`stream.state`帧，结构相同并附`reset`；客户端游标大于现存高水位时reset=true，页面重建当前状态并从该位置续接，绝不重发Run写请求。正常重连仍重放after之后的事件，不用快照跳过未处理事实。epoch为本次API实例身份，临时preview带epoch，旧代次预览丢弃。当前事件日志不裁剪；未凭数字间隔臆测缺失（同Session不同Run的seq可以不连续）。历史API、SSE持久事实不因重连更改。
 
 MK-18回执当前状态：run memory receipts保留原content/revision，附可选current_status/current_revision用于区分历史保存与当前撤销/编辑；旧历史无关联事实不编造。source.span使用Unicode字符起止（左闭右开）。
+
+MK06当前接线：`POST /api/runs/{id}/supplements`正文含body(1–8000字符)/body_version(1–9)，要求同源本机与幂等键；GET返回supplements/pending。pending只代表已接收，consumed代表已持久加入当前Run消息，不保证请求已发送或模型采纳；终态前未加入消息者投影为late。终态后收据保留在Session事实并绑定原Run，不启动新任务。Web启动的自动恢复后继使用相同ApprovalBroker，新的审批仍通过原审批端点操作。
+
+MK07/09当前注意：attention的counts是本次返回数量，limits声明审批和失败列表上限；项目过滤在截取前执行，包含该项目执行副本。全量翻页、问题等待、精确参数版本和恢复动作仍属于计划，当前响应不能冒充完整待办总量。聊天/待处理实际API旅程验证了补充刷新、精确拒绝和同一Run后续消费。

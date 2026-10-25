@@ -30,13 +30,13 @@ async function setup() {
     global: { plugins: [router], stubs: { GenerationEditor: true } },
   });
   const submit = vi.spyOn(store, "submit").mockResolvedValue(undefined);
-  await wrapper.get("textarea").setValue("检查这个项目");
+  await wrapper.get('textarea[aria-label="任务输入"]').setValue("检查这个项目");
   return { store, wrapper, submit };
 }
 describe("conversation interaction guardrails", () => {
   it("keeps Enter for newlines and sends on Ctrl or Meta Enter only", async () => {
     const { wrapper, submit } = await setup();
-    const input = wrapper.get("textarea");
+    const input = wrapper.get('textarea[aria-label="任务输入"]');
     await input.trigger("keydown", { key: "Enter" });
     expect(submit).not.toHaveBeenCalled();
     await input.trigger("keydown", { key: "Enter", ctrlKey: true });
@@ -47,7 +47,7 @@ describe("conversation interaction guardrails", () => {
   });
   it("never submits while an IME composition is active", async () => {
     const { wrapper, submit } = await setup();
-    const input = wrapper.get("textarea");
+    const input = wrapper.get('textarea[aria-label="任务输入"]');
     await input.trigger("compositionstart");
     await input.trigger("keydown", { key: "Enter", ctrlKey: true });
     expect(submit).not.toHaveBeenCalled();
@@ -75,9 +75,11 @@ describe("conversation interaction guardrails", () => {
         status,
       };
       await flushPromises();
-      await wrapper.get("textarea").setValue("下一步草稿");
       await wrapper
-        .get("textarea")
+        .get('textarea[aria-label="任务输入"]')
+        .setValue("下一步草稿");
+      await wrapper
+        .get('textarea[aria-label="任务输入"]')
         .trigger("keydown", { key: "Enter", metaKey: true });
       await wrapper.get("form.composer").trigger("submit");
       expect(submit).not.toHaveBeenCalled();
@@ -95,7 +97,7 @@ describe("conversation interaction guardrails", () => {
     });
     await flushPromises();
     await wrapper
-      .get("textarea")
+      .get('textarea[aria-label="任务输入"]')
       .trigger("keydown", { key: "Enter", ctrlKey: true });
     expect(submit).not.toHaveBeenCalled();
     wrapper.unmount();

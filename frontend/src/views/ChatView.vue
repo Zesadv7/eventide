@@ -472,12 +472,12 @@ async function abandon() {
           :retry="run.model_retry"
         />
         <RunSupplementPanel
-        v-if="run"
-        :run-id="run.run_id"
-        :run-status="run.status"
-        :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
-      />
-      <RunMemoryPanel
+          v-if="run"
+          :run-id="run.run_id"
+          :run-status="run.status"
+          :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
+        />
+        <RunMemoryPanel
           v-if="run"
           :run-id="run.run_id"
           :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"

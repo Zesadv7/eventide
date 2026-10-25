@@ -52,7 +52,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        await context.runtime.initialize()
+        await context.runtime.initialize(recovery_approval_handler=context.approvals.request)
         try:
             yield
         finally:

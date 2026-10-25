@@ -653,14 +653,17 @@ class RuntimeHost:
         self.sessions.workspace(session_id)
         return self.store.list_runs(session_id, limit=limit, before=before)
 
-    async def initialize(self, config_path: Path | None = None) -> None:
+    async def initialize(
+        self, config_path: Path | None = None, *,
+        recovery_approval_handler: ApprovalHandler | None = None,
+    ) -> None:
         if self._closed:
             raise RuntimeError("Host is closed")
         if config_path:
             self._config_path = config_path
         # MCP transports are opened/closed in the owning run task (SDK task-affinity).
         # Each workspace reads its own catalog, never another project's MCP configuration.
-        await self._dispatch_pending_recoveries()
+        await self._dispatch_pending_recoveries(recovery_approval_handler)
 
     async def close(self) -> None:
         if self._closed:
@@ -2804,7 +2807,9 @@ class RuntimeHost:
                 (identity["session_id"], run_id, resumed_as, intent)
             )
 
-    async def _dispatch_pending_recoveries(self) -> None:
+    async def _dispatch_pending_recoveries(
+        self, approval_handler: ApprovalHandler | None,
+    ) -> None:
         """Resume claimed Runs in original admission order through existing scheduling."""
         if not self._pending_recoveries or self._recovery_dispatching:
             return
@@ -2813,7 +2818,9 @@ class RuntimeHost:
         self._pending_recoveries = []
         try:
             for session_id, source_run_id, run_id, intent in pending:
-                await self._resume_recovered_run(session_id, source_run_id, run_id, intent)
+                await self._resume_recovered_run(
+                    session_id, source_run_id, run_id, intent, approval_handler,
+                )
         finally:
             self._recovery_dispatching = False
 
@@ -2829,6 +2836,7 @@ class RuntimeHost:
 
     async def _resume_recovered_run(
         self, session_id: str, source_run_id: str, run_id: str, intent: dict[str, Any],
+        approval_handler: ApprovalHandler | None,
     ) -> None:
         # Later configuration changes never expand the original frozen admission.
         if (
@@ -2855,7 +2863,7 @@ class RuntimeHost:
 
         # This synchronous entry registers ownership before the task can run;
         # its existing done callback persists failures and releases resources.
-        self.start_admitted_run(run_id)
+        self.start_admitted_run(run_id, approval_handler=approval_handler)
 
     def _crash_gap_evidence(self, run_id: str) -> tuple[list[str], dict[str, Any] | None] | None:
         """What the filesystem still knows about a run that died without a checkpoint.

@@ -818,3 +818,14 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 2026-10-26 主代理受控复现，基线b12e7cc；`pytest tests/test_attention_api.py -k project_filter` 1失败，日志`.task_outputs/maka-upgrade/attention/review-red.log`。投影先全局截取再过滤项目，其他项目的新失败挤掉目标项目旧事项，误显示没有；同处仅以source_workspace_id过滤会漏执行副本。将项目过滤下沉SQLite查询，并明确返回展示上限，不把有界条数宣称全部。待修复复验。
 - 主代理修改后6项attention专项通过；Ruff复核失败（review-ruff.log），Mypy因前序失败未执行，待按静态诊断修正。
 - MKATTN-REVIEW修复后6项后端、3项前端、vue-tsc、Ruff/Mypy2模块通过。项目过滤在SQL LIMIT之前，使用workspace_projects覆盖执行副本；跨会话按时间/rowid排序，页面明确是最近有界展示数量；移除交付查询异常静默跳过。静态失败3处长行已拆行复验（review-ruff-final.log）。
+
+### MK08C-API — 自动续跑缺Web审批处理器
+
+- 2026-10-26 主代理受控复现，集成基线3ece870；`pytest tests/test_run_recovery.py -k api_recovered` 1失败（integration/recovery-approval-red.log）。Host重启续跑未接API ApprovalBroker，新出现ASK会按既有安全默认拒绝，用户无法在Web处理。这没有扩大权限，但丢失可交互能力；将API启动时的处理器显式传入恢复派发，开发接口缺处理器仍默认拒绝。待复验。
+
+### MK06-UI-INTEGRATE — 新增补充输入框使旧测试选错输入
+
+- 2026-10-26 集成3ece870；前端4文件37项中32通过/5失败（integration/phase4-frontend.log），后续类型检查/构建因&&未执行。已证实聊天测试使用第一个textarea定位主任务输入，补充面板移入可见聊天流后选中了补充输入。改为明确`textarea[aria-label="任务输入"]`，同类execution/sandbox组件测试同步固定目标；保留快捷键/草稿断言，不改生产行为。
+
+- MK08C-API修复后32项恢复/API通过（integration/recovery-approval-green.log），新ASK实际进入Web broker且原审批端点可拒绝；开发接口默认拒绝保留。
+- MK06-UI-INTEGRATE修复后59项前端通过（phase4-frontend-final.log）、vue-tsc/build/4资源打包通过，built浏览器审批中补充/刷新/待处理拒绝/同一Run消费1/1通过（phase4-browser.log）。142项后端组合亦通过，Ruff及Mypy8模块通过。未重跑全仓，历史失败原日志均保留，未把组件检查当模型效果。

@@ -239,3 +239,35 @@ async def test_recovery_preserves_explicit_model_and_worktree(isolated_workspace
         assert ModelBudgetController(second.store).context(successor)[1].root_run_id == old_run
     finally:
         await second.close()
+
+
+def test_api_recovered_run_can_receive_new_approval(isolated_workspace):
+    import time
+    import uuid
+
+    from fastapi.testclient import TestClient
+
+    from eventide.api import create_app
+
+    repo = make_repo(isolated_workspace / "repo")
+    first = RuntimeHost(settings_for(isolated_workspace))
+    workspace = first.resolve_or_register_workspace(repo)
+    session = first.create_session(workspace_id=workspace.workspace_id)
+    old_run = asyncio.run(first.admit_run(RunRequest("finish task", session)))
+    crash_host(first)
+    restarted = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([
+        {"tool_calls": [{"id": "ask", "name": "bash", "arguments": {"command": "rm scratch.txt"}}]},
+        {"text": "done"},
+    ]))
+    with TestClient(create_app(restarted)) as client:
+        deadline = time.monotonic() + 3
+        while not client.app.state.approvals.pending and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert client.app.state.approvals.pending
+        successor = continuation_runs(restarted.store, old_run)[0]
+        approval_id = next(iter(client.app.state.approvals.pending))
+        response = client.post(
+            f"/api/runs/{successor}/approvals/{approval_id}", json={"approved": False},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert response.status_code == 200

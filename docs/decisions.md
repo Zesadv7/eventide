@@ -1325,7 +1325,7 @@ literal 模式保持纯 Python 且语义不变（行级命中、offset 计数、
 
 1. 补充只经可信本机 HTTP 路径接收：`POST /api/runs/{run_id}/supplements`（要求本机来源与 Idempotency-Key，复用既有 `mutate_run_action` write receipts/origin 语义；同键同正文重放返回原收据，同键不同正文 409）。收据事实 `interaction.supplement` 落唯一 Event Log，含 supplement_id、run_id、session_id、正文、body_version；正文 1–8,000 字符，空正文 422。
 2. 接收时按投影 Run 状态定级：queued/running/waiting_for_user 记 `pending`；终态（completed/failed/interrupted）记 `late`。Store 的终态 Run 拒绝任何 run 标签新事实，因此迟到收据以 session 事实落账、payload 内仍固定 run_id 供作用域判定。
-3. 消费点唯一：Host 主循环每步在 `context_builder.build` 之前读取本 Run 的 pending 补充，经新窄方法 `consume_supplement` 在同一事务内原子追加 `message.user`（带 `[User supplement for the running task]` 前缀）与 `interaction.supplement.consumed`（含 step）。消息序列天然位于已执行工具结果之后，不倒带任何工具；同 Session 串行保证单一消费者，崩溃时两事实同事务原子提交，不出现"已消费但模型未见"或重复注入。Host 不在其他任何位置读取补充。
+3. 消费点唯一：Host 主循环每步在 `context_builder.build` 之前读取本 Run 的 pending 补充，经新窄方法 `consume_supplement` 在同一事务内原子追加 `message.user`（带 `[User supplement for the running task]` 前缀）与 `interaction.supplement.consumed`（含 step）。消息序列天然位于已执行工具结果之后，不倒带任何工具；同 Session 串行保证单一消费者，崩溃时两事实同事务原子提交，不出现消费标记与消息事实半提交或重复注入；请求发出前崩溃时模型仍可能尚未收到消息。Host 不在其他任何位置读取补充。
 4. 作用域隔离：`interaction_supplements(run_id)` 只匹配本 Run 的收据/消费事实；其他 Run（含同 Session 后续 Run）不消费、不投影。迟到补充保持 `late`，不自动创建、不排队、不恢复任何 Run；是否带入下一轮由用户显式决定。
 5. 查询端点 `GET /api/runs/{run_id}/supplements` 返回收据/状态投影（pending/consumed/late 及消费 step）；刷新与迟到读取只读同一 Event Log，不重放写入。Vue `RunSupplementPanel` 独立组件挂 ChatView：发送走 `durableMutation` 幂等，late 明确提示不自动续跑，pending/consumed 按步数展示。
 
@@ -1341,12 +1341,12 @@ literal 模式保持纯 Python 且语义不变（行级命中、offset 计数、
 
 **决策：**
 - 授权按接收冻结：每次 admission 在 `run.admitted` 持久化 `recovery_policy={"auto_resume": true, "version": 1}`；旧历史无此字段，永不自动升级，重启后仍停驻（手动 Continue 不变）。
-- 判定是事实投影（`eventide/run_recovery.py`，纯函数）：控制类执行（沙箱/快照/worktree/交付/评测/索引/worktree 控制/历史导入/Python 实验/连接探测）、未知工具结果、未闭合工具协议对、待审批、副作用缺 post-tool checkpoint、无冻结策略，一律不自动续跑。
+- 判定是事实投影（`eventide/run_recovery.py`，纯函数）：控制类执行（沙箱/交付/评测/索引/worktree 控制/历史导入/Python 实验/连接探测）、未知工具结果、未闭合工具协议对、待审批、副作用缺 post-tool checkpoint、无冻结策略，一律不自动续跑。
 - 文件系统证据仍须成立：当前 checkpoint 必须等于该 Run 最后一个已提交 `workspace.checkpoint`，否则停驻（`workspace_evidence_changed`），不把漂移文件当原任务继续。
 - 恢复领取与新后继身份同一事务（`store.claim_run_recovery`）：先写 `recovery.claimed`（冻结 `resumed_as` 身份）再写 `run.interrupted`；`turns.continuation_of` 的 UNIQUE 约束与 claim 存在性检查共同保证重复 initialize/连续重启只能重建同一后继，不能产生两个续跑。
-- 实际重派发延后到 `initialize()`（持久 Provider 配置已加载）：冻结的 provider/endpoint/model 与当前配置不一致、冻结 Skill 快照无法复现、或 admission 失败时，写 `recovery.blocked` 会话事实并保持停驻——后来的配置变化不扩大原授权。通过后走既有 Continue admission 与调度队列（原顺序、既有模型槽/根租约上限），不新建调度路径。
+- 实际重派发延后到 `initialize()`（持久 Provider 配置已加载）：冻结的 provider/endpoint 与当前配置不一致、原显式模型参数不可复用、冻结 Skill 快照无法复现、或 admission 失败时，写 `recovery.blocked` 会话事实并保持停驻——后来的配置变化不扩大原授权。通过后走既有 Continue admission 与调度队列（原顺序、既有模型槽/根租约上限），不新建调度路径。
 - 预算跨链不重置：续跑 intent 持久化 `recovery_of`，`ModelBudgetController.context` 与 `BudgetLedger._validate_context` 按 recovery 谱系上溯到原根 Run，run 作用域限额与项目/日预算跨重启延续。
-- 后继 Run 经正常 `_recovery_facts` 配对旧协议史；已执行工具引用原结果，不重放；没有实时 sink/审批处理器，ASK 默认拒绝语义不变。
+- 后继 Run 经正常 `_recovery_facts` 配对旧协议史；已执行工具引用原结果，不重放；Web启动显式传入既有ApprovalBroker处理新ASK；没有审批处理器的开发接口仍默认拒绝。
 
 **后果：** 停驻理由更精确（如源码漂移记 `workspace_evidence_changed`）；沙箱/交付等控制类恢复、未知工具只读核查（08D）、恢复状态 API/页面由后续切片承接。
 
@@ -1361,3 +1361,5 @@ literal 模式保持纯 Python 且语义不变（行级命中、offset 计数、
 **取舍：** 不按结果隐藏过期审批——保留事实并标注，比静默消失更可核对；同工作区源执行同时只能有一个写入任务，跨会话并行审批列表受既有串行约束约束，不做并行化扩展。MK-07 的 operation/revision/参数摘要绑定与批准前参数变化失效、MK-09 的待回答/核查不明类别与项目筛选 UI 属后续切片。
 
 **验证：** 后端 5 项新定向（可读派生、过期审批保留且拒绝、失败运行列表、跨会话去重键、未知字段不猜测）+ `tests/test_api.py` 25 项回归通过；前端 3 项组件测试（可读事实渲染/失效按钮禁用、复用原审批端点并显示拒绝、空类别不伪造）通过；Ruff、Mypy（py310 目标 4 模块）、vue-tsc、Prettier 通过。日志 `.task_outputs/maka-upgrade/attention/`。无模型调用、无真实平台验证。
+
+ADR-111补充：恢复领取后、initialize前再次退出时，下一进程从持久claim重建同一后继；普通worktree和snapshot在证据一致时允许恢复。当前仅恢复进程退出时缺终态的Run；正常close已记为取消的运行不会自动重启，后续需区分服务关闭与用户停止后再扩大范围。不得据此宣称所有服务重启均已自动恢复。

@@ -50,7 +50,9 @@ describe("session execution copy controls", () => {
         .value,
     ).toBe("worktree");
     await wrapper.get('[aria-label="运行模式"]').setValue("plan");
-    await wrapper.get("textarea").setValue("继续检查自己的副本");
+    await wrapper
+      .get('textarea[aria-label="任务输入"]')
+      .setValue("继续检查自己的副本");
     await wrapper.get("form.composer").trigger("submit");
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "plan", execution_target: "worktree" }),
@@ -65,7 +67,9 @@ describe("session execution copy controls", () => {
       status: "running",
       execution: { kind: "source" },
     });
-    await wrapper.get("textarea").setValue("已有副本继续工作");
+    await wrapper
+      .get('textarea[aria-label="任务输入"]')
+      .setValue("已有副本继续工作");
     expect(
       wrapper.get('button[type="submit"]').attributes("disabled"),
     ).toBeUndefined();
@@ -85,7 +89,9 @@ describe("session execution copy controls", () => {
       (wrapper.get('[aria-label="运行模式"]').element as HTMLSelectElement)
         .value,
     ).toBe("auto");
-    await wrapper.get("textarea").setValue("新副本需要短期源锁");
+    await wrapper
+      .get('textarea[aria-label="任务输入"]')
+      .setValue("新副本需要短期源锁");
     expect(
       wrapper.get('button[type="submit"]').attributes("disabled"),
     ).toBeDefined();
@@ -103,7 +109,9 @@ describe("session execution copy controls", () => {
         .value,
     ).toBe("worktree");
     const submit = vi.spyOn(store, "submit").mockResolvedValue(undefined);
-    await wrapper.get("textarea").setValue("必须写入我的独立副本");
+    await wrapper
+      .get('textarea[aria-label="任务输入"]')
+      .setValue("必须写入我的独立副本");
     await wrapper.get("form.composer").trigger("submit");
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({ execution_target: "worktree" }),
@@ -155,7 +163,9 @@ describe("task knowledge preparation", () => {
       await option.setValue(true);
       await wrapper.get(".index-preparation-options input").setValue(true);
       await wrapper.get('[aria-label="索引范围"]').setValue("all");
-      await wrapper.get("textarea").setValue("调查取消流程");
+      await wrapper
+        .get('textarea[aria-label="任务输入"]')
+        .setValue("调查取消流程");
       await wrapper.get("form.composer").trigger("submit");
       expect(submit).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -177,7 +187,7 @@ describe("task knowledge preparation", () => {
     await wrapper.get('[aria-label="执行位置"]').setValue("snapshot");
     expect(option.attributes("disabled")).toBeDefined();
     expect((option.element as HTMLInputElement).checked).toBe(false);
-    await wrapper.get("textarea").setValue("调查快照");
+    await wrapper.get('textarea[aria-label="任务输入"]').setValue("调查快照");
     await wrapper.get("form.composer").trigger("submit");
     expect(submit.mock.calls[0]![0]).not.toHaveProperty("knowledge_index");
     wrapper.unmount();
