@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ConnectionNotice from "../components/ConnectionNotice.vue";
 import IndexPreparationOptions from "../components/IndexPreparationOptions.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRoute } from "vue-router";
@@ -457,6 +458,13 @@ async function abandon() {
           <h2>这次想完成什么？</h2>
           <p>可以先让 Agent 只读分析项目，再决定修改范围。</p>
         </div>
+        <ConnectionNotice
+          v-if="
+            isActive &&
+            !['connected', 'closed'].includes(store.eventConnection.state)
+          "
+          :status="store.eventConnection"
+        />
         <RetrievalStatus v-if="run" :state="run.retrieval" />
         <ToolActivity
           v-if="run"

@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from eventide.http_api.context import ApiContext
@@ -44,14 +44,15 @@ def create_router(context: ApiContext) -> APIRouter:
     async def run_events(
         run_id: str,
         request: Request,
-        after: int = 0,
+        after: int = Query(default=0, ge=0),
         include_preview: bool = False,
+        last_event_id: int | None = Header(default=None, ge=0),
     ) -> StreamingResponse:
         if not agent_runtime.store.get_run_identity(run_id):
             raise HTTPException(status_code=404, detail="Run not found")
 
         async def stream() -> AsyncIterator[str]:
-            cursor = max(after, 0)
+            cursor = max(after, last_event_id or 0)
             idle_ticks = 0
             preview_revision = 0
             preview_active = False
@@ -88,6 +89,9 @@ def create_router(context: ApiContext) -> APIRouter:
                     idle_ticks = 0
                 await asyncio.sleep(0.25)
 
-        return StreamingResponse(stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            stream(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     return router

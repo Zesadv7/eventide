@@ -4,6 +4,7 @@ import { api, ApiError } from "../api/client";
 import {
   connectRun,
   type EventConnection,
+  type ConnectionStatus,
   type RuntimeEvent,
   type PreviewEvent,
 } from "../api/events";
@@ -42,6 +43,11 @@ export const useWorkbench = defineStore("workbench", () => {
     connected = ref(true),
     loading = ref(false),
     creating = ref(false);
+  const eventConnection = ref<ConnectionStatus>({
+    state: "closed",
+    attempt: 0,
+    nextRetryAt: null,
+  });
   const drafts = ref<Record<string, string>>(stored("eventide.drafts", {}));
   const pending = ref<Record<string, { key: string; body: RunInput }>>(
     stored("eventide.pending", {}),
@@ -72,6 +78,7 @@ export const useWorkbench = defineStore("workbench", () => {
     ),
   );
   let selectionVersion = 0;
+  let connectionVersion = 0;
   const refreshVersions: Record<string, number> = {};
   let timer: ReturnType<typeof setInterval> | undefined,
     connection: EventConnection | undefined,
@@ -141,13 +148,20 @@ export const useWorkbench = defineStore("workbench", () => {
   function watchRun() {
     const run = currentRun.value;
     if (!run || !active(run.status)) {
+      connectionVersion += 1;
       connection?.close();
+      eventConnection.value = {
+        state: "closed",
+        attempt: 0,
+        nextRetryAt: null,
+      };
       connection = undefined;
       watchedRun = "";
       if (run) delete previews.value[run.run_id];
       return;
     }
     if (watchedRun === run.run_id) return;
+    const version = ++connectionVersion;
     connection?.close();
     watchedRun = run.run_id;
     const sessionIdentity = run.session_id || selectedSession.value;
@@ -155,6 +169,7 @@ export const useWorkbench = defineStore("workbench", () => {
       run.run_id,
       cursors.value[run.run_id] || 0,
       (event) => {
+        if (version !== connectionVersion) return;
         const cursor = cursors.value[event.run_id] || 0;
         if (event.seq <= cursor) return;
         cursors.value[event.run_id] = event.seq;
@@ -167,6 +182,7 @@ export const useWorkbench = defineStore("workbench", () => {
         void refreshSession(sessionIdentity).catch(fail);
       },
       (preview) => {
+        if (version !== connectionVersion) return;
         connected.value = true;
         const previous = previews.value[preview.run_id];
         if (
@@ -179,7 +195,19 @@ export const useWorkbench = defineStore("workbench", () => {
         else delete previews.value[preview.run_id];
       },
       () => {
+        if (version !== connectionVersion) return;
         connected.value = false;
+        delete previews.value[run.run_id];
+      },
+      (status) => {
+        if (version !== connectionVersion) return;
+        eventConnection.value = status;
+        if (status.state === "connected") {
+          connected.value = true;
+          void refreshSession(sessionIdentity).catch(fail);
+        } else if (status.state !== "closed") {
+          connected.value = false;
+        }
       },
     );
   }
@@ -206,7 +234,9 @@ export const useWorkbench = defineStore("workbench", () => {
     }
     selectedSession.value = session;
     persistSelection();
+    connectionVersion += 1;
     connection?.close();
+    eventConnection.value = { state: "closed", attempt: 0, nextRetryAt: null };
     watchedRun = "";
     await refreshSession(session);
   }
@@ -242,7 +272,9 @@ export const useWorkbench = defineStore("workbench", () => {
         if (workspace) await loadSessions(workspace);
         const session = selectedSession.value;
         if (session) await refreshSession(session);
-        connected.value = true;
+        connected.value = ["closed", "connected"].includes(
+          eventConnection.value.state,
+        );
       } catch {
         connected.value = false;
       } finally {
@@ -251,11 +283,13 @@ export const useWorkbench = defineStore("workbench", () => {
     }, 2500);
   }
   function dispose() {
+    connectionVersion += 1;
     if (timer) clearInterval(timer);
     timer = undefined;
     connection?.close();
     connection = undefined;
     watchedRun = "";
+    eventConnection.value = { state: "closed", attempt: 0, nextRetryAt: null };
   }
   async function createSession() {
     if (!selectedWorkspace.value || creating.value) return;
@@ -361,6 +395,7 @@ export const useWorkbench = defineStore("workbench", () => {
     error,
     notice,
     connected,
+    eventConnection,
     loading,
     creating,
     drafts,

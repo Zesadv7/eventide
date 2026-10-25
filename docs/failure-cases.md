@@ -553,3 +553,29 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - MERGE-FILE-01修正后：文件操作43项全部通过（8.86秒），含三项原失败；结合此前其他关联文件100项通过，合计143项不同后端用例有通过证据。前端受影响5文件66项通过。Ruff首次仅本次新增raise语句102字符超100，记录为维护静态检查问题；拆行后只复验该模块，未改语义。
 
 - MERGE-FILE-01最终验证：Ruff行长修正后模块通过；Python3.10目标Mypy130模块、66项前端、8条生产静态页面真实API旅程、12项分发/服务测试、Vue构建/格式、服务/help/smoke12与干净wheel隔离检查通过。原始首次失败和未修正运行均保留；该缺陷无剩余未验证项，不将本轮定向结果称为再次全量通过。
+
+
+## MK-ZCODE-CONCURRENCY：外部子agent并发限制（2026-10-26）
+
+- 分类：环境/外部故障，开发子agent调用失败，不是Eventide应用真实模型评测失败。基线5acba20。
+- 命令：指定Node调用/Users/zesadv/.codex/tools/zcode-start-plan/run.mjs，--cwd分别为maka-context/eventide、maka-native/eventide独立工作副本，--prompt-file使用本轮临时UTF-8任务，--mode yolo；桥接options.reasoningLevel=max。原始命令及任务文件路径在本轮工具记录，未写入凭据。
+- 现象：增加至5个在途ZCode任务后，摘要和原生隔离两次调用返回ok=false，HTTP429/provider_code3008，message=user concurrency limit exceeded。确认是账号并发限制，不能解释为余额耗尽；未切换Start GLM-5.3或Coding Plan，不购买/升级套餐。不能由两次失败推断套餐精确并发上限。
+- 证据：各worktree忽略目录.task_outputs/maka-upgrade/zcode/result.jsonl、progress.log；context session sess_962957e5-ed1e-4d2b-8c13-438228eca475，native session sess_752a61d0-3dd1-46b0-80e0-f2198cfd3e96。
+- 处理：停止扩大在途调用，保留已有任务，后续采用有界分批调度；核对失败会话是否存在文件修改，不把子agent的ok当实现验收。此时尚未完成后续复验，保留待验证。
+- 参与与可追问点：主agent实际拆分/启动并读回错误，未修改登录/额度路由，未宣称模型自动恢复或额度切换通过。
+
+## MK08A-LINT：新增续接测试格式检查失败（2026-10-26）
+
+- 分类：测试问题。基线 `5acba20` 加本轮页面续接改动；命令为共享环境 Python `-m ruff check eventide/http_api/streams.py tests/test_stream_reconnect.py`，退出 1。
+- 现象及已证实原因：新增测试第 33、36、38 行超过 100 字符，三条 E501；功能定向测试此前通过。原始结果见本轮工具输出。
+- 处理：按项目格式拆分断言；Ruff 定向复验通过，8 项后端续接/流式测试通过。相关提交见本节首次提交。实际排障为主代理执行，未涉及模型效果或生产故障。
+
+## MK08A-UI-TEST：重连提示定向测试失败（2026-10-26）
+
+- 分类：待查。基线 `5acba20` 加本轮页面续接改动；命令 `node node_modules/vitest/vitest.mjs run tests/events.test.ts tests/workbench.test.ts tests/chat-experience.test.ts tests/connection-notice.test.ts`，frontend 目录运行，退出 1。
+- 原始证据：`.task_outputs/maka-upgrade/connection/frontend-red.log`。已确认失败在卸载后全局计时器数量断言（预期 0、实测 1）；该断言把测试框架/DOM 的计时器也算入了组件责任。改为验证组件创建的 interval 身份确实被 clearInterval 清理，保留倒计时和离线文案行为断言；4 文件 36 项前端定向复验通过，证据 `connection/frontend.log`。相关提交见本节首次提交。
+
+## MK08A-MYPY：续接路由类型检查未通过（2026-10-26）
+
+- 分类：环境/外部依赖故障，与既有 RG-LOCAL-MYPY 的 NumPy 类型语法问题相同。基线 `5acba20` 加本轮页面续接改动；共享环境 Python `-m mypy eventide/http_api/streams.py` 退出 2。
+- 原始证据：`.task_outputs/maka-upgrade/connection/mypy.log`。NumPy 使用 Python 3.12 类型别名语法，与项目 3.10 检查目标不兼容；改用已有隔离 `.task_outputs/publish-py310/bin/python`，不改仓库门槛或共享依赖，按默认目标检查通过，证据 `mypy-py310.log`。主代理核查与复验，未改生产行为。

@@ -276,3 +276,51 @@ it("refreshes durable retrieval evidence on SSE and restores it through the same
   expect(restored.currentRun?.retrieval).toEqual(available);
   restored.dispose();
 });
+
+it("refreshes after reconnect but ignores a detached connection's callbacks", async () => {
+  const store = useWorkbench();
+  await store.selectSession(session.session_id);
+  const old = vi.mocked(connectRun).mock.calls.at(-1)!;
+  old[3]({
+    type: "model.preview",
+    run_id: run.run_id,
+    text: "old preview",
+    active: true,
+    ephemeral: true,
+  });
+  old[4]();
+  expect(store.previews[run.run_id]).toBeUndefined();
+  old[5]?.({ state: "retrying", attempt: 1, nextRetryAt: Date.now() + 1000 });
+  expect(store.eventConnection.state).toBe("retrying");
+  const reads = vi.mocked(api.session).mock.calls.length;
+  old[5]?.({ state: "connected", attempt: 1, nextRetryAt: null });
+  await flushPromises();
+  expect(vi.mocked(api.session).mock.calls.length).toBeGreaterThan(reads);
+  store.dispose();
+  old[3]({
+    type: "model.preview",
+    run_id: run.run_id,
+    text: "late",
+    active: true,
+    ephemeral: true,
+  });
+  old[5]?.({ state: "retrying", attempt: 2, nextRetryAt: Date.now() });
+  expect(store.previews[run.run_id]).toBeUndefined();
+  expect(store.eventConnection.state).toBe("closed");
+});
+
+it("does not label a retrying event connection connected just because polling works", async () => {
+  vi.useFakeTimers();
+  const store = useWorkbench();
+  await store.selectSession(session.session_id);
+  vi.mocked(connectRun).mock.calls.at(-1)![5]?.({
+    state: "retrying",
+    attempt: 1,
+    nextRetryAt: Date.now() + 5000,
+  });
+  store.startPolling();
+  await vi.advanceTimersByTimeAsync(2500);
+  expect(store.connected).toBe(false);
+  expect(store.eventConnection.state).toBe("retrying");
+  store.dispose();
+});

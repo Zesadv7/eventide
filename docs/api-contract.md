@@ -78,7 +78,7 @@ Run事件流可显式传`include_preview=true`接收`event: model.preview`。此
 | `POST /api/sessions/{id}/abandon` | 放弃恢复 |
 | `GET /api/runs/{id}` | Run 详情（含 usage/steps/tool_calls/reason/gap_files） |
 | `POST /api/runs/{id}/cancel` | 停止运行 |
-| `GET /api/runs/{id}/events`（SSE） | 事件流（`after` 游标；prepared/completed 以 `tool.request`/`tool.result` 别名推送） |
+| `GET /api/runs/{id}/events`（SSE） | 事件流（非负 `after` / `Last-Event-ID` 游标取较大值；prepared/completed 以 `tool.request`/`tool.result` 别名推送） |
 | `GET /api/runs/{id}/export` | NDJSON 审计导出 |
 | `POST /api/runs/{id}/approvals/{approval_id}` | 审批决定 |
 | `GET` / `POST /api/sessions/{id}/attachments` | 待提交附件清单 / 上传 |
@@ -649,3 +649,11 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 每个 MK 项在 AGENTS 记录：后端领域与权限、HTTP/OpenAPI、SSE/投影、Vue、定向验证、最终真实 API 旅程、分发资源七个完成证据。只有全部适用项具备证据才能标功能完成；纯工具项没有新增 HTTP 时明确“复用某接口”，不能空着当已完成。
 
 前端必须验证：首次进入与刷新同样可用、迟到响应不串项目、重复点击只产生一次意图、事件乱序/重连按事实修复、停止等待真实收尾、关闭面板不取消、操作过期明确提示、错误可读、键盘可操作、窄屏可访问。真实模型效果与这些接线测试分别记录。
+
+### MK-08A 第一批实现：浏览器事件续接
+
+`GET /api/runs/{id}/events` 接收非负整数查询 `after` 和可选请求头 `Last-Event-ID`，取较大者后严格返回新事件；格式非法返回 422。响应禁止缓存与代理缓冲。重连只查询已持久事实，不创建 Run、不调用模型或重放工具。
+
+Vue 使用最后成功交给状态层的持久事件序号重建连接，忽略旧连接回调和重复事件；临时预览不推进游标，断线清除。错误后从 500ms 指数退避至 30s 基值，附加最多 25% 正向抖动，稳定连接 10s 后重置计数；离线暂停，联网或页面重新可见时唤醒。终态停止订阅；切换会话和卸载清理订阅及重试。页面区分连接中、重连等待、离线并显示倒计时，连接恢复触发会话状态刷新。
+
+本批尚未实现服务启动代次、原子快照与事件缺口协议、按模型尝试隔离预览、写入回执统一核查；完整 MK-08A 仍进行中，后端自动恢复另按 MK-08B/C/D 实施。

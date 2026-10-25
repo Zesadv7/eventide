@@ -7817,7 +7817,9 @@ export interface operations {
         after?: number;
         include_preview?: boolean;
       };
-      header?: never;
+      header?: {
+        "last-event-id"?: number | null;
+      };
       path: {
         run_id: string;
       };

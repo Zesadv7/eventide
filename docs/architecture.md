@@ -1182,3 +1182,7 @@ MK-13 的数据设计与比较器可在 A–E 编写，真实付费/真实任务
 - [Graph](https://github.com/apache/maka/blob/a4b5f86c5256044d063a62045754e4a3411a8426/docs/architecture/agent-graph-stream-scheduling-draft.md)、[原生隔离](https://github.com/apache/maka/blob/a4b5f86c5256044d063a62045754e4a3411a8426/packages/runtime/src/sandbox/README.md)、[外部配对报告](https://github.com/apache/maka/blob/a4b5f86c5256044d063a62045754e4a3411a8426/docs/eval/terminal-bench-2.1-deepseek-v4-flash-nine-arm.md)。
 
 借鉴采用独立设计与 Python 实现；若后续直接复用第三方代码/资源，须逐文件检查许可证、版权和 NOTICE 要求，保留 Eventide LICENSE，不把调研等同复制授权检查已完成。
+
+### MK-08A 已实现切片：事件连接生命周期
+
+连接控制统一在 `frontend/src/api/events.ts`，Pinia 的订阅代次隔离旧回调。连接状态与 HTTP 轮询成功分开，避免查询成功遮住事件流断线；连接恢复刷新会话事实。服务端接受 Last-Event-ID 与 after 的较大非负序号，事件保持原唯一日志来源。此切片只处理浏览器观察连接，不改变后台运行和恢复决策；原子快照、服务代次与尝试级预览仍待补齐。取舍见 ADR-106；接口与定向证据见 API 契约和 AGENTS 的 MK-08 记录。

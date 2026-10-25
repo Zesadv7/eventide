@@ -6,6 +6,7 @@ class Source {
   url: string;
   closed = false;
   onerror: (() => void) | null = null;
+  onopen: (() => void) | null = null;
   constructor(url: string) {
     this.url = url;
     Source.current = this;
@@ -20,7 +21,11 @@ class Source {
     this.listeners[name]?.({ data: JSON.stringify(value) });
   }
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 describe("SSE contract", () => {
   it("keeps previews separate from persisted sequence events", () => {
     vi.stubGlobal("EventSource", Source);
@@ -85,4 +90,132 @@ it("treats retrieval status as a persistent event with the existing run cursor",
   Source.current.emit("retrieval.status", { ...payload, run_id: "other" });
   expect(event).toHaveBeenCalledOnce();
   expect(preview).not.toHaveBeenCalled();
+});
+
+describe("connection recovery", () => {
+  it("reconnects from the newest committed cursor and rejects old-socket events", () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.stubGlobal("EventSource", Source);
+    const event = vi.fn(),
+      preview = vi.fn(),
+      status = vi.fn();
+    const connection = connectRun("run-1", 5, event, preview, vi.fn(), status);
+    const old = Source.current;
+    old.onopen?.();
+    old.emit("model.response", {
+      type: "model.response",
+      run_id: "run-1",
+      seq: 8,
+      payload: {},
+    });
+    old.emit("model.response", {
+      type: "model.response",
+      run_id: "run-1",
+      seq: 8,
+      payload: {},
+    });
+    expect(event).toHaveBeenCalledOnce();
+    old.onerror?.();
+    expect(old.closed).toBe(true);
+    expect(status.mock.calls.at(-1)?.[0].state).toBe("retrying");
+    vi.advanceTimersByTime(500);
+    expect(Source.current.url).toContain("after=8&");
+    old.emit("model.preview", {
+      type: "model.preview",
+      run_id: "run-1",
+      ephemeral: true,
+      active: true,
+      text: "stale",
+    });
+    old.emit("model.response", {
+      type: "model.response",
+      run_id: "run-1",
+      seq: 9,
+      payload: {},
+    });
+    expect(preview).not.toHaveBeenCalled();
+    expect(event).toHaveBeenCalledOnce();
+    Source.current.emit("model.response", {
+      type: "model.response",
+      run_id: "run-1",
+      seq: 10,
+      payload: {},
+    });
+    expect(event).toHaveBeenCalledTimes(2);
+    connection.close();
+  });
+  it("waits while offline, wakes on connectivity and stops all reconnects when closed", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", Source);
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    const status = vi.fn();
+    const connection = connectRun(
+      "run-1",
+      0,
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      status,
+    );
+    const old = Source.current;
+    online.mockReturnValue(false);
+    window.dispatchEvent(new Event("offline"));
+    expect(old.closed).toBe(true);
+    expect(status.mock.calls.at(-1)?.[0].state).toBe("offline");
+    vi.advanceTimersByTime(60_000);
+    expect(Source.current).toBe(old);
+    online.mockReturnValue(true);
+    window.dispatchEvent(new Event("online"));
+    const resumed = Source.current;
+    expect(resumed).not.toBe(old);
+    resumed.onerror?.();
+    connection.close();
+    vi.advanceTimersByTime(60_000);
+    window.dispatchEvent(new Event("online"));
+    expect(Source.current).toBe(resumed);
+  });
+  it("backs off unstable connections and resets after a stable interval", () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.stubGlobal("EventSource", Source);
+    const status = vi.fn();
+    const connection = connectRun(
+      "run-1",
+      0,
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      status,
+    );
+    Source.current.onerror?.();
+    vi.advanceTimersByTime(500);
+    Source.current.onopen?.();
+    Source.current.onerror?.();
+    expect(status.mock.calls.at(-1)?.[0].attempt).toBe(2);
+    vi.advanceTimersByTime(1000);
+    Source.current.onopen?.();
+    vi.advanceTimersByTime(10_000);
+    Source.current.onerror?.();
+    expect(status.mock.calls.at(-1)?.[0].attempt).toBe(1);
+    connection.close();
+  });
+  it("closes a terminal run without scheduling another connection", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", Source);
+    const event = vi.fn();
+    connectRun("run-1", 0, event, vi.fn(), vi.fn());
+    const source = Source.current;
+    source.emit("run.completed", {
+      type: "run.completed",
+      run_id: "run-1",
+      seq: 4,
+      payload: {},
+    });
+    expect(event).toHaveBeenCalledOnce();
+    expect(source.closed).toBe(true);
+    source.onerror?.();
+    vi.advanceTimersByTime(60_000);
+    expect(Source.current).toBe(source);
+  });
 });
