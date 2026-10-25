@@ -576,3 +576,16 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 
 - 分类：测试问题。基线 `5acba20` 加本轮页面续接改动；命令 `node node_modules/vitest/vitest.mjs run tests/events.test.ts tests/workbench.test.ts tests/chat-experience.test.ts tests/connection-notice.test.ts`，frontend 目录运行，退出 1。
 - 原始证据：`.task_outputs/maka-upgrade/connection/frontend-red.log`。已确认失败在卸载后全局计时器数量断言（预期 0、实测 1）；全局计时器来源未逐一归属，该断言超出了本组件的清理责任。改为验证组件创建的 interval 身份确实被 clearInterval 清理，保留倒计时和离线文案行为断言；4 文件 36 项前端定向复验通过，证据 `connection/frontend.log`。相关提交 `983f0c4`。
+
+## MK-ZCODE-TIMEOUT：开发子任务达到桥接执行时限（2026-10-26）
+
+- 分类：环境/执行时限，非Eventide模型评测。基线5acba20，maka-recovery独立副本；指定Node/run.mjs --cwd该副本 --prompt-file恢复任务 --mode yolo，退出1。
+- 已证实原因：桥接固定30分钟时限，结果ok=false、error=ZCode task exceeded 30 minutes；会话sess_671f8729-7be9-4dad-9240-9ae3226ae9af，Start Plan GLM-5.3-Flash/max。不是额度耗尽，不切换套餐。
+- 证据：maka-recovery/eventide/.task_outputs/maka-upgrade/zcode/result.jsonl和progress.log。保留修改与新增测试；尚未有可核验的测试日志或提交，不计完成。
+- 处理：释放调用槽，待主代理接手核验及完成切片；后续任务收紧范围并预留验证时间。后续复验、提交及遗留项待补充。实际参与为ZCode写入候选、主代理调度和审查，不能宣称重试或恢复已验收。
+
+- 同根因第二次：maka-contract会话sess_598a5faa-7a1a-41a3-a1ab-9a9bc6b8e21d同样30分钟退出1，但已产生本地提交`2f6ec8f`与定向/前端/浏览器验证日志。桥接超时不否定已保存证据，也不等于整体验收；主代理仍须复核并处理额外边界。证据为该副本zcode/result.jsonl及contract目录日志，保留未经修改。
+
+- 同根因第三次：maka-file-evidence会话sess_b3cd4b84-dab5-4cc5-9114-7a76752a210d在30分钟退出1；文件工具/副本worker/测试候选保留，未提交、未取得完整验证结果。主代理接手后核验，不能计为完成。证据在该副本zcode/result.jsonl/progress.log。
+
+- recovery后续：主代理完成独立核验并修正候选，179项后端定向及Ruff/Mypy通过，本地候选提交d75cd93；细节随集成保留MK08B-REVIEW。桥接超时日志仍保留，不改称ZCode调用成功。context/native按三路队列重发后均进入工具执行；没有再次出现并发拒绝，但任务最终验收仍待完成。
