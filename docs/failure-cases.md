@@ -803,3 +803,12 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 
 - 关联105项中104通过/1失败已定位：旧队列测试断言所有模型请求为零，而独立只读快照现在按新策略正常恢复。改为验证漂移source Run无model.attempt且无后继，保留对其拒绝Continue的断言；不禁止另一个已冻结快照恢复。
 - MK08C-REVIEW最终关联105个不同用例全部通过（首轮104+漂移source断言复验1），随后去除多余启动包装任务，直接使用已有同步start_admitted_run注册所有权；25项恢复/调度复验通过，Ruff/Mypy通过（review-ownership-final、review-static-final、review-type-final）。修复持久claim重新扫描、原显式模型/冻结Skill恢复、普通worktree/snapshot恢复与预算谱系；未放开未知副作用/审批/控制执行。
+
+## MKATTN-ZCODE-01：待处理中心切片开发期定向测试失败（2026-10-26）
+
+- 类型：新增测试首轮迭代失败（实现缺口与测试期望错误），无生产回归；基线 0c86c75 干净工作区。
+- 命令：`python -m pytest tests/test_attention_api.py -x -q`，共四轮失败，日志 `.task_outputs/maka-upgrade/attention/backend.log` 仅保留最终通过轮（首轮输出随会话保留未存档，同 MKNATIVE-ZCODE-01 的记录缺口，不虚构文件）。
+- 已证实原因（逐项）：1) `collect_attention` 把 `ProjectRecord` dataclass 当 dict 下标（实现 bug，改属性访问）；2) 审批等待中 Run 投影状态是 `waiting_for_user` 而非 `running`，`actionable` 初版判定漏掉该状态；3) runs 表无 `workspace_id`，失败运行列表需经 session 取（实现 bug）；4) 过期审批的批准尝试实际返回 404 "Approval is no longer pending" 而非测试臆断的 409——拒绝语义正确，修正测试断言接受 404/409；另初版跨会话并行测试违反同工作区源执行串行约束（第二 Run 409 busy）且 `echo` 命令在默认 Agent 模式自动批准，改为真实顺序场景。
+- 处理：仅改 `eventide/attention.py` 与测试文件；store 审批查询/路由/API 注册未因此改动语义。取消路径确认不补发 `approval.resolved`，过期审批保留事实并由原端点拒绝，已写成测试断言。
+- 复验：最终 `tests/test_attention_api.py` 5 项与 `tests/test_api.py` 25 项全部通过；Ruff 5 文件、Mypy py310 目标 4 模块、vue-tsc、Prettier 通过；前端 3 项通过。
+- 经验：新视图的状态判定必须对照 `RuntimeStateProjection` 的实际状态机（含 `waiting_for_user`），不能凭直觉枚举；投影层读 `get_run_summary` 时不能假设 runs 行携带 workspace 属性。无遗留未验证项；全量、浏览器与真实平台验证按切片规划另行执行。
