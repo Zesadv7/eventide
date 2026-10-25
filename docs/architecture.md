@@ -238,7 +238,7 @@ SDK内部重试显式关闭，Host统一重试，因此每条attempt对应一次
 
 三类 Provider adapter 同时提供 `complete(request)` 与可选 `stream(request)`。`streaming.ModelStreamEvent` 只有 `text_delta` 和 `response_completed`；只有后者含完整 ModelResponse 和工具调用，增量中没有可执行 ToolCall。Responses 读取 SDK 的终态对象，Chat 按调用 index 拼接参数，Anthropic 按消息/内容块生命周期拼接 JSON；各自保留必要的私有推理状态，增量只发送可见文本。收到最终对象前不会执行工具。Chat 等待结束原因并读取后续 usage，Anthropic 用累计 message_delta 覆盖临时用量，不把 message_start 的输出零值冒充最终消费。
 
-SDK stream 在终态返回前关闭；异常、取消和消费者 aclose 同样释放连接。SDK 请求创建成功后任何断流均为不可重试错误，不能因预览失败回退为 complete 重发。适配器限制保留内容/参数/推理合计 8 MiB、128 个输出项及 65,536 个事件；超限与缺终态均不返回完整响应。这些是响应组装边界，不是请求费用上限或操作系统隔离。适配器及Host临时预览、SSE和尝试账本已完成A6/A7集成验收，最终综合门禁按R阶段执行。
+SDK stream 在终态返回前关闭；异常、取消和消费者 aclose 同样释放连接。MK-08B已替换断流一律停止规则：可恢复传输失败在同一步输入上重试，协议错误及服务商侧活动禁止重放，不回退为complete。适配器限制保留内容/参数/推理合计 8 MiB、128 个输出项及 65,536 个事件；超限与缺终态均不返回完整响应。这些是响应组装边界，不是请求费用上限或操作系统隔离。适配器及Host临时预览、SSE和尝试账本已完成A6/A7集成验收，最终综合门禁按R阶段执行。
 
 Responses 终态为 incomplete 时，即使带有格式正确的 function_call，也保留 max_output_tokens 等原始截断原因，不能改写成 tool_use。外层 completed 但工具项仍为 in_progress/incomplete、缺少调用身份或 JSON 无效时，同样标记 incomplete；缺身份的项不制造伪调用，带身份的 JSON 错误保留审计占位。完整 ModelResponse 继续携带最终 usage，使 Host 可先记账，再终止并标记未派发的调用，不能因工具不完整而丢失已知消费。
 
@@ -397,7 +397,7 @@ CI 分开验证默认依赖、可选 parser/OTel、Docker 与浏览器：默认 
 
 ## 临时流式预览（A6/A7）
 
-Host对具有stream方法的主调用消费text_delta/response_completed，完整响应之前不派发工具；辅助摘要保持complete。预览每Run最多16,000字符、最多64个活跃条目，完成/失败/取消删除，不写Event Log。已知凭据保留足够跨片lookahead后脱敏，过长密钥禁预览而非泄漏。完整内容与usage仍由持久响应/attempt事实承担。SSE显式include_preview才发送无id临时帧；持久游标不被改变。流式失败/超时不自动重新请求或降级complete，未知消费保留；三类官方SDK适配及Vue预览已集成，最终综合门禁按R阶段执行。
+Host对具有stream方法的主调用消费text_delta/response_completed，完整响应之前不派发工具；辅助摘要保持complete。预览每Run最多16,000字符、最多64个活跃条目，完成/失败/取消删除，不写Event Log。已知凭据保留足够跨片lookahead后脱敏，过长密钥禁预览而非泄漏。完整内容与usage仍由持久响应/attempt事实承担。SSE显式include_preview才发送无id临时帧；持久游标不被改变。可恢复流式失败/超时按ADR-101分类重试，不降级complete，未知消费保留；三类官方SDK适配及Vue预览已集成，最终综合门禁按R阶段执行。
 
 Host的全部实际目录已接入严格工具契约，包括MCP、Skills、RAG及只读Worker过滤后的目录。每Run仅允许一次参数错误后的修正轮次，再次出现参数错误即在保存全部已知结果后失败；不重新执行先前副作用。截断响应中的完整JSON也不执行，未派发调用写tool.abandoned补齐消息配对。严格schema使基础目录实测从约2,738增加至3,283字符；上下文测试固定成本相应更新，保留独立目录上限检测，不能把新增校验成本当作Token优化收益。
 
@@ -1186,3 +1186,11 @@ MK-13 的数据设计与比较器可在 A–E 编写，真实付费/真实任务
 ### MK-08A 已实现切片：事件连接生命周期
 
 连接控制统一在 `frontend/src/api/events.ts`，Pinia 的订阅代次隔离旧回调。连接状态与 HTTP 轮询成功分开，避免查询成功遮住事件流断线；连接恢复刷新会话事实。服务端接受 Last-Event-ID 与 after 的较大非负序号，事件保持原唯一日志来源。此切片只处理浏览器观察连接，不改变后台运行和恢复决策；原子快照、服务代次与尝试级预览仍待补齐。取舍见 ADR-106；接口与定向证据见 API 契约和 AGENTS 的 MK-08 记录。
+
+### MK-08B 已实现切片：模型步骤分类重试
+
+`model_failures.py` 统一区分可恢复网络/超时/限流/临时错误/缺终态和认证/账单/拒绝/协议/未知。结构化账单错误优先于HTTP429，文本数字片段不当状态码。主任务每步最多10次，最终化1次；固定评测单次边界和辅助调用原上限不变。每次重新竞争模型槽、预留和结算，未知预留不释放。
+
+默认退避基值1/2/4/8/16/32秒封顶，附加最多50%正向抖动，Retry-After为下限。EVENTIDE_MODEL_RETRY_BASE_DELAY默认1；EVENTIDE_MODEL_RETRY_WAIT_LIMIT默认300秒，只限制累计退避等待，不把单次模型执行耗时算成等待。原Run/交付/项目预算仍约束每次尝试，取消等待不会创建新尝试。
+
+预览携带attempt_id并在尝试结束清空；截断参数不派发。未知服务商执行项立即终止协议，防止随后超时丢失副作用证据。失败中已报告用量保留，缺失消费仍未知。179项后端定向和Ruff/Mypy通过；日志在recovery子任务忽略目录。服务重启、工具核查与完整恢复UI仍待补齐，整个MK-08未完成。

@@ -195,13 +195,14 @@ async def test_anthropic_blocks_complete_only_at_message_stop_and_preserve_think
     ("chat", [chat_chunk(content="partial")]),
     ("anthropic", anthropic_events()[:-1]),
 ])
-async def test_missing_terminal_never_returns_a_complete_response(kind, events):
+async def test_missing_terminal_fails_as_replayable_stream_truncation(kind, events):
     instance, stream, calls = provider(kind, events)
     seen = []
     with pytest.raises(ProviderError) as caught:
         async for event in instance.stream(request()):
             seen.append(event)
-    assert not caught.value.retryable
+    assert caught.value.retryable
+    assert caught.value.category == "stream_truncated"
     assert all(event.response is None for event in seen)
     assert stream.closed and len(calls) == 1
 
@@ -211,11 +212,14 @@ async def test_missing_terminal_never_returns_a_complete_response(kind, events):
     ("chat", [chat_chunk(content="partial")]),
     ("anthropic", anthropic_events()[:7]),
 ])
-async def test_partial_stream_failure_is_nonretryable_and_closes(kind, events):
+async def test_partial_stream_transport_failure_is_retryable_truncation_and_closes(
+    kind, events,
+):
     instance, stream, calls = provider(kind, events, failure=RuntimeError("503 unavailable"))
     with pytest.raises(ProviderError) as caught:
         _ = [event async for event in instance.stream(request())]
-    assert not caught.value.retryable
+    assert caught.value.retryable
+    assert caught.value.category == "stream_truncated"
     assert len(calls) == 1 and stream.closed
 
 

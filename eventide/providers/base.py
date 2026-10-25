@@ -9,9 +9,32 @@ from eventide.models import ModelRequest, ModelResponse
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, message: str, *, retryable: bool = False):
+    """One provider attempt failure carrying its replay-safety classification.
+
+    ``retryable`` alone never enables a retry: the Host only replays attempts
+    whose category is retryable and that carry no provider-side tool activity
+    or protocol barrier. ``usage`` keeps tokens the provider already reported
+    for a failed attempt; it stays None when usage is unknown.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        category: str = "unknown",
+        retry_after: float | None = None,
+        usage: dict[str, int] | None = None,
+        server_side_activity: bool = False,
+    ):
         super().__init__(message)
         self.retryable = retryable
+        self.category = category
+        self.retry_after = retry_after
+        self.usage: dict[str, int] | None = (
+            dict(usage) if isinstance(usage, dict) and usage else None
+        )
+        self.server_side_activity = server_side_activity
 
 
 class Provider(Protocol):

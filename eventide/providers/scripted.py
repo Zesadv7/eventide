@@ -23,7 +23,15 @@ class ScriptedProvider:
         if item.get("delay_ms"):
             await asyncio.sleep(float(item["delay_ms"]) / 1000)
         if "error" in item:
-            raise ProviderError(str(item["error"]), retryable=bool(item.get("retryable")))
+            raise ProviderError(
+                str(item["error"]),
+                retryable=bool(item.get("retryable")),
+                **{
+                    key: item[key]
+                    for key in ("category", "retry_after", "usage", "server_side_activity")
+                    if key in item
+                },
+            )
         calls = tuple(
             ToolCall(
                 str(call.get("id", f"call_{index}")),

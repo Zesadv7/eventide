@@ -41,16 +41,24 @@ class PreviewStore:
         self._items: dict[str, dict[str, Any]] = {}
         self._revision = 0
 
-    def append(self, run_id: str, request_id: str, text: str) -> None:
+    def append(
+        self, run_id: str, request_id: str, text: str, *, attempt_id: str | None = None,
+    ) -> None:
         if not text:
             return
         previous = self._items.get(run_id)
-        if previous and previous["request_id"] != request_id:
+        # A new physical attempt starts a clean preview even inside the same
+        # logical request, so a failed attempt's fragments never leak into the
+        # retry's preview or overwrite a newer attempt after a late arrival.
+        if previous and (
+            previous["request_id"] != request_id
+            or previous.get("attempt_id") != attempt_id
+        ):
             previous = None
         full = (previous["text"] if previous else "") + text
         omitted = (previous["omitted_chars"] if previous else 0) + max(0, len(full) - self.limit)
         self._revision += 1
-        self._items[run_id] = {
+        item = {
             "type": "model.preview",
             "run_id": run_id,
             "request_id": request_id,
@@ -60,6 +68,9 @@ class PreviewStore:
             "active": True,
             "ephemeral": True,
         }
+        if attempt_id:
+            item["attempt_id"] = attempt_id
+        self._items[run_id] = item
         while len(self._items) > self.active_limit:
             self._items.pop(next(iter(self._items)))
 

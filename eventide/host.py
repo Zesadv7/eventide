@@ -43,6 +43,12 @@ from eventide.generation import (
 )
 from eventide.mcp.client import MCPManager
 from eventide.model_budget import ModelBudgetController
+from eventide.model_failures import (
+    MODEL_STEP_ATTEMPTS,
+    classify_failure,
+    default_jitter,
+    retry_delay,
+)
 from eventide.models import (
     ContinuationRequest,
     ModelRequest,
@@ -934,7 +940,7 @@ class RuntimeHost:
         sink: EventSink | None,
         *,
         kind: str = "agent",
-        max_attempts: int = 3,
+        max_attempts: int = MODEL_STEP_ATTEMPTS,
         _evaluation_origin: dict[str, Any] | None = None,
         _memory_base_system: str | None = None,
         _memory_allowed: set[str] | None = None,
@@ -950,11 +956,16 @@ class RuntimeHost:
 
             if not is_evaluation_run(self.store, run_id):
                 raise ValueError("Evaluation origin requires a trusted control Run")
-        if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
+        if type(max_attempts) is not int or not 1 <= max_attempts <= MODEL_STEP_ATTEMPTS:
             raise ValueError("Invalid model attempt limit")
         request_id = f"request_{uuid.uuid4().hex}"
         admitted = self._admitted_intent(run_id) or {}
         call_kind = "worker" if kind == "agent" and admitted.get("parent_run_id") else kind
+        # Total delay this step may spend waiting between attempts. The
+        # schedule stays inside Run/delivery budgets: every attempt is still
+        # reserved and settled individually, and waits release the model slot.
+        retry_wait_remaining = self.settings.model_retry_wait_limit
+        planned_delay = 0.0
         for attempt in range(1, max_attempts + 1):
             async with self.dispatch.scheduler.model_slot():
                 attempt_id = f"attempt_{uuid.uuid4().hex}"
@@ -992,32 +1003,61 @@ class RuntimeHost:
                             memory_base=_memory_base_system,
                             memory_allowed={r["id"] for r in memory_refs},
                             memory_attempt=attempt_id,
+                            attempt_id=attempt_id,
                         ),
                         timeout=self.settings.model_timeout,
                     )
                 except BaseException as exc:
-                    self.model_budget.finish(run_id, {
-                        **identity, "status": "cancelled" if isinstance(exc, asyncio.CancelledError)
-                        else "failed", "usage_source": "unknown",
-                        "duration_ms": (time.perf_counter() - started) * 1000,
-                    })
-                    if not isinstance(exc, (asyncio.TimeoutError, ProviderError)):
+                    cancelled = isinstance(exc, asyncio.CancelledError)
+                    if not cancelled and not isinstance(exc, (asyncio.TimeoutError, ProviderError)):
+                        self.model_budget.finish(run_id, {
+                            **identity, "status": "failed", "usage_source": "unknown",
+                            "duration_ms": (time.perf_counter() - started) * 1000,
+                        })
                         raise
-                    streaming = kind == "agent" and callable(
-                        getattr(self._provider(), "stream", None)
-                    )
-                    retryable = (
-                        isinstance(exc, asyncio.TimeoutError) or exc.retryable
-                    ) and not streaming
+                    failure = classify_failure(exc)
+                    known_usage = failure.usage
+                    settled_identity = {
+                        **identity,
+                        "status": "cancelled" if cancelled else "failed",
+                        "usage_source": "reported" if known_usage else "unknown",
+                        "duration_ms": (time.perf_counter() - started) * 1000,
+                    }
+                    if known_usage is not None:
+                        settled_identity["usage"] = known_usage
+                    self.model_budget.finish(run_id, settled_identity)
+                    if cancelled:
+                        raise
                     message = (
                         f"Model request timed out ({self.settings.model_timeout:g}s)"
                         if isinstance(exc, asyncio.TimeoutError) else self._clean(str(exc))
                     )
+                    will_retry = failure.retryable and attempt < max_attempts
+                    deadline_stopped = False
+                    if will_retry:
+                        planned_delay = retry_delay(
+                            attempt,
+                            base=self.settings.model_retry_base_delay,
+                            retry_after=failure.retry_after,
+                            jitter=default_jitter,
+                        )
+                        if planned_delay > retry_wait_remaining:
+                            will_retry = False
+                            deadline_stopped = True
                     await self._emit(run_id, "model.retry", {
-                        **identity, "retryable": retryable and attempt < max_attempts,
+                        **identity,
+                        "retryable": will_retry,
                         "error": message,
+                        "category": failure.category,
+                        **({"retry_after_seconds": round(failure.retry_after, 3)}
+                           if failure.retry_after is not None else {}),
+                        **({"delay_seconds": round(planned_delay, 3),
+                            "next_attempt": attempt + 1} if will_retry else {}),
+                        **({"server_side_activity": True}
+                           if failure.server_side_activity else {}),
+                        **({"retry_wait_limit_exceeded": True} if deadline_stopped else {}),
                     }, sink)
-                    if not retryable or attempt == max_attempts:
+                    if not will_retry:
                         if isinstance(exc, asyncio.TimeoutError):
                             raise RuntimeError(message) from exc
                         raise
@@ -1034,7 +1074,8 @@ class RuntimeHost:
                             "attempt_id": attempt_id, "budgets": settled.warnings,
                         }, sink)
                     return response
-            await asyncio.sleep(0.25 * (2 ** (attempt - 1)))
+            await asyncio.sleep(planned_delay)
+            retry_wait_remaining -= planned_delay
         raise RuntimeError("Model attempts exhausted")
 
     def model_usage_events(self, run_id: str) -> list[dict[str, Any]]:
@@ -1053,7 +1094,7 @@ class RuntimeHost:
     async def _complete_request(
         self, request: ModelRequest, run_id: str, request_id: str, kind: str,
         *, memory_base: str | None = None, memory_allowed: set[str] | None = None,
-        memory_attempt: str | None = None,
+        memory_attempt: str | None = None, attempt_id: str | None = None,
     ) -> ModelResponse:
         # No await between eligibility check, dispatch receipt and provider entry.
         if memory_base is not None and self.memory.enabled:
@@ -1080,7 +1121,9 @@ class RuntimeHost:
                     if completed is not None:
                         raise ProviderError("Model stream emitted data after its terminal response")
                     if event.kind == "text_delta":
-                        self.previews.append(run_id, request_id, buffer.feed(event.text))
+                        self.previews.append(
+                            run_id, request_id, buffer.feed(event.text), attempt_id=attempt_id,
+                        )
                     elif event.kind == "response_completed":
                         if completed is not None or event.response is None:
                             raise ProviderError("Invalid duplicate or missing stream terminal")
@@ -1088,11 +1131,25 @@ class RuntimeHost:
                     else:
                         raise ProviderError("Unknown model stream event")
             if completed is None:
-                raise ProviderError("Model stream ended without a complete response")
+                # The provider ended its stream without a terminal event and
+                # without raising: the same replayable truncation adapters report.
+                raise ProviderError(
+                    "Model stream ended without a complete response",
+                    retryable=True, category="stream_truncated",
+                )
             return completed
         except ProviderError as exc:
-            if observed:
-                raise ProviderError(str(exc), retryable=False) from exc
+            if observed and exc.retryable and exc.category == "unknown":
+                # Output was already discarded: a bare retryable transport error
+                # at this point is a stream truncation, whatever raised it.
+                raise ProviderError(
+                    str(exc),
+                    retryable=True,
+                    category="stream_truncated",
+                    retry_after=exc.retry_after,
+                    usage=exc.usage,
+                    server_side_activity=exc.server_side_activity,
+                ) from exc
             raise
         finally:
             # No raw suffix is flushed to a client on failure; the canonical
@@ -3639,7 +3696,7 @@ class RuntimeHost:
                     ),
                     run_id,
                     sink,
-                    max_attempts=1 if finalizing else 3,
+                    max_attempts=1 if finalizing else MODEL_STEP_ATTEMPTS,
                     _memory_base_system=memory_base_system if not readonly_profile else None,
                     _memory_allowed={r["id"] for r in context_memory_refs},
                 )

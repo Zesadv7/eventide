@@ -589,3 +589,12 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 同根因第三次：maka-file-evidence会话sess_b3cd4b84-dab5-4cc5-9114-7a76752a210d在30分钟退出1；文件工具/副本worker/测试候选保留，未提交、未取得完整验证结果。主代理接手后核验，不能计为完成。证据在该副本zcode/result.jsonl/progress.log。
 
 - recovery后续：主代理完成独立核验并修正候选，179项后端定向及Ruff/Mypy通过，本地候选提交d75cd93；细节随集成保留MK08B-REVIEW。桥接超时日志仍保留，不改称ZCode调用成功。context/native按三路队列重发后均进入工具执行；没有再次出现并发拒绝，但任务最终验收仍待完成。
+
+## MK08B-REVIEW：重试候选独立复核未通过（2026-10-26）
+
+- 分类：受控缺陷复现/待查。基线5acba20加ZCode未提交候选，主代理接手后运行共享Python `-m pytest -q tests/test_model_failure_review.py tests/test_model_retry.py`，退出1。
+- 原始证据：`.task_outputs/maka-upgrade/recovery/review-red.log`。主代理新增独立的结构化账单429及错误文本数字误分类用例；原因、修复、复验待补齐。不计完成，不把开发失败当线上影响。
+
+- 后续核验：核心83项已通过（recovery/core.log）；Ruff变更范围检查退出1，详情recovery/ruff.log，尚待修正。关联pytest命令误用了不存在的tests/test_model_slots.py（同时检查实际日志是否有其他缺失文件），收集退出4，未执行测试；这是主代理测试调用问题，非应用失败，命令和现象保留recovery/regression.log，改用实际文件名后复验。
+
+- 已证实原因及处理：结构化账单429被HTTP状态覆盖、裸数字子串被误当状态码；调整结构化优先级与状态码边界，未知Retry-After不授权重试。另补累计等待与模型执行耗时分离、服务商执行项立即停止，避免随后超时丢失边界证据。核心83项、关联96项均通过，Ruff复验与Mypy11模块通过，证据recovery/core.log、regression.log、ruff-green.log、mypy.log。静态失败仅新增测试导入排序和循环闭包绑定，已修复。错误文件名日志已另存regression-command-error.log；实际test_scheduler.py及其他关联范围合计96项通过。相关提交由本记录所在提交定位；无真实模型效果结论。参与为ZCode初版实现、主代理独立复现和修正，可追问如何区分账单与限流、为何等待额度不应包含单次请求时间。

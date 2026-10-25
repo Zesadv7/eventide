@@ -40,6 +40,8 @@ class Settings:
     context_limit: int = 50_000
     approval_timeout: float = 60.0
     model_timeout: float = 300.0
+    model_retry_base_delay: float = 1.0
+    model_retry_wait_limit: float = 300.0
     mcp_timeout: float = 30.0
     command_timeout: float = 120.0
     run_token_limit: int = 0
@@ -57,6 +59,10 @@ class Settings:
     def __post_init__(self) -> None:
         if self.run_token_limit < 0:
             raise ValueError("run_token_limit must be zero or positive")
+        if not 0 < self.model_retry_base_delay <= 60:
+            raise ValueError("model_retry_base_delay must be within (0, 60] seconds")
+        if not 0 < self.model_retry_wait_limit <= 3600:
+            raise ValueError("model_retry_wait_limit must be within (0, 3600] seconds")
         if not isinstance(self.local_proxy_peers, tuple) or len(self.local_proxy_peers) > 32:
             raise ValueError("local_proxy_peers must be a tuple of at most 32 exact IP addresses")
         peers = []
@@ -97,6 +103,8 @@ class Settings:
             context_limit=int(os.getenv("EVENTIDE_CONTEXT_LIMIT", "50000")),
             approval_timeout=float(os.getenv("EVENTIDE_APPROVAL_TIMEOUT", "60")),
             model_timeout=float(os.getenv("EVENTIDE_MODEL_TIMEOUT", "300")),
+            model_retry_base_delay=float(os.getenv("EVENTIDE_MODEL_RETRY_BASE_DELAY", "1")),
+            model_retry_wait_limit=float(os.getenv("EVENTIDE_MODEL_RETRY_WAIT_LIMIT", "300")),
             mcp_timeout=float(os.getenv("EVENTIDE_MCP_TIMEOUT", "30")),
             command_timeout=float(os.getenv("EVENTIDE_COMMAND_TIMEOUT", "120")),
             run_token_limit=int(os.getenv("EVENTIDE_RUN_TOKEN_LIMIT", "0")),

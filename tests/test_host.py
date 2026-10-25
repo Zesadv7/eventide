@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from eventide.host import RuntimeHost
+from eventide.model_failures import MODEL_STEP_ATTEMPTS
 from eventide.models import ModelResponse, RunRequest, WorkspaceTarget
 from eventide.providers import ScriptedProvider
 from eventide.workspace import workspace_checkpoint
@@ -597,21 +598,31 @@ async def test_cancel_after_a_side_effecting_tool_keeps_the_session_resumable(is
 
 async def test_model_request_timeout_fails_with_durable_retries(isolated_workspace):
     class WaitingProvider:
+        def __init__(self):
+            self.calls = 0
+
         async def complete(self, _request):
+            self.calls += 1
             await asyncio.sleep(60)
 
-    settings = replace(settings_for(isolated_workspace), model_timeout=0.01)
-    host = RuntimeHost(settings, WaitingProvider())
+    provider = WaitingProvider()
+    settings = replace(
+        settings_for(isolated_workspace), model_timeout=0.01, model_retry_base_delay=0.001,
+    )
+    host = RuntimeHost(settings, provider)
     try:
         result = await host.run(RunRequest("wait"))
         assert result.status == "failed"
         assert "timed out" in result.output
+        assert provider.calls == MODEL_STEP_ATTEMPTS
         retries = [
             event
             for event in host.store.run_events(result.run_id)
             if event["type"] == "model.retry"
         ]
-        assert len(retries) == 3
+        assert len(retries) == MODEL_STEP_ATTEMPTS
+        assert all(item["payload"]["category"] == "timeout" for item in retries)
+        assert retries[-1]["payload"]["retryable"] is False
     finally:
         await host.close()
 

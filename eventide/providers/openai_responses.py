@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from eventide.config import Settings
 from eventide.generation import wire_parameters
+from eventide.model_failures import failure_from_message
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
 from eventide.streaming import (
@@ -21,6 +22,11 @@ from eventide.streaming import (
     to_dict,
 )
 from eventide.usage import normalize_provider_usage
+
+# Output item types Eventide assembles itself. Anything else (web search,
+# file search, code interpreter, computer use, MCP calls) runs on the
+# provider side: a truncated such stream must never be replayed blindly.
+REPLAYABLE_ITEM_TYPES = frozenset({"message", "reasoning", "function_call"})
 
 
 def convert_response_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -146,6 +152,7 @@ class OpenAIResponsesProvider:
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         started = False
         result: ModelResponse | None = None
+        server_side_activity = False
         limit = StreamLimit()
         items: set[int] = set()
         try:
@@ -174,7 +181,14 @@ class OpenAIResponsesProvider:
                         items.add(index)
                         if len(items) > MAX_STREAM_ITEMS:
                             raise ProviderError("Model stream exceeded the output item limit")
-                        limit.check_object(field(event, "item"))
+                        item = field(event, "item")
+                        limit.check_object(item)
+                        if field(item, "type", "") not in REPLAYABLE_ITEM_TYPES:
+                            server_side_activity = True
+                            raise ProviderError(
+                                "Unsupported provider-side activity in model stream",
+                                category="protocol", server_side_activity=True,
+                            )
                     elif kind in {"response.completed", "response.incomplete"}:
                         response = field(event, "response")
                         if response is None:
@@ -183,11 +197,32 @@ class OpenAIResponsesProvider:
                         result = parse_response(response)
                         break
                     elif kind in {"response.failed", "error"}:
-                        raise ProviderError("Model response stream failed")
-            if result is None:
-                raise ProviderError("Model response stream ended without a terminal response")
+                        source = field(event, "response") if kind == "response.failed" else event
+                        detail = field(source, "error")
+                        payload = detail if isinstance(detail, dict) else to_dict(detail)
+                        payload = payload if isinstance(payload, dict) else {}
+                        message = str(
+                            payload.get("message")
+                            or payload.get("code")
+                            or "Model response stream failed"
+                        )
+                        classified = failure_from_message(message)
+                        raise ProviderError(
+                            message,
+                            retryable=classified.retryable,
+                            category=classified.category,
+                        )
+                if result is None:
+                    # Clean transport EOF before the terminal event: replayable
+                    # truncation, no complete response existed to act on.
+                    raise ProviderError(
+                        "Model response stream ended without a terminal response",
+                        retryable=True, category="stream_truncated",
+                    )
         except Exception as exc:
-            raise stream_error(exc, started=started) from exc
+            raise stream_error(
+                exc, started=started, server_side_activity=server_side_activity,
+            ) from exc
         yield ModelStreamEvent("response_completed", response=result)
 
 

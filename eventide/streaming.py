@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol
 
+from eventide.model_failures import classify_transport
 from eventide.models import ModelRequest, ModelResponse
 from eventide.providers.base import ProviderError
 
@@ -79,14 +80,31 @@ def parse_arguments(value: str) -> dict[str, Any]:
     return decoded
 
 
-def stream_error(exc: Exception, *, started: bool) -> ProviderError:
-    if isinstance(exc, ProviderError):
-        return ProviderError(str(exc), retryable=exc.retryable and not started)
-    text = str(exc).lower()
+def stream_error(
+    exc: Exception,
+    *,
+    started: bool,
+    server_side_activity: bool = False,
+    usage: dict[str, int] | None = None,
+) -> ProviderError:
+    """Wrap one adapter failure in the unified classified ProviderError.
+
+    ``started`` marks a stream that already produced events: transport drops
+    and missing terminals then become retryable stream truncations, while
+    protocol violations and provider-side tool activity stay non-replayable.
+    """
+    failure = classify_transport(exc, started=started)
+    if server_side_activity and not failure.server_side_activity:
+        failure = replace(failure, server_side_activity=True, retryable=False)
+    if usage and failure.usage is None:
+        failure = replace(failure, usage=dict(usage))
     return ProviderError(
         str(exc),
-        retryable=not started
-        and any(code in text for code in ("429", "500", "502", "503", "529", "overloaded")),
+        retryable=failure.retryable,
+        category=failure.category,
+        retry_after=failure.retry_after,
+        usage=failure.usage,
+        server_side_activity=failure.server_side_activity,
     )
 
 

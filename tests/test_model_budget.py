@@ -10,6 +10,7 @@ from eventide.budget_prices import PriceVersion
 from eventide.budgets import BudgetExceeded, BudgetScope
 from eventide.host import RuntimeHost
 from eventide.model_budget import estimate_request
+from eventide.model_failures import MODEL_STEP_ATTEMPTS
 from eventide.models import ModelRequest, ModelResponse, RunRequest
 from eventide.providers import ProviderError, ScriptedProvider
 from eventide.usage import build_usage_ledger
@@ -140,7 +141,11 @@ async def test_unknown_attempts_survive_restart(isolated_workspace, failure):
             yield SimpleNamespace(kind="text_delta", text="partial", response=None)
             raise ProviderError("disconnected", retryable=True)
 
-    settings = settings_for(isolated_workspace, model_timeout=.01 if failure == "timeout" else 30)
+    settings = settings_for(
+        isolated_workspace,
+        model_timeout=.01 if failure == "timeout" else 30,
+        model_retry_base_delay=0.001,
+    )
     host = RuntimeHost(settings, StreamingProvider() if failure == "stream" else Provider())
     task = asyncio.create_task(host.run(RunRequest("work", run_id="unknown")))
     try:
@@ -155,7 +160,10 @@ async def test_unknown_attempts_survive_restart(isolated_workspace, failure):
         assert before["reservations"]
         assert all(r["status"] == "unsettled" for r in before["reservations"])
         assert all(r["reserved_tokens"] > 0 for r in before["reservations"])
-        assert len(before["reservations"]) == (3 if failure == "timeout" else 1)
+        expected = {"timeout": MODEL_STEP_ATTEMPTS, "stream": MODEL_STEP_ATTEMPTS}.get(
+            failure, 1,
+        )
+        assert len(before["reservations"]) == expected
     finally:
         await host.close()
     restored = RuntimeHost(settings, ScriptedProvider([]))

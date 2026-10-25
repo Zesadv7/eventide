@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from eventide.config import Settings
 from eventide.generation import wire_parameters
+from eventide.model_failures import STREAM_TRUNCATED, failure_from_message
 from eventide.models import ModelRequest, ModelResponse, ToolCall
 from eventide.providers.base import ProviderError
 from eventide.streaming import (
@@ -21,6 +22,11 @@ from eventide.streaming import (
     to_dict,
 )
 from eventide.usage import normalize_provider_usage
+
+# Output block types Eventide can assemble and replay. Anything else is
+# provider-side tool activity (server tools, MCP, code execution): a truncated
+# such stream must never be replayed blindly.
+REPLAYABLE_BLOCK_TYPES = frozenset({"text", "tool_use", "thinking", "redacted_thinking"})
 
 
 def _without_provider_state(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -110,6 +116,7 @@ class AnthropicProvider:
         message_started = False
         message_stopped = False
         stop_reason: str | None = None
+        server_side_activity = False
         limit = StreamLimit()
         blocks: dict[int, dict[str, Any]] = {}
         open_blocks: set[int] = set()
@@ -146,6 +153,12 @@ class AnthropicProvider:
                         block = to_dict(field(event, "content_block"))
                         if not isinstance(block, dict):
                             raise ProviderError("Invalid model stream content block")
+                        if block.get("type") not in REPLAYABLE_BLOCK_TYPES:
+                            server_side_activity = True
+                            raise ProviderError(
+                                "Unsupported provider-side activity in model stream",
+                                category="protocol", server_side_activity=True,
+                            )
                         limit.add(json.dumps(block, ensure_ascii=False))
                         blocks[index] = block
                         open_blocks.add(index)
@@ -205,15 +218,40 @@ class AnthropicProvider:
                         message_stopped = True
                         break
                     elif kind == "error":
-                        raise ProviderError("Model message stream failed")
+                        detail = field(event, "error")
+                        payload = detail if isinstance(detail, dict) else to_dict(detail)
+                        payload = payload if isinstance(payload, dict) else {}
+                        message = str(
+                            payload.get("message")
+                            or payload.get("type")
+                            or "Model message stream failed"
+                        )
+                        classified = failure_from_message(message)
+                        raise ProviderError(
+                            message,
+                            retryable=classified.retryable,
+                            category=classified.category,
+                            usage=normalize_provider_usage("anthropic", usage) or None,
+                        )
             if not message_stopped:
-                raise ProviderError("Model stream ended without message_stop")
+                # A clean transport EOF without the terminal event is a replayable
+                # truncation: no complete response existed to act on.
+                raise ProviderError(
+                    "Model stream ended without message_stop",
+                    retryable=True,
+                    category=STREAM_TRUNCATED,
+                )
             result = parse_message({
                 "content": [block for _, block in sorted(blocks.items())],
                 "usage": usage, "stop_reason": stop_reason,
             })
         except Exception as exc:
-            raise stream_error(exc, started=started) from exc
+            raise stream_error(
+                exc,
+                started=started,
+                server_side_activity=server_side_activity,
+                usage=normalize_provider_usage("anthropic", usage) or None,
+            ) from exc
         yield ModelStreamEvent("response_completed", response=result)
 
 

@@ -6,6 +6,7 @@ import pytest
 
 from eventide.config import Settings
 from eventide.host import RuntimeHost
+from eventide.model_failures import MODEL_STEP_ATTEMPTS
 from eventide.models import ModelResponse, RunRequest
 from eventide.providers import ScriptedProvider
 from tests.test_runtime import COMPACTION_BUDGET, settings_for
@@ -82,18 +83,19 @@ async def test_summary_obeys_model_timeout_and_retry_limit(isolated_workspace):
             isolated_workspace,
             context_limit=COMPACTION_BUDGET,
             model_timeout=0.01,
+            model_retry_base_delay=0.001,
         ),
         provider,
     )
     try:
         first = await host.run(RunRequest("prior"))
-        result = await asyncio.wait_for(host.run(RunRequest("next", first.session_id)), 2)
+        result = await asyncio.wait_for(host.run(RunRequest("next", first.session_id)), 30)
         assert result.status == "failed"
-        assert len(provider.requests) == 4
+        assert len(provider.requests) == MODEL_STEP_ATTEMPTS + 1
         retries = [
             e["payload"] for e in host.store.run_events(result.run_id) if e["type"] == "model.retry"
         ]
-        assert [item["kind"] for item in retries] == ["context_summary"] * 3
+        assert [item["kind"] for item in retries] == ["context_summary"] * MODEL_STEP_ATTEMPTS
     finally:
         await host.close()
 

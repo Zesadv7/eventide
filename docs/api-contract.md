@@ -657,3 +657,9 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 Vue 使用最后成功交给状态层的持久事件序号重建连接，忽略旧连接回调和重复事件；临时预览不推进游标，断线清除。错误后从 500ms 指数退避至 30s 基值，附加最多 25% 正向抖动，稳定连接 10s 后重置计数；离线暂停，联网或页面重新可见时唤醒。终态停止订阅；切换会话和卸载清理订阅及重试。页面区分连接中、重连等待、离线并显示倒计时，连接恢复触发会话状态刷新。
 
 本批尚未实现服务启动代次、原子快照与事件缺口协议、按模型尝试隔离预览、写入回执统一核查；完整 MK-08A 仍进行中，后端自动恢复另按 MK-08B/C/D 实施。
+
+### MK-08B 模型重试事实
+
+model.retry保留request_id/attempt_id/attempt，增加category；retryable表示实际上是否还有下一次。计划重试时给delay_seconds和next_attempt，可包含retry_after_seconds；服务商活动边界为server_side_activity=true，累计等待超限为retry_wait_limit_exceeded=true。终止分类也留此事实，但retryable=false不表示已经重试。
+
+model.preview增加可选attempt_id，不拼接不同尝试草稿。attempt_started/finished、预算和最终response仍是唯一持久事实。取消和半截工具不产生完整响应。完整恢复页面和动作矩阵仍待MK-08F，不新增隐藏执行入口。

@@ -215,7 +215,12 @@ class OpenAICompatibleProvider:
                                 raise ProviderError("Model stream repeated its terminal choice")
                             finish_reason = str(reason)
             if finish_reason is None:
-                raise ProviderError("Model stream ended without a finish reason")
+                # Clean transport EOF before the terminal choice: replayable
+                # truncation, no complete response existed to act on.
+                raise ProviderError(
+                    "Model stream ended without a finish reason",
+                    retryable=True, category="stream_truncated",
+                )
             tool_calls: list[ToolCall] = []
             for _, item in sorted(calls.items()):
                 if not item["id"] or not item["name"]:
@@ -229,5 +234,5 @@ class OpenAICompatibleProvider:
                 "openai_compatible",
             )
         except Exception as exc:
-            raise stream_error(exc, started=started) from exc
+            raise stream_error(exc, started=started, usage=usage or None) from exc
         yield ModelStreamEvent("response_completed", response=result)

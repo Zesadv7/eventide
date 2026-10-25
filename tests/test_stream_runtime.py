@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from eventide.api import create_app
 from eventide.host import RuntimeHost
+from eventide.model_failures import MODEL_STEP_ATTEMPTS
 from eventide.models import ModelResponse, RunRequest, ToolCall
 from eventide.previews import PreviewStore, SafeTextBuffer
 from eventide.providers import ProviderError
@@ -38,46 +39,74 @@ def test_preview_limits_and_disposal():
     assert store.get("b") is None
 
 
-async def test_partial_stream_fails_without_retry_or_tool_execution(isolated_workspace):
+async def test_partial_stream_retries_committed_input_without_tool_execution(isolated_workspace):
     class PartialProvider:
         calls = 0
+        requests = []
 
         async def stream(self, request):
             self.calls += 1
+            self.requests.append(request)
             yield SimpleNamespace(kind="text_delta", text="partial answer", response=None)
             raise ProviderError("connection lost", retryable=True)
 
     provider = PartialProvider()
-    host = RuntimeHost(settings_for(isolated_workspace), provider)
+    settings = replace(settings_for(isolated_workspace), model_retry_base_delay=0.001)
+    host = RuntimeHost(settings, provider)
     try:
         result = await host.run(RunRequest("work"))
         assert result.status == "failed"
-        assert provider.calls == 1
+        assert provider.calls == MODEL_STEP_ATTEMPTS
         assert host.previews.get(result.run_id) is None
-        assert not any(e["type"] == "tool.prepared" for e in host.store.run_events(result.run_id))
-        assert (
-            build_usage_ledger(host.store.usage_events(run_id=result.run_id))["unknown_attempts"]
-            == 1
-        )
+        events = host.store.run_events(result.run_id)
+        assert not any(e["type"] == "tool.prepared" for e in events)
+        ledger = build_usage_ledger(host.store.usage_events(run_id=result.run_id))
+        assert ledger["unknown_attempts"] == MODEL_STEP_ATTEMPTS
+        assert ledger["reported_totals"] == {}
+        # Every retry re-dispatches the identical committed model input boundary.
+        assert all(request.system == provider.requests[0].system for request in provider.requests)
+        assert all(request.messages == provider.requests[0].messages
+                   for request in provider.requests)
+        retries = [e["payload"] for e in events if e["type"] == "model.retry"]
+        assert [item["attempt"] for item in retries] == list(range(1, MODEL_STEP_ATTEMPTS + 1))
+        assert retries[0]["retryable"] is True and retries[0]["category"] == "stream_truncated"
+        assert retries[-1]["retryable"] is False and "next_attempt" not in retries[-1]
     finally:
         await host.close()
 
 
-async def test_stream_timeout_never_retries(isolated_workspace):
-    class SlowProvider:
+async def test_stream_timeout_retries_and_then_completes(isolated_workspace):
+    class SlowThenCompleteProvider:
         calls = 0
 
         async def stream(self, request):
             self.calls += 1
-            yield SimpleNamespace(kind="text_delta", text="waiting", response=None)
-            await asyncio.Event().wait()
+            if self.calls == 1:
+                yield SimpleNamespace(kind="text_delta", text="waiting", response=None)
+                await asyncio.Event().wait()
+            yield SimpleNamespace(
+                kind="response_completed",
+                text="",
+                response=ModelResponse("done", usage={"input_tokens": 3, "output_tokens": 2}),
+            )
 
-    provider = SlowProvider()
-    host = RuntimeHost(replace(settings_for(isolated_workspace), model_timeout=0.05), provider)
+    provider = SlowThenCompleteProvider()
+    settings = replace(
+        settings_for(isolated_workspace), model_timeout=0.05, model_retry_base_delay=0.001,
+    )
+    host = RuntimeHost(settings, provider)
     try:
         result = await host.run(RunRequest("work"))
-        assert result.status == "failed"
-        assert provider.calls == 1
+        assert result.status == "completed"
+        assert provider.calls == 2
+        retries = [
+            e["payload"] for e in host.store.run_events(result.run_id)
+            if e["type"] == "model.retry"
+        ]
+        assert len(retries) == 1 and retries[0]["category"] == "timeout"
+        ledger = build_usage_ledger(host.store.usage_events(run_id=result.run_id))
+        assert ledger["attempt_count"] == 2 and ledger["unknown_attempts"] == 1
+        assert ledger["reported_totals"] == {"input_tokens": 3, "output_tokens": 2}
     finally:
         await host.close()
 
