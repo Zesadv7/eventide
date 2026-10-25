@@ -16,7 +16,8 @@ const detail = ref<SupplementProjection | null>(null),
   notice = ref(""),
   sending = ref(false),
   loading = ref(false);
-let version = 0;
+let version = 0,
+  scope = 0;
 async function load() {
   const current = ++version,
     id = props.runId;
@@ -34,6 +35,7 @@ async function load() {
 }
 async function send() {
   const id = props.runId,
+    currentScope = scope,
     body = draft.value.trim();
   if (!id || !body || sending.value) return;
   sending.value = true;
@@ -41,6 +43,7 @@ async function send() {
   notice.value = "";
   try {
     const receipt = await interactionsApi.add(id, body);
+    if (currentScope !== scope) return;
     if (receipt.status === "late") {
       notice.value =
         "该运行已结束：补充已保存为记录，但不会自动恢复或重开任何运行；是否带入下一轮由你决定。";
@@ -50,9 +53,10 @@ async function send() {
     draft.value = "";
     await load();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "补充发送失败";
+    if (currentScope === scope)
+      error.value = e instanceof Error ? e.message : "补充发送失败";
   } finally {
-    sending.value = false;
+    if (currentScope === scope) sending.value = false;
   }
 }
 const statusLabel: Record<SupplementStatus, string> = {
@@ -60,8 +64,25 @@ const statusLabel: Record<SupplementStatus, string> = {
   consumed: "已消费一次",
   late: "迟到 · 不会自动续跑",
 };
-watch(() => [props.runId, props.refreshKey], load, { immediate: true });
-onUnmounted(() => version++);
+watch(
+  () => props.runId,
+  () => {
+    scope++;
+    version++;
+    detail.value = null;
+    draft.value = "";
+    notice.value = "";
+    error.value = "";
+    sending.value = false;
+    void load();
+  },
+  { immediate: true },
+);
+watch(() => props.refreshKey, load);
+onUnmounted(() => {
+  version++;
+  scope++;
+});
 </script>
 <template>
   <details v-if="runId" class="run-supplements">

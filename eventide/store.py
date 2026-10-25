@@ -1253,7 +1253,12 @@ class RuntimeStore:
                 receipts[payload["supplement_id"]] = payload
             elif event["type"] == interactions.SUPPLEMENT_CONSUMED_EVENT:
                 consumed[payload["supplement_id"]] = payload
-        return interactions.merge_supplements(list(receipts.values()), consumed)
+        projected = interactions.merge_supplements(list(receipts.values()), consumed)
+        if self.run_is_terminal(run_id):
+            for item in projected:
+                if item["status"] == "pending":
+                    item["status"] = "late"
+        return projected
 
     def consume_supplement(
         self, run_id: str, supplement_id: str, *, step: int, message: dict[str, Any]

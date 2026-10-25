@@ -65,6 +65,10 @@ def test_supplement_consumed_once_at_next_model_boundary(isolated_workspace):
     with _client(runtime) as client:
         run_id = _start_run(client)
         wait_for_status(client, run_id, {"running"})
+        deadline = time.monotonic() + 5
+        while not runtime.provider.requests and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(runtime.provider.requests) == 1
         received = client.post(
             f"/api/runs/{run_id}/supplements",
             json={"body": "also check the retry path", "body_version": 2},
@@ -238,3 +242,23 @@ def test_supplement_rejects_invalid_input_and_unknown_run(isolated_workspace):
             json={"body": "ok"},
             headers={"Idempotency-Key": uuid.uuid4().hex},
         ).status_code == 404
+
+
+def test_pending_supplement_does_not_stay_waiting_after_final_response(isolated_workspace):
+    runtime = RuntimeHost(
+        settings_for(isolated_workspace),
+        ScriptedProvider([{"text": "done", "delay_ms": 700}]),
+    )
+    with _client(runtime) as client:
+        run_id = _start_run(client)
+        wait_for_status(client, run_id, {"running"})
+        response = client.post(
+            f"/api/runs/{run_id}/supplements", json={"body": "extra instruction"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert response.json()["status"] == "pending"
+        wait_for_status(client, run_id, {"completed"})
+        records = client.get(f"/api/runs/{run_id}/supplements").json()
+        assert records["pending"] == 0
+        assert records["supplements"][0]["status"] == "late"
+        assert len(runtime.provider.requests) == 1

@@ -131,3 +131,33 @@ it("disables send for empty drafts only", async () => {
   expect(add).not.toHaveBeenCalled();
   wrapper.unmount();
 });
+
+it("ignores an old run send response after switching runs", async () => {
+  vi.spyOn(interactionsApi, "list").mockImplementation(async (id) =>
+    projection({ run_id: id, supplements: [], pending: 0 }),
+  );
+  let finish!: (value: Awaited<ReturnType<typeof interactionsApi.add>>) => void;
+  vi.spyOn(interactionsApi, "add").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const wrapper = mountPanel();
+  await flushPromises();
+  await wrapper.find("textarea").setValue("old run instruction");
+  await wrapper.find("button.primary").trigger("click");
+  await wrapper.setProps({ runId: "r2" });
+  await flushPromises();
+  await wrapper.find("textarea").setValue("new run draft");
+  finish({
+    supplement_id: "sup_old",
+    run_id: "r1",
+    status: "late",
+    consumed: false,
+  });
+  await flushPromises();
+  expect(wrapper.find("textarea").element.value).toBe("new run draft");
+  expect(wrapper.text()).not.toContain("该运行已结束");
+  wrapper.unmount();
+});

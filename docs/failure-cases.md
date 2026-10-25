@@ -773,3 +773,11 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 处理：仅改测试与一处路由字段名；生产实现与 Store/Host 消费语义未因失败放宽。
 - 复验：最终 `tests/test_interactions.py` 4 项通过、前端 supplements 4 项与 chat-experience/memory/sandbox 39 项回归通过、`vue-tsc --noEmit`、Ruff 全仓、Mypy（py310 目标）5 模块通过；日志 `.task_outputs/maka-upgrade/interactions/final-backend.log` 与 `frontend-final.log`。
 - 经验：ApiContext 注入字段以 `http_api/context.py` 为准；ScriptedProvider 无工具调用的响应即终态，跨步断言必须脚本化工具调用；消息 content 的块列表形态要统一规范化后再断言。结构化提问（切片 2）未实现，不因本切片标记 MK-06 完成。
+
+### MK06-REVIEW — 最终回答期间收到的补充永久显示待消费
+
+- 2026-10-26 主代理受控复现，基线6f7f7ca；`pytest tests/test_interactions.py -k pending_supplement` 1失败，日志`.task_outputs/maka-upgrade/interactions/review-red.log`。补充到达时Run仍running，随后直接完成无下一请求，查询仍按接收时pending投影，误称仍会消费。应以终态事实标late未消费，并保留原接收事实。另前端发送迟到回执缺Run切换护栏，主代理同步补充测试与修复。
+- 修改后5项专项中4通过/1失败（review-green.log），为原一次消费用例；新终态迟到场景通过，原失败原因待定位。5项前端（含切Run迟到回执）、vue-tsc、Ruff/Mypy通过，未宣称整体通过。
+
+- 原一次消费断言失败已证实是fixture竞态：Run变running早于第一请求，补充可能合法在第1步边界被消费。测试改为等待已派发第一请求后再送补充，继续严格断言第2步一次消费，未放宽生产语义。
+- MK06-REVIEW最终5项后端通过（review-final.log）、5项前端通过（review-frontend.log）及vue-tsc/Ruff/Mypy通过。终态未消费改late，旧Run迟到发送结果不清空新Run草稿/覆盖提示。原接收事实未改，无自动续跑。
