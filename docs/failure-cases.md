@@ -781,3 +781,15 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 
 - 原一次消费断言失败已证实是fixture竞态：Run变running早于第一请求，补充可能合法在第1步边界被消费。测试改为等待已派发第一请求后再送补充，继续严格断言第2步一次消费，未放宽生产语义。
 - MK06-REVIEW最终5项后端通过（review-final.log）、5项前端通过（review-frontend.log）及vue-tsc/Ruff/Mypy通过。终态未消费改late，旧Run迟到发送结果不清空新Run草稿/覆盖提示。原接收事实未改，无自动续跑。
+
+## MK08C-ZCODE：持久恢复切片开发期回归失败（2026-10-26）
+
+- 类型：既有测试断言过时 + 开发期测试缺陷，无生产回归。基线 0c86c75。
+- 首轮开发中四类失败（日志见 `.task_outputs/maka-upgrade/recovery/` 开发过程随会话，最终定向日志 `final-directed.log`）：
+  1. `claim_run_recovery` 首版查询 `runs.continuation_of` 列不存在（`OperationalError`）——该字段实际在 `turns` 表（UNIQUE 约束天然防双续跑），修正查询对象。
+  2. 同事务先写 `run.interrupted` 再写 `recovery.claimed` 被拒（`Run already terminated`）——`_append_fact_locked` 禁止向终态 Run 追加事实；改为先 claim 后 finalize，两写仍在同一事务。
+  3. 恢复续跑执行失败 `Budget root must be the actual root Run`——`BudgetLedger._validate_context` 只认 `parent_run_id` 谱系；与 `ModelBudgetController.context` 一并补 `recovery_of` 谱系（预算跨链不重置的接线本身即此修复）。
+  4. `tests/test_run_dispatch.py::test_restart_parks_unstarted_source_without_replacing_checkpoint` 断言旧理由 `host_stopped_before_dispatch`，MK-08C 后源码漂移的排队 Run 停驻理由为更精确的 `workspace_evidence_changed`（仍停驻、不替换 checkpoint、不自动续跑）；仅更新该断言并加注释，核心断言（checkpoint 数量、interrupted 状态、Continue 拒绝）不变。
+- 另：预算单测两次因测试自设数字算错（120>100 直接超限；90+2 未超 100），修正测试数字，生产代码未改。
+- 复验：`pytest tests/test_run_recovery.py tests/test_run_dispatch.py tests/test_budgets.py tests/test_model_budget.py -q` 91 项通过（`final-directed.log`）；另 test_host/test_model_retry/test_stream_runtime 73 项通过。
+- 经验：SQLite 端 UNIQUE `turns.continuation_of` 本身就是“一个源 Run 只能有一个后继”的硬约束，恢复去重应显式利用它；终态事实是会话内不可逆边界，成对事实必须先非终态后终态写入。

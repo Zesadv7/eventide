@@ -621,6 +621,60 @@ class RuntimeStore:
                 )
         return turn_id
 
+    def claim_run_recovery(
+        self,
+        session_id: str,
+        old_run_id: str,
+        new_run_id: str,
+        *,
+        finalize_payload: dict[str, Any],
+        claim_payload: dict[str, Any],
+    ) -> bool:
+        """Finalize a crashed Run and freeze its successor identity in one transaction.
+
+        The claim is the only writer of ``recovery.claimed``: repeated Host
+        initialization or consecutive restarts cannot mint a second successor,
+        because the old Run is terminal and the claimed identity is durable
+        before any successor admission is attempted.
+        """
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            old = self._connection.execute(
+                "SELECT session_id FROM runs WHERE id=?", (old_run_id,)
+            ).fetchone()
+            if old is None or old["session_id"] != session_id:
+                return False
+            if self._connection.execute(
+                "SELECT 1 FROM runtime_events WHERE run_id=? AND type IN "
+                "('run.completed','run.failed','run.interrupted')",
+                (old_run_id,),
+            ).fetchone():
+                return False
+            if self._connection.execute(
+                "SELECT 1 FROM runtime_events WHERE run_id=? AND type='recovery.claimed'",
+                (old_run_id,),
+            ).fetchone():
+                return False
+            if self._connection.execute(
+                "SELECT 1 FROM turns WHERE continuation_of=?", (old_run_id,)
+            ).fetchone():
+                return False
+            if self._connection.execute(
+                "SELECT 1 FROM runs WHERE id=?", (new_run_id,)
+            ).fetchone():
+                return False
+            # The claim freezes the successor identity first: after the terminal
+            # fact lands in the same transaction no further Run fact is accepted.
+            self._append_fact_locked(
+                session_id, "recovery.claimed", claim_payload,
+                run_id=old_run_id, role="system", author="runtime",
+            )
+            self._append_fact_locked(
+                session_id, "run.interrupted", finalize_payload,
+                run_id=old_run_id, role="system", author="runtime",
+            )
+        return True
+
     def referenced_attachments(self, session_id: str) -> set[str]:
         """Canonical references protect attachments even when the used cache was not written."""
         with self._lock:

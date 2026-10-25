@@ -69,6 +69,16 @@ class ModelBudgetController:
             if project_id is not None and project_id != workspace.project_id:
                 raise ValueError("Child Run changed project ownership")
             project_id = workspace.project_id
+            # MK-08C: an auto-resumed Run continues its source Run's budget root,
+            # so a restart cannot reset a configured run-scope limit mid-chain.
+            recoveries = {
+                intent["recovery_of"] for intent in intents if intent.get("recovery_of")
+            }
+            if len(recoveries) > 1:
+                raise ValueError("Conflicting recovery lineage")
+            if recoveries:
+                ancestor = recoveries.pop()
+                continue
             parents = {intent["parent_run_id"] for intent in intents
                        if intent.get("parent_run_id")}
             if len(parents) > 1:

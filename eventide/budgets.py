@@ -352,8 +352,14 @@ class BudgetLedger:
         parents: dict[str, str] = {}
         for event in events:
             if event["type"] in {"run.admitted", "run.started"} and event["run_id"]:
-                parent = event["payload"].get("parent_run_id")
-                if parent:
+                # MK-08C: recovery continuations walk the same lineage as parents.
+                links = {
+                    event["payload"].get("parent_run_id"),
+                    event["payload"].get("recovery_of"),
+                } - {None}
+                if len(links) > 1:
+                    raise ValueError("Conflicting parent Run identity")
+                for parent in links:
                     if event["run_id"] in parents and parents[event["run_id"]] != parent:
                         raise ValueError("Conflicting parent Run identity")
                     parents[event["run_id"]] = parent

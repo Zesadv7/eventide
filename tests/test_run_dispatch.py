@@ -470,7 +470,9 @@ asyncio.run(main())
     try:
         events = host.store.run_events("queued")
         assert sum(event["type"] == "workspace.checkpoint" for event in events) == 1
-        assert events[-1]["payload"]["reason"] == "host_stopped_before_dispatch"
+        # MK-08C: a queued Run with a frozen recovery policy whose source drifted
+        # after process death is parked with the drift reason, not auto-resumed.
+        assert events[-1]["payload"]["reason"] == "workspace_evidence_changed"
         assert host.store.get_run("queued")["status"] == "interrupted"
         assert not host.dispatch.snapshot()["queued"]
         assert not host.provider.requests

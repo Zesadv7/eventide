@@ -1332,3 +1332,20 @@ literal 模式保持纯 Python 且语义不变（行级命中、offset 计数、
 **取舍：** 复用 `message.user` 作为模型消费载体使上下文装配无需改动 context_builder，代价是补充在会话转录中呈现为普通用户消息（消费事实与收据提供追溯）。结构化提问的持久等待/回答需要审批式的等待接线，属切片 2，本 ADR 不声称完成。
 
 **验证：** 后端 4 项定向（test_interactions.py：边界单次消费与 step 投影、同键重放/冲突/终态重放、迟到不续跑且不泄漏到后续 Run、空/超长/未知 Run 4xx）通过；新增前端 4 项组件测试通过；`vue-tsc --noEmit`、Ruff 全仓、Mypy（py310 目标）5 模块通过；chat-experience/memory/sandbox 既有 39 项回归通过。未运行全量、浏览器、容器或真实模型；测试迭代首轮失败已登记 failure-cases MK-06。
+
+## ADR-111：持久自动恢复的领取式续跑（MK-08C 切片）
+
+**状态：Proposed（2026-10-26；离线定向验证通过，真实模型/平台验收未做）。**
+
+**背景：** 重启前 Host 把全部未完成 Run 一律关成 interrupted，用户必须手动 Continue；与"积极自动恢复"的目标不符。但盲目续跑会重放副作用、绕过审批/预算或用新配置扩大旧授权。
+
+**决策：**
+- 授权按接收冻结：每次 admission 在 `run.admitted` 持久化 `recovery_policy={"auto_resume": true, "version": 1}`；旧历史无此字段，永不自动升级，重启后仍停驻（手动 Continue 不变）。
+- 判定是事实投影（`eventide/run_recovery.py`，纯函数）：控制类执行（沙箱/快照/worktree/交付/评测/索引/worktree 控制/历史导入/Python 实验/连接探测）、未知工具结果、未闭合工具协议对、待审批、副作用缺 post-tool checkpoint、无冻结策略，一律不自动续跑。
+- 文件系统证据仍须成立：当前 checkpoint 必须等于该 Run 最后一个已提交 `workspace.checkpoint`，否则停驻（`workspace_evidence_changed`），不把漂移文件当原任务继续。
+- 恢复领取与新后继身份同一事务（`store.claim_run_recovery`）：先写 `recovery.claimed`（冻结 `resumed_as` 身份）再写 `run.interrupted`；`turns.continuation_of` 的 UNIQUE 约束与 claim 存在性检查共同保证重复 initialize/连续重启只能重建同一后继，不能产生两个续跑。
+- 实际重派发延后到 `initialize()`（持久 Provider 配置已加载）：冻结的 provider/endpoint/model 与当前配置不一致、冻结 Skill 快照无法复现、或 admission 失败时，写 `recovery.blocked` 会话事实并保持停驻——后来的配置变化不扩大原授权。通过后走既有 Continue admission 与调度队列（原顺序、既有模型槽/根租约上限），不新建调度路径。
+- 预算跨链不重置：续跑 intent 持久化 `recovery_of`，`ModelBudgetController.context` 与 `BudgetLedger._validate_context` 按 recovery 谱系上溯到原根 Run，run 作用域限额与项目/日预算跨重启延续。
+- 后继 Run 经正常 `_recovery_facts` 配对旧协议史；已执行工具引用原结果，不重放；没有实时 sink/审批处理器，ASK 默认拒绝语义不变。
+
+**后果：** 停驻理由更精确（如源码漂移记 `workspace_evidence_changed`）；沙箱/交付等控制类恢复、未知工具只读核查（08D）、恢复状态 API/页面由后续切片承接。

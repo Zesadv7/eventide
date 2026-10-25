@@ -224,6 +224,10 @@ class RuntimeHost:
                 self.state_dir, checkpoint_files=self._checkpoint_files,
                 checkpoint_directories=self._checkpoint_directories,
             )
+            self._pending_recoveries: list[tuple[str, str, str, dict[str, Any]]] = []
+            self._recovery_markers: dict[str, str] = {}
+            self._recovery_tasks: set[asyncio.Task[None]] = set()
+            self._recovery_dispatching = False
             self._recover_interrupted_runs()
             self.file_operations = FileOperations(self.store, self.state_dir)
             self.file_operations.recover()
@@ -657,6 +661,7 @@ class RuntimeHost:
             self._config_path = config_path
         # MCP transports are opened/closed in the owning run task (SDK task-affinity).
         # Each workspace reads its own catalog, never another project's MCP configuration.
+        await self._dispatch_pending_recoveries()
 
     async def close(self) -> None:
         if self._closed:
@@ -1838,6 +1843,9 @@ class RuntimeHost:
         session_id: str | None = None,
     ) -> dict[str, Any]:
         mode = run_policy.normalize_mode(request.mode) if request else "auto"
+        # MK-08C: every new admission freezes its recovery policy. Runs admitted
+        # before this field existed are never auto-upgraded on restart.
+        recovery_policy: dict[str, Any] = {"auto_resume": True, "version": 1}
         model = request.model.strip() if request and request.model else self.settings.model
         model = model or self.settings.model
         execution_config: dict[str, Any] = {}
@@ -1899,6 +1907,7 @@ class RuntimeHost:
             "provider": self.settings.provider,
             "endpoint_hash": digest(self.settings.base_url),
             "generation": generation,
+            "recovery_policy": recovery_policy,
             **retrieval,
             **({"skill_snapshot": skill_snapshot} if skill_snapshot is not None else {}),
             **({"execution_config": execution_config} if execution_config else {}),
@@ -2099,6 +2108,9 @@ class RuntimeHost:
                             request.request_fingerprint if request else request_fingerprint
                         ),
                     }
+                    recovery_of = self._recovery_markers.pop(run_id, None)
+                    if recovery_of:
+                        payload["recovery_of"] = recovery_of
                     facts = [("run.admitted", self._semantic(payload), "system", "user")]
                     if previous and request is None:
                         facts.extend(self._recovery_facts(previous))
@@ -2630,19 +2642,19 @@ class RuntimeHost:
             self._active_tasks.discard(task)
 
     def _recover_interrupted_runs(self) -> None:
-        """Close out runs the Host died inside, and keep the resumable ones resumable.
+        """Close out runs the Host died inside, and auto-resume the recoverable ones.
 
-        A crash can land between a completed side-effecting tool and the checkpoint
-        that records its result, which used to leave the Session parked with Continue
-        refusing forever. Append the checkpoint the filesystem can still justify; when
-        it cannot justify one, record which paths changed instead, so the user can see
-        what to check before deciding to abandon.
+        Classification lives in ``run_recovery``: only Runs whose admission froze
+        ``recovery_policy.auto_resume`` and whose committed facts still describe a
+        safe boundary (no unknown outcomes, no unresolved tool pairs, no pending
+        approvals, no missing post-tool checkpoint) are resumed. Each resume is
+        claimed in one Store transaction that finalizes the old Run and freezes
+        the successor identity, so repeated initialization cannot mint two
+        successors. Actual re-admission waits for ``initialize``, where the
+        persisted provider configuration is loaded and frozen identities are
+        re-verified before the existing scheduling path takes over.
         """
-        from eventide.delivery_control import is_delivery_control_run
-        from eventide.evaluation_control import is_evaluation_run
-        from eventide.history_import_control import is_history_import_run
-        from eventide.index_control import is_index_run
-        from eventide.worktree_control import is_worktree_control_run
+        from eventide.run_recovery import FINALIZE, classify_recovery_run
 
         for run_id in self.store.unfinished_runs():
             binding = self._execution_binding(run_id)
@@ -2662,30 +2674,168 @@ class RuntimeHost:
                             "sandbox_id": binding["sandbox_id"],
                             "error": "Host stopped before sandbox container cleanup was confirmed",
                         })
-            payload: dict[str, Any] = {"error": "Host stopped before terminal fact"}
-            started = any(event["type"] == "run.started"
-                          for event in self.store.run_events(run_id))
-            # An unstarted admission already has its authoritative checkpoint.
-            # Replacing it with the current filesystem would hide queue-time drift.
-            queued = not started and self._admitted_intent(run_id) is not None
-            evidence = (None if queued or is_service_probe_run(self.store, run_id)
-                        or self._is_python_experiment_run(run_id)
-                        or is_evaluation_run(self.store, run_id) or is_index_run(self.store, run_id)
-                        or is_delivery_control_run(self.store, run_id)
-                        or is_worktree_control_run(self.store, run_id)
-                        or is_history_import_run(self.store, run_id)
-                        else self._crash_gap_evidence(run_id))
-            if queued:
-                payload["reason"] = "host_stopped_before_dispatch"
-            if evidence is not None:
-                files, checkpoint = evidence
-                if files:
-                    payload["gap_files"] = files
-                elif checkpoint is not None:
-                    self.store.append_event(
-                        run_id, "workspace.checkpoint", {"checkpoint": checkpoint}
-                    )
-            self.store.append_event(run_id, "run.interrupted", payload)
+            verdict, reason = classify_recovery_run(self.store, run_id)
+            if verdict == FINALIZE:
+                parked_reason = None if reason == "run_already_terminal" else reason
+                self._finalize_interrupted_run(run_id, parked_reason)
+            else:
+                self._claim_auto_recovery(run_id, reason)
+
+    def _finalize_interrupted_run(self, run_id: str, recovery_class: str | None) -> None:
+        """Park one unfinished Run with the evidence the filesystem can still justify."""
+        from eventide.delivery_control import is_delivery_control_run
+        from eventide.evaluation_control import is_evaluation_run
+        from eventide.history_import_control import is_history_import_run
+        from eventide.index_control import is_index_run
+        from eventide.worktree_control import is_worktree_control_run
+
+        payload: dict[str, Any] = {"error": "Host stopped before terminal fact"}
+        started = any(event["type"] == "run.started"
+                      for event in self.store.run_events(run_id))
+        # An unstarted admission already has its authoritative checkpoint.
+        # Replacing it with the current filesystem would hide queue-time drift.
+        queued = not started and self._admitted_intent(run_id) is not None
+        evidence = (None if queued or is_service_probe_run(self.store, run_id)
+                    or self._is_python_experiment_run(run_id)
+                    or is_evaluation_run(self.store, run_id) or is_index_run(self.store, run_id)
+                    or is_delivery_control_run(self.store, run_id)
+                    or is_worktree_control_run(self.store, run_id)
+                    or is_history_import_run(self.store, run_id)
+                    else self._crash_gap_evidence(run_id))
+        if recovery_class:
+            payload["reason"] = recovery_class
+        elif queued:
+            payload["reason"] = "host_stopped_before_dispatch"
+        if evidence is not None:
+            files, checkpoint = evidence
+            if files:
+                payload["gap_files"] = files
+            elif checkpoint is not None:
+                self.store.append_event(
+                    run_id, "workspace.checkpoint", {"checkpoint": checkpoint}
+                )
+        self.store.append_event(run_id, "run.interrupted", payload)
+
+    def _recovery_boundary_justified(self, run_id: str) -> bool:
+        """The committed checkpoint still describes the workspace the Run died in."""
+        identity = self.store.get_run_identity(run_id)
+        session = identity and self.store.get_session(identity["session_id"])
+        workspace = session and self.store.get_workspace(session["workspace_id"])
+        if not isinstance(workspace, WorkspaceRecord):
+            return False
+        binding = self._execution_binding(run_id)
+        evidence: dict[str, Any] | None
+        if binding:
+            evidence = self._execution_checkpoint(binding)
+        else:
+            root = Path(workspace.path)
+            if not root.is_dir() or root.resolve() != root:
+                return False
+            evidence = self._workspace_checkpoint(root)
+        committed = next(
+            (
+                event["payload"]["checkpoint"]
+                for event in reversed(self.store.run_events(run_id))
+                if event["type"] == "workspace.checkpoint"
+                and "checkpoint" in event["payload"]
+            ),
+            None,
+        )
+        return evidence is not None and committed is not None and evidence == committed
+
+    def _claim_auto_recovery(self, run_id: str, verdict_reason: str) -> None:
+        """Finalize a safe Run and freeze its successor identity in one transaction."""
+        intent = self._admitted_intent(run_id)
+        identity = self.store.get_run_identity(run_id)
+        if intent is None or identity is None:
+            self._finalize_interrupted_run(run_id, "admission_not_persisted")
+            return
+        if not self._recovery_boundary_justified(run_id):
+            self._finalize_interrupted_run(run_id, "workspace_evidence_changed")
+            return
+        resumed_as = f"run_{uuid.uuid4().hex[:16]}"
+        claimed = self.store.claim_run_recovery(
+            identity["session_id"], run_id, resumed_as,
+            finalize_payload={
+                "error": "Host stopped before terminal fact",
+                "reason": "host_recovered_automatically",
+                "recovery": {
+                    "resumed_as": resumed_as,
+                    "policy": intent.get("recovery_policy"),
+                    "verdict": verdict_reason,
+                },
+            },
+            claim_payload={
+                "resumed_as": resumed_as,
+                "source_run_id": run_id,
+                "verdict": verdict_reason,
+                "policy": intent.get("recovery_policy"),
+            },
+        )
+        if claimed:
+            self._pending_recoveries.append(
+                (identity["session_id"], run_id, resumed_as, intent)
+            )
+
+    async def _dispatch_pending_recoveries(self) -> None:
+        """Resume claimed Runs in original admission order through existing scheduling."""
+        if not self._pending_recoveries or self._recovery_dispatching:
+            return
+        self._recovery_dispatching = True
+        pending = self._pending_recoveries
+        self._pending_recoveries = []
+        try:
+            for session_id, source_run_id, run_id, intent in pending:
+                await self._resume_recovered_run(session_id, source_run_id, run_id, intent)
+        finally:
+            self._recovery_dispatching = False
+
+    def _block_recovery(
+        self, session_id: str, source_run_id: str, run_id: str, reason: str,
+    ) -> None:
+        """Park a claimed recovery; the old Run stays interrupted for manual Continue."""
+        self.store.append_fact(
+            session_id, "recovery.blocked",
+            {"source_run_id": source_run_id, "resumed_as": run_id, "reason": reason},
+            author="runtime",
+        )
+
+    async def _resume_recovered_run(
+        self, session_id: str, source_run_id: str, run_id: str, intent: dict[str, Any],
+    ) -> None:
+        # Later configuration changes never expand the original frozen admission.
+        if (
+            intent.get("provider") != self.settings.provider
+            or intent.get("endpoint_hash") != digest(self.settings.base_url)
+            or intent.get("model") != self.settings.model
+        ):
+            self._block_recovery(session_id, source_run_id, run_id, "model_config_changed")
+            return
+        try:
+            workspace = self.sessions.workspace(session_id)
+            frozen_skills = intent.get("skill_snapshot")
+            if frozen_skills is not None and frozen_skills != await self._freeze_skills(
+                workspace, None
+            ):
+                self._block_recovery(session_id, source_run_id, run_id, "skill_config_changed")
+                return
+            self._recovery_markers[run_id] = source_run_id
+            await self.admit_continue(session_id, run_id)
+        except Exception as exc:
+            self._recovery_markers.pop(run_id, None)
+            self._block_recovery(
+                session_id, source_run_id, run_id, f"admission_failed:{exc}"
+            )
+            return
+
+        async def launch() -> None:
+            # The tracked Run task already persisted its terminal fact on failure.
+            with suppress(Exception):
+                await self.start_admitted_run(run_id)
+
+        task = asyncio.create_task(launch())
+        self._recovery_tasks.add(task)
+        task.add_done_callback(self._recovery_tasks.discard)
 
     def _crash_gap_evidence(self, run_id: str) -> tuple[list[str], dict[str, Any] | None] | None:
         """What the filesystem still knows about a run that died without a checkpoint.
