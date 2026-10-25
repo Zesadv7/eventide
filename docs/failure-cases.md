@@ -741,3 +741,13 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 2026-10-26 基线315e0eb受控复现；新增test_saved_receipt_keeps_historical_content_but_exposes_current_revocation失败，证据 `.task_outputs/maka-upgrade/memory-intake/review-red.log`。保存回执是历史事实，页面重载不能仅凭回执显示仍有效；需附当前状态/版本，不改历史。复核同时发现撤销网络失败被当作撤销完成而隐藏按钮，正在修正。
 - 主代理新增已知语言主题识别后复验57通过/1失败，为旧断言仍要求语言主题散列key；现语言偏好统一response_language以拦截“中文/英文”矛盾自动双存，更新断言。前端15项通过，但typecheck发现子代理旧测试mock仅给{id}冒充完整MemoryRecord（review-typecheck.log），替换为现有完整record fixture；不改生产类型。
 - 修复后58项不同后端用例全部通过（review-green.log 57通过+review-key-green.log重验1），15项前端、typecheck、Ruff/Mypy2模块通过。明确语言主题冲突、历史回执的当前撤销态、失败重试及默认可见提示已覆盖；仍不宣称通用语言抽取准确率。
+
+## MK15-ZCODE：定向测试发现既有的压缩预算溢出（2026-10-26）
+
+- 分类：意外回归（既有基线问题，非 MK-15 改动引起）。worktree codex/maka-search 基线 3898ffc。
+- 现象：`tests/test_runtime.py::test_runtime_retries_and_compacts` 失败，`ContextOverflow: …5922 characters against a 4850 character budget (5811 fixed system/tool characters…)`。命令与完整输出：`.task_outputs/maka-upgrade/search/directed.log`（159 项通过中唯一失败）。
+- 已证实原因（二分定位）：3898ffc 加长了 read_file/edit_file 的 catalog 描述，固定 system/tool 字符增加；该测试用固定 `COMPACTION_BUDGET`（4850）且用户消息 2,000 字符，余量本就紧张。逐提交 checkout 验证：17c211f 通过、3898ffc 失败；在干净基线 3898ffc 上复跑同样失败，与 MK-15 的新增描述无关（MK-15 描述增量约 160 字符，不改变该测试通过与否）。
+- 处理与取舍：不在本切片修改主代理已提交的描述或测试预算常量；MK-15 的 search_text 描述在编写时主动收紧（旧 247 字符 → 新约 410 字符），避免进一步挤压同类紧凑预算测试。根因修复（调预算或精简 3898ffc 描述）留给集成方决策。
+- 相关 commit：3898ffc 引入；本切片提交只登记，不改该行为。
+- 经验：catalog 描述进入每次模型请求的固定预算；向紧凑上下文预算的测试引入更长工具描述前，先确认相关压缩/预算测试余量。
+- 实际参与及可追问点：本切片子代理做了失败登记与逐提交二分；可复跑 `directed.log` 中的命令核对。不宣称已修复，不外推其他预算测试受影响。

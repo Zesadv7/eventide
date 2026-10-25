@@ -3,11 +3,13 @@
 import hashlib
 import os
 import re
+import time
 from fnmatch import fnmatchcase
 from functools import cache
 from pathlib import Path
 
 from eventide.policy import resolve_scoped_path
+from eventide.tools import regex_backend
 
 READ_PAGE_CHARS = 10_000
 # Headroom for the version header, continuation token and cut footer so a
@@ -30,6 +32,10 @@ TOKEN_BEYOND_LINE = (
 SEARCH_FILE_BYTES = 1_048_576
 SEARCH_SCAN_BYTES = 10 * SEARCH_FILE_BYTES
 SEARCH_SCAN_FILES = 2_000
+SEARCH_REGEX_BATCH_FILES = 256
+SEARCH_REGEX_DEADLINE_SECONDS = 10.0
+SEARCH_LINE_DISPLAY_CHARS = 240
+SEARCH_LINE_CONTEXT_CHARS = 60
 
 
 def content_sha256(raw: bytes) -> str:
@@ -80,6 +86,91 @@ def page_token(
     is rejected instead of serving pages across different file states.
     """
     return f"evtfile1:{start_line}:{start_char}:{_page_path_id(base, relative_path)}:{sha}"
+
+
+class _PageBuilder:
+    """Render hits and merged context blocks under one page budget.
+
+    Context ranges of hits inside a file are merged before rendering, so a
+    line that is both a hit and somebody's context appears once, as a hit.
+    """
+
+    def __init__(self, offset: int, limit: int, context_lines: int):
+        self.offset_remaining = offset
+        self.limit = limit
+        self.context_lines = context_lines
+        self.budget = 9_000
+        self.page: list[str] = []
+        self.hits_shown = 0
+        self.files_shown = 0
+        self.more = False
+
+    def add_file(
+        self, relative: str, sha: str, lines: list[str],
+        hits: list[tuple[int, int | None]],
+    ) -> None:
+        """Add one file's hits (line number, match char position) to the page."""
+        if self.more:
+            return
+        if self.offset_remaining >= len(hits):
+            self.offset_remaining -= len(hits)
+            return
+        if self.offset_remaining:
+            hits = hits[self.offset_remaining:]
+            self.offset_remaining = 0
+        if not hits:
+            return
+        positions = dict(hits)
+        hit_numbers = {number for number, _ in hits}
+        ranges: list[list[int]] = []
+        for number, _ in hits:
+            start = max(1, number - self.context_lines)
+            end = min(len(lines), number + self.context_lines)
+            if ranges and start <= ranges[-1][1] + 1:
+                ranges[-1][1] = max(ranges[-1][1], end)
+            else:
+                ranges.append([start, end])
+        header = f"{relative} sha256={sha}"
+        header_cost = len(header) + 1
+        if self.page and self.budget < header_cost:
+            self.more = True
+            return
+        rendered_header = False
+        for start, end in ranges:
+            for number in range(start, end + 1):
+                is_hit = number in hit_numbers
+                if is_hit and self.hits_shown >= self.limit:
+                    self.more = True
+                    return
+                text = lines[number - 1]
+                position = positions[number] if is_hit else None
+                segment = _clip_line(text, position)
+                entry = f"{relative}:{number}: {segment}" if is_hit else (
+                    f"{relative}:{number}- {segment}"
+                )
+                cost = len(entry) + 1 + (0 if rendered_header else header_cost)
+                if self.budget < cost:
+                    self.more = True
+                    return
+                if not rendered_header:
+                    self.page.append(header)
+                    self.budget -= header_cost
+                    rendered_header = True
+                    self.files_shown += 1
+                self.page.append(entry)
+                self.budget -= len(entry) + 1
+                if is_hit:
+                    self.hits_shown += 1
+
+
+def _clip_line(text: str, position: int | None) -> str:
+    """Bound one source line for display, marking exactly what was elided."""
+    start = max(0, (position if position is not None else 0) - SEARCH_LINE_CONTEXT_CHARS)
+    segment = text[start:start + SEARCH_LINE_DISPLAY_CHARS]
+    prefix = "…" if start else ""
+    elided = len(text) - start - len(segment)
+    suffix = f"… (+{elided} chars)" if elided > 0 else ""
+    return prefix + segment + suffix
 
 
 def _search_paths(base: Path, pattern: str) -> tuple[list[Path], bool]:
@@ -140,67 +231,281 @@ def _search_paths(base: Path, pattern: str) -> tuple[list[Path], bool]:
     return sorted(found), exhausted
 
 
+def _literal_line_matcher(query: str, case_sensitive: bool) -> re.Pattern[str] | None:
+    """Case-insensitive literal matching via an escaped pattern.
+
+    re.escape yields a pure literal alternation with no backtracking states, so
+    matching stays linear; case folding is left to the engine because
+    str.casefold can change string length and corrupt match positions.
+    """
+    if case_sensitive:
+        return None
+    return re.compile(re.escape(query), re.IGNORECASE)
+
+
+def _read_search_file(base: Path, path: Path, used_bytes: int) -> tuple[bytes, bool]:
+    """Read one candidate inside the file and scan byte budgets.
+
+    Returns the bytes and whether the scan cap cut the file short; such a file
+    was searched only partially and must not be reported as fully covered.
+    Oversized files are returned as-is for the caller's skip rules.
+    """
+    remaining = SEARCH_SCAN_BYTES - used_bytes
+    want = min(SEARCH_FILE_BYTES, remaining) + 1
+    with resolve_scoped_path(base, str(path)).open("rb") as source:
+        raw = source.read(want)
+    return raw, len(raw) == want and remaining < SEARCH_FILE_BYTES
+
+
 def run_search_text(
     query: str, pattern: str = "**/*", offset: int = 0, limit: int = 50,
+    mode: str = "literal", case_sensitive: bool = True, context_lines: int = 0,
     cwd: Path | None = None,
 ) -> str:
-    """Search literal text without an index; offsets count matching source lines."""
-    base = (cwd or Path.cwd()).resolve()
-    pattern = resolve_scoped_path(base, pattern).relative_to(base).as_posix()
-    paths, exhausted = _search_paths(base, pattern)
-    page: list[str] = []
-    matches = scanned = used_bytes = skipped = used_chars = 0
-    more = False
-    for path in paths:
-        relative = path.relative_to(base).as_posix()
-        if scanned >= SEARCH_SCAN_FILES or used_bytes >= SEARCH_SCAN_BYTES:
-            exhausted = True
-            break
-        scanned += 1
-        with resolve_scoped_path(base, str(path)).open("rb") as source:
-            raw = source.read(min(SEARCH_FILE_BYTES, SEARCH_SCAN_BYTES - used_bytes) + 1)
-        used_bytes += len(raw)
-        if len(raw) > SEARCH_FILE_BYTES:
-            skipped += 1
-            continue
-        if used_bytes > SEARCH_SCAN_BYTES:
-            exhausted = True
-            break
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            skipped += 1
-            continue
-        if "\x00" in text:
-            skipped += 1
-            continue
-        for number, line in enumerate(text.splitlines(), 1):
-            position = line.find(query)
-            if position < 0:
-                continue
-            matches += 1
-            if matches <= offset:
-                continue
-            snippet = line[max(0, position - 60):position + max(len(query), 180)]
-            item = f"{relative}:{number}: {snippet}"
-            if len(page) >= limit or used_chars + len(item) + 1 > 9_000:
-                more = True
-                break
-            page.append(item)
-            used_chars += len(item) + 1
-        if more:
-            break
-    status = (
-        f"next offset={offset + len(page)}" if more else
-        "scan limit reached; narrow pattern (remaining files unsearched)" if exhausted else
-        "end of matches"
-    )
+    """Search workspace files without an index, with versioned source evidence.
+
+    Line numbers are one-based source coordinates; hit lines render as
+    ``path:line:`` and context lines as ``path:line-``. Every source with
+    displayed lines carries the sha256 of the exact bytes that were searched,
+    the same content version read_file reports and edit_file accepts. Literal
+    mode is pure Python and always available; regex mode requires the local
+    ripgrep backend and reports an error when it is missing instead of
+    treating the pattern as literal. Reported regex matches are verified line
+    by line against bytes read inside the workspace boundary, so backend
+    output can never introduce text from outside it. Scan, skip, timeout and
+    verification counts are explicit: an empty result only covers the files
+    actually searched, never the whole workspace.
+    """
+    if mode not in {"literal", "regex"}:
+        return f"Error: mode must be 'literal' or 'regex', got {mode!r}."
+    if not 0 <= int(context_lines) <= 10:
+        return "Error: context_lines must be between 0 and 10."
+    context_lines = int(context_lines)
+    rg_binary = ""
+    matcher: re.Pattern[str] | None = None
+    if mode == "literal":
+        matcher = _literal_line_matcher(query, case_sensitive)
+    else:
+        found = regex_backend.find_backend()
+        if found is None:
+            return regex_backend.backend_unavailable_message()
+        rg_binary = found
+    try:
+        base = (cwd or Path.cwd()).resolve()
+        pattern = resolve_scoped_path(base, pattern).relative_to(base).as_posix()
+        paths, exhausted = _search_paths(base, pattern)
+    except PermissionError:
+        raise
+    except Exception as exc:
+        return f"Error: {exc}"
+    builder = _PageBuilder(offset, limit, context_lines)
+    scanned = skipped = unverified = 0
+    used_bytes = 0
+    timed_out = output_capped = False
+    backend_error = ""
+    try:
+        if mode == "literal":
+            for path in paths:
+                if scanned >= SEARCH_SCAN_FILES or used_bytes >= SEARCH_SCAN_BYTES:
+                    exhausted = True
+                    break
+                scanned += 1
+                raw, scan_capped = _read_search_file(base, path, used_bytes)
+                used_bytes += len(raw)
+                if len(raw) > SEARCH_FILE_BYTES:
+                    skipped += 1
+                    continue
+                if scan_capped or used_bytes > SEARCH_SCAN_BYTES:
+                    exhausted = True
+                    skipped += 1
+                    break
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    skipped += 1
+                    continue
+                if "\x00" in text:
+                    skipped += 1
+                    continue
+                lines = text.splitlines()
+                hits = _literal_hits(lines, query, matcher)
+                if hits:
+                    builder.add_file(
+                        path.relative_to(base).as_posix(), content_sha256(raw), lines, hits,
+                    )
+                    if builder.more:
+                        break
+        else:
+            candidates: list[tuple[str, bytes]] = []
+            for path in paths:
+                if scanned >= SEARCH_SCAN_FILES or used_bytes >= SEARCH_SCAN_BYTES:
+                    exhausted = True
+                    break
+                scanned += 1
+                relative = path.relative_to(base).as_posix()
+                try:
+                    relative.encode("utf-8")
+                except UnicodeEncodeError:
+                    skipped += 1
+                    continue
+                raw, scan_capped = _read_search_file(base, path, used_bytes)
+                used_bytes += len(raw)
+                if len(raw) > SEARCH_FILE_BYTES:
+                    skipped += 1
+                    continue
+                if scan_capped or used_bytes > SEARCH_SCAN_BYTES:
+                    exhausted = True
+                    skipped += 1
+                    break
+                try:
+                    raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    skipped += 1
+                    continue
+                if b"\x00" in raw:
+                    skipped += 1
+                    continue
+                candidates.append((relative, raw))
+            started = time.monotonic()
+            for batch_start in range(0, len(candidates), SEARCH_REGEX_BATCH_FILES):
+                if builder.more:
+                    break
+                remaining = SEARCH_REGEX_DEADLINE_SECONDS - (time.monotonic() - started)
+                if remaining <= 0.05:
+                    timed_out = True
+                    exhausted = True
+                    break
+                batch = candidates[batch_start:batch_start + SEARCH_REGEX_BATCH_FILES]
+                result = regex_backend.run_regex_batch(
+                    rg_binary, query, [relative for relative, _ in batch], base,
+                    case_sensitive=case_sensitive, deadline_seconds=remaining,
+                    max_output_bytes=regex_backend.MAX_OUTPUT_BYTES,
+                )
+                if result.outcome == "backend_error":
+                    backend_error = result.detail
+                    exhausted = True
+                    break
+                if result.outcome == "timeout":
+                    timed_out = True
+                    exhausted = True
+                    break
+                if result.outcome == "output_limit":
+                    output_capped = True
+                    exhausted = True
+                    break
+                raw_by_path = dict(batch)
+                grouped: dict[str, list[regex_backend.ReportedMatch]] = {}
+                for match in result.matches:
+                    grouped.setdefault(match.path, []).append(match)
+                for relative, raw in raw_by_path.items():
+                    reported = grouped.get(relative)
+                    if not reported:
+                        continue
+                    verified = _verify_regex_matches(raw, reported)
+                    if verified is None:
+                        unverified += 1
+                        continue
+                    lines = raw.decode("utf-8").split("\n")
+                    builder.add_file(relative, content_sha256(raw), lines, verified)
+                    if builder.more:
+                        break
+            if backend_error and not builder.page:
+                return f"Error: regex backend rejected the search: {backend_error[:300]}"
+    except PermissionError:
+        raise
+    except Exception as exc:
+        return f"Error: {exc}"
+    notes = ""
+    if timed_out:
+        notes += (
+            f"; regex deadline exceeded after {SEARCH_REGEX_DEADLINE_SECONDS:.0f}s; "
+            "remaining files unsearched"
+        )
+    if output_capped:
+        notes += "; regex output cap reached; matches may be missed"
+    if backend_error and builder.page:
+        notes += "; regex backend error after partial results; remaining files unsearched"
+    if unverified:
+        notes += f"; unverified {unverified} changed files excluded"
+    if builder.more:
+        status = f"next offset={offset + builder.hits_shown}"
+    elif exhausted and not (timed_out or output_capped):
+        status = "scan limit reached; narrow pattern (remaining files unsearched)"
+    elif exhausted:
+        status = "remaining files unsearched"
+    else:
+        status = "end of matches"
+    backend_label = "python" if mode == "literal" else "ripgrep"
     header = (
-        f"[Literal search; {len(page)} matching lines; {status}; "
-        f"enumeration incomplete={exhausted}; "
-        f"scanned {scanned} files; skipped {skipped} non-UTF8/binary/oversized files]"
+        f"[Text search mode={mode} backend={backend_label} "
+        f"case={'sensitive' if case_sensitive else 'insensitive'} "
+        f"context={context_lines}; {builder.hits_shown} matching lines in "
+        f"{builder.files_shown} files; {status}; enumeration incomplete={exhausted}; "
+        f"scanned {scanned} files; skipped {skipped} "
+        f"non-UTF8/binary/oversized/unsearched files{notes}; "
+        'hits use "path:line:"; context lines use "path:line-"; '
+        "sha256 values are the exact searched content, accepted by edit_file "
+        "expected_sha256]"
     )
-    return header + "\n" + ("\n".join(page) if page else "(no matches in searched text)")
+    if not builder.page:
+        if skipped or exhausted or unverified or timed_out or output_capped:
+            body = (
+                "(no matches in the files searched; skipped, unsearched or excluded "
+                "files above mean this is not a whole-repo empty result)"
+            )
+        else:
+            body = "(no matches in searched text)"
+    else:
+        body = "\n".join(builder.page)
+    return header + "\n" + body
+
+
+def _literal_hits(
+    lines: list[str], query: str, matcher: re.Pattern[str] | None,
+) -> list[tuple[int, int | None]]:
+    hits: list[tuple[int, int | None]] = []
+    for number, line in enumerate(lines, 1):
+        if matcher is not None:
+            found = matcher.search(line)
+            position = found.start() if found else -1
+        else:
+            position = line.find(query)
+        if position >= 0:
+            hits.append((number, position))
+    return hits
+
+
+def _verify_regex_matches(
+    raw: bytes, reported: list[regex_backend.ReportedMatch],
+) -> list[tuple[int, int | None]] | None:
+    """Confirm reported matches against the bytes actually read, or reject all.
+
+    A reported line must be byte-identical to the same numbered line of the
+    read content; regex matching is a pure function of the line text, so equal
+    text proves the match exists in the hashed content. Any disagreement
+    (including a changed or replaced file) rejects the whole source instead of
+    mixing evidence across content versions.
+    """
+    raw_lines = raw.split(b"\n")
+    seen: set[int] = set()
+    verified: list[tuple[int, int | None]] = []
+    for match in reported:
+        if not 1 <= match.line_number <= len(raw_lines) or match.line_number in seen:
+            return None
+        line_bytes = raw_lines[match.line_number - 1]
+        try:
+            if line_bytes.decode("utf-8") != match.line_text:
+                return None
+            position = (
+                len(line_bytes[:match.match_byte_start].decode("utf-8"))
+                if match.match_byte_start is not None and match.match_byte_start <= len(line_bytes)
+                else None
+            )
+        except UnicodeDecodeError:
+            return None
+        seen.add(match.line_number)
+        verified.append((match.line_number, position))
+    return verified
 
 
 def run_read(

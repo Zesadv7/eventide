@@ -68,6 +68,9 @@ class SearchTextArguments(_Arguments):
     pattern: NonemptyText = "**/*"
     offset: Annotated[int, Field(ge=0)] = 0
     limit: Annotated[int, Field(ge=1, le=50)] = 50
+    mode: Literal["literal", "regex"] = "literal"
+    case_sensitive: bool = True
+    context_lines: Annotated[int, Field(ge=0, le=10)] = 0
 
 
 class CompactArguments(_Arguments):

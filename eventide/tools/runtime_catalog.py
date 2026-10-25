@@ -37,10 +37,13 @@ TOOLS = [
     ),
     _tool("glob", "Find workspace paths."),
     _tool(
-        "search_text", "Find literal text in UTF-8 workspace files without an index. "
-        "Returns path:source-line and bounded snippets. Pattern filters paths; offset counts "
-        "matching lines. Hidden paths require an explicit dot pattern. "
-        "Narrow pattern on scan limit.",
+        "search_text", "Search UTF-8 workspace files without an index. mode=literal always "
+        "works; mode=regex needs the local ripgrep backend and errors when it is missing, "
+        "never degrading regex to literal. Hits render as path:line, context lines as "
+        "path:line-, and sources carry the sha256 of the exact searched bytes, accepted by "
+        "edit_file expected_sha256; the header reports scan/skip/timeout status, so an empty "
+        "result covers only the files searched. Pattern filters paths; offset counts matching "
+        "lines; hidden paths need an explicit dot.",
     ),
     _tool("compact", "Request context compaction of completed turns."),
 ]
