@@ -756,3 +756,6 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 
 - 2026-10-26 主代理受控复现，基线245eefa；`python -m pytest -q tests/test_search_review.py` 1失败（review-red.log）。以`-gignored`命名的文件被当成选项，违反只读搜索参数边界。修复为--分隔且每个路径带./前缀（包括单独-），禁用rg隐式用户配置；不执行任何外部配置指定的预处理器。另补stdout结束后子进程wait的剩余截止时间，避免无界收尾；后续验证待补。
 - 复核修复后30项搜索用例通过（review-green.log，含真实rg参数边界），Ruff/Mypy1模块通过。未执行未知命令或读取外部目录；仍待主集成上下文fixture与源码定位页面收口。
+- MK-INTEGRATE-CONTEXT追加第三批：基线dda6bda，7文件定向118通过/4失败（integration/phase3-backend.log）。搜索schema增添mode/case/context及说明后目录再次增长，原紧凑机制fixture低于固定底座，涉及runtime compaction/Host目录/长结果/重开checkpoint；正在按实际增量定位修正，未改生产预算。
+
+- MK-INTEGRATE-CONTEXT第三批复验4/4通过（integration/phase3-context-recheck.log）：实测目录5191字符，目录哨兵5400、请求fixture底座5850、长结果fixture16900；生产预算及冻结模型评测不改。与首轮118项合计122个不同用例通过，未重复全仓。

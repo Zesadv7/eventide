@@ -35,7 +35,8 @@ def settings_for(path, **changes):
 # search_text adds 637 fixed catalog characters; retain the previous tail headroom.
 # MK-01/02 add 746 schema/description characters for version-bound reads/edits.
 # Keep these mechanism fixtures above the measured fixed request floor.
-REQUEST_FLOOR_CHARS = 5_250
+# MK-15 adds explicit regex/case/context schemas; fixed request grows again.
+REQUEST_FLOOR_CHARS = 5_850
 # Operating budget for the compaction tests: the floor plus room for the compacted tail and
 # for path-length drift, so catalog growth trips the sentinel instead of these tests.
 COMPACTION_BUDGET = REQUEST_FLOOR_CHARS + 400

@@ -470,6 +470,11 @@ async function abandon() {
           v-if="isActive && run?.model_retry"
           :retry="run.model_retry"
         />
+        <RunMemoryPanel
+          v-if="run"
+          :run-id="run.run_id"
+          :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
+        />
         <RetrievalStatus v-if="run" :state="run.retrieval" />
         <ToolActivity
           v-if="run"
@@ -856,11 +861,7 @@ async function abandon() {
             >下载事件记录</a
           >
         </section>
-        <RunMemoryPanel
-          v-if="run"
-          :run-id="run.run_id"
-          :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
-        />
+
         <RouterLink to="/history">查看历史与证据 →</RouterLink>
       </aside></Transition
     >

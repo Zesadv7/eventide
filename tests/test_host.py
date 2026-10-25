@@ -26,7 +26,7 @@ from tests.test_runtime import COMPACTION_BUDGET, settings_for
 # add object closure, ranges and nullable plan fields (measured 3_283); this is an
 # explicit correctness/context tradeoff, guarded independently from compaction.
 # Index-free literal search adds 637 characters (measured catalog: 3,920).
-TOOL_CATALOG_BUDGET = 4_800
+TOOL_CATALOG_BUDGET = 5_400
 
 
 def make_repo(path: Path) -> Path:
@@ -361,7 +361,7 @@ async def test_long_turn_folds_older_tool_results_instead_of_failing(isolated_wo
         (isolated_workspace / f"d{index}").write_text("y" * 3000, encoding="utf-8")
     # Keep room for three recent results plus the source-coordinate/format policy
     # and absolute worktree paths, but force older results to fold below.
-    host = RuntimeHost(settings_for(isolated_workspace, context_limit=16_300), provider)
+    host = RuntimeHost(settings_for(isolated_workspace, context_limit=16_900), provider)
     try:
         result = await host.run(RunRequest("read"))
         assert result.status == "completed"
