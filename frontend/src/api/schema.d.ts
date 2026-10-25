@@ -1452,6 +1452,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/runs/{run_id}/diagnostics": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Run Diagnostics */
+    get: operations["run_diagnostics_api_runs__run_id__diagnostics_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/runs/{run_id}/diagnostics/download": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Run Diagnostics Download */
+    get: operations["run_diagnostics_download_api_runs__run_id__diagnostics_download_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1477,6 +1511,25 @@ export interface components {
       content_base64: string;
       /** Media Type */
       media_type?: string | null;
+    };
+    /** AttemptFact */
+    AttemptFact: {
+      /** Attempt Id */
+      attempt_id: string;
+      /** Attempt */
+      attempt?: number | null;
+      /** Kind */
+      kind?: string | null;
+      /** Status */
+      status: string;
+      /** Usage Source */
+      usage_source: string;
+      /** Model */
+      model?: string | null;
+      /** Started At */
+      started_at?: number | null;
+      /** Finished At */
+      finished_at?: number | null;
     };
     /** BudgetBody */
     BudgetBody: {
@@ -1663,6 +1716,17 @@ export interface components {
       complete: boolean;
     } & {
       [key: string]: unknown;
+    };
+    /** DiagnosticReference */
+    DiagnosticReference: {
+      /** Event Type */
+      event_type?: string | null;
+      /** At */
+      at?: number | null;
+      /** Call Id */
+      call_id?: string | null;
+      /** Attempt Id */
+      attempt_id?: string | null;
     };
     /** DirectoryChoice */
     DirectoryChoice: {
@@ -2203,6 +2267,16 @@ export interface components {
         [key: string]: number;
       } | null;
     };
+    /** KnownCause */
+    KnownCause: {
+      /** Code */
+      code: string;
+      /** Label */
+      label: string;
+      /** Detail */
+      detail?: string | null;
+      ref?: components["schemas"]["DiagnosticReference"] | null;
+    };
     /** MemoryCreate */
     MemoryCreate: {
       /**
@@ -2264,6 +2338,16 @@ export interface components {
       scope: "user" | "project";
       /** Expected Version */
       expected_version?: string | null;
+    };
+    /** PendingItem */
+    PendingItem: {
+      /** Code */
+      code: string;
+      /** Label */
+      label: string;
+      /** Detail */
+      detail?: string | null;
+      ref?: components["schemas"]["DiagnosticReference"] | null;
     };
     /** PriceBody */
     PriceBody: {
@@ -2391,6 +2475,65 @@ export interface components {
       /** Selected Skills */
       selected_skills?: string[] | null;
     };
+    /** RunDiagnosticsReport */
+    RunDiagnosticsReport: {
+      /** Report Version */
+      report_version: number;
+      /** Source */
+      source: string;
+      /** Run Id */
+      run_id: string;
+      /** High Water */
+      high_water: number;
+      /** Facts Available */
+      facts_available: boolean;
+      /** Status */
+      status: string;
+      /** Stop Reason */
+      stop_reason?: string | null;
+      /** Mode */
+      mode?: string | null;
+      /** Provider */
+      provider?: string | null;
+      /** Model */
+      model?: string | null;
+      /** Started At */
+      started_at?: number | null;
+      /** Ended At */
+      ended_at?: number | null;
+      /** Counts */
+      counts: {
+        [key: string]: number;
+      };
+      summary: components["schemas"]["RunSummary"];
+      /** Known Causes */
+      known_causes: components["schemas"]["KnownCause"][];
+      /** Pending */
+      pending: components["schemas"]["PendingItem"][];
+      /** Tools */
+      tools: components["schemas"]["ToolFact"][];
+      /** Attempts */
+      attempts: components["schemas"]["AttemptFact"][];
+      /** Unavailable */
+      unavailable: string[];
+      /** Notes */
+      notes: string[];
+      /** Truncated */
+      truncated: boolean;
+    };
+    /** RunSummary */
+    RunSummary: {
+      /** What Happened */
+      what_happened: string;
+      /** Where Stopped */
+      where_stopped: string | null;
+      /** Completed */
+      completed: string;
+      /** Unknowns */
+      unknowns: string[];
+      /** Next Steps */
+      next_steps: string[];
+    };
     /**
      * RuntimeContractResponse
      * @description MK-00 contract identity; frontend gates on exact contract_version match.
@@ -2438,6 +2581,23 @@ export interface components {
       disabled_project?: string[];
       /** Selected */
       selected?: string[];
+    };
+    /** ToolFact */
+    ToolFact: {
+      /** Call Id */
+      call_id: string;
+      /** Name */
+      name: string;
+      /** Readonly */
+      readonly: boolean;
+      /** Status */
+      status: string;
+      /** Detail */
+      detail?: string | null;
+      /** Duration Ms */
+      duration_ms?: number | null;
+      /** At */
+      at?: number | null;
     };
     /** TraceReport */
     TraceReport: {
@@ -15401,6 +15561,249 @@ export interface operations {
             [key: string]: unknown;
           };
         };
+      };
+      /** @description bad request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description method not allowed */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description rate limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  run_diagnostics_api_runs__run_id__diagnostics_get: {
+    parameters: {
+      query?: {
+        high_water?: number | null;
+      };
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RunDiagnosticsReport"];
+        };
+      };
+      /** @description bad request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Run not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description method not allowed */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description rate limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  run_diagnostics_download_api_runs__run_id__diagnostics_download_get: {
+    parameters: {
+      query?: {
+        format?: string;
+        high_water?: number | null;
+      };
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description bad request */
       400: {

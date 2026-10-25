@@ -634,3 +634,21 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 关联首次124通过、5失败均为旧测试断言未纳入新的sha256页头；更新断言后只重跑失败5项均通过（container-recheck.log），原内容和隔离验证未削弱。关联工具契约/Runtime/沙箱57项通过（runtime.log），Mypy5模块和最终Ruff通过。独立复现、129项核心、关联57项为不同范围；真实Docker/模型未执行，仍待最终平台验收。所有首次失败保留，相关提交由本节所在提交定位。
 
 - 工作区API追加11项通过（workspace-api.log），含运行目录内实际read_file输出版本头；本切片合计197个不同后端用例通过。无扩大到全仓，也未改变冻结模型验收。
+
+- 分类：环境/外部依赖故障，与既有 RG-LOCAL-MYPY 的 NumPy 类型语法问题相同。基线 `5acba20` 加本轮页面续接改动；共享环境 Python `-m mypy eventide/http_api/streams.py` 退出 2。
+- 原始证据：`.task_outputs/maka-upgrade/connection/mypy.log`。NumPy 使用 Python 3.12 类型别名语法，与项目 3.10 检查目标不兼容；改用已有隔离 `.task_outputs/publish-py310/bin/python`，不改仓库门槛或共享依赖，按默认目标检查通过，证据 `mypy-py310.log`。主代理核查与复验，未改生产行为。
+
+## MK19-ZCODE：故障报告切片验证中的实现与测试失败（2026-10-26）
+
+- 分类：一次实现缺陷、一次实现缺口、其余为测试问题。基线 `983f0c4`，worktree `codex/maka-diagnostics`；命令、轮次与处理记录在忽略目录 `.task_outputs/maka-upgrade/diagnostics/mk19-zcode.log`。
+- 已证实原因及处理：
+  - pytest 首轮：`collect_run_diagnostics` 把合法默认 `high_water=None` 误判为非法（校验写反）。修复为仅显式传入时校验非负整数，复验通过。
+  - pytest 第二轮：`truncated` 标志未覆盖有界文本截断，先失败后补全。修复为扫描有界字段中的截断标记，复验通过。
+  - 测试问题：已完成的 failed attempt（用量未知）不应产生 `attempt_unfinished` 待查，拆两个 attempt 修正预期；`high_water` 序列数按 4 个事件修正断言；前端错误桩缺契约 `detail` 字段（后端错误信封含 code/message/detail）；陈旧响应测试释放了第二个请求的 resolver 而非旧请求。均只改测试或桩，不改实现，复验通过。
+  - Mypy 3.10 目标：新模块使用 `datetime.UTC`（3.11+），与 G2 记录的兼容性问题同类。改用 `datetime.timezone.utc`，复验通过。
+- 定向复验：后端 `tests/test_diagnostics.py` 12 项通过；前端 `tests/diagnostics.test.ts` 6 项通过；Ruff、3.10 目标 Mypy（3 模块）、vue-tsc、Vite 构建、`package_web.mjs` 4 资源轮换、OpenAPI/`schema.d.ts` 重新生成全部通过。原始日志见上述忽略目录。
+- 遗留：无未解释失败；MK-19 仍为进行中，恢复入口、证据跳转、Graph 关系与产物化导出未实现，不因本切片宣称故障报告完成。
+
+### MK-INTEGRATE — 生成命令路径修正
+
+- 2026-10-26 故障报告集成时从仓库根误用 `python scripts/export_openapi.py`，退出2、文件不存在；实际脚本在 frontend/scripts/export_openapi.py。未生成产物，修正工作目录后重新生成；这是命令问题，不是服务运行故障。

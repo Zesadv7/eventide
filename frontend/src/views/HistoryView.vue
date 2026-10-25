@@ -415,6 +415,14 @@ function closeDetail() {
         运行完成不等于变更已验收。运行中的记录每3秒更新；本页不发起审批、继续或修改任务。
       </p>
       <RunTrace :run-id="detail.run_id" />
+      <p>
+        <RouterLink
+          :to="{
+            path: `/runs/${encodeURIComponent(detail.run_id)}/diagnostics`,
+          }"
+          >查看故障报告（事实摘要）</RouterLink
+        >
+      </p>
       <h3>工具证据</h3>
       <details
         v-for="(tool, id) in detail.tools || {}"

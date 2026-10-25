@@ -644,7 +644,7 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 | MK-16 发现 | `GET /api/workspaces/{id}/tools?query=...`；目录项详情；Run 已加载工具查询；模型 discover/load 工具 | catalog_version、schema digest、来源、环境、权限、loaded、禁用原因 | 工具目录页+会话已加载面板；加载不自动授权，目录变更提示及同名来源区分 |
 | MK-17 旁枝 | `POST /api/sessions/{id}/side-questions`；复用子 Session 查询/SSE；`POST /api/side-questions/{id}/return` | source highwater、snapshot、引用、只读边界、回传身份及 consumed 状态 | 聊天旁栏、引用来源、刷新背景、回传预览；主任务继续、回传只消费一次 |
 | MK-18 记忆 | 复用 memory records/suggestions/settings CRUD；扩展自然语言来源和保存回执；不开放任意模型授权写入口 | explicit/suggested、canonical source/span、scope、revision、撤销/冲突、抽取 attempt | “已记住+撤销”、建议确认卡和管理页；来源可查，“这次”不会存成长期偏好 |
-| MK-19 报告 | `GET /api/runs/{id}/diagnostics`；`POST /api/runs/{id}/diagnostic-exports` 生成有界报告，下载复用产物接口 | 确定/推测原因、失败点、已完成工作、未知项、脱敏字段、证据/缺失、report_version | 人话摘要、诊断详情、导出预览/选择内容；不自动上传，不夹带密钥/整仓源码 |
+| MK-19 报告 | 切片一已实现：`GET /api/runs/{id}/diagnostics`（可选 `high_water`）与 `GET /api/runs/{id}/diagnostics/download?format=json\|markdown`；完整计划保留 `POST /api/runs/{id}/diagnostic-exports` 产物化导出（未实现，见下方小节） | 确定/推测原因、失败点、已完成工作、未知项、脱敏字段、证据/缺失、report_version | 人话摘要、诊断详情、导出预览/选择内容；不自动上传，不夹带密钥/整仓源码 |
 | MK-20 Graph | `POST /api/sessions/{id}/graphs`；`GET /api/graphs/{id}`及 events；图/节点 stop、revise、retry；整合/验收/采纳复用 delivery | graph/node/work_revision/activation、依赖、claims、结果 refs、预算、workspace、verification | 图+列表、节点会话、等待原因、修改/停止、整合 diff 和人工采纳；循环依赖/过期修订拒绝 |
 | MK-21 隔离 | `GET /api/runtime/execution-backends`；扩展 Run 接收配置与 Session binding；边界扩展走现有审批 | backend/probe/能力矩阵、profile revision、paths/network、限制与不支持原因 | 环境设置、会话环境徽标及审批差异；native 不可用不能暗中切 local |
 | MK-22 收口 | 所有上列契约实际 OpenAPI 生成；静态资源/服务契约版本同批发行 | 数据迁移、能力/平台验证记录和旧 API 替代清单 | 全流程真实 API 浏览器、320px、刷新/停止/重复请求/版本不匹配及实际包分发 |
@@ -686,3 +686,11 @@ MK-00复核补充：兼容响应必须有有效schema_version、runtime_version�
 ### MK-01/02 文件工具增量契约
 
 read_file新增可选continuation，带凭据时不能同时传非零offset；每页头返回sha256，尚有内容时给下一continuation。凭据属于模型工具接口，HTTP工具结果仍通过原持久tool.completed查询；界面不能把不同版本的页拼为同一证据。edit_file新增可选expected_sha256，版本不符、空目标、未命中和多处（含重叠）匹配均返回错误且不修改文件。大范围歧义只展示前5处并明确数量下界。具体行内偏移以返回凭据为准，不依赖固定分页长度。
+
+### MK-19 第一批实现：可读故障报告切片
+
+`GET /api/runs/{id}/diagnostics` 返回事实派生的中文报告，可选查询 `high_water`（非负整数）复现任意旧版本；Run 不存在返回 404，非法参数返回 422。`GET /api/runs/{id}/diagnostics/download?format=json|markdown&high_water=N` 以附件下载 JSON 或 Markdown，两格式渲染自同一份事实，内容一致。报告固定 `report_version=1`，绑定 `(run_id, high_water)`；`high_water` 为纳入事件的最大 `session_seq`（无事件为 0），其后提交的事件不会混入已生成版本，重新生成才纳入。生成过程只读已保存事件：不调用模型、不执行工具、不追加事件、不自动上传或外发。
+
+报告包含：状态与执行身份（mode/provider/model）、五段中文摘要（发生什么/停在哪/完成了什么/未知项/下一步）、已知原因与待查事项分列、有界工具与 attempt 明细、缺失与不可用清单及固定说明（当前版本不含任务图/恢复关系与恢复动作入口）。事件文本经既有 `redact` 有界截断（约 300 字符）并在响应层替换配置密钥；对话正文、源码、完整工具输出与提示不进入报告。缺事件时 `facts_available=false` 并明确列出不可用，不编造已恢复或已验证。
+
+Vue 新增 `/runs/:runId/diagnostics` 报告页（历史页运行详情提供入口），含加载、错误（保留后端 message）、缺事实、重新生成与高水位绑定展示；下载链接始终携带当前报告的 `high_water`。切换 Run 丢弃迟到响应。本批尚未实现恢复动作入口、证据跳转、Graph/恢复关系、`POST diagnostic-exports` 产物化导出与用户选择内容预览；完整 MK-19 仍进行中。
