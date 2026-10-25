@@ -329,10 +329,9 @@ class ToolExecutor:
         swap an implementation under a same name; an invalid schema stays a
         ToolContractError and the call is rejected fail-closed.
         """
+        contract = contract_catalog([{"name": name, "input_schema": input_schema}])[name]
+        self.contracts[name] = contract
         self.handlers[name] = handler
-        self.contracts[name] = contract_catalog(
-            [{"name": name, "input_schema": input_schema}]
-        )[name]
         if readonly:
             self.readonly_tools.add(name)
 

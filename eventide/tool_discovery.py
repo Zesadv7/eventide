@@ -328,7 +328,6 @@ class ToolDiscovery:
             "environment": entry["environment"],
             "input_schema": copy.deepcopy(schema),
         }
-        self.loaded[name] = receipt
         if self._executor is not None:
             self._executor.register_discovered_tool(
                 name,
@@ -336,6 +335,7 @@ class ToolDiscovery:
                 self._on_demand_handlers[name],
                 readonly=entry["effect"] == "readonly",
             )
+        self.loaded[name] = receipt
         return copy.deepcopy(receipt)
 
 

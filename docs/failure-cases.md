@@ -713,3 +713,10 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 基线复验：git stash回到3898ffc原样重跑同样3项均失败，证明与本切片工具发现改动无关；恢复工作区后本切片新增5项及executor/contracts/tools定向共56项通过。证据 `.task_outputs/maka-upgrade/tool-discovery/host-after.log`。
 - 已证实原因：待查（catalog预算超限疑似Q系列工具描述增长所致；另两项中断前未定位）。处理与修复由工具目录预算归属的集成任务决定，本切片不放宽断言、不改工具描述。
 - 经验：在共享基线上开工前先跑受影响套件并保留基线复验证据，避免把既有失败误算进本切片结果。
+
+### MK16-REVIEW — 已加载工具未进入下一实际模型请求
+
+- 2026-10-26 主代理受控复现，基线f4b06e8；`python -m pytest -q tests/test_tool_discovery_review.py` 1失败，证据 `.task_outputs/maka-upgrade/tool-discovery/review-red.log`。
+- 已证实：load解锁executor但Host固定tools变量没重新投影，下一次模型请求仍没有已加载schema；发现/加载以及MCP只读调用的readonly准备事实也要统一。修复中，真实Host回归待验。
+- 真实Host/目录6项复验通过（review-green.log），编译后再发布handler/loaded回执，下一请求重新计算schema与目录摘要；Ruff报新增条件长行，已拆行（review-ruff.log），不改变行为。
+- 最终Ruff与Mypy3模块通过，commit保留修复与Host真实请求回归。生产MCP传输/重连仍待后续真实接线验收，当前为替身目录+真实Host/Executor。

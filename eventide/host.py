@@ -3346,9 +3346,10 @@ class RuntimeHost:
                     base_tools,
                     manager.tools,
                     manager.handlers,
-                    readonly_names=manager.readonly_tools,
+                    readonly_names=BASE_RUNTIME_READONLY_TOOLS | manager.readonly_tools,
                 )
-                if manager.tools and not sandbox_execution and not readonly_profile
+                if (manager.tools and mode != "plan"
+                    and not sandbox_execution and not readonly_profile)
                 else None
             )
             tools = [
@@ -3411,6 +3412,7 @@ class RuntimeHost:
                     *({"delegate_readonly"} if worker_tools else set()),
                     *({"search_knowledge"} if rag_tools else set()),
                     *manager.readonly_tools,
+                    *({"tool_discover", "tool_load"} if discovery else set()),
                     *({"load_skill", "read_skill_resource"} if skills else set()),
                 },
                 command_executor,
@@ -3421,6 +3423,9 @@ class RuntimeHost:
             if discovery is not None:
                 discovery.bind_executor(executor)
             runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)
+            runtime_readonly_tools.update(manager.readonly_tools)
+            if discovery:
+                runtime_readonly_tools.update({"tool_discover", "tool_load"})
             if worker_tools:
                 runtime_readonly_tools.add("delegate_readonly")
             if skills:
@@ -3600,6 +3605,12 @@ class RuntimeHost:
             for steps in range(1, max_steps + 1):
                 ensure_token_budget()
                 phase = "finalization" if finalizing else "tools" if json_output else "agent"
+                if discovery is not None:
+                    tools = production_tool_catalog(run_policy.filter_tool_catalog(
+                        [*base_tools, *discovery.model_tools()], mode,
+                    ))
+                    catalog_hash = digest(tools)
+                    tool_catalog_chars = tool_catalog_size(tools)
                 request_tools = [] if finalizing else tools
                 request_generation = dict(generation)
                 if json_output and not finalizing:
