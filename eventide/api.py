@@ -15,6 +15,7 @@ from eventide.config import Settings
 from eventide.host import RuntimeHost
 from eventide.http_api import (
     attachments,
+    attention,
     budgets,
     config,
     contracts,
@@ -100,6 +101,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
 
     for domain in (
         contracts, projects, workspaces, sessions, runs, models, config, attachments, streams,
+        attention,
         skills, budgets, queue, evaluations, indexes, deliveries, traces, worktrees,
         history_imports, directories, memory, file_operations, diagnostics, tools, interactions,
     ):

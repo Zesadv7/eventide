@@ -1252,6 +1252,53 @@ class RuntimeStore:
             ).fetchall()
         return [row["id"] for row in rows]
 
+    def pending_approval_facts(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Approval.required facts without a resolution in the same run, newest first.
+
+        Expired approvals of terminal runs stay in the facts; callers may only
+        display them, and the approval POST endpoint remains the sole authority
+        that rejects acting on them.
+        """
+        if not 1 <= limit <= 200:
+            raise ValueError("Attention approval limit must be between 1 and 200")
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT e.event_id, e.run_id, e.session_id, e.ts, e.payload_json, "
+                "s.workspace_id FROM runtime_events e "
+                "JOIN sessions s ON s.id=e.session_id "
+                "WHERE e.type='approval.required' AND e.partial=0 "
+                "AND NOT EXISTS (SELECT 1 FROM runtime_events x WHERE x.run_id=e.run_id "
+                "AND x.type='approval.resolved' AND x.session_seq>e.session_seq "
+                "AND json_extract(x.payload_json,'$.approval_id')"
+                "=json_extract(e.payload_json,'$.approval_id')) "
+                "ORDER BY e.session_seq DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "run_id": row["run_id"],
+                "session_id": row["session_id"],
+                "workspace_id": row["workspace_id"],
+                "ts": row["ts"],
+                "payload": json.loads(row["payload_json"]),
+            }
+            for row in rows
+        ]
+
+    def recent_failed_run_ids(self, limit: int = 20) -> list[str]:
+        """Runs whose newest terminal fact is a failure or interruption, newest first."""
+        if not 1 <= limit <= 100:
+            raise ValueError("Attention run limit must be between 1 and 100")
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT e.run_id, MAX(e.ts) last_ts FROM runtime_events e "
+                "WHERE e.type IN ('run.failed','run.interrupted') AND e.partial=0 "
+                "AND e.run_id IS NOT NULL GROUP BY e.run_id "
+                "ORDER BY last_ts DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [row["run_id"] for row in rows]
+
     def append_message(self, session_id: str, message: dict[str, Any]) -> None:
         self.create_session(session_id)
         self.append_fact(

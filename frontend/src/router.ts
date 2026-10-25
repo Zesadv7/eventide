@@ -1,4 +1,5 @@
 import MemoryView from "./views/MemoryView.vue";
+import AttentionView from "./views/AttentionView.vue";
 import ProjectsView from "./views/ProjectsView.vue";
 import HistoryImportsView from "./views/HistoryImportsView.vue";
 import WorktreesView from "./views/WorktreesView.vue";
@@ -18,6 +19,7 @@ export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/memory", component: MemoryView },
+    { path: "/attention", component: AttentionView },
     { path: "/projects", component: ProjectsView },
     { path: "/imports", component: HistoryImportsView },
     { path: "/worktrees", component: WorktreesView },

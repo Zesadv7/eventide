@@ -75,6 +75,7 @@ const workspace = computed(() =>
   store.workspaces.find((w) => w.workspace_id === store.selectedWorkspace),
 );
 const links = [
+  ["/attention", "待处理"],
   ["/projects", "项目管理"],
   ["/queue", "任务队列"],
   ["/imports", "历史导入"],

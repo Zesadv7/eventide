@@ -1349,3 +1349,15 @@ literal 模式保持纯 Python 且语义不变（行级命中、offset 计数、
 - 后继 Run 经正常 `_recovery_facts` 配对旧协议史；已执行工具引用原结果，不重放；没有实时 sink/审批处理器，ASK 默认拒绝语义不变。
 
 **后果：** 停驻理由更精确（如源码漂移记 `workspace_evidence_changed`）；沙箱/交付等控制类恢复、未知工具只读核查（08D）、恢复状态 API/页面由后续切片承接。
+
+## ADR-113：可读审批与待处理中心是纯事实投影（MK-07/MK-09 切片 1，2026-10-26）
+
+**状态：Proposed（离线定向验证通过；真实多会话/多标签旅程与完整门禁未做，不作为最终验收）。**
+
+**决策：** 注意力数据一律从唯一事件日志与既有绑定事实投影，不新增状态存储、不新增授权通道。`eventide/attention.py` 仅做只读派生：待审批取同 Run 内无 resolution 的 `approval.required` 事实（取消/中断不补发 resolution，因此过期审批保留在列表中并标记不可操作），失败/停驻运行取最新终态为 `run.failed/run.interrupted` 的 Run，待采纳候选取交付 `repair_status=passed` 且未 applied 的记录。去重键为 `approval:{approval_id}`、`run:{run_id}:{status}`、`delivery:{delivery_id}`。
+
+可读审批从冻结参数与 `run_execution` 绑定派生命令/目标路径/cwd/执行位置/影响范围；网络访问与权限提升没有事实来源，永远显示"未声明"，不从命令文本推断。审批 `approval_id` 与原始 `arguments` 原样透传，展示转换不改变授权身份；批准/拒绝复用既有 `POST /api/runs/{run_id}/approvals/{approval_id}`，过期审批继续由该端点拒绝（404/409）。新增 `GET /api/attention` 与 `GET /api/projects/{project_id}/attention`（GET-only，纯读）；"待回答"类别当前无事件事实，明确声明不支持，不伪造。前端 `/attention` 独立页面 + 导航入口，Chat 主链路不改动。
+
+**取舍：** 不按结果隐藏过期审批——保留事实并标注，比静默消失更可核对；同工作区源执行同时只能有一个写入任务，跨会话并行审批列表受既有串行约束约束，不做并行化扩展。MK-07 的 operation/revision/参数摘要绑定与批准前参数变化失效、MK-09 的待回答/核查不明类别与项目筛选 UI 属后续切片。
+
+**验证：** 后端 5 项新定向（可读派生、过期审批保留且拒绝、失败运行列表、跨会话去重键、未知字段不猜测）+ `tests/test_api.py` 25 项回归通过；前端 3 项组件测试（可读事实渲染/失效按钮禁用、复用原审批端点并显示拒绝、空类别不伪造）通过；Ruff、Mypy（py310 目标 4 模块）、vue-tsc、Prettier 通过。日志 `.task_outputs/maka-upgrade/attention/`。无模型调用、无真实平台验证。

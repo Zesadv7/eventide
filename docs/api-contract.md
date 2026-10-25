@@ -634,9 +634,9 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 | MK-04 输入与规则 | `GET /api/runs/{run_id}/attempts/{attempt_id}/context`；项目规则来源查询 | 规则/Skill/记忆/工具目录及裁剪清单、大小、来源/版本；脱敏有效投影 | “本次模型看到了什么”面板，切换尝试不串数据；截断和未加载明显区分 |
 | MK-05 长日志 | `GET /api/runs/{run_id}/tools/{call_id}/output?stream=stdout&cursor=...`；复用归档授权与分页 | capture_state、availability、偏移/下一页、退出码、超时、省略量 | 工具卡日志展开/分页/缺失提示；中间错误能找到，过期不显示为空成功 |
 | MK-06 补充与提问 | `POST /api/sessions/{id}/messages` 带 current/next 意图；`GET /api/sessions/{id}/questions`；`POST /api/questions/{id}/answer` | `message.accepted/consumed`、question opened/answered/expired、来源 Run/revision、生效 attempt | 输入区选择补充/下一轮；问题卡含选择与自由回答；刷新、重复回答、停止后迟到答复有明确结果 |
-| MK-07 审批 | 扩展现有 approval GET/resolve DTO，不另造授权通道 | command/cwd/paths、effect、执行边界、参数 digest、revision、scope | 可读审批卡及原始详情；源/副本/native/Docker 一目了然；过期批准拒绝 |
+| MK-07 审批 | 切片 1 已实现：`GET /api/attention`/`GET /api/projects/{id}/attention` 返回结构化审批卡，动作仍走既有 `POST /api/runs/{run_id}/approvals/{approval_id}`；扩展现有 approval GET/resolve DTO，不另造授权通道 | command/cwd/paths、effect、执行边界、参数 digest、revision、scope | 可读审批卡及原始详情；源/副本/native/Docker 一目了然；过期批准拒绝 |
 | MK-08 恢复 | `GET /api/runs/{id}/recovery`；`POST /api/runs/{id}/recovery/actions`；扩展现有 Run 状态/SSE/停止 | recovery_id、classification、检查项、next_retry_at、attempt/max_attempts、claim、successor、核查证据、available_actions | 聊天恢复条+恢复详情；断网接回、倒计时、重启自动续跑、未知核查、停止、双标签去重 |
-| MK-09 待处理 | `GET /api/projects/{id}/attention?cursor=...`；动作跳对应对象接口 | attention_id、type、source/version、reason、actions；解决状态由源事实派生 | 项目待办入口和筛选，点击旧卡复核；隐藏不等于解决，不卡住其他会话 |
+| MK-09 待处理 | 切片 1 已实现：`GET /api/attention`（全局）与 `GET /api/projects/{id}/attention`（按项目），无 cursor 分页；动作跳对应对象接口，`awaiting_answers` 明示不支持 | attention_id、type、source/version、reason、actions；解决状态由源事实派生 | 项目待办入口和筛选，点击旧卡复核；隐藏不等于解决，不卡住其他会话 |
 | MK-10 后台任务 | `GET /api/sessions/{id}/background-tasks`；详情/日志；`POST /api/background-tasks/{id}/stop`；有界 health 查询/探测 | started/ready/exited/unknown、所有者/进程身份、隔离配置、日志引用 | 后台任务面板；进程存活和服务就绪分开，停止子树后刷新状态一致 |
 | MK-11 工具并行 | 工具调度接线，扩展 Run/tool 投影，无独立启动 HTTP 必要 | batch_id、call_id、dependency、状态、稳定结果顺序 | 并行活动可展开，某项失败不会把整批显示成功；取消结果不丢 |
 | MK-12 产物 | `GET /api/sessions/{id}/artifacts`；详情/content/download，仅受控身份 | 来源 Run/tool/Workspace、版本/MIME、可用性、证据保护/保留策略 | 本次产出列表、Markdown/图片/隔离 HTML 预览、下载；恶意 HTML 无宿主权限 |
