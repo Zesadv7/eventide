@@ -939,7 +939,7 @@ RQ工程收口：一次完整后端2201通过/1旧幂等测试预期失败/12显
 <a id="maka-upgrade-plan"></a>
 ## Maka 借鉴升级方案（2026-10-26，实施中）
 
-本节是完整设计与实施顺序；除 MK-00 契约切片（见下）外，其余能力尚未实现，不得当成本来能力引用。状态唯一入口为 [AGENTS.md 的 MK 计划](../AGENTS.md#maka-upgrade-status)，配套为 [API/UI 草案](api-contract.md#maka-upgrade-api) 和 [ADR-100](decisions.md#adr-100)。实施过程不执行真实模型任务、不改历史实验结论。
+本节是完整设计与实施顺序，已进入分批实施。各项已实现切片在下方记录，尚未完成的范围不作为现有能力引用。状态唯一入口为 [AGENTS.md 的 MK 计划](../AGENTS.md#maka-upgrade-status)，配套为 [API/UI 草案](api-contract.md#maka-upgrade-api) 和 [ADR-100](decisions.md#adr-100)。实施过程不执行真实模型任务、不改历史实验结论。
 
 ### 用户已确认的决策
 
@@ -1228,3 +1228,5 @@ MK-13 的数据设计与比较器可在 A–E 编写，真实付费/真实任务
 read_file每页带原始字节SHA256及范围。continuation绑定工作目录、相对文件和内容版本；每次重新过路径边界，跨文件/副本或内容变化（含变空）明确拒绝。超长行分段返回一基行号和零基字符偏移，续页完整回读；约10,000字符页预算包含行号、标题和路径。初次offset/limit仍可用。凭据是版本和范围校验，不是额外访问授权。
 
 本地与容器固定文件worker采用同一契约。容器身份使用可信宿主副本路径及目录身份注入，不能拿所有容器共享的/workspace挂载名作为副本身份。离线worker实测不等同真实Docker或原生内核验收。工具明细现有文本可以显示版本/续页凭据；专门的证据浏览交互及原生后端接入仍待后续，因此MK-01/02整体仍进行中。
+
+MK-08B页面接线：RuntimeStateProjection从原model.retry派生当前等待，HTTP刷新可重建同一截止时间，下一attempt/终态清除；Chat显示分类原因、自动尝试序号、倒计时和停止说明。2项投影、21项前端关联、1条built真实API浏览器（scripted模型断连→刷新→原Run完成、2次attempt）通过。模型服务重试与浏览器SSE重连分开展示；持久宿主恢复和未知工具核查仍待MK-08C/D。

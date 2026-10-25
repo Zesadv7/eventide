@@ -2,6 +2,7 @@ export interface PreviewEvent {
   type: "model.preview";
   run_id: string;
   request_id?: string;
+  attempt_id?: string;
   revision?: number;
   text: string;
   omitted_chars?: number;

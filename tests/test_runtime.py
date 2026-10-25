@@ -33,7 +33,9 @@ def settings_for(path, **changes):
 # Strict generated schemas measure 3_283 characters, with fixed system text and
 # checkout identity bringing the full floor to about 3_631 on the primary host.
 # search_text adds 637 fixed catalog characters; retain the previous tail headroom.
-REQUEST_FLOOR_CHARS = 4_450
+# MK-01/02 add 746 schema/description characters for version-bound reads/edits.
+# Keep these mechanism fixtures above the measured fixed request floor.
+REQUEST_FLOOR_CHARS = 5_250
 # Operating budget for the compaction tests: the floor plus room for the compacted tail and
 # for path-length drift, so catalog growth trips the sentinel instead of these tests.
 COMPACTION_BUDGET = REQUEST_FLOOR_CHARS + 400

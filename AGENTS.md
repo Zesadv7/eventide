@@ -489,10 +489,10 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-12 | 待开始 | 有来源的产物列表、Markdown/图片/隔离HTML/报告预览；证据保护和访问校验。 |
 | MK-13 | 待开始 | 同条件外部Agent及单项消融比较器/页面，冻结开发留出；真实比较放最终批次。 |
 | MK-14 | 待开始 | 版本化模型/端点能力目录、配置/连接/工具验证分开；设置页能力卡。 |
-| MK-15 | 待开始 | 正则/上下文行/过滤及版本化搜索证据，后端能力明确；源码定位UI。 |
-| MK-16 | 待开始 | 大目录发现/精确schema按需加载、冻结版本/权限/环境；工具目录和已加载面板。 |
+| MK-15 | 进行中 | 正则/上下文行/过滤及版本化搜索证据，后端能力明确；源码定位UI。 |
+| MK-16 | 进行中 | 大目录发现/精确schema按需加载、冻结版本/权限/环境；工具目录和已加载面板。 |
 | MK-17 | 待开始 | 独立只读旁枝、主任务已提交快照、用户选择回传；聊天侧栏及消息幂等接线。 |
-| MK-18 | 待开始 | 自然语言长期记忆、可信原话/作用域、推测确认、撤销；保存提示/建议/管理联动。 |
+| MK-18 | 进行中 | 自然语言长期记忆、可信原话/作用域、推测确认、撤销；保存提示/建议/管理联动。 |
 | MK-19 | 进行中 | 2026-10-26切片一：`eventide/diagnostics.py`事实投影+`GET /api/runs/{id}/diagnostics`及`download?format=json\|markdown`，报告绑定`(run_id, high_water)`、`report_version=1`，旧版本不随后续事件漂移；中文五段摘要（发生/停驻/完成/未知/下一步）、已知原因与待查分列、事件文本有界脱敏、缺事件明确不可用；生成不调用模型、不执行工具、不追加事件、不自动外发。Vue报告页`/runs/:runId/diagnostics`+历史页运行详情入口，覆盖加载/错误/缺事实/重新生成与高水位绑定下载。后端12项、前端6项定向、vue-tsc/Vite构建/OpenAPI/schema重生成/4资源打包、Ruff、3.10目标Mypy通过；验证失败已登记MK19-ZCODE。ADR-107、api-contract/architecture切片小节同步；恢复动作入口、证据跳转、Graph/恢复关系、产物化导出未实现，不宣称故障报告完成。 |
 | MK-20 | 待开始 | 自主Graph/依赖/领取/恢复/公平预算/独立写副本/候选整合/Verifier/人工采纳；任务图与列表。 |
 | MK-21 | 进行中 | 2026-10-26切片1：`eventide/native_sandbox/`集中库落地（严格类型policy与能力矩阵、probe只读探测、Seatbelt profile/argv、bubblewrap挂载白名单argv、纯stdlib有界JSON行协议文件worker、无回退runner及测试注入点声明）；allow_network/allow_subprocess本切片显式拒绝，探测存在≠隔离有效。44项离线定向（策略/路径边界、矩阵、argv文本、协议与输入边界、真子进程握手/写读/shutdown、显式失败）、Ruff、Mypy(py310目标)7模块通过，无网络无模型。宿主接线（executor/policy/HTTP/前端/Skill与Shell同边界/Docker并存）及真实OS越界验证未做，清单见architecture#native-sandbox-slice与ADR-105；完整MK-21仍含网络/环境/后台/Skills/Graph矩阵、环境页/扩权审批和实机证据。 |
@@ -515,3 +515,7 @@ MK-01/02首批工具切片：唯一编辑、重叠歧义拒绝、expected_sha256
 - 外部 ZCode 子代理实施，仅改 context 层：新增 `eventide/context_summary.py`（schema v2 结构化摘要：goal/hard_constraints/facts/unverified/checks/failures/next_steps，证据节强制 `{"msg","quote"}` 逐字引文，确定性校验拒绝无效摘要并保留旧历史/旧 checkpoint）并接入 `context_builder.py` 摘要生成与渲染；根 AGENTS.md 改有界读取 + 来源头 + 截断提示 + read_file 回读指引（`instructions_record()`）。checkpoint/claim/digest/policy_version/账本及单次模型调用不变，无新事件类型；拒绝原因入 `context.trimmed.summary_rejected`。
 - 验证：142 项受影响定向测试通过（新增 27 项 + 既有 7 处纯文本摘要响应按新契约更新）、Ruff 9 文件、Mypy py310 目标 2 模块；未跑全量/前端/容器/真实模型，未调用付费 API。首轮 12 项失败（预期行为变化与测试编写缺陷）见 failure-cases MKCTX-ZCODE。
 - 设计取舍见 [ADR-104](docs/decisions.md#adr-104)；architecture MK-03/04 小节已加切片注记。Host 侧逐尝试输入清单、安装级/目录作用域规则、API/UI 摘要比较及真实模型效果仍待后续切片，MK-03/MK-04 整体保持进行中，不标完成。
+
+第二批集成复核：故障报告、结构化摘要与原生启动库已集成；主代理修复完整统计被明细裁剪、缺事实误报正常、摘要JSON字段误作引文、Linux授权环境/代码挂载遗漏和Mac只读依赖写规则。原生尚未接生产入口，能力文本不等于内核隔离通过；参考MK19-REVIEW/MKCTX-REVIEW/MKNATIVE-REVIEW。当前ZCode三路为代码搜索、工具发现、自然记忆；最终模型和平台验收仍待后续。
+
+MK-08B等待界面已接线：Run事实投影保存绝对retry_at，Chat显示错误分类/下一尝试/倒计时，刷新不重置，仍可停止。2项投影、21项前端、1条built真实API旅程、typecheck/build/Ruff/Mypy通过；仅scripted注入，非付费模型效果。第二批171项不同后端集成用例已逐项通过，8项组合失败及复验见MK-INTEGRATE-CONTEXT。仍无整仓收口和真实平台验收。

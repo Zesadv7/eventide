@@ -109,6 +109,13 @@ def main() -> None:
                     yield ModelStreamEvent("text_delta", text="正在核对独立工作副本。" * 50)
                     await asyncio.sleep(8)
                     response = ModelResponse(text="副本已完成：" + prompt, usage=usage)
+            elif "模型重试场景" in prompt:
+                if step == 1:
+                    raise ProviderError(
+                        "fixture network interruption", retryable=True,
+                        category="network", retry_after=5,
+                    )
+                response = ModelResponse(text="模型自动恢复完成", usage=usage)
             elif "并发快照场景" in prompt:
                 yield ModelStreamEvent("text_delta", text="正在分析独立只读快照。" * 50)
                 await asyncio.sleep(8)

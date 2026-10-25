@@ -71,6 +71,7 @@ class RuntimeStateProjection:
             "reason": None,
             "gap_files": None,
             "retrieval": None,
+            "model_retry": None,
         }
         terminal = False
         for event in events:
@@ -99,6 +100,13 @@ class RuntimeStateProjection:
             }:
                 for key, value in payload.get("usage", {}).items():
                     state["usage"][key] = state["usage"].get(key, 0) + value
+            if kind == "model.retry" and not terminal:
+                state["model_retry"] = (
+                    {**payload, "retry_at": event["ts"] + payload["delay_seconds"]}
+                    if payload.get("retryable") and "delay_seconds" in payload else None
+                )
+            if kind in {"model.attempt_started", "model.response"}:
+                state["model_retry"] = None
             if kind == "workspace.checkpoint":
                 state["checkpoint"] = payload.get("checkpoint")
             if kind == "retrieval.status":
@@ -124,6 +132,7 @@ class RuntimeStateProjection:
                     state["status"] = "running"
             if kind in TERMINALS and not terminal:
                 terminal = True
+                state["model_retry"] = None
                 state.update({k: v for k, v in payload.items() if k in state})
                 state["status"] = kind.split(".")[1]
                 state["completed_at"] = event["ts"]

@@ -37,7 +37,14 @@ export interface RetrievalStatus {
   model?: string | null;
   embedding_fingerprint?: string | null;
 }
+export interface ModelRetry {
+  attempt: number;
+  next_attempt: number;
+  category: string;
+  retry_at: number;
+}
 export interface Run {
+  model_retry?: ModelRetry | null;
   retrieval?: RetrievalStatus | null;
   run_id: string;
   session_id?: string;

@@ -692,3 +692,17 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 已证实：bubblewrap的clearenv丢弃worker授权配置，且未挂载安装源码；Seatbelt工作区写授权没有对内部只读依赖加禁止写规则。补明确setenv/只读安装路径挂载和依赖写拒绝。另复核发现解释器可再次exec，Seatbelt subprocess_deny不能标full；两平台暂仅partial，内核实测仍未完成。
 - 首次修复复验45通过/1失败，为旧能力矩阵断言仍期望full；review-green.log保留为review-matrix-old.log。已将断言与真实partial边界同步，无放宽执行权限。
 - 修复后46项离线定向、Ruff、Mypy7模块通过（review-green/review-ruff/review-mypy.log）。启动文本验证不能代替内核实测，原生模块尚未接入生产ToolExecutor，未宣称可用安全隔离；实际可执行权限范围仍须后续收紧及平台验收。
+
+### MK-INTEGRATE-CONTEXT — 文件工具契约与上下文升级集成回归
+
+- 2026-10-26 集成基线6462892；16文件定向pytest（完整命令见本轮调用记录）163通过/8失败，日志 `.task_outputs/maka-upgrade/integration/phase2-backend.log`。涉及summary runtime/throttle、工具目录预算和长工具结果折叠；各分支单独通过但组合未过。原因待查，未将集成标通过。
+- 已定位固定请求体增长：MK-01/02新增schema/说明使目录由4k门槛增长为4746字符，原4850字符上下文fixture低于新的固定请求底座，第一次请求就触发错误摘要路径；并非消费账本丢失。保留新增版本证据契约，目录哨兵明确调至4800、纯机制fixture固定底座加800字符，长结果折叠fixture同步加800。生产预算/冻结真实评测未改；后续工具发现减少大目录注入另验。
+- 第二次定向44通过/2失败（context-recheck.log）：直接ContextBuilder不带Host工具目录，增大共用fixture后不再超过上下文，故该处固定4000以继续验证节流；长结果场景同时多了每页版本头，实测折叠后15881字符（临时短路径），改用16300预留集成worktree路径，仍断言确有折叠。未调整生产折叠策略或真实评测门槛。
+
+### MK08-UI — 模型重试页面旅程fixture错误
+
+- 2026-10-26，集成6462892+未提交UI；`EVENTIDE_E2E_BUILT=1 ... run_e2e.mjs tests/e2e/model-retry.spec.ts` 1失败，等待提示未出现；证据 `.task_outputs/maka-upgrade/integration/retry-browser.log`。已证实fixture创建ProviderError忘记显式retryable=True，Provider契约默认False正确禁止重试。修正fixture，不改变分类策略。
+- Ruff同时报fixture长行（retry-ruff.log），拆行修正；Mypy因&&未执行，未算通过。
+- 第二次旅程已通过重试显示/刷新/同Run完成，但末尾检查误用HTTP原始Run的run_id字段（服务返回id，前端客户端才归一化run_id），导致诊断请求404；retry-browser-green.log保留该失败。修正为id并显式检查HTTP状态，避免把错误响应当报告。
+- MK08-UI最终实测旅程1/1通过（retry-browser-final.log），两次请求/一个Run、重试等待跨刷新恢复、终态清除提示均核实；2项投影、21项前端关联、类型检查、Ruff/Mypy与构建通过。应用真实模型效果未测，fixture明确为scripted。
+- MK-INTEGRATE-CONTEXT定向失败全部复验通过：首次171项中163通过，44项后续中6项原失败修正，最终2项通过（context-final.log）。未重复全仓；所有171个不同用例已通过，保留每次失败原日志。

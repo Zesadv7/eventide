@@ -1203,7 +1203,7 @@ ADR-099补充：旧位置到新位置也必须检查已存在索引的完整构�
 
 **取舍：** 自动恢复及 Graph 增加状态组合、额外请求和资源竞争；保留尝试/时间/预算上限、停止优先、可追溯来源及无进展终止。文件后置状态不等于历史操作恰好一次；通用 Shell/远端未知可能无法自动核实。原生平台能力不同，不静默无隔离执行。Maka 尚未实现的 workspace continuity 和通用核销不能当现成成果照搬；具体增强在 Eventide 中独立设计验证。
 
-完整范围、21项追踪、依赖、接口/UI和验收见 [升级方案](architecture.md#maka-upgrade-plan)、[接口计划](api-contract.md#maka-upgrade-api) 与 [MK状态](../AGENTS.md#maka-upgrade-status)。本轮不改运行代码、不运行付费模型、不公开发布。
+完整范围、21项追踪、依赖、接口/UI和验收见 [升级方案](architecture.md#maka-upgrade-plan)、[接口计划](api-contract.md#maka-upgrade-api) 与 [MK状态](../AGENTS.md#maka-upgrade-status)。方案阶段（5acba20）未改运行代码；用户随后已授权实施，当前切片与验收以MK状态为准。应用真实模型与平台完整验证放在最终阶段，不公开发布。
 
 <a id="adr-106"></a>
 ## ADR-106：浏览器进度连接显式续接（2026-10-26，Accepted）

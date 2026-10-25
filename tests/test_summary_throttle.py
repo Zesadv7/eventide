@@ -343,7 +343,8 @@ async def test_cancelled_host_summary_keeps_one_unknown_attempt(isolated_workspa
                 provider=provider,
                 provider_name=host.settings.provider,
                 model=host.settings.model,
-                budget=COMPACTION_BUDGET,
+                # Direct builder omits the Host catalog; force the same overflow.
+                budget=4_000,
             )
         assert provider.requests == 2
     finally:

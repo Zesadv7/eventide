@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ModelRetryNotice from "../components/ModelRetryNotice.vue";
 import ConnectionNotice from "../components/ConnectionNotice.vue";
 import IndexPreparationOptions from "../components/IndexPreparationOptions.vue";
 import { computed, nextTick, ref, watch } from "vue";
@@ -465,6 +466,10 @@ async function abandon() {
           "
           :status="store.eventConnection"
         />
+        <ModelRetryNotice
+          v-if="isActive && run?.model_retry"
+          :retry="run.model_retry"
+        />
         <RetrievalStatus v-if="run" :state="run.retrieval" />
         <ToolActivity
           v-if="run"
@@ -474,7 +479,7 @@ async function abandon() {
           :active="isActive"
         />
         <p
-          v-if="isActive && !preview?.active"
+          v-if="isActive && !preview?.active && !run?.model_retry"
           class="working-narrative"
           role="status"
         >

@@ -694,3 +694,5 @@ read_file新增可选continuation，带凭据时不能同时传非零offset；�
 报告包含：状态与执行身份（mode/provider/model）、五段中文摘要（发生什么/停在哪/完成了什么/未知项/下一步）、已知原因与待查事项分列、有界工具与 attempt 明细、缺失与不可用清单及固定说明（当前版本不含任务图/恢复关系与恢复动作入口）。事件文本经既有 `redact` 有界截断（约 300 字符）并在响应层替换配置密钥；对话正文、源码、完整工具输出与提示不进入报告。缺事件时 `facts_available=false` 并明确列出不可用，不编造已恢复或已验证。
 
 Vue 新增 `/runs/:runId/diagnostics` 报告页（历史页运行详情提供入口），含加载、错误（保留后端 message）、缺事实、重新生成与高水位绑定展示；下载链接始终携带当前报告的 `high_water`。切换 Run 丢弃迟到响应。本批尚未实现恢复动作入口、证据跳转、Graph/恢复关系、`POST diagnostic-exports` 产物化导出与用户选择内容预览；完整 MK-19 仍进行中。
+
+MK-08B等待状态：Run投影新增可空`model_retry`，含原始attempt/next_attempt/category和绝对`retry_at`（事件ts加delay_seconds）。GET恢复当前等待，不以浏览器重新打开时间重置倒计时；下一次attempt开始、完整response或Run终态清除。旧历史未记录等待时返回null，不猜时间。Vue区分模型请求重试与页面连接重试，仍可停止原任务。
