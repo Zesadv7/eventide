@@ -123,6 +123,17 @@ class DelegateReadonlyArguments(_Arguments):
     tasks: Annotated[list[WorkerTask], Field(min_length=1, max_length=2)]
 
 
+class ToolDiscoverArguments(_Arguments):
+    query: str = ""
+    offset: Annotated[int, Field(ge=0)] = 0
+    limit: Annotated[int, Field(ge=1, le=50)] = 20
+
+
+class ToolLoadArguments(_Arguments):
+    name: NonemptyText
+    expected_catalog_version: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
+
+
 BUILTIN_ARGUMENTS: dict[str, type[BaseModel]] = {
     "bash": BashArguments,
     "read_file": ReadFileArguments,
@@ -138,6 +149,8 @@ BUILTIN_ARGUMENTS: dict[str, type[BaseModel]] = {
     "run_skill_script": RunSkillScriptArguments,
     "search_knowledge": SearchKnowledgeArguments,
     "delegate_readonly": DelegateReadonlyArguments,
+    "tool_discover": ToolDiscoverArguments,
+    "tool_load": ToolLoadArguments,
 }
 
 

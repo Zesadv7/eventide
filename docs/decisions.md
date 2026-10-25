@@ -1285,3 +1285,18 @@ MK-19 的报告不是新的任务状态，也不是可变产物：它是 `(run_i
 **接线契约（后续主任务实施）：** 文件工具执行点从宿主实现切换为：`ToolExecutor` 按会话冻结的 `NativeSandboxPolicy`（含 `default_protected_paths` 派生的状态根/共享 Git 保护）构造 `NativeSandboxRunner`，`start()` 后以 `call(op, **params)` 执行文件操作，`aclose()` 收尾；`NativeSandboxUnavailableError`/`UnsupportedPolicyError` 必须作为明确的工具/会话失败呈现，不得降级到宿主执行；Profile/argv/profile 文本与 worker 版本进入工具指纹与审计证据。API/OpenAPI/页面与实机验证清单见 [架构](architecture.md#native-sandbox-slice)。
 
 **验证：** 44 项离线定向测试（策略边界、能力矩阵、profile/argv 文本、协议与输入边界、真子进程握手与显式失败）、Ruff、Mypy 7 模块（py310 目标）通过；无网络、无模型调用。真实 OS 越界验证（文件/网络/子进程/符号链接/受保护目录/本机管理 API/取消清理）按 MK-21 在本机统一执行。
+
+<a id="adr-109"></a>
+## ADR-109：确定性工具目录发现与版本绑定按需加载（2026-10-26，Accepted）
+
+**状态：Accepted（2026-10-26；MK-16 纵向最小切片已实现并定向验证，API/UI 面板与持久加载回执仍按 [MK-16](../AGENTS.md#maka-upgrade-status) 进行中）。**
+
+**背景：** [MK-16](architecture.md#mk-16工具发现与按需加载) 要求大工具目录先检索/浏览、选中后加载精确 schema，目录快照固定版本，MCP 重连后同名不能换实现，发现不等于授权。
+
+**决策：** 新模块 `eventide/tool_discovery.py` 提供两个原语。`ToolCatalog` 是一次运行的冻结目录快照：目录项含名称、来源（`builtin`/`mcp:<server>`）、schema SHA256 版本指纹、描述、效果类别（readonly/effect）、执行环境、状态与禁用原因，目录版本指纹是对全部条目身份的规范 JSON 哈希；确定性搜索按名称精确/前缀/子串/描述四级排序稳定分页，空查询即浏览。`ToolDiscovery` 是运行内绑定：`tool_discover` 返回分页摘要，`tool_load` 校验同名工具与可选 `expected_catalog_version` 后返回绑定目录版本的 schema 回执，并把该 schema 注册进本运行唯一的 `ToolExecutor`（`register_discovered_tool`，schema 来自同一冻结快照，坏 schema 仍编译失败并拒绝调用）。
+
+**接线与边界：** Host 在工具投影处（`host.py` 工具组装块）把 MCP 工具从默认广告改为按需投影：仅当存在 MCP 工具且非沙箱/只读档案时构建 `ToolDiscovery`，基础工具照旧直接提供，加载后的工具才进入模型目录与 handler；未加载的 MCP 工具既不在目录里也没有 handler，幻觉调用被执行器以 Unknown tool 拒绝。加载不触碰 PolicyEngine：readonly 按 MCP 声明进入受信只读集，effect 工具加载后仍走既有 ASK/审批，默认拒绝语义不变。快照按运行冻结，跨运行重建产生新版本，回执无法复活旧实现。
+
+**取舍与边界：** 快照与加载回执当前在运行内存中，不持久化到事件日志，Workspace 级 HTTP 目录只列真实常备基础目录并明确标注 run-scoped 加载未持久化，不伪造已加载列表；沙箱/只读/plan 模式不开放发现（plan 目录本就过滤掉发现工具）。目录预算测试与已加载面板、加载事实持久化、同名来源竞争 UI 属后续切片。
+
+**验证：** 新增 5 项定向测试覆盖 121 工具分页/空反馈、指纹稳定与漂移、回执与版本校验、未加载拒绝/加载后执行/加载≠授权、按加载状态投影；executor/contracts/tools/worker/mcp 关联 76 项及 host 26 项（3 项基线既有失败见 failure-cases MK16-BASELINE）通过，Ruff/Mypy(4模块) 通过。证据 `.task_outputs/maka-upgrade/tool-discovery/`。

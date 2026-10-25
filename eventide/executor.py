@@ -315,6 +315,27 @@ class ToolExecutor:
             ]
         )
 
+    def register_discovered_tool(
+        self,
+        name: str,
+        input_schema: object,
+        handler: Callable[..., object],
+        *,
+        readonly: bool = False,
+    ) -> None:
+        """Unlock one catalog-frozen tool after an explicit discovery load (MK-16).
+
+        The schema comes from the run's frozen catalog snapshot, so this cannot
+        swap an implementation under a same name; an invalid schema stays a
+        ToolContractError and the call is rejected fail-closed.
+        """
+        self.handlers[name] = handler
+        self.contracts[name] = contract_catalog(
+            [{"name": name, "input_schema": input_schema}]
+        )[name]
+        if readonly:
+            self.readonly_tools.add(name)
+
     async def execute(self, call: ToolCall, context: ToolContext) -> ToolResult:
         handler = self.handlers.get(call.name)
         if handler is None:

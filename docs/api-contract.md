@@ -641,7 +641,7 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 | MK-13 比较评测 | 扩展已有 evaluation plan/confirm/results API，新增比较 manifest 和 arm | model/config/tool/budget/grader/commit 指纹、逐题结果、未尝试/失败/未知 | 比较页面列条件及逐题证据；不同预算显式分组，不做虚假同条件排名 |
 | MK-14 模型目录 | 扩展现有 models/generation/defaults/config test API | 目录来源/版本、端点身份、声明能力、连接/工具/流式验证分别记录 | 设置页能力卡、验证状态和覆盖差异；配置保存不冒充已通过连接 |
 | MK-15 搜索 | 扩展 `search_text` 工具 schema/结果，受控证据读取复用 MK-02 | literal/regex、context_lines、backend、文件版本、扫描/省略计数 | 搜索结果定位与上下文预览，正则不支持/不完整明确呈现；无原生工具时不宿主回退 |
-| MK-16 发现 | `GET /api/workspaces/{id}/tools?query=...`；目录项详情；Run 已加载工具查询；模型 discover/load 工具 | catalog_version、schema digest、来源、环境、权限、loaded、禁用原因 | 工具目录页+会话已加载面板；加载不自动授权，目录变更提示及同名来源区分 |
+| MK-16 发现 | 已实现：`GET /api/workspaces/{id}/tools?query=&offset=&limit=` 返回常备基础目录（catalog_version、schema digest、来源、环境、effect、status、provided；loaded 恒为 false，run-scoped 加载未持久化并在 loading_note 说明）；Run 内模型 `tool_discover`/`tool_load` 工具及加载回执（绑定 catalog_version 与 schema digest）。未实现：Run 已加载工具查询 API、工具目录页+会话已加载面板 | 加载不自动授权，执行仍过 Policy；目录版本变更需重新 discover |
 | MK-17 旁枝 | `POST /api/sessions/{id}/side-questions`；复用子 Session 查询/SSE；`POST /api/side-questions/{id}/return` | source highwater、snapshot、引用、只读边界、回传身份及 consumed 状态 | 聊天旁栏、引用来源、刷新背景、回传预览；主任务继续、回传只消费一次 |
 | MK-18 记忆 | 复用 memory records/suggestions/settings CRUD；扩展自然语言来源和保存回执；不开放任意模型授权写入口 | explicit/suggested、canonical source/span、scope、revision、撤销/冲突、抽取 attempt | “已记住+撤销”、建议确认卡和管理页；来源可查，“这次”不会存成长期偏好 |
 | MK-19 报告 | 切片一已实现：`GET /api/runs/{id}/diagnostics`（可选 `high_water`）与 `GET /api/runs/{id}/diagnostics/download?format=json\|markdown`；完整计划保留 `POST /api/runs/{id}/diagnostic-exports` 产物化导出（未实现，见下方小节） | 确定/推测原因、失败点、已完成工作、未知项、脱敏字段、证据/缺失、report_version | 人话摘要、诊断详情、导出预览/选择内容；不自动上传，不夹带密钥/整仓源码 |

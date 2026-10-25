@@ -490,7 +490,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-13 | 待开始 | 同条件外部Agent及单项消融比较器/页面，冻结开发留出；真实比较放最终批次。 |
 | MK-14 | 待开始 | 版本化模型/端点能力目录、配置/连接/工具验证分开；设置页能力卡。 |
 | MK-15 | 进行中 | 正则/上下文行/过滤及版本化搜索证据，后端能力明确；源码定位UI。 |
-| MK-16 | 进行中 | 大目录发现/精确schema按需加载、冻结版本/权限/环境；工具目录和已加载面板。 |
+| MK-16 | 进行中 | 2026-10-26纵向最小切片：`tool_discovery.py`确定性目录快照（版本指纹/来源/效果/环境/状态）与四级排序分页搜索；`tool_discover`/`tool_load`模型工具加载精确schema回执并绑定目录版本，Host在存在MCP工具且非沙箱/只读时把MCP工具改为按需投影（host.py工具组装块），未加载调用被Unknown tool拒绝、加载不改变Policy审批；`ToolExecutor.register_discovered_tool`只解锁同快照schema。新增5项定向、executor/contracts/tools/worker/mcp关联76项通过，host26项中3项为基线3898ffc既有失败（failure-cases MK16-BASELINE），Ruff/Mypy4模块通过；`GET /api/workspaces/{id}/tools`提供常备基础目录，不伪造已加载。ADR-109；已加载面板/加载事实持久化/Run已加载查询API及真实Host+MCP端到端旅程待后续。 |
 | MK-17 | 待开始 | 独立只读旁枝、主任务已提交快照、用户选择回传；聊天侧栏及消息幂等接线。 |
 | MK-18 | 进行中 | 自然语言长期记忆、可信原话/作用域、推测确认、撤销；保存提示/建议/管理联动。 |
 | MK-19 | 进行中 | 2026-10-26切片一：`eventide/diagnostics.py`事实投影+`GET /api/runs/{id}/diagnostics`及`download?format=json\|markdown`，报告绑定`(run_id, high_water)`、`report_version=1`，旧版本不随后续事件漂移；中文五段摘要（发生/停驻/完成/未知/下一步）、已知原因与待查分列、事件文本有界脱敏、缺事件明确不可用；生成不调用模型、不执行工具、不追加事件、不自动外发。Vue报告页`/runs/:runId/diagnostics`+历史页运行详情入口，覆盖加载/错误/缺事实/重新生成与高水位绑定下载。后端12项、前端6项定向、vue-tsc/Vite构建/OpenAPI/schema重生成/4资源打包、Ruff、3.10目标Mypy通过；验证失败已登记MK19-ZCODE。ADR-107、api-contract/architecture切片小节同步；恢复动作入口、证据跳转、Graph/恢复关系、产物化导出未实现，不宣称故障报告完成。 |

@@ -706,3 +706,10 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 第二次旅程已通过重试显示/刷新/同Run完成，但末尾检查误用HTTP原始Run的run_id字段（服务返回id，前端客户端才归一化run_id），导致诊断请求404；retry-browser-green.log保留该失败。修正为id并显式检查HTTP状态，避免把错误响应当报告。
 - MK08-UI最终实测旅程1/1通过（retry-browser-final.log），两次请求/一个Run、重试等待跨刷新恢复、终态清除提示均核实；2项投影、21项前端关联、类型检查、Ruff/Mypy与构建通过。应用真实模型效果未测，fixture明确为scripted。
 - MK-INTEGRATE-CONTEXT定向失败全部复验通过：首次171项中163通过，44项后续中6项原失败修正，最终2项通过（context-final.log）。未重复全仓；所有171个不同用例已通过，保留每次失败原日志。
+
+## MK16-BASELINE：基线3898ffc的3项host回归失败（2026-10-26）
+
+- 分类：意外回归（基线已存在，非本切片引入）。本切片运行受影响定向测试 `pytest tests/test_host.py` 退出1：`test_tool_catalog_stays_within_its_budget`（目录4746字符超过4000预算）、`test_long_turn_folds_older_tool_results_instead_of_failing`、`test_context_checkpoint_survives_reopen_and_rebuild`。
+- 基线复验：git stash回到3898ffc原样重跑同样3项均失败，证明与本切片工具发现改动无关；恢复工作区后本切片新增5项及executor/contracts/tools定向共56项通过。证据 `.task_outputs/maka-upgrade/tool-discovery/host-after.log`。
+- 已证实原因：待查（catalog预算超限疑似Q系列工具描述增长所致；另两项中断前未定位）。处理与修复由工具目录预算归属的集成任务决定，本切片不放宽断言、不改工具描述。
+- 经验：在共享基线上开工前先跑受影响套件并保留基线复验证据，避免把既有失败误算进本切片结果。

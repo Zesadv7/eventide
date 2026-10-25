@@ -91,6 +91,7 @@ from eventide.task_plan import plan_update
 from eventide.task_plan import prompt as task_plan_prompt
 from eventide.task_plan import summary as plan_summary
 from eventide.tool_contracts import production_tool_catalog
+from eventide.tool_discovery import ToolDiscovery
 from eventide.tool_loops import failure_fingerprint, failure_loop_candidate
 from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
 from eventide.tool_results import reader as tool_result_reader
@@ -3332,15 +3333,28 @@ class RuntimeHost:
                 and not readonly_profile and not snapshot_execution and not sandbox_execution
                 else []
             )
-            tools = [
+            base_tools = [
                 *self.tools,
                 READ_TOOL_RESULT_TOOL,
                 TODO_WRITE_TOOL,
                 *skill_tools,
                 *rag_tools,
-                *manager.tools,
                 *worker_tools,
             ]
+            discovery = (
+                ToolDiscovery(
+                    base_tools,
+                    manager.tools,
+                    manager.handlers,
+                    readonly_names=manager.readonly_tools,
+                )
+                if manager.tools and not sandbox_execution and not readonly_profile
+                else None
+            )
+            tools = [
+                *base_tools,
+                *manager.tools,
+            ] if discovery is None else [*base_tools, *discovery.model_tools()]
             tools = run_policy.filter_tool_catalog(tools, mode)
             handlers = {
                 **self.handlers,
@@ -3353,7 +3367,7 @@ class RuntimeHost:
                 **({"load_skill": load_skill, "read_skill_resource": read_skill_resource,
                     "run_skill_script": run_skill_script} if skills else {}),
                 **rag_handlers,
-                **manager.handlers,
+                **(discovery.handlers() if discovery is not None else manager.handlers),
                 **({"delegate_readonly": delegate_readonly} if worker_tools else {}),
             }
             if sandbox_execution:
@@ -3404,6 +3418,8 @@ class RuntimeHost:
                 file_operations=self.file_operations if not sandbox_execution else None,
                 workspace_id=execution_workspace.workspace_id,
             )
+            if discovery is not None:
+                discovery.bind_executor(executor)
             runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)
             if worker_tools:
                 runtime_readonly_tools.add("delegate_readonly")
