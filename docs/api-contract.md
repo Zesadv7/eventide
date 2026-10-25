@@ -111,6 +111,23 @@ Run事件流可显式传`include_preview=true`接收`event: model.preview`。此
 
 前端：上下文指示器分母、审批超时文案、停驻文案。请求失败前端使用默认值。
 
+### `GET /api/runtime/contract` —— 已实现（MK-00 契约切片）
+
+显式 Web API 契约版本与真实能力发现；`schema_version` 只读自当前运行库（`schema_migrations` 的实际版本，当前为 6），运行库不可读时返回 503，不猜测。`capabilities` 只列已实现能力，新增或退役条目必须与实现同一提交；未实现的 MK 计划项不得出现。
+
+```json
+{
+  "contract_version": 1,
+  "schema_version": 6,
+  "runtime_version": "0.5.0",
+  "capabilities": ["projects", "sessions", "runs", "approvals", "attachments", "worktrees",
+    "delivery", "file_undo", "skills", "mcp", "retrieval", "memory", "usage_ledger",
+    "evaluations", "history_import", "docker_sandbox", "workbench"]
+}
+```
+
+前端启动时先读取该接口：`contract_version` 与前端构建支持的版本精确相等才挂载工作台；不匹配显示"前后端版本不兼容"屏障页（含服务端契约/数据/程序版本与升级指引），连接失败或服务错误显示"暂时无法确认服务兼容性"并区分网络故障与版本问题，两者都提供"重新检查"入口；屏障期间不渲染任何写入口。前端常量为 `src/api/contract.ts` 的 `SUPPORTED_CONTRACT_VERSION`，破坏性 API 变更必须前后端同提交升版本。
+
 ### Run summary 增加 `usage` —— 已实现
 
 `GET /api/sessions/{id}/runs` 与 `latest_run` 每条 Run 增加 `usage: {"input_tokens": n, "output_tokens": n}`，供用量分区的会话累计。
@@ -590,7 +607,7 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 <a id="maka-upgrade-api"></a>
 ## Maka 升级接口与前端计划（设计草案，全部待实现）
 
-本节仅对应 [完整方案](architecture.md#maka-upgrade-plan) 的接口/UI 设计，不属于上文“已实现”的接口。路径、事件名和 DTO 为评审草案，MK-00 冻结后再生成 OpenAPI/TypeScript；本轮没有新增 HTTP 路由或前端组件。既有接口继续按上文工作，不能根据本节提前调用。
+本节对应 [完整方案](architecture.md#maka-upgrade-plan) 的接口/UI 设计。MK-00 契约切片已实现（见上文 `GET /api/runtime/contract` 与 Vue 启动屏障），其余路径、事件名和 DTO 仍为评审草案，实现前不生成 OpenAPI/TypeScript；既有接口继续按上文工作，不能根据本节提前调用。
 
 ### 共用协议
 
@@ -608,7 +625,7 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 
 | 计划 | 后端契约与拟议 HTTP 入口 | 事件/字段重点 | 前端交付与浏览器验收 |
 |---|---|---|---|
-| MK-00 迁移 | 扩展 `GET /api/runtime/settings` 或能力接口，返回契约/数据版本与可用功能；迁移在服务启动维护阶段执行 | `contract_version/schema_version/migration_status`，只读旧历史支持集 | 版本不兼容页、迁移结果和替代入口；旧会话、记忆、diff/undo、账本仍可访问 |
+| MK-00 迁移 | 扩展 `GET /api/runtime/settings` 或能力接口，返回契约/数据版本与可用功能；迁移在服务启动维护阶段执行 | `contract_version/schema_version/migration_status`，只读旧历史支持集 | 版本不兼容页、迁移结果和替代入口；旧会话、记忆、diff/undo、账本仍可访问。**契约切片已实现**：`GET /api/runtime/contract`（真实 schema 版本 + 已实现能力表）与 Vue 启动兼容屏障/重试已上线，见上文"MK-00 契约切片"；`migration_status` 与迁移维护页仍随完整迁移底座待实现 |
 | MK-01 编辑唯一性 | 扩展 `edit_file` 工具 schema/错误 metadata；沿用现有 file-operations 列表/详情/undo | `ambiguous_match/source_changed`、版本、匹配数量和有界位置；成功关联 operation_id | 工具卡显示为什么没改、可跳源码；现有红绿 diff/撤销保持，歧义时文件和差异列表不新增成功记录 |
 | MK-02 文件分页 | `read_file` 返回不透明 continuation_token；受控证据读取接口接同一版本凭据 | Workspace/文件内容版本、行及行内范围、完整性、next_token | 连续读取/文件变化提示/定位；旧页不与新页悄悄拼接 |
 | MK-03 摘要 | `GET /api/runs/{run_id}/context/summaries`；只读查看，生成由 Runtime 调度 | covered_seq、来源 digest、schema_version、证据引用、校验结果 | 上下文侧栏显示替换范围、失败原因、原文入口；刷新保持同一版本 |

@@ -3,11 +3,14 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { isNavigationFailure, useRoute, useRouter } from "vue-router";
 import { confirmUnsavedChanges } from "./composables/useUnsavedChanges";
 import { useWorkbench } from "./stores/workbench";
+import { useContractGate } from "./stores/contract";
 import EventideLogo from "./components/EventideLogo.vue";
 import ThemeControl from "./components/ThemeControl.vue";
 import ProjectFolderPicker from "./components/ProjectFolderPicker.vue";
 import PageBack from "./components/PageBack.vue";
+import ContractBarrier from "./components/ContractBarrier.vue";
 const store = useWorkbench(),
+  gate = useContractGate(),
   router = useRouter(),
   route = useRoute(),
   path = ref(""),
@@ -85,9 +88,18 @@ const links = [
   ["/deliveries", "修复交付"],
   ["/usage", "用量"],
 ];
-onMounted(async () => {
+// The workbench only boots after the backend contract matches this build.
+// An incompatible server keeps the barrier up, so no write path is reachable.
+let workbenchBooted = false;
+async function boot() {
+  await gate.runCheck();
+  if (!gate.compatible || workbenchBooted) return;
+  workbenchBooted = true;
   await store.initialize();
   store.startPolling();
+}
+onMounted(() => {
+  void boot();
 });
 onUnmounted(() => store.dispose());
 async function selectSession(id: string) {
@@ -148,7 +160,9 @@ async function add() {
 }
 </script>
 <template>
+  <ContractBarrier v-if="gate.blocking" @retry="boot" />
   <div
+    v-else
     class="app-shell"
     :class="{ 'sidebar-collapsed': collapsed, 'chat-shell': isChat }"
     @keydown.esc="sidebar = false"

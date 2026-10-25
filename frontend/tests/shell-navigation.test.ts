@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
@@ -12,7 +12,26 @@ beforeEach(() => {
   sessionStorage.clear();
   setActivePinia(createPinia());
 });
+afterEach(() => vi.unstubAllGlobals());
 async function setup(path = "/chat/session-1", dirty = false) {
+  // The shell only boots after the runtime contract matches this build.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/runtime/contract")) {
+        return new Response(
+          JSON.stringify({
+            contract_version: 1,
+            schema_version: 6,
+            runtime_version: "test",
+            capabilities: [],
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected fetch: ${String(input)}`);
+    }),
+  );
   const store = useWorkbench();
   store.loading = false;
   store.selectedWorkspace = "workspace-1";

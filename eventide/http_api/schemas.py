@@ -84,3 +84,12 @@ class ProviderSaveBody(ProviderConfigBody):
 
 class ProviderResetBody(BaseModel):
     expected_config_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class RuntimeContractResponse(BaseModel):
+    """MK-00 contract identity; frontend gates on exact contract_version match."""
+
+    contract_version: int
+    schema_version: int
+    runtime_version: str
+    capabilities: list[str]

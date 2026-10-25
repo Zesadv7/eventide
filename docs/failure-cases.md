@@ -598,3 +598,16 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 后续核验：核心83项已通过（recovery/core.log）；Ruff变更范围检查退出1，详情recovery/ruff.log，尚待修正。关联pytest命令误用了不存在的tests/test_model_slots.py（同时检查实际日志是否有其他缺失文件），收集退出4，未执行测试；这是主代理测试调用问题，非应用失败，命令和现象保留recovery/regression.log，改用实际文件名后复验。
 
 - 已证实原因及处理：结构化账单429被HTTP状态覆盖、裸数字子串被误当状态码；调整结构化优先级与状态码边界，未知Retry-After不授权重试。另补累计等待与模型执行耗时分离、服务商执行项立即停止，避免随后超时丢失边界证据。核心83项、关联96项均通过，Ruff复验与Mypy11模块通过，证据recovery/core.log、regression.log、ruff-green.log、mypy.log。静态失败仅新增测试导入排序和循环闭包绑定，已修复。错误文件名日志已另存regression-command-error.log；实际test_scheduler.py及其他关联范围合计96项通过。相关提交由本记录所在提交定位；无真实模型效果结论。参与为ZCode初版实现、主代理独立复现和修正，可追问如何区分账单与限流、为何等待额度不应包含单次请求时间。
+
+## MK00-ZCODE：MK-00 契约切片首轮新增测试与组件初版失败（2026-10-26）
+
+- 类型：测试问题与静态检查问题，非生产缺陷；发生在新增代码首次验证，无线上影响。基线 5acba20，隔离 worktree codex/maka-contract。
+- 复现命令与现象（2026-10-26，日志 .task_outputs/maka-upgrade/contract/first-run-failures.log）：
+  1. `uv run pytest tests/test_state_copy_migration.py -q` 首轮 1 项失败：断言 `file.operation` 事实总数为 1，实际为 2。追加式账本对同一次操作分别保留 prepared 与 completed 两条事实属既有设计（`FileOperations.write` 先 prepare 再 `_record` 完成），是新增测试预期写错，不是重复迁移。
+  2. `vue-tsc --noEmit` 首轮 3 个类型错误：`Number.isSafeInteger` 不收窄 unknown 导致 contract_version 赋值报错；ContractBarrier 模板在联合类型 `ContractCheck` 上直接取 `.message`。组件初版编写问题。
+  3. `ruff check` 首轮 2 项：新增测试一行 101 字符超限、未使用的 `asyncio` 导入。
+- 已证实原因与处理：均为新增测试/组件初版的预期或类型收窄写法问题，生产代码（store/api 契约路由）无改动。测试断言改为按唯一 operation_id 去重后核对 prepared+completed 两条事实；`asContract` 先做 `typeof` 收窄，屏障组件用 `failure`/`serverFacts` computed 在联合类型上收窄；Ruff 拆行并删除未用导入。
+- 复验：修正后仅重跑受影响范围——`tests/test_runtime_contract.py` + `tests/test_state_copy_migration.py` 7 项通过；`tests/contract.test.ts` + `tests/shell-navigation.test.ts` 16 项通过；vue-tsc、Ruff 全仓、Prettier 均通过。随后定向回归 40 项后端 API/错误/导入/开发接口、前端全量 232 项、3 条真实浏览器契约旅程、真实 HTTP 契约读取全部通过（完整清单见 .task_outputs/maka-upgrade/contract/*.log）。
+- 相关提交：见本切片本地提交（MK-00 契约切片）。
+- 经验：对追加式事实账本写"数量等于 N"断言前，先核对该操作会追加几条事实；联合类型的结果对象在模板里取字段前先用 computed 收窄。
+- 实际参与及可追问点：本切片子代理独立编写并复验；可解释 file.operation 两条事实的状态机与 `records()` 去重投影的关系；不能把首轮失败描述成兼容性回归。
