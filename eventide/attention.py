@@ -116,9 +116,11 @@ def summarize_tool_call(
     }
 
 
-def _approval_items(runtime: RuntimeHost, limit: int) -> list[dict[str, Any]]:
+def _approval_items(
+    runtime: RuntimeHost, limit: int, project_id: str | None,
+) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for fact in runtime.store.pending_approval_facts(limit):
+    for fact in runtime.store.pending_approval_facts(limit, project_id):
         payload = fact["payload"] if isinstance(fact["payload"], dict) else {}
         run = runtime.store.get_run_summary(fact["run_id"])
         if run is None:
@@ -156,9 +158,9 @@ def _approval_items(runtime: RuntimeHost, limit: int) -> list[dict[str, Any]]:
     return items
 
 
-def _run_items(runtime: RuntimeHost, limit: int) -> list[dict[str, Any]]:
+def _run_items(runtime: RuntimeHost, limit: int, project_id: str | None) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for run_id in runtime.store.recent_failed_run_ids(limit):
+    for run_id in runtime.store.recent_failed_run_ids(limit, project_id):
         run = runtime.store.get_run_summary(run_id)
         if run is None:
             continue
@@ -194,10 +196,7 @@ def _delivery_items(runtime: RuntimeHost, project_id: str | None) -> list[dict[s
     controller = WebDeliveryController(runtime)
     items: list[dict[str, Any]] = []
     for scope in projects:
-        try:
-            details = controller.list(scope)
-        except ValueError:
-            continue
+        details = controller.list(scope)
         for detail in details:
             if detail.get("repair_status") != "passed" or detail.get("applied"):
                 continue
@@ -226,33 +225,15 @@ def collect_attention(
     run_limit: int = RUN_LIMIT,
 ) -> dict[str, Any]:
     """Project the pending-attention lists; a pure read over committed facts."""
-    workspace_scopes: set[str] | None = None
     if project_id is not None:
-        project = next(
-            (record for record in runtime.store.list_projects()
-             if record.project_id == project_id),
-            None,
-        )
-        if project is None:
-            raise ValueError(f"Project not found: {project_id}")
-        workspace_scopes = {project.source_workspace_id}
-    if workspace_scopes is None:
-        workspace_scopes = {
-            record.source_workspace_id for record in runtime.store.list_projects()
-        }
-
-    approvals = [
-        item for item in _approval_items(runtime, approval_limit)
-        if item["workspace_id"] in workspace_scopes
-    ]
-    runs = [
-        item for item in _run_items(runtime, run_limit)
-        if item["workspace_id"] in workspace_scopes
-    ]
+        runtime.store.get_project(project_id)
+    approvals = _approval_items(runtime, approval_limit, project_id)
+    runs = _run_items(runtime, run_limit, project_id)
     deliveries = _delivery_items(runtime, project_id)
     return {
         "generated_at": time.time(),
         "project_id": project_id,
+        "limits": {"approvals": approval_limit, "runs": run_limit},
         "counts": {
             "approvals": len(approvals),
             "runs": len(runs),

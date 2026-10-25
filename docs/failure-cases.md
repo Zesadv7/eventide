@@ -812,3 +812,9 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 处理：仅改 `eventide/attention.py` 与测试文件；store 审批查询/路由/API 注册未因此改动语义。取消路径确认不补发 `approval.resolved`，过期审批保留事实并由原端点拒绝，已写成测试断言。
 - 复验：最终 `tests/test_attention_api.py` 5 项与 `tests/test_api.py` 25 项全部通过；Ruff 5 文件、Mypy py310 目标 4 模块、vue-tsc、Prettier 通过；前端 3 项通过。
 - 经验：新视图的状态判定必须对照 `RuntimeStateProjection` 的实际状态机（含 `waiting_for_user`），不能凭直觉枚举；投影层读 `get_run_summary` 时不能假设 runs 行携带 workspace 属性。无遗留未验证项；全量、浏览器与真实平台验证按切片规划另行执行。
+
+### MKATTN-REVIEW — 项目待处理事项被全局限额遮蔽
+
+- 2026-10-26 主代理受控复现，基线b12e7cc；`pytest tests/test_attention_api.py -k project_filter` 1失败，日志`.task_outputs/maka-upgrade/attention/review-red.log`。投影先全局截取再过滤项目，其他项目的新失败挤掉目标项目旧事项，误显示没有；同处仅以source_workspace_id过滤会漏执行副本。将项目过滤下沉SQLite查询，并明确返回展示上限，不把有界条数宣称全部。待修复复验。
+- 主代理修改后6项attention专项通过；Ruff复核失败（review-ruff.log），Mypy因前序失败未执行，待按静态诊断修正。
+- MKATTN-REVIEW修复后6项后端、3项前端、vue-tsc、Ruff/Mypy2模块通过。项目过滤在SQL LIMIT之前，使用workspace_projects覆盖执行副本；跨会话按时间/rowid排序，页面明确是最近有界展示数量；移除交付查询异常静默跳过。静态失败3处长行已拆行复验（review-ruff-final.log）。

@@ -65,6 +65,7 @@ export interface AttentionDelivery {
 export interface AttentionSnapshot {
   generated_at: number;
   project_id: string | null;
+  limits?: { approvals: number; runs: number };
   counts: { approvals: number; runs: number; delivery_candidates: number };
   approvals: AttentionApproval[];
   runs: AttentionRun[];

@@ -219,3 +219,28 @@ def test_summarize_tool_call_never_guesses_undeclared_scope():
     assert unknown["mcp_tool"] == "read"
     assert unknown["impact"] is None
     assert unknown["network_access"] is None
+
+
+def test_project_filter_precedes_limit_and_global_includes_all_projects(isolated_workspace):
+    from eventide.attention import collect_attention
+
+    runtime = RuntimeHost(settings_for(isolated_workspace))
+    first_path, second_path = isolated_workspace / "one", isolated_workspace / "two"
+    first_path.mkdir()
+    second_path.mkdir()
+    first = runtime.resolve_or_register_workspace(first_path)
+    second = runtime.resolve_or_register_workspace(second_path)
+    for index, workspace in enumerate((first, second)):
+        session = runtime.create_session(workspace_id=workspace.workspace_id)
+        run = f"attention_run_{index}"
+        runtime.store.create_run(run, session)
+        runtime.store.append_event(run, "approval.required", {
+            "approval_id": f"approval_{index}", "tool": "bash", "arguments": {"command": "rm x"},
+        })
+        runtime.store.append_event(run, "run.failed", {"error": "test failure"})
+    scoped = collect_attention(runtime, project_id=first.project_id, approval_limit=1, run_limit=1)
+    assert [item["run_id"] for item in scoped["runs"]] == ["attention_run_0"]
+    assert [item["run_id"] for item in scoped["approvals"]] == ["attention_run_0"]
+    assert scoped["limits"]["runs"] == 1
+    runtime.store.close()
+    runtime._lease.close()

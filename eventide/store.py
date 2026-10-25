@@ -1252,7 +1252,9 @@ class RuntimeStore:
             ).fetchall()
         return [row["id"] for row in rows]
 
-    def pending_approval_facts(self, limit: int = 50) -> list[dict[str, Any]]:
+    def pending_approval_facts(
+        self, limit: int = 50, project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Approval.required facts without a resolution in the same run, newest first.
 
         Expired approvals of terminal runs stay in the facts; callers may only
@@ -1266,13 +1268,15 @@ class RuntimeStore:
                 "SELECT e.event_id, e.run_id, e.session_id, e.ts, e.payload_json, "
                 "s.workspace_id FROM runtime_events e "
                 "JOIN sessions s ON s.id=e.session_id "
-                "WHERE e.type='approval.required' AND e.partial=0 "
+                "JOIN workspace_projects wp ON wp.workspace_id=s.workspace_id "
+                "WHERE (? IS NULL OR wp.project_id=?) "
+                "AND e.type='approval.required' AND e.partial=0 "
                 "AND NOT EXISTS (SELECT 1 FROM runtime_events x WHERE x.run_id=e.run_id "
                 "AND x.type='approval.resolved' AND x.session_seq>e.session_seq "
                 "AND json_extract(x.payload_json,'$.approval_id')"
                 "=json_extract(e.payload_json,'$.approval_id')) "
-                "ORDER BY e.session_seq DESC LIMIT ?",
-                (limit,),
+                "ORDER BY e.ts DESC, e.rowid DESC LIMIT ?",
+                (project_id, project_id, limit),
             ).fetchall()
         return [
             {
@@ -1285,17 +1289,20 @@ class RuntimeStore:
             for row in rows
         ]
 
-    def recent_failed_run_ids(self, limit: int = 20) -> list[str]:
+    def recent_failed_run_ids(self, limit: int = 20, project_id: str | None = None) -> list[str]:
         """Runs whose newest terminal fact is a failure or interruption, newest first."""
         if not 1 <= limit <= 100:
             raise ValueError("Attention run limit must be between 1 and 100")
         with self._lock:
             rows = self._connection.execute(
                 "SELECT e.run_id, MAX(e.ts) last_ts FROM runtime_events e "
-                "WHERE e.type IN ('run.failed','run.interrupted') AND e.partial=0 "
+                "JOIN sessions s ON s.id=e.session_id "
+                "JOIN workspace_projects wp ON wp.workspace_id=s.workspace_id "
+                "WHERE (? IS NULL OR wp.project_id=?) "
+                "AND e.type IN ('run.failed','run.interrupted') AND e.partial=0 "
                 "AND e.run_id IS NOT NULL GROUP BY e.run_id "
                 "ORDER BY last_ts DESC LIMIT ?",
-                (limit,),
+                (project_id, project_id, limit),
             ).fetchall()
         return [row["run_id"] for row in rows]
 

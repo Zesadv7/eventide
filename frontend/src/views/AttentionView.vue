@@ -102,14 +102,17 @@ function formatTool(summary: {
         <p class="eyebrow">ATTENTION / INBOX</p>
         <h1>待处理中心</h1>
         <p class="muted">
-          汇总待审批、失败运行与待采纳候选，全部来自已提交的运行事实；只读投影，
-          操作复用各页面既有接口，不自动采纳任何候选。
+          汇总待审批、失败运行与待采纳候选，来源于任务的实际记录。你可以处理审批、查看失败原因，或检查待采纳的修改。
         </p>
       </div>
       <button :disabled="loading" @click="load">刷新</button>
     </header>
     <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
     <template v-if="state">
+      <p v-if="state.limits" class="muted">
+        当前最多展示 {{ state.limits.approvals }} 条最近审批和
+        {{ state.limits.runs }} 条最近失败或停驻记录；下列数字是本页显示数量。
+      </p>
       <p class="muted">
         待审批 {{ state.counts.approvals }} · 失败/停驻运行
         {{ state.counts.runs }} · 待采纳候选
