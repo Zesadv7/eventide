@@ -72,9 +72,10 @@ def run_regex_batch(
     stderr is read only after stdout ends, because backend diagnostics are a
     few lines and cannot deadlock a bounded stdout reader.
     """
-    argv = [binary, "--json", "--no-messages", "-e", pattern]
+    argv = [binary, "--no-config", "--json", "--no-messages", "-e", pattern]
     argv.append("-s" if case_sensitive else "-i")
-    argv.extend(relative_paths)
+    argv.append("--")
+    argv.extend(f"./{path}" for path in relative_paths)
     deadline = time.monotonic() + max(deadline_seconds, 0.05)
     try:
         process = subprocess.Popen(
@@ -106,7 +107,14 @@ def run_regex_batch(
             break
     if outcome != "completed":
         process.kill()
-    process.wait()
+        process.wait()
+    else:
+        try:
+            process.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            outcome = "timeout"
+            process.kill()
+            process.wait()
     stderr = process.stderr.read() or b""
     process.stdout.close()
     process.stderr.close()
@@ -148,5 +156,5 @@ def _parse_matches(raw: bytes) -> list[ReportedMatch]:
             first = submatches[0]
             if isinstance(first, dict) and isinstance(first.get("start"), int):
                 byte_start = first["start"]
-        matches.append(ReportedMatch(path_text, number, line_text, byte_start))
+        matches.append(ReportedMatch(path_text.removeprefix("./"), number, line_text, byte_start))
     return matches
