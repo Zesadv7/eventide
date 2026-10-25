@@ -726,3 +726,12 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 2026-10-26，基线7e71b8f+快照增量；Ruff报epoch预览序列化行101字符（`.task_outputs/maka-upgrade/integration/epoch-ruff.log`），已拆行。后端14项、前端22项及typecheck已通过；Mypy前一命令因&&未执行，不计通过。真实浏览器复验进行中。
 - MK08A-EPOCH最终Ruff/Mypy3模块、OpenAPI/类型生成与构建通过，built实际浏览器断网/联网/刷新旅程1/1通过（epoch-browser.log）；模型/工具副作用未因重连重复。
 - MK16-BASELINE关联集成复验43项通过（integration/discovery.log），其中原Host目录/上下文基线失败已由MK-INTEGRATE-CONTEXT调整机制fixture修复；不改生产预算、冻结评测结果。
+
+## MK18-INTAKE：自然语言记忆切片首轮测试失败（2026-10-26）
+
+- 分类：测试问题（非生产缺陷回归）。基线3898ffc，本切片新增实现后首轮定向验证。
+- 失败1：`pytest tests/test_memory_intake.py::test_plain_remember_repeats_into_pending_suggestion` 退出1（memory-intake/red.log）：断言 `state()["suggestions"]` 为空即挂——`PreferenceMemory.state()` 不带 project_id 时按 scope_matches 过滤项目级建议，断言取数口径错误，抽取/建议链路实际正常（调试脚本显示两条 observed 指纹一致、第二条收到 memory.suggested 回执）。另同一用例先用例未共享 session（RunRequest 缺省各建新会话），同会话重复前提不成立。修正为显式 `host.create_session()` + `state(project_id)`。
+- 失败2：前端 `vitest tests/memory.test.ts` 新增撤销用例两次失败（memory-intake/vitest-red.log）：`wrapper.find("button")` 命中面板首个“刷新记录”按钮而非撤销按钮，导致 revoke 未被调用、以及撤销后断言 `find("button").exists()` 仍命中刷新按钮。改为按文本查找/断言撤销按钮。
+- 已证实原因与处理：均为新测试编写问题；生产实现无改动。复验：`pytest tests/test_memory_intake.py tests/test_preference_memory.py` 56 项通过；`vitest run tests/memory.test.ts` 14 项通过；Ruff（2 生产模块+新测试）、Mypy 2 模块、vue-tsc 通过。Ruff 首轮 3 项 E501/类型收窄（mypy 4 项）同步修正，属同批静态问题。
+- 经验：记忆 state 投影按作用域过滤，断言必须带明确 project_id；包含刷新按钮的面板用文本定位目标按钮。
+- 实际参与及可追问点：本切片子代理独立实现与复验；可解释 intake 分类器令牌循环与 span 偏移换算；未调用付费模型、未跑全量/浏览器。

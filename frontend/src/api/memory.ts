@@ -6,6 +6,7 @@ export interface MemorySource {
   type: "manual" | "explicit" | "suggestion";
   event_ids: string[];
   session_id: string | null;
+  span?: { start: number; end: number };
 }
 export interface MemoryRecord {
   id: string;
@@ -49,6 +50,11 @@ export interface RunMemory {
     memory_id?: string;
     suggestion_id?: string;
     reason?: string;
+    revision?: number;
+    key?: string;
+    content?: string;
+    scope?: MemoryScope;
+    scope_defaulted?: boolean;
   }[];
 }
 export interface MemoryCreate {

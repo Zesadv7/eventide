@@ -8,6 +8,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from eventide.memory_intake import TEMPORARY, classify, natural_key
 from eventide.workspace import digest
 
 if TYPE_CHECKING:
@@ -293,26 +294,42 @@ class PreferenceMemory:
             return []
         parsed = self.parse(text)
         if parsed is None:
-            if re.match(r"^(?:记住|remember)\s*[：:]", text.strip(), re.I):
-                return [
-                    {
-                        "type": "memory.rejected",
-                        "reason": (
-                            "请在记忆设置中确认内容及作用域，或使用："
-                            "记住：项目：response_language=用中文回答"
-                        ),
-                    }
-                ]
-            return []
+            outcome = classify(text)
+            if outcome is None:
+                if re.match(r"^(?:记住|remember)\s*[：:]", text.strip(), re.I):
+                    return [
+                        {
+                            "type": "memory.rejected",
+                            "reason": (
+                                "请在记忆设置中确认内容及作用域，或使用："
+                                "记住：项目：response_language=用中文回答"
+                            ),
+                        }
+                    ]
+                return []
+            if outcome["kind"] == "rejected":
+                return [{"type": "memory.rejected", "reason": outcome["reason"]}]
+            parsed = outcome
+        if TEMPORARY.search(text):
+            return [
+                {
+                    "type": "memory.rejected",
+                    "reason": "“这次”之类的临时要求不会自动保存为长期记忆。",
+                }
+            ]
         session = self.host.store.get_session(run["session_id"])
         assert session is not None
         workspace = self.host.store.get_workspace(session["workspace_id"])
         parsed["project_id"] = workspace.project_id if parsed["scope"] == "project" else None
+        if parsed["key"] is None:
+            parsed["key"] = natural_key(parsed["scope"], parsed["content"])
         origin = {
             "type": "explicit" if parsed["explicit"] else "suggestion",
             "session_id": run["session_id"],
             "event_ids": [source["event_id"]],
         }
+        if "span" in parsed:
+            origin["span"] = parsed["span"]
         try:
             record = self._record(parsed, origin)
         except ValueError:
@@ -358,7 +375,17 @@ class PreferenceMemory:
                 ], additions
             if parsed["explicit"]:
                 additions.append(("memory.record", record))
-                return [{"type": "memory.saved", "memory_id": record["id"]}], additions
+                return [
+                    {
+                        "type": "memory.saved",
+                        "memory_id": record["id"],
+                        "revision": record["revision"],
+                        "key": record["key"],
+                        "content": record["content"],
+                        "scope": record["scope"],
+                        "scope_defaulted": parsed.get("scope_word") is False,
+                    },
+                ], additions
             previous = [
                 e
                 for e in observed
@@ -384,7 +411,16 @@ class PreferenceMemory:
                 "source": {**origin, "event_ids": [eligible[-1]["event_id"], source["event_id"]]},
             }
             additions.append(("memory.suggestion", candidate))
-            return [{"type": "memory.suggested", "suggestion_id": candidate["id"]}], additions
+            return [
+                {
+                    "type": "memory.suggested",
+                    "suggestion_id": candidate["id"],
+                    "revision": candidate["revision"],
+                    "key": candidate["key"],
+                    "content": candidate["content"],
+                    "scope": candidate["scope"],
+                },
+            ], additions
 
         return self.host.store.transact_facts(owner, TYPES, decide, author="user")
 

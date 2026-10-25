@@ -5,7 +5,26 @@ const props = defineProps<{ runId: string; refreshKey?: string | number }>();
 const detail = ref<RunMemory | null>(null),
   error = ref(""),
   loading = ref(false);
+const revoked = ref<Record<string, string>>({});
+const busyId = ref("");
 let version = 0;
+async function revoke(receipt: RunMemory["receipts"][number]) {
+  if (!receipt.memory_id || !receipt.revision) return;
+  const id = receipt.memory_id;
+  busyId.value = id;
+  try {
+    await memoryApi.revoke(id, receipt.revision);
+    revoked.value = { ...revoked.value, [id]: "已撤销：后续请求不再注入；历史事件保留。" };
+    await load();
+  } catch (e) {
+    revoked.value = {
+      ...revoked.value,
+      [id]: e instanceof Error ? e.message : "撤销失败，请到记忆设置处理。",
+    };
+  } finally {
+    busyId.value = "";
+  }
+}
 async function load() {
   const current = ++version,
     id = props.runId;
@@ -68,15 +87,40 @@ onUnmounted(() => version++);
           </li>
         </ul>
       </article>
-      <p v-for="(receipt, index) in detail.receipts" :key="index">
-        {{
-          receipt.type === "memory.saved"
-            ? "偏好已保存，普通新增或编辑下次 Run 生效。"
-            : receipt.type === "memory.suggested"
-              ? "有待确认的偏好候选，确认前不会启用。"
-              : receipt.reason || receipt.type
-        }}
-      </p>
+      <article v-for="(receipt, index) in detail.receipts" :key="index">
+        <template
+          v-if="
+            (receipt.type === 'memory.saved' && receipt.memory_id) ||
+            (receipt.type === 'memory.suggested' && receipt.suggestion_id)
+          "
+        >
+          <p>
+            {{
+              receipt.type === "memory.saved" ? "已记住：" : "记忆候选待确认："
+            }}{{ receipt.content }}
+            · {{ receipt.scope === "global" ? "全局" : "项目" }}
+            <template v-if="receipt.scope_defaulted">
+              · 原话未指定范围，已默认当前项目
+            </template>
+          </p>
+          <p class="receipt-note">
+            来源：本次会话中你的原话片段，已绑定出处；确认前候选不会启用。
+          </p>
+          <template v-if="receipt.type === 'memory.saved' && receipt.memory_id">
+            <p v-if="revoked[receipt.memory_id]" role="status">
+              {{ revoked[receipt.memory_id] }}
+            </p>
+            <button
+              v-else
+              :disabled="busyId === receipt.memory_id"
+              @click="revoke(receipt)"
+            >
+              撤销这条记忆
+            </button>
+          </template>
+        </template>
+        <p v-else>{{ receipt.reason || receipt.type }}</p>
+      </article>
     </template>
     <RouterLink to="/memory">查看当前记忆设置</RouterLink>
   </details>
@@ -97,5 +141,8 @@ li {
 }
 article {
   border-top: 1px solid var(--line);
+}
+.receipt-note {
+  color: var(--muted, #666);
 }
 </style>

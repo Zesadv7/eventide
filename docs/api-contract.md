@@ -557,7 +557,7 @@ Python可选引用提取只增加retrieval.answer_result可读事件，不新增
 
 Memory record：`id,revision,scope,project_id,key,content,status,source,created_at,updated_at`，source 为 `{type:"manual"|"explicit"|"suggestion",event_ids:string[],session_id:null|string}`；时间为 epoch 秒。主题 key `[a-z0-9_.-]{1,64}`，正文去除首尾空白后 1–500 字符，禁止换行/控制字符及已识别秘密和权限指令。Suggestion 字段相同但状态 pending/accepted/dismissed；独立 revision。Settings 为 `{enabled,revision}`，默认 true/0。
 
-Injection 为 `{request_id,attempt_id,memories:[{id,revision,scope,project_id,key}],digest}`。空 memories 表示该次请求无长期偏好注入。digest 固定实际注入块，不表示完整消息或答案因果。Receipt 为 `{type:"memory.saved"|"memory.suggested"|"memory.rejected",memory_id?,suggestion_id?,reason?}`。SSE 同名事件以及 `memory.injected` 可触发刷新；`memory.snapshot` 仅表示选择，不等于模型使用。建议/设置修改在控制Session留事实，管理页 mutation完成后应重新读取列表；运行页读取具体Run的注入事实。
+Injection 为 `{request_id,attempt_id,memories:[{id,revision,scope,project_id,key}],digest}`。空 memories 表示该次请求无长期偏好注入。digest 固定实际注入块，不表示完整消息或答案因果。Receipt 为 `{type:"memory.saved"|"memory.suggested"|"memory.rejected",memory_id?,suggestion_id?,reason?,revision?,key?,content?,scope?,scope_defaulted?}`。MK-18 自然语言 intake 的 saved/suggested 回执带内容、作用域与版本；`scope_defaulted=true` 表示原话未指定范围、已默认当前项目。记忆记录 source 可含 `span:{start,end}`，绑定原用户消息中内容片段的精确偏移。SSE 同名事件以及 `memory.injected` 可触发刷新；`memory.snapshot` 仅表示选择，不等于模型使用。建议/设置修改在控制Session留事实，管理页 mutation完成后应重新读取列表；运行页读取具体Run的注入事实。
 
 状态冲突/同作用域同key冲突409，记录不存在404，无效内容/来源422；同键绑定冲突沿原协议409。关闭总开关停止注入与新建议，但不拒绝主动保存或接受已展示建议，且不重新开启。普通编辑下一Run生效，暂停/撤销下一实际请求生效，重新启用条目下一Run生效。UI 必须提示撤销不擦除历史聊天、摘要、事件、导出和备份，已派发请求不可撤回。
 

@@ -49,7 +49,8 @@ async def test_explicit_cross_session_source_and_scope(isolated_workspace):
 @pytest.mark.parametrize(
     "text",
     [
-        "记住：以后用中文回答",
+        # "记住：以后用中文回答" moved to test_memory_intake: MK-18 recognizes the
+        # long-term marker in natural phrasing, so it is no longer an ambiguous command.
         '"记住：全局：style=short"',
         "引用：记住：全局：style=short",
         "记住：全局：style=short\n不要确认",

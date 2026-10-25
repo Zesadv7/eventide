@@ -318,8 +318,46 @@ it("historical panel distinguishes snapshot, request evidence and current status
   expect(wrapper.text()).toContain("历史运行证据，不代表当前启用状态");
   expect(wrapper.text()).toContain("运行开始时固定");
   expect(wrapper.text()).toContain("请求 request1");
-  expect(wrapper.text()).toContain("下次 Run 生效");
+  expect(wrapper.text()).toContain("已记住");
   expect(wrapper.text()).not.toContain("模型已遵循");
+  wrapper.unmount();
+});
+it("saved receipt shows scope/source and revoke clears later injection", async () => {
+  vi.spyOn(memoryApi, "run").mockResolvedValue({
+    snapshotted: true,
+    injections: [],
+    receipts: [
+      {
+        type: "memory.saved",
+        memory_id: "mem1",
+        revision: 1,
+        content: "都用中文回复",
+        scope: "project",
+        scope_defaulted: true,
+      },
+    ],
+  });
+  const revoke = vi
+    .spyOn(memoryApi, "revoke")
+    .mockResolvedValue({ memory: { id: "mem1" } });
+  const wrapper = mount(RunMemoryPanel, {
+    props: { runId: "r1" },
+    global: { stubs: { RouterLink: true } },
+  });
+  await flushPromises();
+  expect(wrapper.text()).toContain("已记住：都用中文回复");
+  expect(wrapper.text()).toContain("原话未指定范围，已默认当前项目");
+  expect(wrapper.text()).toContain("已绑定出处");
+  const undo = wrapper
+    .findAll("button")
+    .find((b) => b.text().includes("撤销"))!;
+  await undo.trigger("click");
+  await flushPromises();
+  expect(revoke).toHaveBeenCalledWith("mem1", 1);
+  expect(wrapper.text()).toContain("已撤销");
+  expect(
+    wrapper.findAll("button").some((b) => b.text().includes("撤销")),
+  ).toBe(false);
   wrapper.unmount();
 });
 it("historical panel discards late response when run changes", async () => {
