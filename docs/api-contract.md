@@ -585,3 +585,67 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 - `POST /api/sessions/{session_id}/file-operations/{operation_id}/undo` 无正文，要求 `Idempotency-Key`，返回新的记录。沿用本机、严格同源、内容绑定 mutation 回执；无模型工具入口。只允许 completed，当前存在性/内容/权限指纹须等于该次 after，原文件恢复 before，新文件只删除自身。相同操作已 undone 直接返回既有状态，不重执行；无变化、待核验、活动 Workspace 或后续修改冲突返回409，明确拒绝时带 `X-Eventide-Mutation-Outcome: rejected`。不可授权403；恢复结果未知503，回执故障可能500，同键未知不重放，用GET核对当前状态。
 
 新 `file.operation` 为 Session 级审计事实，payload.run_id/call_id 指向原工具；tool.completed.metadata.file_operation_id 仅是小引用。大备份不在 SSE/UI 事件、JSONL 或模型消息中；人工详情 diff 是有界的受控本机读取。服务重启将 prepared/undo_prepared 标 needs_review，禁止盲目撤销。API 不接受任意备份磁盘路径；本地同 UID Shell 的既有宿主权限不是模型身份隔离。交付 patch/apply 契约不变，没有新增整批交付撤销。
+
+
+<a id="maka-upgrade-api"></a>
+## Maka 升级接口与前端计划（设计草案，全部待实现）
+
+本节仅对应 [完整方案](architecture.md#maka-upgrade-plan) 的接口/UI 设计，不属于上文“已实现”的接口。路径、事件名和 DTO 为评审草案，MK-00 冻结后再生成 OpenAPI/TypeScript；本轮没有新增 HTTP 路由或前端组件。既有接口继续按上文工作，不能根据本节提前调用。
+
+### 共用协议
+
+- 保留本机同源、内容绑定幂等接收、身份授权和显式错误；运行控制由同一 Host/Store 执行。长动作先持久接收，返回 202 和 operation/run 身份，查询/SSE 跟踪，断线同键查询或重放接收回执，不重复派发副作用。
+- 建议新增 `contract_version` 和能力发现；破坏性 API 变更随前后端同版本迁移。未知版本提示升级，不静默套旧语义。旧事件缺字段显示未记录，不能补零或假设成功。
+- 对可变控制意图使用 `revision/expected_revision`，对恢复/验收使用 `evidence_version` 和源码指纹；重复键同内容返回原结果，不同内容/过期版本 409。冲突响应给当前版本和稳定原因，不回显秘密。
+- 核心身份：`project_id/session_id/run_id/attempt_id/call_id/workspace_id`；新增对象按需带 `recovery_id/graph_id/node_id/activation_id/question_id/message_id/side_session_id/artifact_id`。这些是关联字段，不把同名 ID 当跨项目读取授权。
+- 持久事件继续有序号/稳定身份，预览另带 attempt/revision 且不推进持久游标。SSE 断开按最近提交游标续订，支持 Last-Event-ID；服务代次变化或事件缺口走一致快照+补读。不能靠重新发送 POST“找回连接”。
+- 统一交互响应包含 `status/reason_code/message/evidence_refs/available_actions`（按对象适用）；UI 不通过错误字符串决定能否执行。非允许状态的动作后端再次拒绝。
+- 所有待实现动作覆盖 loading/accepted/queued/running/waiting/retrying/needs_review/terminal，采用适合各对象的子集；页面关闭不取消，停止为独立幂等动作。密钥、未脱敏内容和原始 Provider 私有数据不进入通用状态 DTO。
+
+### 逐项后端—接口—前端矩阵
+
+表中 GET/POST 是拟议控制面；模型工具仍走 ToolExecutor，不把 HTTP 管理端点直接作为模型权限。复用已有接口时扩展其真实 DTO，不新增重复事实源。
+
+| 计划 | 后端契约与拟议 HTTP 入口 | 事件/字段重点 | 前端交付与浏览器验收 |
+|---|---|---|---|
+| MK-00 迁移 | 扩展 `GET /api/runtime/settings` 或能力接口，返回契约/数据版本与可用功能；迁移在服务启动维护阶段执行 | `contract_version/schema_version/migration_status`，只读旧历史支持集 | 版本不兼容页、迁移结果和替代入口；旧会话、记忆、diff/undo、账本仍可访问 |
+| MK-01 编辑唯一性 | 扩展 `edit_file` 工具 schema/错误 metadata；沿用现有 file-operations 列表/详情/undo | `ambiguous_match/source_changed`、版本、匹配数量和有界位置；成功关联 operation_id | 工具卡显示为什么没改、可跳源码；现有红绿 diff/撤销保持，歧义时文件和差异列表不新增成功记录 |
+| MK-02 文件分页 | `read_file` 返回不透明 continuation_token；受控证据读取接口接同一版本凭据 | Workspace/文件内容版本、行及行内范围、完整性、next_token | 连续读取/文件变化提示/定位；旧页不与新页悄悄拼接 |
+| MK-03 摘要 | `GET /api/runs/{run_id}/context/summaries`；只读查看，生成由 Runtime 调度 | covered_seq、来源 digest、schema_version、证据引用、校验结果 | 上下文侧栏显示替换范围、失败原因、原文入口；刷新保持同一版本 |
+| MK-04 输入与规则 | `GET /api/runs/{run_id}/attempts/{attempt_id}/context`；项目规则来源查询 | 规则/Skill/记忆/工具目录及裁剪清单、大小、来源/版本；脱敏有效投影 | “本次模型看到了什么”面板，切换尝试不串数据；截断和未加载明显区分 |
+| MK-05 长日志 | `GET /api/runs/{run_id}/tools/{call_id}/output?stream=stdout&cursor=...`；复用归档授权与分页 | capture_state、availability、偏移/下一页、退出码、超时、省略量 | 工具卡日志展开/分页/缺失提示；中间错误能找到，过期不显示为空成功 |
+| MK-06 补充与提问 | `POST /api/sessions/{id}/messages` 带 current/next 意图；`GET /api/sessions/{id}/questions`；`POST /api/questions/{id}/answer` | `message.accepted/consumed`、question opened/answered/expired、来源 Run/revision、生效 attempt | 输入区选择补充/下一轮；问题卡含选择与自由回答；刷新、重复回答、停止后迟到答复有明确结果 |
+| MK-07 审批 | 扩展现有 approval GET/resolve DTO，不另造授权通道 | command/cwd/paths、effect、执行边界、参数 digest、revision、scope | 可读审批卡及原始详情；源/副本/native/Docker 一目了然；过期批准拒绝 |
+| MK-08 恢复 | `GET /api/runs/{id}/recovery`；`POST /api/runs/{id}/recovery/actions`；扩展现有 Run 状态/SSE/停止 | recovery_id、classification、检查项、next_retry_at、attempt/max_attempts、claim、successor、核查证据、available_actions | 聊天恢复条+恢复详情；断网接回、倒计时、重启自动续跑、未知核查、停止、双标签去重 |
+| MK-09 待处理 | `GET /api/projects/{id}/attention?cursor=...`；动作跳对应对象接口 | attention_id、type、source/version、reason、actions；解决状态由源事实派生 | 项目待办入口和筛选，点击旧卡复核；隐藏不等于解决，不卡住其他会话 |
+| MK-10 后台任务 | `GET /api/sessions/{id}/background-tasks`；详情/日志；`POST /api/background-tasks/{id}/stop`；有界 health 查询/探测 | started/ready/exited/unknown、所有者/进程身份、隔离配置、日志引用 | 后台任务面板；进程存活和服务就绪分开，停止子树后刷新状态一致 |
+| MK-11 工具并行 | 工具调度接线，扩展 Run/tool 投影，无独立启动 HTTP 必要 | batch_id、call_id、dependency、状态、稳定结果顺序 | 并行活动可展开，某项失败不会把整批显示成功；取消结果不丢 |
+| MK-12 产物 | `GET /api/sessions/{id}/artifacts`；详情/content/download，仅受控身份 | 来源 Run/tool/Workspace、版本/MIME、可用性、证据保护/保留策略 | 本次产出列表、Markdown/图片/隔离 HTML 预览、下载；恶意 HTML 无宿主权限 |
+| MK-13 比较评测 | 扩展已有 evaluation plan/confirm/results API，新增比较 manifest 和 arm | model/config/tool/budget/grader/commit 指纹、逐题结果、未尝试/失败/未知 | 比较页面列条件及逐题证据；不同预算显式分组，不做虚假同条件排名 |
+| MK-14 模型目录 | 扩展现有 models/generation/defaults/config test API | 目录来源/版本、端点身份、声明能力、连接/工具/流式验证分别记录 | 设置页能力卡、验证状态和覆盖差异；配置保存不冒充已通过连接 |
+| MK-15 搜索 | 扩展 `search_text` 工具 schema/结果，受控证据读取复用 MK-02 | literal/regex、context_lines、backend、文件版本、扫描/省略计数 | 搜索结果定位与上下文预览，正则不支持/不完整明确呈现；无原生工具时不宿主回退 |
+| MK-16 发现 | `GET /api/workspaces/{id}/tools?query=...`；目录项详情；Run 已加载工具查询；模型 discover/load 工具 | catalog_version、schema digest、来源、环境、权限、loaded、禁用原因 | 工具目录页+会话已加载面板；加载不自动授权，目录变更提示及同名来源区分 |
+| MK-17 旁枝 | `POST /api/sessions/{id}/side-questions`；复用子 Session 查询/SSE；`POST /api/side-questions/{id}/return` | source highwater、snapshot、引用、只读边界、回传身份及 consumed 状态 | 聊天旁栏、引用来源、刷新背景、回传预览；主任务继续、回传只消费一次 |
+| MK-18 记忆 | 复用 memory records/suggestions/settings CRUD；扩展自然语言来源和保存回执；不开放任意模型授权写入口 | explicit/suggested、canonical source/span、scope、revision、撤销/冲突、抽取 attempt | “已记住+撤销”、建议确认卡和管理页；来源可查，“这次”不会存成长期偏好 |
+| MK-19 报告 | `GET /api/runs/{id}/diagnostics`；`POST /api/runs/{id}/diagnostic-exports` 生成有界报告，下载复用产物接口 | 确定/推测原因、失败点、已完成工作、未知项、脱敏字段、证据/缺失、report_version | 人话摘要、诊断详情、导出预览/选择内容；不自动上传，不夹带密钥/整仓源码 |
+| MK-20 Graph | `POST /api/sessions/{id}/graphs`；`GET /api/graphs/{id}`及 events；图/节点 stop、revise、retry；整合/验收/采纳复用 delivery | graph/node/work_revision/activation、依赖、claims、结果 refs、预算、workspace、verification | 图+列表、节点会话、等待原因、修改/停止、整合 diff 和人工采纳；循环依赖/过期修订拒绝 |
+| MK-21 隔离 | `GET /api/runtime/execution-backends`；扩展 Run 接收配置与 Session binding；边界扩展走现有审批 | backend/probe/能力矩阵、profile revision、paths/network、限制与不支持原因 | 环境设置、会话环境徽标及审批差异；native 不可用不能暗中切 local |
+| MK-22 收口 | 所有上列契约实际 OpenAPI 生成；静态资源/服务契约版本同批发行 | 数据迁移、能力/平台验证记录和旧 API 替代清单 | 全流程真实 API 浏览器、320px、刷新/停止/重复请求/版本不匹配及实际包分发 |
+
+### 恢复动作与错误明细草案
+
+恢复 GET 至少包含：`source_run_id/recovery_id/revision/classification/reason_code/checks/affected_resources/reconciliation/next_retry_at/successor_run_id/evidence_refs/available_actions`。checks 每项区分 passed/failed/unknown/not_applicable，不把未知当失败或通过。
+
+动作 POST 只接收枚举动作、expected_revision 和必要的用户输入，内容绑定幂等键；动作可包含停止自动恢复、重新检查、回答待核查问题、授权建立新工作基线。不能提供可直接改写历史 outcome 的自由布尔字段。自动核查使用同一内部动作语义并记录系统来源，不伪造用户操作。
+
+模型重试相关持久事实建议：`model.retry_scheduled/model.retry_started/model.retry_exhausted`；恢复建议：`recovery.assessed/claimed/reconciliation_started/reconciliation_recorded/continued/blocked`。计时显示可本地推算，必须以持久 next_retry_at 为准；周期倒计时不逐秒写日志。
+
+拟议稳定错误包括 `retry_exhausted/recovery_not_safe/evidence_stale/tool_outcome_unresolved/interaction_expired/catalog_changed/execution_backend_unavailable/unsupported_profile/graph_revision_conflict`。保持原 HTTP 语义，错误带可行动作和受控证据引用，不用 200 包装所有失败。原未知写请求同键核对与新恢复动作是不同对象，不把“恢复”当改变原键强行重放。
+
+### 页面组织与接线记录规范
+
+现有 ChatView/Pinia API 层承接状态，按功能拆组件；计划页面包括恢复详情、Graph、工具目录与执行环境、记忆管理、待办、产物/报告，旁枝及上下文优先侧栏。保持现有项目/会话、交付、评测和用量入口可达，避免新增功能后旧功能隐藏失效。
+
+每个 MK 项在 AGENTS 记录：后端领域与权限、HTTP/OpenAPI、SSE/投影、Vue、定向验证、最终真实 API 旅程、分发资源七个完成证据。只有全部适用项具备证据才能标功能完成；纯工具项没有新增 HTTP 时明确“复用某接口”，不能空着当已完成。
+
+前端必须验证：首次进入与刷新同样可用、迟到响应不串项目、重复点击只产生一次意图、事件乱序/重连按事实修复、停止等待真实收尾、关闭面板不取消、操作过期明确提示、错误可读、键盘可操作、窄屏可访问。真实模型效果与这些接线测试分别记录。
