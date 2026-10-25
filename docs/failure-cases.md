@@ -668,3 +668,11 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 新增测试编写缺陷：摘要采纳有 `size(candidate) < size(current)` 门槛，fixture 历史太小（约 200 字符）导致合法摘要反而更大未被采纳——加入 120 行调查日志放大历史；`valid_summary()` 的 hard_constraints 引言 "Only use Python 3.10" 只在模块级 HISTORY 常量里、不在 build fixture 用户消息里——补进 fixture；host 测试历史 msg0 是 "prior" 不含 x、引文在 assistant 的 x*5000（msg1）——`minimal_summary_text` 增加 msg 参数；溢出测试误用会成功采纳的摘要——改为缺 goal 的非法摘要使拒绝路径与溢出叠加。
 - 修正后：142 项受影响定向测试全部通过（10 个文件，12.9 秒）；Ruff 9 文件通过（首轮 11 处 E501 超长行修为换行）；Mypy py310 目标 2 生产模块通过。未运行全量、前端、容器或真实模型；生产实现未因测试失败放宽任何校验。
 - 经验：引入摘要结构契约时，所有依赖"任意非空文本可被采纳"的既有测试同时失效属预期；新增测试应先核对引用目标确实存在于被测 fixture，且历史必须大于摘要渲染结果才能走采纳路径。
+
+### MKCTX-REVIEW — 摘要引用使用序列化结构而非消息正文
+
+- 2026-10-26 主代理受控复现，基线4451fd5；`python -m pytest -q tests/test_context_summary_review.py` 2失败；证据 `.task_outputs/maka-upgrade/context/review-red.log`。
+- 已证实：在JSON序列化串查引文会拒绝原文换行/引号，却接受只存在于JSON键的content。修正为解码正文/工具内容的实际文本值验证；仍只证明来源存在，不宣称语义真实性。修复和复验进行中。
+- 复验命令曾误写两个测试文件名，pytest退出4、未收集（review-green.log当次，已保留为review-command-error.log）。按真实tests/test_summary_reliability.py、test_summary_throttle.py修正命令；不算实现回归。
+- 引用修复后的Ruff检查报提示词长行（review-ruff.log），已拆分字符串，功能无改。正文引用复验58项通过；检查/提交记录随后追加。
+- 修复后58项摘要/ContextBuilder/节流/Runtime定向、Ruff及Mypy2模块通过；证据review-green/review-ruff-green/review-mypy.log。引用现在只匹配解码正文、工具结果及调用参数的实际文本值，不接受字段名；真实模型摘要保真率仍待最终评测。

@@ -44,7 +44,8 @@ _PROMPT = (
     '[{"msg": int, "quote": str}]}], "next_steps": [str]}\n'
     "The user message below contains the history as a JSON array of message "
     "objects. In src, msg is the 0-based index into that array and quote must be "
-    "a short verbatim substring copied exactly from that message.\n"
+    "a short verbatim substring of the decoded message body or tool content, "
+    "not JSON field names or escaped serialization.\n"
     "Sections: goal = what the user is trying to accomplish; hard_constraints = "
     "explicit user or system requirements bounding the work; facts = claims "
     "backed by history evidence, each with at least one src whose quote is an "
@@ -95,7 +96,32 @@ def _check_source(reference: Any, history: list[dict[str, Any]]) -> str | None:
     quote = reference.get("quote")
     if not isinstance(quote, str) or not quote.strip():
         return "src.quote is empty"
-    if quote not in json.dumps(history[index], ensure_ascii=False):
+    content = history[index].get("content", "")
+    fragments: list[str] = []
+    if isinstance(content, str):
+        fragments.append(content)
+    elif isinstance(content, list):
+        for block in content:
+            if block.get("type") == "text":
+                fragments.append(block["text"])
+            elif block.get("type") == "tool_result":
+                result = block["content"]
+                if isinstance(result, str):
+                    fragments.append(result)
+                else:
+                    fragments.extend(item["text"] for item in result if item["type"] == "text")
+            elif block.get("type") == "tool_use":
+                # A call's exact arguments are evidence too, not its JSON field names.
+                pending = list(block["input"].values())
+                while pending:
+                    value = pending.pop()
+                    if isinstance(value, str):
+                        fragments.append(value)
+                    elif isinstance(value, dict):
+                        pending.extend(value.values())
+                    elif isinstance(value, list):
+                        pending.extend(value)
+    if not any(quote in fragment for fragment in fragments):
         return f"src.quote not found in history message {index}"
     return None
 
@@ -156,9 +182,7 @@ def parse_structured_summary(
 
 def is_structured_summary(text: str) -> bool:
     parsed = _extract_json_object(text)
-    return (
-        isinstance(parsed, dict) and parsed.get("schema_version") == SUMMARY_SCHEMA_VERSION
-    )
+    return isinstance(parsed, dict) and parsed.get("schema_version") == SUMMARY_SCHEMA_VERSION
 
 
 def _render_quote(reference: dict[str, Any]) -> str:
