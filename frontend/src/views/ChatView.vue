@@ -11,6 +11,7 @@ import GenerationEditor from "../components/GenerationEditor.vue";
 import SafeContent from "../components/SafeContent.vue";
 import SandboxEvidence from "../components/SandboxEvidence.vue";
 import RunMemoryPanel from "../components/RunMemoryPanel.vue";
+import RunSupplementPanel from "../components/RunSupplementPanel.vue";
 import EventideLogo from "../components/EventideLogo.vue";
 import ToolActivity from "../components/ToolActivity.vue";
 import RetrievalStatus from "../components/RetrievalStatus.vue";
@@ -470,7 +471,13 @@ async function abandon() {
           v-if="isActive && run?.model_retry"
           :retry="run.model_retry"
         />
-        <RunMemoryPanel
+        <RunSupplementPanel
+        v-if="run"
+        :run-id="run.run_id"
+        :run-status="run.status"
+        :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
+      />
+      <RunMemoryPanel
           v-if="run"
           :run-id="run.run_id"
           :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"

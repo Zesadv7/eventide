@@ -25,6 +25,7 @@ from eventide.http_api import (
     file_operations,
     history_imports,
     indexes,
+    interactions,
     memory,
     models,
     projects,
@@ -100,7 +101,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
     for domain in (
         contracts, projects, workspaces, sessions, runs, models, config, attachments, streams,
         skills, budgets, queue, evaluations, indexes, deliveries, traces, worktrees,
-        history_imports, directories, memory, file_operations, diagnostics, tools,
+        history_imports, directories, memory, file_operations, diagnostics, tools, interactions,
     ):
         app.include_router(domain.create_router(context))
     return app

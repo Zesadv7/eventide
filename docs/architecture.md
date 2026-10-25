@@ -1031,6 +1031,8 @@ Maka 提供参考，不作为效果保证：它会对可安全重放的模型步
 
 运行中可选择“补充当前任务”或“排到下一轮”；接收先持久化，当前补充在下一安全模型边界生效，展示 accepted/consumed/superseded 等状态和实际生效 attempt。正在执行的工具不会被一句新消息追溯撤销；与当前操作冲突时明确停止/核查路径。
 
+切片 1（2026-10-26，[ADR-112](decisions.md#adr-112)）已实现自由文本补充：`interaction.supplement` 收据与 `interaction.supplement.consumed` 消费事实只落唯一 Event Log（`eventide/interactions.py` 定义契约，Store 新增 `record_supplement`/`interaction_supplements`/`consume_supplement` 三个窄方法）；Host 仅在主循环每步 `context_builder.build` 前读取 pending 补充，并以同一事务原子追加带前缀的 `message.user` 与消费事实，已执行工具不倒带。`POST/GET /api/runs/{run_id}/supplements` 复用本机来源与 write receipts/origin 幂等；终态后接收的补充记 `late`，不自动创建或恢复任何 Run，同 Session 其他 Run 不消费。Vue `RunSupplementPanel` 挂 ChatView 展示 pending/consumed/late。结构化提问（问题 ID、选项、等待/过期、幂等回答）属切片 2，尚未实现。
+
 结构化提问具有问题 ID、少量选项、自由输入、取消/过期、源 Run 及版本。等待用户时释放模型槽，仍保留必要的工作区所有权；重启可重建等待状态。回答、修改、重复点击和迟到回答统一幂等，问题答案不等于工具权限审批。API/UI 提供对话内问题卡和待处理入口。验收刷新不丢、一次回答只消费一次、停止后不偷偷续跑、父子问题不串会话。
 
 ### MK-07：可读审批

@@ -81,6 +81,8 @@ Run事件流可显式传`include_preview=true`接收`event: model.preview`。此
 | `GET /api/runs/{id}/events`（SSE） | 事件流（非负 `after` / `Last-Event-ID` 游标取较大值；prepared/completed 以 `tool.request`/`tool.result` 别名推送） |
 | `GET /api/runs/{id}/export` | NDJSON 审计导出 |
 | `POST /api/runs/{id}/approvals/{approval_id}` | 审批决定 |
+| `POST /api/runs/{id}/supplements` | 运行中补充接收（本机来源 + Idempotency-Key；同键同正文重放原收据、同键不同正文 409；正文 1–8,000 字符，`body_version` 1–9） |
+| `GET /api/runs/{id}/supplements` | 补充投影（pending/consumed/late 及消费 step；迟到补充不自动续跑） |
 | `GET` / `POST /api/sessions/{id}/attachments` | 待提交附件清单 / 上传 |
 | `GET` / `DELETE /api/sessions/{id}/attachments/{aid}` | 下载 / 删除未使用附件 |
 | `GET`/`PUT`/`DELETE /api/config/provider`、`POST /api/config/provider/test` | 模型配置（仅回环） |

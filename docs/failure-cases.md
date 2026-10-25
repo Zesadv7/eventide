@@ -765,3 +765,11 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 2026-10-26 03:02（Asia/Shanghai），工具目录、命令日志、旁枝提问三路ZCode返回ok:false / HTTP405 Method Not Allowed，响应为网关阻断HTML。证据分别位于maka-tool-directory、maka-command-logs、maka-side-questions工作副本的`.task_outputs/maka-upgrade/zcode/{result.jsonl,progress.log}`；调用均指定既定Node/run.mjs、--cwd、UTF-8 --prompt-file、--mode yolo、Flash/max。
 - 分类：环境/外部服务故障。网关页说明请求被拦截，具体触发原因未知；不是429并发限制，也没有额度耗尽证据，因此没有切换模型/套餐、修改桥接或绕过拦截。三路停止且未形成可验收提交：工具目录留有3份未完成修改，其余尚无运行代码改动。
 - 主代理保留现场及任务文件，继续集成此前已交回切片。该外部依赖恢复前，不宣称后续子任务完成或并行仍运行；不把wrapper进程退出0当任务成功。
+
+### MK-06-SLICE1 — 运行中补充切片首轮测试迭代失败
+
+- 2026-10-26，基线0c86c75新增切片实现；首轮后端定向 4 次运行中 3 次失败，证据 `.task_outputs/maka-upgrade/interactions/backend-red.log`。
+- 已证实原因（全部为新增测试侧或接线笔误，逐项）：新路由取 `context.agent_runtime` 而真实 ApiContext 字段是 `runtime`（AttributeError）；脚本首响应无 tool_calls 使 Run 一步终态、无第二次模型请求可断言（改为 read_file 工具调用）；ModelRequest 消息 content 可能是块列表，测试直接 `startswith` 抛 AttributeError（加 `_content_text` 规范化）；另有两处草率断言把初始 prompt 的 `message.user` 误当补充、用 sessions 列表长度检查"未自动建 Run"，改为按补充前缀过滤和 run.admitted 事件计数。前端 1 次失败为 `toHaveBeenCalledWith` 多写了运行时有默认值的第三参数，修正断言。
+- 处理：仅改测试与一处路由字段名；生产实现与 Store/Host 消费语义未因失败放宽。
+- 复验：最终 `tests/test_interactions.py` 4 项通过、前端 supplements 4 项与 chat-experience/memory/sandbox 39 项回归通过、`vue-tsc --noEmit`、Ruff 全仓、Mypy（py310 目标）5 模块通过；日志 `.task_outputs/maka-upgrade/interactions/final-backend.log` 与 `frontend-final.log`。
+- 经验：ApiContext 注入字段以 `http_api/context.py` 为准；ScriptedProvider 无工具调用的响应即终态，跨步断言必须脚本化工具调用；消息 content 的块列表形态要统一规范化后再断言。结构化提问（切片 2）未实现，不因本切片标记 MK-06 完成。

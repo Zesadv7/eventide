@@ -1314,3 +1314,21 @@ MK-18 的记忆抽取不引入付费模型或语义解析：`memory_intake.py` �
 regex 模式只依赖可探测的本机 ripgrep，缺失时返回明确能力错误而不是降级为字面匹配或自动安装；这是有意的能力边界，不是缺陷。Python `re` 不用于用户提供的 regex：其回溯没有可用的时间上界，而 Rust regex 引擎保证线性时间，配合整批 wall-clock 截止时间和输出字节上限、超时即 kill 并 reap，构成"实际执行时间边界"。rg 只是匹配预言机：它报告的每一行都必须与工具自己在工作区边界内读取并哈希的字节逐行一致才采信，任何不一致把整个来源按内容已变化排除——这同时封住了枚举与匹配之间的 TOCTOU 窗口，后端输出无法把边界外文本带进结果。
 
 literal 模式保持纯 Python 且语义不变（行级命中、offset 计数、扫描/跳过上限、隐藏与链接规则）；大小写不敏感用 `re.escape` 的字面模式实现，因为 casefold 会改变字符串长度、破坏匹配位置。上下文行在文件内合并去重，命中与上下文用不同记号区分；每个展示来源携带实际搜索字节的 sha256，直接作为 edit_file 的 expected_sha256。空结果必须带扫描/跳过/超时/核对计数，不允许被读成全仓无匹配。沙箱 Docker 任务副本本轮仍不暴露 search_text，不做容器内正则的虚假覆盖声明。代价是 regex 模式引入外部进程依赖和一次额外文件读取；换来的是有界的执行时间和不出边界的证据链。源码定位 UI 与整体效果验收由后续切片承接。
+
+## ADR-112：运行中补充的持久接收与单次模型边界消费（MK-06 切片 1）
+
+**状态：Proposed（2026-10-26；切片 1 已实现并通过定向验证，结构化提问等待/回答属切片 2 未实现）。**
+
+**背景：** [Maka 借鉴升级](architecture.md#maka-upgrade-plan) 要求真实运行中的任务能持久接收用户补充，在下一安全模型边界消费一次；已执行的工具不倒带，终态后的迟到补充不得自动续跑。所有状态只放唯一 Event Log；工具问题不等于权限审批，不建第二执行路径。
+
+**决策：**
+
+1. 补充只经可信本机 HTTP 路径接收：`POST /api/runs/{run_id}/supplements`（要求本机来源与 Idempotency-Key，复用既有 `mutate_run_action` write receipts/origin 语义；同键同正文重放返回原收据，同键不同正文 409）。收据事实 `interaction.supplement` 落唯一 Event Log，含 supplement_id、run_id、session_id、正文、body_version；正文 1–8,000 字符，空正文 422。
+2. 接收时按投影 Run 状态定级：queued/running/waiting_for_user 记 `pending`；终态（completed/failed/interrupted）记 `late`。Store 的终态 Run 拒绝任何 run 标签新事实，因此迟到收据以 session 事实落账、payload 内仍固定 run_id 供作用域判定。
+3. 消费点唯一：Host 主循环每步在 `context_builder.build` 之前读取本 Run 的 pending 补充，经新窄方法 `consume_supplement` 在同一事务内原子追加 `message.user`（带 `[User supplement for the running task]` 前缀）与 `interaction.supplement.consumed`（含 step）。消息序列天然位于已执行工具结果之后，不倒带任何工具；同 Session 串行保证单一消费者，崩溃时两事实同事务原子提交，不出现"已消费但模型未见"或重复注入。Host 不在其他任何位置读取补充。
+4. 作用域隔离：`interaction_supplements(run_id)` 只匹配本 Run 的收据/消费事实；其他 Run（含同 Session 后续 Run）不消费、不投影。迟到补充保持 `late`，不自动创建、不排队、不恢复任何 Run；是否带入下一轮由用户显式决定。
+5. 查询端点 `GET /api/runs/{run_id}/supplements` 返回收据/状态投影（pending/consumed/late 及消费 step）；刷新与迟到读取只读同一 Event Log，不重放写入。Vue `RunSupplementPanel` 独立组件挂 ChatView：发送走 `durableMutation` 幂等，late 明确提示不自动续跑，pending/consumed 按步数展示。
+
+**取舍：** 复用 `message.user` 作为模型消费载体使上下文装配无需改动 context_builder，代价是补充在会话转录中呈现为普通用户消息（消费事实与收据提供追溯）。结构化提问的持久等待/回答需要审批式的等待接线，属切片 2，本 ADR 不声称完成。
+
+**验证：** 后端 4 项定向（test_interactions.py：边界单次消费与 step 投影、同键重放/冲突/终态重放、迟到不续跑且不泄漏到后续 Run、空/超长/未知 Run 4xx）通过；新增前端 4 项组件测试通过；`vue-tsc --noEmit`、Ruff 全仓、Mypy（py310 目标）5 模块通过；chat-experience/memory/sandbox 既有 39 项回归通过。未运行全量、浏览器、容器或真实模型；测试迭代首轮失败已登记 failure-cases MK-06。

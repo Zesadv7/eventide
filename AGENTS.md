@@ -480,7 +480,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-03 | 进行中 | 摘要目标/约束/事实/假设/检查/证据，结构和来源校验；上下文版本对照。 |
 | MK-04 | 进行中 | 规则来源/作用域/截断及attempt输入清单；请求诊断面板不串轮。 |
 | MK-05 | 受阻 | 普通Shell/Skill/后台长日志归档回读，保留配额/脱敏/退出事实；页面分页与缺失状态。 |
-| MK-06 | 进行中 | 运行中补充/下一轮、结构化问题与持久回答；安全边界消费、刷新/迟到/停止回归。 |
+| MK-06 | 进行中 | 2026-10-26 切片1（自由文本运行中补充，基线0c86c75）：`interaction.supplement`/`consumed` 只落唯一EventLog（新interactions.py+Store三窄方法），Host仅每步context_builder.build前消费一次并同事务追加带前缀message.user，工具不倒带；POST/GET /api/runs/{id}/supplements复用本机来源+write receipts/origin幂等，终态后收据记late不自动续跑、不建Run、同Session其他Run不消费；Vue RunSupplementPanel挂ChatView。后端4项定向（边界单次消费/同键重放与409/迟到隔离/4xx）、前端4项组件+39项chat/memory/sandbox回归、vue-tsc、Ruff全仓、Mypy(py310)5模块通过；首轮测试迭代失败已记MK-06-SLICE1，日志.task_outputs/maka-upgrade/interactions/。ADR-112、architecture/api-contract同步。结构化提问持久等待/回答（切片2）未实现，OpenAPI/schema.d.ts未重新生成，不计整项完成。 |
 | MK-07 | 进行中 | 实际参数生成可读审批，冻结版本/边界/副本；过期与扩权校验。 |
 | MK-08 | 进行中 | 整体恢复重做：A连接与回执、B模型分类重试、C持久恢复、D未知结果只读核查、E源码变化重新建立基线、F恢复UI；故障注入矩阵。B首批主调用10次分类重试/Retry-After/等待释放槽/用量预算/尝试预览隔离实现，179项定向、Ruff和Mypy11模块通过，ADR-101及MK08B-REVIEW记录。仍待页面和持久恢复，不计整项完成，无真实模型验收。 |
 | MK-09 | 进行中 | 全局待回答/审批/恢复/采纳事项，从事实派生，点击复验与去重。 |

@@ -12,6 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, TypeVar
 
+from eventide import interactions
 from eventide.models import ProjectRecord, RuntimeEvent, WorkspaceRecord
 from eventide.normalization import redact
 from eventide.projections import TERMINALS, MessagesProjection, RuntimeStateProjection
@@ -1219,6 +1220,75 @@ class RuntimeStore:
 
     def finish_run(self, run_id: str, *, status: str, **payload: Any) -> None:
         self.append_event(run_id, f"run.{status}", payload)
+
+    def record_supplement(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Append a supplement receipt; terminal runs only accept session facts."""
+        run = self.get_run_identity(run_id)
+        if not run:
+            raise ValueError("Run not found")
+        active = self.get_run(run_id)
+        assert active is not None
+        if active["status"] in interactions.ACTIVE_RUN_STATUSES:
+            return self.append_fact(
+                run["session_id"], interactions.SUPPLEMENT_EVENT, redact(payload),
+                run_id=run_id, role="user", author="user",
+            )
+        return self.append_fact(
+            run["session_id"], interactions.SUPPLEMENT_EVENT, redact(payload),
+            role="user", author="user",
+        )
+
+    def interaction_supplements(self, run_id: str) -> list[dict[str, Any]]:
+        """Narrow interaction projection scoped to one run's own session facts."""
+        run = self.get_run_identity(run_id)
+        if not run:
+            raise ValueError("Run not found")
+        receipts: dict[str, dict[str, Any]] = {}
+        consumed: dict[str, dict[str, Any]] = {}
+        for event in self.session_events(run["session_id"]):
+            payload = event["payload"]
+            if payload.get("run_id") != run_id:
+                continue
+            if event["type"] == interactions.SUPPLEMENT_EVENT:
+                receipts[payload["supplement_id"]] = payload
+            elif event["type"] == interactions.SUPPLEMENT_CONSUMED_EVENT:
+                consumed[payload["supplement_id"]] = payload
+        return interactions.merge_supplements(list(receipts.values()), consumed)
+
+    def consume_supplement(
+        self, run_id: str, supplement_id: str, *, step: int, message: dict[str, Any]
+    ) -> bool:
+        """Atomically append the user message and its one-time consumption fact."""
+        run = self.get_run_identity(run_id)
+        if not run:
+            raise ValueError("Run not found")
+        session_id = run["session_id"]
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            receipt = self._connection.execute(
+                "SELECT COUNT(*) FROM runtime_events WHERE session_id=? AND type=? "
+                "AND json_extract(payload_json,'$.supplement_id')=? "
+                "AND json_extract(payload_json,'$.run_id')=?",
+                (session_id, interactions.SUPPLEMENT_EVENT, supplement_id, run_id),
+            ).fetchone()[0]
+            consumed = self._connection.execute(
+                "SELECT COUNT(*) FROM runtime_events WHERE session_id=? AND type=? "
+                "AND json_extract(payload_json,'$.supplement_id')=? "
+                "AND json_extract(payload_json,'$.run_id')=?",
+                (session_id, interactions.SUPPLEMENT_CONSUMED_EVENT, supplement_id, run_id),
+            ).fetchone()[0]
+            if not receipt or consumed:
+                return False
+            self._append_fact_locked(
+                session_id, "message.user", {"message": redact(message)},
+                run_id=run_id, role="user", author="user",
+            )
+            self._append_fact_locked(
+                session_id, interactions.SUPPLEMENT_CONSUMED_EVENT,
+                {"supplement_id": supplement_id, "run_id": run_id, "step": step},
+                run_id=run_id,
+            )
+        return True
 
     def get_events(self, run_id: str, after: int = 0) -> list[dict[str, Any]]:
         # Compatibility presentation; canonical names remain in run_events().

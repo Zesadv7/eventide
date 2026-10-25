@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from eventide import attachments, model_catalog, run_policy
+from eventide import interactions as interactions
 from eventide.acceptance_output import AcceptanceOutputs
 from eventide.budget_prices import PriceVersion
 from eventide.budgets import BudgetExceeded, BudgetScope, is_service_probe_run
@@ -3669,6 +3670,15 @@ class RuntimeHost:
                     )
                 memory_base_system = system
                 system, context_memory_refs = self.memory.request_system(run_id, system)
+                for supplement in self.store.interaction_supplements(run_id):
+                    if supplement["status"] != "pending":
+                        continue
+                    self.store.consume_supplement(
+                        run_id,
+                        supplement["supplement_id"],
+                        step=steps,
+                        message=interactions.supplement_message(supplement["body"]),
+                    )
                 messages, compacted, trimmed = await self.context_builder.build(
                     session_id,
                     provider=self._provider(),
