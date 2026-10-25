@@ -720,3 +720,9 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 已证实：load解锁executor但Host固定tools变量没重新投影，下一次模型请求仍没有已加载schema；发现/加载以及MCP只读调用的readonly准备事实也要统一。修复中，真实Host回归待验。
 - 真实Host/目录6项复验通过（review-green.log），编译后再发布handler/loaded回执，下一请求重新计算schema与目录摘要；Ruff报新增条件长行，已拆行（review-ruff.log），不改变行为。
 - 最终Ruff与Mypy3模块通过，commit保留修复与Host真实请求回归。生产MCP传输/重连仍待后续真实接线验收，当前为替身目录+真实Host/Executor。
+
+### MK08A-EPOCH — 增量流快照静态检查
+
+- 2026-10-26，基线7e71b8f+快照增量；Ruff报epoch预览序列化行101字符（`.task_outputs/maka-upgrade/integration/epoch-ruff.log`），已拆行。后端14项、前端22项及typecheck已通过；Mypy前一命令因&&未执行，不计通过。真实浏览器复验进行中。
+- MK08A-EPOCH最终Ruff/Mypy3模块、OpenAPI/类型生成与构建通过，built实际浏览器断网/联网/刷新旅程1/1通过（epoch-browser.log）；模型/工具副作用未因重连重复。
+- MK16-BASELINE关联集成复验43项通过（integration/discovery.log），其中原Host目录/上下文基线失败已由MK-INTEGRATE-CONTEXT调整机制fixture修复；不改生产预算、冻结评测结果。

@@ -219,3 +219,49 @@ describe("connection recovery", () => {
     expect(Source.current).toBe(source);
   });
 });
+
+it("repairs a future cursor from an authoritative snapshot and fences old previews", () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("EventSource", Source);
+  const event = vi.fn(),
+    preview = vi.fn(),
+    snapshot = vi.fn();
+  const connection = connectRun(
+    "run-1",
+    500,
+    event,
+    preview,
+    vi.fn(),
+    vi.fn(),
+    snapshot,
+  );
+  Source.current.emit("stream.state", {
+    type: "stream.state",
+    run_id: "run-1",
+    epoch: "new",
+    high_water: 4,
+    reset: true,
+    state: { status: "running" },
+  });
+  expect(snapshot).toHaveBeenCalledOnce();
+  Source.current.emit("model.preview", {
+    type: "model.preview",
+    run_id: "run-1",
+    epoch: "old",
+    ephemeral: true,
+    active: true,
+    text: "old",
+  });
+  expect(preview).not.toHaveBeenCalled();
+  Source.current.emit("model.response", {
+    type: "model.response",
+    run_id: "run-1",
+    seq: 5,
+    payload: {},
+  });
+  expect(event).toHaveBeenCalledOnce();
+  Source.current.onerror?.();
+  vi.advanceTimersByTime(1000);
+  expect(Source.current.url).toContain("after=5&");
+  connection.close();
+});

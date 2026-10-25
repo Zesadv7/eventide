@@ -40,6 +40,13 @@ def create_router(context: ApiContext) -> APIRouter:
             headers={"Content-Disposition": f'attachment; filename="eventide-{safe_id}.jsonl"'},
         )
 
+    @router.get("/api/runs/{run_id}/snapshot")
+    async def run_snapshot(run_id: str) -> dict:
+        snapshot = agent_runtime.store.run_snapshot(run_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return {"run_id": run_id, "epoch": context.epoch, **snapshot}
+
     @router.get("/api/runs/{run_id}/events")
     async def run_events(
         run_id: str,
@@ -53,6 +60,14 @@ def create_router(context: ApiContext) -> APIRouter:
 
         async def stream() -> AsyncIterator[str]:
             cursor = max(after, last_event_id or 0)
+            snapshot = agent_runtime.store.run_snapshot(run_id)
+            assert snapshot is not None
+            reset = cursor > snapshot["high_water"]
+            if reset:
+                cursor = snapshot["high_water"]
+            state = {"type": "stream.state", "run_id": run_id, "epoch": context.epoch,
+                     "reset": reset, **snapshot}
+            yield f"event: stream.state\ndata: {json.dumps(state, ensure_ascii=False)}\n\n"
             idle_ticks = 0
             preview_revision = 0
             preview_active = False
@@ -67,12 +82,15 @@ def create_router(context: ApiContext) -> APIRouter:
                     if preview and preview["revision"] != preview_revision:
                         preview_revision = preview["revision"]
                         preview_active = True
-                        encoded = json.dumps(preview, ensure_ascii=False)
+                        encoded = json.dumps(
+                            {**preview, "epoch": context.epoch}, ensure_ascii=False,
+                        )
                         yield f"event: model.preview\ndata: {encoded}\n\n"
                     elif preview_active and preview is None:
                         preview_active = False
                         cleared = {
                             "type": "model.preview",
+                            "epoch": context.epoch,
                             "run_id": run_id,
                             "active": False,
                             "ephemeral": True,

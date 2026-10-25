@@ -3,6 +3,7 @@ export interface PreviewEvent {
   run_id: string;
   request_id?: string;
   attempt_id?: string;
+  epoch?: string;
   revision?: number;
   text: string;
   omitted_chars?: number;
@@ -14,6 +15,14 @@ export interface RuntimeEvent {
   run_id: string;
   seq: number;
   payload: Record<string, unknown>;
+}
+export interface StreamState {
+  type: "stream.state";
+  run_id: string;
+  epoch: string;
+  high_water: number;
+  reset: boolean;
+  state: Record<string, unknown>;
 }
 export type EventConnection = { close: () => void };
 export interface ConnectionStatus {
@@ -55,8 +64,10 @@ export function connectRun(
   onPreview: (event: PreviewEvent) => void,
   onError: () => void,
   onStatus: (status: ConnectionStatus) => void = () => {},
+  onSnapshot: (snapshot: StreamState) => void = () => {},
 ): EventConnection {
   let cursor = after;
+  let epoch: string | undefined;
   let source: EventSource | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
@@ -119,6 +130,34 @@ export function connectRun(
     current.onerror = () => {
       if (!closed && source === current) retry();
     };
+    current.addEventListener("stream.state", ((event: MessageEvent) => {
+      if (closed || source !== current) return;
+      let snapshot: StreamState;
+      try {
+        snapshot = JSON.parse(event.data);
+      } catch {
+        retry();
+        return;
+      }
+      if (
+        !snapshot ||
+        snapshot.type !== "stream.state" ||
+        snapshot.run_id !== run ||
+        typeof snapshot.epoch !== "string" ||
+        !snapshot.epoch ||
+        !Number.isSafeInteger(snapshot.high_water) ||
+        snapshot.high_water < 0 ||
+        typeof snapshot.reset !== "boolean" ||
+        !snapshot.state ||
+        typeof snapshot.state !== "object"
+      ) {
+        retry();
+        return;
+      }
+      epoch = snapshot.epoch;
+      if (snapshot.reset) cursor = snapshot.high_water;
+      onSnapshot(snapshot);
+    }) as EventListener);
     for (const name of eventNames) {
       current.addEventListener(name, ((event: MessageEvent) => {
         if (closed || source !== current) return;
@@ -157,6 +196,7 @@ export function connectRun(
         value.run_id === run &&
         value.type === "model.preview" &&
         value.ephemeral === true &&
+        (epoch === undefined || value.epoch === epoch) &&
         typeof value.active === "boolean" &&
         typeof value.text === "string"
       )

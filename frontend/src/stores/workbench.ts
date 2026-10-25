@@ -209,6 +209,15 @@ export const useWorkbench = defineStore("workbench", () => {
           connected.value = false;
         }
       },
+      (snapshot) => {
+        if (version !== connectionVersion) return;
+        delete previews.value[run.run_id];
+        if (snapshot.reset) {
+          cursors.value[run.run_id] = snapshot.high_water;
+          events.value[run.run_id] = [];
+        }
+        void refreshSession(sessionIdentity).catch(fail);
+      },
     );
   }
   async function selectWorkspace(workspace: string) {

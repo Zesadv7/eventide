@@ -696,3 +696,5 @@ read_file新增可选continuation，带凭据时不能同时传非零offset；�
 Vue 新增 `/runs/:runId/diagnostics` 报告页（历史页运行详情提供入口），含加载、错误（保留后端 message）、缺事实、重新生成与高水位绑定展示；下载链接始终携带当前报告的 `high_water`。切换 Run 丢弃迟到响应。本批尚未实现恢复动作入口、证据跳转、Graph/恢复关系、`POST diagnostic-exports` 产物化导出与用户选择内容预览；完整 MK-19 仍进行中。
 
 MK-08B等待状态：Run投影新增可空`model_retry`，含原始attempt/next_attempt/category和绝对`retry_at`（事件ts加delay_seconds）。GET恢复当前等待，不以浏览器重新打开时间重置倒计时；下一次attempt开始、完整response或Run终态清除。旧历史未记录等待时返回null，不猜时间。Vue区分模型请求重试与页面连接重试，仍可停止原任务。
+
+MK-08A快照与服务代次：新增只读`GET /api/runs/{id}/snapshot`，返回`run_id/epoch/high_water/state`；Store同一锁内读取状态与事件高水位。SSE首次发送无事件游标的`stream.state`帧，结构相同并附`reset`；客户端游标大于现存高水位时reset=true，页面重建当前状态并从该位置续接，绝不重发Run写请求。正常重连仍重放after之后的事件，不用快照跳过未处理事实。epoch为本次API实例身份，临时preview带epoch，旧代次预览丢弃。当前事件日志不裁剪；未凭数字间隔臆测缺失（同Session不同Run的seq可以不连续）。历史API、SSE持久事实不因重连更改。

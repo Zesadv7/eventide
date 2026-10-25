@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,6 +60,7 @@ def require_local_request(request: Request) -> None:
 class ApiContext:
     runtime: RuntimeHost
     approvals: ApprovalBroker = field(default_factory=ApprovalBroker)
+    epoch: str = field(default_factory=lambda: uuid.uuid4().hex)
     local_proxy_peers: tuple[str, ...] = field(init=False)
 
     def __post_init__(self) -> None:

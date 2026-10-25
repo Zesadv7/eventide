@@ -1031,6 +1031,18 @@ class RuntimeStore:
         row = self.get_run_identity(run_id)
         return {**row, **RuntimeStateProjection.project(self.run_events(run_id))} if row else None
 
+    def run_snapshot(self, run_id: str) -> dict[str, Any] | None:
+        """Read one projection and its event cursor under the same store lock."""
+        with self._lock:
+            identity = self.get_run_identity(run_id)
+            if identity is None:
+                return None
+            events = self.run_events(run_id)
+            return {
+                "high_water": events[-1]["session_seq"] if events else 0,
+                "state": {**identity, **RuntimeStateProjection.project(events)},
+            }
+
     def get_run_summary(self, run_id: str) -> dict[str, Any] | None:
         """Project only state needed by navigation and history indexes."""
         row = self.get_run_identity(run_id)

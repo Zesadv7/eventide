@@ -519,3 +519,5 @@ MK-01/02首批工具切片：唯一编辑、重叠歧义拒绝、expected_sha256
 第二批集成复核：故障报告、结构化摘要与原生启动库已集成；主代理修复完整统计被明细裁剪、缺事实误报正常、摘要JSON字段误作引文、Linux授权环境/代码挂载遗漏和Mac只读依赖写规则。原生尚未接生产入口，能力文本不等于内核隔离通过；参考MK19-REVIEW/MKCTX-REVIEW/MKNATIVE-REVIEW。当前ZCode三路为代码搜索、工具发现、自然记忆；最终模型和平台验收仍待后续。
 
 MK-08B等待界面已接线：Run事实投影保存绝对retry_at，Chat显示错误分类/下一尝试/倒计时，刷新不重置，仍可停止。2项投影、21项前端、1条built真实API旅程、typecheck/build/Ruff/Mypy通过；仅scripted注入，非付费模型效果。第二批171项不同后端集成用例已逐项通过，8项组合失败及复验见MK-INTEGRATE-CONTEXT。仍无整仓收口和真实平台验收。
+
+MK-08A快照/代次已补：原子Run快照、首次SSE状态、超前游标reset、旧代次preview拒绝；14项后端/22项前端/1条built实际API断网与刷新通过，类型/构建/OpenAPI/Ruff/Mypy3模块完成。工具发现主代理修复后43项Host/目录/HTTP回归通过（integration/discovery.log），旧3898ffc的目录固定预算失败已按MK-INTEGRATE-CONTEXT修复。

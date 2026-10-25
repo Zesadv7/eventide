@@ -1232,3 +1232,5 @@ read_file每页带原始字节SHA256及范围。continuation绑定工作目录�
 本地与容器固定文件worker采用同一契约。容器身份使用可信宿主副本路径及目录身份注入，不能拿所有容器共享的/workspace挂载名作为副本身份。离线worker实测不等同真实Docker或原生内核验收。工具明细现有文本可以显示版本/续页凭据；专门的证据浏览交互及原生后端接入仍待后续，因此MK-01/02整体仍进行中。
 
 MK-08B页面接线：RuntimeStateProjection从原model.retry派生当前等待，HTTP刷新可重建同一截止时间，下一attempt/终态清除；Chat显示分类原因、自动尝试序号、倒计时和停止说明。2项投影、21项前端关联、1条built真实API浏览器（scripted模型断连→刷新→原Run完成、2次attempt）通过。模型服务重试与浏览器SSE重连分开展示；持久宿主恢复和未知工具核查仍待MK-08C/D。
+
+MK-08A快照接线：Store.run_snapshot在同一读锁中得到Run投影与事件高水位，API实例代次在创建时冻结。每次SSE连接先发送stream.state，快照不推进正常重放游标；若游标超前则明确reset到现有高水位并刷新状态，旧代次preview不显示。14项后端、22项前端、1条built断网/恢复/刷新旅程、类型/构建/Ruff/Mypy3模块通过。当前日志无裁剪，不把Session序号跨Run间隔误报为缺事件。写入未知回执统一核查及恢复中心仍在后续。

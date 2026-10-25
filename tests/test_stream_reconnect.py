@@ -46,3 +46,34 @@ def test_last_event_id_resumes_newer_than_initial_query(isolated_workspace):
             client.get(f"/api/runs/{run}/events", headers={"Last-Event-ID": "-1"}).status_code
             == 422
         )
+
+
+def test_snapshot_cursor_and_epoch_survive_replay_without_new_run(isolated_workspace):
+    host = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
+    app = create_app(host)
+    with TestClient(app) as client:
+        session = client.post(
+            "/api/sessions", headers={"Idempotency-Key": uuid.uuid4().hex}
+        ).json()["session_id"]
+        run = client.post(
+            f"/api/sessions/{session}/runs",
+            json={"prompt": "hello"},
+            headers={"Idempotency-Key": uuid.uuid4().hex},
+        ).json()["run_id"]
+        client.get(f"/api/runs/{run}/events")
+        snapshot = client.get(f"/api/runs/{run}/snapshot").json()
+        events = host.store.run_events(run)
+        assert snapshot["high_water"] == events[-1]["session_seq"]
+        assert snapshot["state"]["status"] == "completed"
+        assert snapshot["epoch"] == app.state.api_context.epoch
+        replay = client.get(f"/api/runs/{run}/events?after=999999")
+        import json
+
+        state = json.loads(
+            next(line[6:] for line in replay.text.splitlines() if line.startswith("data: "))
+        )
+        assert state["type"] == "stream.state" and state["reset"] is True
+        assert state["high_water"] == snapshot["high_water"]
+        assert host.store.run_events(run) == events
+        assert len(host.store.list_runs(session)) == 1
+        assert create_app(host).state.api_context.epoch != snapshot["epoch"]
