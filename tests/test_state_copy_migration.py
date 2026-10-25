@@ -11,22 +11,22 @@ import shutil
 import sqlite3
 from dataclasses import asdict, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from eventide.file_operations import FileOperations
 from eventide.host import RuntimeHost
+from eventide.preference_memory import PreferenceMemory
 from eventide.providers import ScriptedProvider
 from eventide.store import RuntimeStore
 from tests.test_host import make_repo
 from tests.test_runtime import settings_for
 
 MEMORY_RECORD = {
-    "memory_id": "mem_state_copy",
+    "key": "response_style",
     "scope": "global",
     "content": "回复保持简短并给出文件行号",
-    "revision": 1,
-    "source": "explicit",
 }
 
 
@@ -60,8 +60,9 @@ def populated_host(path: Path):
             "usage_source": "reported",
         },
     )
+    host.memory.mutate("create", dict(MEMORY_RECORD))
+    host.memory.snapshot(run_id)
     host.store.finish_run(run_id, status="completed", output="done")
-    host.store.append_fact(session, "memory.record", dict(MEMORY_RECORD))
     result = host.file_operations.write(
         "write_file",
         {"path": "notes/undo-me.txt", "content": "可撤销的修改内容\n"},
@@ -139,6 +140,11 @@ async def test_state_copy_reinitialization_preserves_everything_without_duplicat
         ]
         # The encrypted undo artifact is byte-identical and decryptable with the
         # copied installation key; the copy never falls back to the original key.
+        restored_memory = PreferenceMemory(SimpleNamespace(store=first))
+        assert restored_memory.state()["memories"][0]["content"] == MEMORY_RECORD["content"]
+        context, refs = restored_memory.context(run_id)
+        assert MEMORY_RECORD["content"] in context
+        assert len(refs) == 1
         assert first.file_operation_backup(operation_id) == backup
         restored = json.loads(FileOperations(first, copy_dir).box.decrypt(backup))
         assert restored["after"] == "可撤销的修改内容\n"

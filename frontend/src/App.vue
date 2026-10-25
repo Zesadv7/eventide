@@ -91,17 +91,25 @@ const links = [
 // The workbench only boots after the backend contract matches this build.
 // An incompatible server keeps the barrier up, so no write path is reachable.
 let workbenchBooted = false;
+let disposed = false;
 async function boot() {
   await gate.runCheck();
-  if (!gate.compatible || workbenchBooted) return;
+  if (disposed || !gate.compatible || workbenchBooted) return;
   workbenchBooted = true;
   await store.initialize();
+  if (disposed) {
+    store.dispose();
+    return;
+  }
   store.startPolling();
 }
 onMounted(() => {
   void boot();
 });
-onUnmounted(() => store.dispose());
+onUnmounted(() => {
+  disposed = true;
+  store.dispose();
+});
 async function selectSession(id: string) {
   try {
     const result = await router.push(`/chat/${encodeURIComponent(id)}`);

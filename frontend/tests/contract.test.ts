@@ -86,12 +86,12 @@ describe("runtime contract classification", () => {
       "fetch",
       vi.fn().mockResolvedValue(jsonResponse({ hello: "world" })),
     );
-    expect((await checkRuntimeContract()).kind).toBe("incompatible");
+    expect((await checkRuntimeContract()).kind).toBe("unavailable");
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(new Response("not json", { status: 200 })),
     );
-    expect((await checkRuntimeContract()).kind).toBe("incompatible");
+    expect((await checkRuntimeContract()).kind).toBe("unavailable");
   });
 
   it("never mistakes transport failures or server faults for version problems", async () => {
@@ -198,6 +198,19 @@ describe("startup compatibility gate", () => {
     wrapper.unmount();
   });
 
+  it("does not boot after unmount while the contract request is pending", async () => {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    const { store, wrapper } = await mountApp([pending]);
+    wrapper.unmount();
+    resolve(jsonResponse(compatibleBody));
+    await flushPromises();
+    expect(store.initialize).not.toHaveBeenCalled();
+    expect(store.startPolling).not.toHaveBeenCalled();
+  });
+
   it("keeps the check inflight-safe when the retry is pressed repeatedly", async () => {
     setActivePinia(createPinia());
     const gate = useContractGate();
@@ -234,5 +247,27 @@ describe("contract barrier rendering", () => {
     expect(wrapper.text()).toContain("服务端数据版本");
     expect(wrapper.text()).toContain("v6");
     wrapper.unmount();
+  });
+});
+
+describe("independent compatibility review", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("does not fabricate missing contract metadata", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ contract_version: 1 })),
+    );
+    expect((await checkRuntimeContract()).kind).toBe("unavailable");
+  });
+  it("does not call a body read failure a version mismatch", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(new TypeError("connection reset")),
+      }),
+    );
+    expect((await checkRuntimeContract()).kind).toBe("unavailable");
   });
 });

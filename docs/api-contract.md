@@ -680,3 +680,5 @@ Vue 使用最后成功交给状态层的持久事件序号重建连接，忽略�
 model.retry保留request_id/attempt_id/attempt，增加category；retryable表示实际上是否还有下一次。计划重试时给delay_seconds和next_attempt，可包含retry_after_seconds；服务商活动边界为server_side_activity=true，累计等待超限为retry_wait_limit_exceeded=true。终止分类也留此事实，但retryable=false不表示已经重试。
 
 model.preview增加可选attempt_id，不拼接不同尝试草稿。attempt_started/finished、预算和最终response仍是唯一持久事实。取消和半截工具不产生完整响应。完整恢复页面和动作矩阵仍待MK-08F，不新增隐藏执行入口。
+
+MK-00复核补充：兼容响应必须有有效schema_version、runtime_version及完整字符串capabilities列表，不补默认值冒充兼容。响应体读取/解析失败、字段残缺显示“无法确认兼容性”，不推断版本不匹配。capabilities表示此版本已实现的能力，不表示本机已安装对应依赖或已授权执行。页面离开后，迟到的兼容查询不会再启动工作台轮询。

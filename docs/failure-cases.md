@@ -611,3 +611,10 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 相关提交：见本切片本地提交（MK-00 契约切片）。
 - 经验：对追加式事实账本写"数量等于 N"断言前，先核对该操作会追加几条事实；联合类型的结果对象在模板里取字段前先用 computed 收窄。
 - 实际参与及可追问点：本切片子代理独立编写并复验；可解释 file.operation 两条事实的状态机与 `records()` 去重投影的关系；不能把首轮失败描述成兼容性回归。
+
+## MK00-REVIEW：兼容性数据与读取故障误分类（2026-10-26）
+
+- 分类：受控缺陷复现。基线2f6ec8f，主代理独立追加两项边界测试，Node运行Vitest `run --root frontend tests/contract.test.ts` 退出1，证据`.task_outputs/maka-upgrade/contract/review-red.log`。
+- 当前候选会把缺少元数据的version=1响应补成默认字段后标兼容，并把body读取失败称为版本不兼容；两者都缺事实依据。修复和复验待补充，不计验收完成。
+
+- 已完成修复：严格验证返回字段，读取和解析故障保持unavailable；真实版本差异才给升级提示。增加页面卸载后的异步启动隔离。迁移副本测试改用真实PreferenceMemory写入和快照，并验证恢复后的state/context可用，替代只能证明原始事件复制的手工假记忆。7项后端定向、含两个独立复现的18项前端定向及新增卸载用例通过（14项契约文件复验，合计19个不同前端用例）；Vue类型检查、受改测试Ruff通过。日志review-backend.log、review-frontend.log、unmount.log、review-typecheck.log；相关提交见本节修正提交。主代理独立检查与修正，不虚构线上影响或恢复效果。

@@ -39,17 +39,21 @@ function asContract(body: unknown): RuntimeContract | null {
   const version = value.contract_version;
   if (typeof version !== "number" || !Number.isSafeInteger(version))
     return null;
+  if (
+    typeof value.schema_version !== "number" ||
+    !Number.isSafeInteger(value.schema_version) ||
+    value.schema_version < 1 ||
+    typeof value.runtime_version !== "string" ||
+    !value.runtime_version ||
+    !Array.isArray(value.capabilities) ||
+    !value.capabilities.every((item) => typeof item === "string")
+  )
+    return null;
   return {
     contract_version: version,
-    schema_version:
-      typeof value.schema_version === "number" ? value.schema_version : -1,
-    runtime_version:
-      typeof value.runtime_version === "string" ? value.runtime_version : "",
-    capabilities: Array.isArray(value.capabilities)
-      ? value.capabilities.filter(
-          (item): item is string => typeof item === "string",
-        )
-      : [],
+    schema_version: value.schema_version,
+    runtime_version: value.runtime_version,
+    capabilities: value.capabilities,
   };
 }
 
@@ -85,15 +89,17 @@ export async function checkRuntimeContract(
   try {
     body = await response.json();
   } catch {
-    return incompatible(
-      "服务端返回了无法解析的契约数据，版本未知。请升级服务端 Eventide 后重试。",
-    );
+    return {
+      kind: "unavailable",
+      message: "服务信息未能完整读取或解析，暂时无法确认兼容性，请重试。",
+    };
   }
   const contract = asContract(body);
   if (!contract) {
-    return incompatible(
-      "服务端契约数据缺少有效的 contract_version，版本未知。请升级服务端 Eventide 后重试。",
-    );
+    return {
+      kind: "unavailable",
+      message: "服务返回的兼容性信息缺失或格式无效，无法确认版本，请重试。",
+    };
   }
   if (contract.contract_version === SUPPORTED_CONTRACT_VERSION) {
     return { kind: "compatible", contract };
