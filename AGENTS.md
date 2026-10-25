@@ -527,3 +527,5 @@ MK-08A快照/代次已补：原子Run快照、首次SSE状态、超前游标rese
 ZCode后续3路（MK16目录UI、MK05命令日志、MK17旁枝）于03:02返回网关405，非额度耗尽，未绕过或切套餐；未完成现场保留，failure-cases#MK-ZCODE-405及本地dispatch清单可追溯。已交回切片继续主代理复核集成。
 
 MK-08C持久恢复首批切片（2026-10-26，子agent，ADR-111）：接收冻结recovery_policy，旧历史不自动升级；重启按事实投影判定（控制类执行/未知工具/未闭合协议对/待审批/缺post-tool checkpoint/源码checkpoint漂移均停驻），可恢复Run经store.claim_run_recovery单事务领取（recovery.claimed冻结后继身份+run.interrupted收尾），重复initialize/连续重启不产生两个后继；initialize()复核冻结provider/model/Skill快照后走既有Continue调度原顺序重派发，预算按recovery_of上溯原根Run不重置。4项真实Host重启定向、91项恢复/调度/预算/Continue回归、73项host/retry/stream回归、Ruff/Mypy通过；失败与复验见failure-cases MK08C-ZCODE，日志.task_outputs/maka-upgrade/recovery/。仍待08D未知核查、恢复API/页面、控制类执行恢复与真实验收；MK-08整体仍进行中。
+
+MK08C主代理复核：61cf634后发现并修复claim与initialize间再次崩溃遗漏、普通worktree/snapshot误停、显式模型/Skill误比默认的问题；保留相同后继身份、原副本及预算根。105个不同恢复/调度/预算/副本用例通过，最后25项调度复验与Ruff/Mypy通过，failure-cases MK08C-REVIEW可追溯。MK08仍未完成：未知工具自动核查、源码变化重新建立基线、恢复中心UI及控制执行恢复未交付。

@@ -793,3 +793,13 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 另：预算单测两次因测试自设数字算错（120>100 直接超限；90+2 未超 100），修正测试数字，生产代码未改。
 - 复验：`pytest tests/test_run_recovery.py tests/test_run_dispatch.py tests/test_budgets.py tests/test_model_budget.py -q` 91 项通过（`final-directed.log`）；另 test_host/test_model_retry/test_stream_runtime 73 项通过。
 - 经验：SQLite 端 UNIQUE `turns.continuation_of` 本身就是“一个源 Run 只能有一个后继”的硬约束，恢复去重应显式利用它；终态事实是会话内不可逆边界，成对事实必须先非终态后终态写入。
+
+### MK08C-REVIEW — 恢复领取后再次崩溃及实际副本恢复缺口
+
+- 2026-10-26，主代理受控复现，基线61cf634；`pytest tests/test_run_recovery.py -k 'reclaim_after or preserves_explicit'` 2失败，日志`.task_outputs/maka-upgrade/recovery/review-red.log`。
+- 已证实：领取事务只持久化旧Run的claim/terminal，待派发清单只在内存，构造Host后initialize前再次退出会遗失续跑；worktree/snapshot被一律列控制执行导致普通隔离写任务不能恢复，默认模型一致性检查也误拒绝原Run显式选择的模型。待修复并复验；预算根/副本身份必须保留，不通过复制新用户输入重启任务。
+- 关联验证首次命令误写不存在的tests/test_execution_worktrees.py，pytest退出4且未收集测试（review-related.log）；正确文件为tests/test_worktree_execution.py，命令修正后另存日志，不计前次通过。
+- 关联复验 review-related-green.log 运行中已出现1项失败（初始20项后），原因待最终报告定位；当前不计通过。此前6项新恢复专项已通过，Ruff/Mypy5模块通过。
+
+- 关联105项中104通过/1失败已定位：旧队列测试断言所有模型请求为零，而独立只读快照现在按新策略正常恢复。改为验证漂移source Run无model.attempt且无后继，保留对其拒绝Continue的断言；不禁止另一个已冻结快照恢复。
+- MK08C-REVIEW最终关联105个不同用例全部通过（首轮104+漂移source断言复验1），随后去除多余启动包装任务，直接使用已有同步start_admitted_run注册所有权；25项恢复/调度复验通过，Ruff/Mypy通过（review-ownership-final、review-static-final、review-type-final）。修复持久claim重新扫描、原显式模型/冻结Skill恢复、普通worktree/snapshot恢复与预算谱系；未放开未知副作用/审批/控制执行。

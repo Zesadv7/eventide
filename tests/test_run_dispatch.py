@@ -478,7 +478,10 @@ asyncio.run(main())
         assert not host.provider.requests
         with pytest.raises(ValueError, match="changed or checkpoint"):
             await host.continue_session("queued-session")
-        assert not host.provider.requests
+        # The independent immutable snapshot may now auto-resume; the drifted
+        # source Run must still make no request and gain no continuation.
+        assert not any(e["type"] == "model.attempt" for e in host.store.run_events("queued"))
+        assert host.store.latest_run_summary("queued-session")["id"] == "queued"
         assert host.store.load_messages("queued-session")[0]["content"] == "must preserve"
     finally:
         await host.close()

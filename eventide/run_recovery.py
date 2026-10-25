@@ -24,7 +24,7 @@ FINALIZE = "finalize"
 # deliveries, evaluations, indexes, control operations) are never auto-resumed
 # by this slice; their lifecycle owners must settle them explicitly.
 CONTROL_BINDING_KINDS = frozenset({
-    "sandbox", "snapshot", "worktree", "delivery", "evaluation", "index",
+    "sandbox", "delivery", "evaluation", "index",
     "worktree_control", "history_import", "python_experiment",
 })
 

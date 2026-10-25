@@ -194,3 +194,48 @@ def test_recovery_continuation_shares_root_run_budget(isolated_workspace):
             input_estimate=10, output_estimate=10, estimate_method="test tokenizer v1",
         )
     store.close()
+
+
+async def test_reclaim_after_crash_between_claim_and_initialization(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    first = RuntimeHost(settings_for(isolated_workspace))
+    workspace = first.resolve_or_register_workspace(repo)
+    session = first.create_session(workspace_id=workspace.workspace_id)
+    old_run = await first.admit_run(RunRequest("finish the task", session))
+    crash_host(first)
+    second = RuntimeHost(settings_for(isolated_workspace))
+    claims = [e for e in second.store.run_events(old_run) if e["type"] == "recovery.claimed"]
+    successor = claims[0]["payload"]["resumed_as"]
+    crash_host(second)
+    third = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
+    try:
+        await third.initialize()
+        assert third.store.get_run_identity(successor) is not None
+        assert await wait_terminal(third, successor) == "run.completed"
+        assert continuation_runs(third.store, old_run) == [successor]
+    finally:
+        await third.close()
+
+
+async def test_recovery_preserves_explicit_model_and_worktree(isolated_workspace):
+    repo = make_repo(isolated_workspace / "repo")
+    first = RuntimeHost(settings_for(isolated_workspace))
+    workspace = first.resolve_or_register_workspace(repo)
+    session = first.create_session(workspace_id=workspace.workspace_id)
+    old_run = await first.admit_run(RunRequest(
+        "finish the task", session, model="selected-model", execution_target="worktree",
+    ))
+    binding = first._execution_binding(old_run)
+    crash_host(first)
+    second = RuntimeHost(settings_for(isolated_workspace), ScriptedProvider([{"text": "done"}]))
+    try:
+        await second.initialize()
+        successors = continuation_runs(second.store, old_run)
+        assert len(successors) == 1
+        successor = successors[0]
+        assert second._admitted_intent(successor)["model"] == "selected-model"
+        assert second._execution_binding(successor) == binding
+        assert await wait_terminal(second, successor) == "run.completed"
+        assert ModelBudgetController(second.store).context(successor)[1].root_run_id == old_run
+    finally:
+        await second.close()

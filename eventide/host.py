@@ -226,7 +226,6 @@ class RuntimeHost:
             )
             self._pending_recoveries: list[tuple[str, str, str, dict[str, Any]]] = []
             self._recovery_markers: dict[str, str] = {}
-            self._recovery_tasks: set[asyncio.Task[None]] = set()
             self._recovery_dispatching = False
             self._recover_interrupted_runs()
             self.file_operations = FileOperations(self.store, self.state_dir)
@@ -2295,6 +2294,9 @@ class RuntimeHost:
                         "request_fingerprint": request.request_fingerprint
                         if request else request_fingerprint,
                     }
+                    recovery_of = self._recovery_markers.pop(run_id, None)
+                    if recovery_of:
+                        payload["recovery_of"] = recovery_of
                     persisted = self._semantic(payload)
                     # This binding is generated and validated internally, with paths,
                     # hashes and counts only. Filename keys such as test_tokens.py
@@ -2680,6 +2682,31 @@ class RuntimeHost:
                 self._finalize_interrupted_run(run_id, parked_reason)
             else:
                 self._claim_auto_recovery(run_id, reason)
+        self._restore_recovery_claims()
+
+    def _restore_recovery_claims(self) -> None:
+        """Rebuild dispatch intent even after a second crash before initialization."""
+        blocked = {
+            e["payload"]["resumed_as"]
+            for e in self.store.facts_by_type(("recovery.blocked",))
+        }
+        self._pending_recoveries = []
+        for claim in self.store.facts_by_type(("recovery.claimed",)):
+            source_id = claim["payload"]["source_run_id"]
+            successor = claim["payload"]["resumed_as"]
+            if successor in blocked or self.store.get_run_identity(successor):
+                continue
+            latest = self.store.latest_run_summary(claim["session_id"])
+            if latest is None or latest["id"] != source_id:
+                self._block_recovery(
+                    claim["session_id"], source_id, successor, "superseded_by_user_run",
+                )
+                continue
+            intent = self._admitted_intent(source_id)
+            assert intent is not None
+            self._pending_recoveries.append(
+                (claim["session_id"], source_id, successor, intent)
+            )
 
     def _finalize_interrupted_run(self, run_id: str, recovery_class: str | None) -> None:
         """Park one unfinished Run with the evidence the filesystem can still justify."""
@@ -2807,18 +2834,16 @@ class RuntimeHost:
         if (
             intent.get("provider") != self.settings.provider
             or intent.get("endpoint_hash") != digest(self.settings.base_url)
-            or intent.get("model") != self.settings.model
         ):
             self._block_recovery(session_id, source_run_id, run_id, "model_config_changed")
             return
         try:
             workspace = self.sessions.workspace(session_id)
             frozen_skills = intent.get("skill_snapshot")
-            if frozen_skills is not None and frozen_skills != await self._freeze_skills(
-                workspace, None
-            ):
-                self._block_recovery(session_id, source_run_id, run_id, "skill_config_changed")
-                return
+            if frozen_skills is not None:
+                binding = self._execution_binding(source_run_id)
+                root = self._execution_paths(binding)[0] if binding else Path(workspace.path)
+                self.skills.restore(root, frozen_skills)
             self._recovery_markers[run_id] = source_run_id
             await self.admit_continue(session_id, run_id)
         except Exception as exc:
@@ -2828,14 +2853,9 @@ class RuntimeHost:
             )
             return
 
-        async def launch() -> None:
-            # The tracked Run task already persisted its terminal fact on failure.
-            with suppress(Exception):
-                await self.start_admitted_run(run_id)
-
-        task = asyncio.create_task(launch())
-        self._recovery_tasks.add(task)
-        task.add_done_callback(self._recovery_tasks.discard)
+        # This synchronous entry registers ownership before the task can run;
+        # its existing done callback persists failures and releases resources.
+        self.start_admitted_run(run_id)
 
     def _crash_gap_evidence(self, run_id: str) -> tuple[list[str], dict[str, Any] | None] | None:
         """What the filesystem still knows about a run that died without a checkpoint.
