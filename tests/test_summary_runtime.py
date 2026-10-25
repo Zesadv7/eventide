@@ -9,6 +9,7 @@ from eventide.host import RuntimeHost
 from eventide.model_failures import MODEL_STEP_ATTEMPTS
 from eventide.models import ModelResponse, RunRequest
 from eventide.providers import ScriptedProvider
+from tests.test_context_summary import minimal_summary_text
 from tests.test_runtime import COMPACTION_BUDGET, settings_for
 
 
@@ -16,7 +17,7 @@ async def test_summary_usage_is_recorded_once_and_never_becomes_a_message(isolat
     provider = ScriptedProvider(
         [
             {"text": "x" * 5000},
-            {"text": "compact prior work", "usage": {"input_tokens": 5, "output_tokens": 7}},
+            {"text": minimal_summary_text(msg=1), "usage": {"input_tokens": 5, "output_tokens": 7}},
             {"text": "done", "usage": {"input_tokens": 3, "output_tokens": 4}},
         ]
     )
@@ -34,7 +35,7 @@ async def test_summary_usage_is_recorded_once_and_never_becomes_a_message(isolat
         assert "message" not in generated["payload"]
         assert len([e for e in events if e["type"] == "model.response"]) == 1
         assert all(
-            message["content"] != "compact prior work"
+            message["content"] != "carry the prior goal"
             for message in host.store.load_messages(first.session_id)
         )
     finally:
@@ -104,7 +105,7 @@ async def test_summary_token_limit_parks_before_another_model_call(isolated_work
     provider = ScriptedProvider(
         [
             {"text": "x" * 5000},
-            {"text": "compact prior work", "usage": {"input_tokens": 8, "output_tokens": 5}},
+            {"text": minimal_summary_text(msg=1), "usage": {"input_tokens": 8, "output_tokens": 5}},
             {"text": "continued", "usage": {"input_tokens": 2, "output_tokens": 1}},
         ]
     )

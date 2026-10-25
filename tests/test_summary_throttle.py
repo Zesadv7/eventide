@@ -13,6 +13,7 @@ from eventide.host import RuntimeHost
 from eventide.models import ModelResponse, RunRequest
 from eventide.providers import ScriptedProvider
 from eventide.store import RuntimeStore
+from tests.test_context_summary import minimal_summary_text
 from tests.test_runtime import COMPACTION_BUDGET, settings_for
 
 
@@ -224,7 +225,10 @@ async def test_valid_checkpoint_reuses_result_without_new_claim(history):
 
     async def complete(request):
         requests.append(request)
-        return ModelResponse("retained goal", usage={"input_tokens": 3, "output_tokens": 2})
+        return ModelResponse(
+            minimal_summary_text("retained goal"),
+            usage={"input_tokens": 3, "output_tokens": 2},
+        )
 
     messages, compacted, _ = await build(history, complete)
     assert compacted["usage"] == {"input_tokens": 3, "output_tokens": 2}

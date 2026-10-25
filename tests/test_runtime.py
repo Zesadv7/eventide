@@ -8,6 +8,7 @@ from eventide.host import RuntimeHost
 from eventide.models import RunRequest
 from eventide.providers import ScriptedProvider
 from eventide.store import RuntimeStore
+from tests.test_context_summary import minimal_summary_text
 
 
 def settings_for(path, **changes):
@@ -108,7 +109,7 @@ async def test_runtime_retries_and_compacts(isolated_workspace):
     settings = settings_for(isolated_workspace, context_limit=COMPACTION_BUDGET)
     provider = ScriptedProvider(
         [
-            {"text": "Earlier goal retained."},
+            {"text": minimal_summary_text("Earlier goal retained.")},
             {"error": "429", "retryable": True},
             {"text": "recovered"},
         ]

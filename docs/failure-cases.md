@@ -658,3 +658,13 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 - 2026-10-26 主代理受控复现，基线382bf6b；`python -m pytest -q tests/test_diagnostics_review.py` 2失败，证据 `.task_outputs/maka-upgrade/diagnostics/review-red.log`。
 - 已证实：工具/attempt在聚合前裁掉100条之后事实，使102次报告成100；无事件的where_stopped为None，被Markdown的正常结束默认文案误读。当前修正中，未做真实模型验证。
 - 修复后14项后端定向、6项前端报告组件、Ruff及Mypy2模块通过（review-green/review-frontend/review-ruff/review-mypy.log）。汇总现在使用完整事实，明细才裁剪；缺失事实明确不能确认停止位置。无真实模型或平台测试，后续恢复中心关联仍待实现。
+
+## MKCTX-ZCODE：结构化摘要契约首轮预期 Red 与测试编写缺陷（2026-10-26）
+
+- 类型：混合一轮——既有断言的预期行为变化（7 项）+ 旧断言预期失效（1 项）+ 新增测试自身编写缺陷（4 项根因）。基线 5acba20（codex/maka-context 分支），实现为 context_summary 新模块与 context_builder 接入。
+- 首轮命令：`pytest tests/test_context_summary.py tests/test_context_builder.py tests/test_summary_runtime.py tests/test_summary_throttle.py test_summary_reliability.py -q`，12 失败/44 通过。首轮输出未即时落盘，失败清单与根因从会话记录如实回填，未重跑历史；最终绿证据 `.task_outputs/maka-upgrade/context/final-green.log`。
+- 预期行为变化（按新契约修正测试，非放宽生产检查）：test_summary_runtime 2 项、test_summary_throttle::test_valid_checkpoint_reuses、test_summary_reliability 3 项、test_host 2 处、test_runtime::test_runtime_retries_and_compacts 此前用纯文本摘要（如 "compact prior work"/"retained goal"）即被旧契约采纳；新契约要求 schema v2 结构化 JSON，纯文本一律拒绝，因此这些测试的运行结果从 completed/interrupted 变为 failed。修正是把 ScriptedProvider 摘要响应替换为 `minimal_summary_text()` 合法结构化摘要，让测试继续验证其本来目标（用量记账、停驻、checkpoint 复用、重开重建）。
+- 预期旧断言失效：test_context_builder 旧断言 `len(instructions) == 4000` 与新来源头/截断提示冲突；另发现新断言误用 `text.count("x")` 时头部单词 "text" 含一个 x 导致 4001。改为精确断言 `record.text == "x"*4000` 加头部内容检查。
+- 新增测试编写缺陷：摘要采纳有 `size(candidate) < size(current)` 门槛，fixture 历史太小（约 200 字符）导致合法摘要反而更大未被采纳——加入 120 行调查日志放大历史；`valid_summary()` 的 hard_constraints 引言 "Only use Python 3.10" 只在模块级 HISTORY 常量里、不在 build fixture 用户消息里——补进 fixture；host 测试历史 msg0 是 "prior" 不含 x、引文在 assistant 的 x*5000（msg1）——`minimal_summary_text` 增加 msg 参数；溢出测试误用会成功采纳的摘要——改为缺 goal 的非法摘要使拒绝路径与溢出叠加。
+- 修正后：142 项受影响定向测试全部通过（10 个文件，12.9 秒）；Ruff 9 文件通过（首轮 11 处 E501 超长行修为换行）；Mypy py310 目标 2 生产模块通过。未运行全量、前端、容器或真实模型；生产实现未因测试失败放宽任何校验。
+- 经验：引入摘要结构契约时，所有依赖"任意非空文本可被采纳"的既有测试同时失效属预期；新增测试应先核对引用目标确实存在于被测 fixture，且历史必须大于摘要渲染结果才能走采纳路径。

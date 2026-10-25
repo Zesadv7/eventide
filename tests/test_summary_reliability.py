@@ -15,6 +15,7 @@ from eventide.models import ModelResponse, ToolCall
 from eventide.providers import ScriptedProvider
 from eventide.store import RuntimeStore
 from eventide.workspace import digest
+from tests.test_context_summary import minimal_summary_text
 
 
 @pytest.fixture
@@ -38,7 +39,10 @@ async def test_owner_completion_accounts_once_before_adopted_summary_is_cached(h
 
     async def complete_summary(request):
         requests.append(request)
-        response = ModelResponse("retained goal", usage={"input_tokens": 7, "output_tokens": 2})
+        response = ModelResponse(
+            minimal_summary_text("retained goal"),
+            usage={"input_tokens": 7, "output_tokens": 2},
+        )
         for key, value in response.usage.items():
             usage[key] += value
         return response
@@ -49,7 +53,7 @@ async def test_owner_completion_accounts_once_before_adopted_summary_is_cached(h
         "session", provider=provider, provider_name="scripted", model="selected-model",
         budget=1000, complete_summary=complete_summary,
     )
-    assert messages[0]["content"] == "[Prior context]\nretained goal"
+    assert messages[0]["content"].startswith("[Prior context]\nGoal: retained goal")
     assert messages[-1]["content"] == "current goal"
     assert compacted["usage"] == usage == {"input_tokens": 7, "output_tokens": 2}
     assert requests[0].model == "selected-model"
@@ -150,7 +154,10 @@ async def test_owner_keeps_usage_when_context_overflows_after_summary(history):
     received_usage = []
 
     async def complete_summary(request):
-        response = ModelResponse("retained goal", usage={"input_tokens": 23, "output_tokens": 3})
+        response = ModelResponse(
+            minimal_summary_text("retained goal"),
+            usage={"input_tokens": 23, "output_tokens": 3},
+        )
         received_usage.append(response.usage)
         return response
 
@@ -215,7 +222,8 @@ async def test_cancellation_propagates_out_of_owner_summary_completion(history):
 
 async def test_direct_provider_completion_retains_usage_for_existing_consumers(history):
     provider = ScriptedProvider([{
-        "text": "retained goal", "usage": {"input_tokens": 7, "output_tokens": 2},
+        "text": minimal_summary_text("retained goal"),
+        "usage": {"input_tokens": 7, "output_tokens": 2},
     }])
     messages, compacted, _ = await ContextBuilder(history).build(
         "session", provider=provider, provider_name="scripted", model="scripted", budget=1000,

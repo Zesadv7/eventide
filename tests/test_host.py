@@ -15,6 +15,7 @@ from eventide.model_failures import MODEL_STEP_ATTEMPTS
 from eventide.models import ModelResponse, RunRequest, WorkspaceTarget
 from eventide.providers import ScriptedProvider
 from eventide.workspace import workspace_checkpoint
+from tests.test_context_summary import minimal_summary_text
 from tests.test_runtime import COMPACTION_BUDGET, settings_for
 
 # What the assembled tool catalog may cost on every single model request, before any
@@ -659,7 +660,12 @@ async def test_mcp_close_failure_does_not_overwrite_success(isolated_workspace, 
 async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace, monkeypatch):
     clock = [1_000.0]
     monkeypatch.setattr("eventide.context_builder.time.time", lambda: clock[0])
-    provider = ScriptedProvider([{"text": "summary"}, {"text": "done" + "y" * 4000}])
+    provider = ScriptedProvider(
+        [
+            {"text": minimal_summary_text("carry the prior goal")},
+            {"text": "done" + "y" * 4000},
+        ]
+    )
     settings = settings_for(isolated_workspace, context_limit=COMPACTION_BUDGET)
     host = RuntimeHost(settings, provider)
     session = host.create_session()
@@ -674,7 +680,15 @@ async def test_context_checkpoint_survives_reopen_and_rebuild(isolated_workspace
     host.store._connection.commit()
     await host.close()
     clock[0] += 60
-    reopened = RuntimeHost(settings, ScriptedProvider([{"text": "new summary"}, {"text": "done"}]))
+    reopened = RuntimeHost(
+        settings,
+        ScriptedProvider(
+            [
+                {"text": minimal_summary_text("carry the goal again")},
+                {"text": "done"},
+            ]
+        ),
+    )
     try:
         assert (await reopened.run(RunRequest("again", session))).status == "completed"
         assert reopened.store.session_events(session)[: len(original)] == original

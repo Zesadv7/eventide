@@ -478,7 +478,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-01 | 进行中 | 编辑精确唯一匹配、版本冲突与可读诊断；沿用diff/undo，歧义不改文件。 |
 | MK-02 | 进行中 | 文件版本绑定续页、超长行、跨副本校验；页面范围/变化提示。 |
 | MK-03 | 进行中 | 摘要目标/约束/事实/假设/检查/证据，结构和来源校验；上下文版本对照。 |
-| MK-04 | 待开始 | 规则来源/作用域/截断及attempt输入清单；请求诊断面板不串轮。 |
+| MK-04 | 进行中 | 规则来源/作用域/截断及attempt输入清单；请求诊断面板不串轮。 |
 | MK-05 | 待开始 | 普通Shell/Skill/后台长日志归档回读，保留配额/脱敏/退出事实；页面分页与缺失状态。 |
 | MK-06 | 待开始 | 运行中补充/下一轮、结构化问题与持久回答；安全边界消费、刷新/迟到/停止回归。 |
 | MK-07 | 待开始 | 实际参数生成可读审批，冻结版本/边界/副本；过期与扩权校验。 |
@@ -509,3 +509,9 @@ MK-08A 首批实现：浏览器显式重连/离线唤醒、最新游标续接、
 外部 ZCode 调度：用户授权按可用最高并发运行。当前实测三项在途，增加的 context/native 首请求被 429/3008 并发限制拒绝；先按三路补位，空闲即分配下一项。全部 yolo/max，保留既定额度切换顺序；并发限制不当作额度耗尽。主代理负责拆分边界、独立副本、集成及真实结果核验。
 
 MK-01/02首批工具切片：唯一编辑、重叠歧义拒绝、expected_sha256、版本绑定续页及长行偏移、本地/容器worker同契约实现；129项核心与57项关联定向通过，Ruff/Mypy5模块通过，失败与修复见MKFILES-REVIEW。专门前端证据浏览、原生接入及真实平台验收仍待后续；ADR-103/README/architecture/api-contract已记录，整体状态不改为完成。
+
+## MK-03/MK-04 context 层切片（2026-10-26，MKCTX-ZCODE，未完成整体 MK-03/04）
+
+- 外部 ZCode 子代理实施，仅改 context 层：新增 `eventide/context_summary.py`（schema v2 结构化摘要：goal/hard_constraints/facts/unverified/checks/failures/next_steps，证据节强制 `{"msg","quote"}` 逐字引文，确定性校验拒绝无效摘要并保留旧历史/旧 checkpoint）并接入 `context_builder.py` 摘要生成与渲染；根 AGENTS.md 改有界读取 + 来源头 + 截断提示 + read_file 回读指引（`instructions_record()`）。checkpoint/claim/digest/policy_version/账本及单次模型调用不变，无新事件类型；拒绝原因入 `context.trimmed.summary_rejected`。
+- 验证：142 项受影响定向测试通过（新增 27 项 + 既有 7 处纯文本摘要响应按新契约更新）、Ruff 9 文件、Mypy py310 目标 2 模块；未跑全量/前端/容器/真实模型，未调用付费 API。首轮 12 项失败（预期行为变化与测试编写缺陷）见 failure-cases MKCTX-ZCODE。
+- 设计取舍见 [ADR-104](docs/decisions.md#adr-104)；architecture MK-03/04 小节已加切片注记。Host 侧逐尝试输入清单、安装级/目录作用域规则、API/UI 摘要比较及真实模型效果仍待后续切片，MK-03/MK-04 整体保持进行中，不标完成。
