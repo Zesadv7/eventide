@@ -1014,6 +1014,7 @@ MK-CODING-1308于2026-10-26 15:30–15:31再次出现：Graph review1、native r
 MK06-MK21-EARLY-REVIEW后续：提问草稿的问题已由主代理按ADR123修复，并在questions-review验证；原生草稿的清理、权限和文件契约问题仍未修复/验收，不能把本条当MK21闭环。MK20与MK11提前审查项仍待后续候选验证。
 
 
+
 ### MK20-CURRENT — 当前模型接手任务图
 
 - 基线6873d21，保留外部ZCode未集成草稿后重新实现唯一Runtime EventLog上的只读图。首轮 `python -m pytest -q tests/test_agent_graph.py` 为9通过/1失败，退出1；新增预算断言误调用不存在的Store.model_call_attempts，尚未执行该条预算归属核对。日志`.task_outputs/maka-upgrade/graph-review/backend1.log`；先按真实账本接口修正测试，不改生产预算以通过测试。任务图整体和写协作仍未完成。
@@ -1150,3 +1151,14 @@ MK21-INTEGRATION组合守卫复验：Graph创建/公共旁枝拒绝与普通Grap
 - MK21-INTEGRATION执行测试定位修正后首次复验又因维护命令在仓库根运行Vitest，未加载frontend的Vue插件，.vue导入变换失败、未收集用例（frontend-execution.log）。改在frontend目录执行，不把零用例计为通过；与此前Vue类型命令同属目录选择错误。生产页面和权限逻辑未改。
 
 MK21-INTEGRATION当前复验：89项原生worker/协议/路径/取消主集成通过，Mypy15模块通过；首批前端23通过中的旧发送按钮定位修正后，该文件11项通过（frontend-execution2.log），未更改页面权限判断。Vue类型正确项目复验通过；两个目录选择错误均已保留日志且未虚报检查结果。真实内核尚未验证，原生候选仍待生成契约/资源与built页面，不因本条提前上传。
+
+### MK08D-RECONCILE — 内置文件未知结果核查（2026-10-26，基线6873d21）
+
+- 首批13项后端行为验证通过（backend1.log）；随后`ruff check`涉及8个运行模块与新测试退出1，20项为新增长行、导入布局和未使用Path，日志`.task_outputs/maka-upgrade/outcome-reconcile/ruff1.log`。属于开发期静态问题，不将行为验证通过当静态通过；逐项修正并复验。新核查依赖写前目标外工作区指纹，旧记录缺证据保持待判断，不放宽历史判定。
+
+- ruff2仍有Host新增update行102字符（退出1，ruff2.log），继续缩为独立关键字行；未改运行行为。
+
+- types1退出2：新增前端测试对Vue Test Utils的get返回值调用exists（其类型明确省略该方法，recovery.test.ts:365）。8项组件行为与8模块Mypy、最终Ruff已通过；改为find().exists()复验类型，未改生产代码。证据outcome-reconcile/types1.log。
+
+- MK08D-RECONCILE收口：ruff3及ruff-last通过；types2修复测试定位后通过，mypy-final8模块通过。backend2共103项通过（含新增16项及原恢复/关服/文件撤销/详情/Store）；后补backend-final2项、backend-production1项分别通过，未重复整批。frontend1恢复页8项通过，核查时间与测试类型修复后frontend2定向2项通过/其余6项未运行，格式通过。实际Host完成记录OSError是受控故障注入：按预期停驻，核查后原写入只有一次、显式Continue仅回送原call的核查结果；不是线上事故。原长行/导入和测试类型问题均已修复，未留未登记失败。当前模型子agent实现后端/API/UI与定向验证，真实浏览器/产物及全量由主集成负责；相关本地提交以feat: reconcile builtin file outcomes from frozen read-only evidence的Git记录为准。
+

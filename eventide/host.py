@@ -81,6 +81,7 @@ from eventide.native_execution import (
 )
 from eventide.native_sandbox.runner import NativeSandboxError
 from eventide.normalization import normalize, redact
+from eventide.outcome_reconciliation import unresolved_outcomes, verified_outcomes
 from eventide.policy import PolicyDecision, PolicyEngine
 from eventide.preference_memory import PreferenceMemory
 from eventide.previews import PreviewStore, SafeTextBuffer
@@ -241,6 +242,7 @@ class RuntimeHost:
         self._owns_store = store is None
         self._worktree_removals: set[Path] = set()
         self._lease = HostLease(store.path.parent if store else self.settings.state_dir)
+        self.policy = PolicyEngine()
         try:
             self.store = store or RuntimeStore(self.settings.state_dir / "runtime.sqlite")
             self._checkpoint_files = runtime_checkpoint_files(self.store.path, self.state_dir)
@@ -257,9 +259,10 @@ class RuntimeHost:
             self._pending_recoveries: list[tuple[str, str, str, dict[str, Any]]] = []
             self._recovery_markers: dict[str, str] = {}
             self._recovery_dispatching = False
-            self._recover_interrupted_runs()
+            self.sessions = SessionManager(self.store)
             self.file_operations = FileOperations(self.store, self.state_dir)
             self.file_operations.recover()
+            self._recover_interrupted_runs()
             self.acceptance_output = AcceptanceOutputs(self.store, self.state_dir)
             self.acceptance_output.recover()
             self.command_logs = CommandLogs(
@@ -270,7 +273,6 @@ class RuntimeHost:
             self._secret_box = SecretBox(self.settings.state_dir)
             self._provider_secret_error: str | None = None
             self._load_persisted_provider()
-            self.sessions = SessionManager(self.store)
             self.context_builder = ContextBuilder(self.store)
             self.default_workspace = self.resolve_or_register_workspace(self.settings.workdir)
         except BaseException:
@@ -281,7 +283,6 @@ class RuntimeHost:
         self.provider = provider
         self.tools = production_tool_catalog(list(TOOLS if tools is None else tools))
         self.handlers = dict(HANDLERS if handlers is None else handlers)
-        self.policy = PolicyEngine()
         self.executor = ToolExecutor(
             self.handlers,
             command_executor=LocalCommandExecutor(
@@ -1558,6 +1559,113 @@ class RuntimeHost:
             raise PermissionError("File operation is no longer permitted by policy")
         self.file_operations.validate(record)
         return record
+
+    def _reconcile_file_outcomes(self, run_id: str) -> list[dict[str, Any]]:
+        """Inspect frozen builtin-write evidence; called only without a live writer."""
+        identity = self.store.get_run_identity(run_id)
+        if identity is None:
+            raise LookupError("Run not found")
+        session_id = identity["session_id"]
+        events = self.store.run_events(run_id)
+        records = {record["call_id"]: record for record in self.file_operations.records(session_id)
+                   if record["run_id"] == run_id}
+        settled = {event["payload"]["call_id"] for event in events
+                   if event["type"] in {"tool.completed", "tool.abandoned", "tool.outcome_unknown"}}
+        for event in events:
+            call = event["payload"]
+            if (event["type"] == "tool.prepared" and call["call_id"] not in settled
+                    and call["call_id"] in records and call["name"] in {"write_file", "edit_file"}):
+                self.store.append_event(run_id, "tool.outcome_unknown", {
+                    "call_id": call["call_id"], "name": call["name"], "readonly": False,
+                    "workspace_id": records[call["call_id"]]["workspace_id"],
+                    "error": "Process stopped before the builtin file result was recorded",
+                })
+        events = self.store.run_events(run_id)
+        prepared = {event["payload"]["call_id"]: event["payload"] for event in events
+                    if event["type"] == "tool.prepared"}
+        advertised = {block["id"]: block for event in events if event["type"] == "model.response"
+                      for block in event["payload"].get("message", {}).get("content", [])
+                      if block["type"] == "tool_use"}
+        checks: list[dict[str, Any]] = []
+        for unknown in unresolved_outcomes(self.store.run_outcome_events(run_id)):
+            call = unknown["payload"]
+            record = records.get(call["call_id"])
+            observation: dict[str, Any] = {
+                "status": "requires_review", "reason": "unsupported_or_missing_file_evidence",
+            }
+            if record is not None:
+                original = prepared.get(call["call_id"], {})
+                block = advertised.get(call["call_id"], {})
+                if (call["name"] == record["tool"] == original.get("name") == block.get("name")
+                        and call["name"] in {"write_file", "edit_file"}
+                        and original.get("arguments_fingerprint")
+                        == record.get("arguments_fingerprint")
+                        and original.get("arguments_fingerprint") is not None):
+                    try:
+                        self.authorize_file_operation(session_id, record["operation_id"])
+                        binding = self._execution_binding(run_id)
+                        root = (self._execution_paths(binding)[0] if binding
+                                else Path(self.sessions.workspace(session_id).path))
+                        before = self._workspace_checkpoint(root)
+                        observation = self.file_operations.inspect_outcome(record)
+                        after = self._workspace_checkpoint(root)
+                        if observation["status"] == "verified_after":
+                            if before is None or before != after:
+                                observation.update(
+                                    status="requires_review",
+                                    reason="workspace_changed_during_check",
+                                )
+                            else:
+                                observation["observed_checkpoint"] = after
+                    except (OSError, ValueError, SecretKeyError) as exc:
+                        observation = {
+                            "status": "requires_review", "reason": "evidence_unavailable",
+                            "detail": self._semantic(str(exc)),
+                        }
+                else:
+                    observation["reason"] = "original_call_evidence_mismatch"
+            payload = self._semantic({
+                "source_run_id": run_id, "call_id": call["call_id"],
+                "unknown_event_id": unknown["event_id"], "name": call["name"],
+                "operation_id": record["operation_id"] if record else None,
+                "source_high_water": events[-1]["session_seq"], **observation,
+            })
+            payload["observation_digest"] = digest(payload)
+            checks.append(self.store.record_outcome_reconciliation(session_id, payload))
+        return checks
+
+    async def reconcile_run_outcomes(self, run_id: str) -> dict[str, Any]:
+        """Human-requested read-only check; it never starts or approves a Run."""
+        task = asyncio.current_task()
+        assert task is not None
+        already_active = task in self._active_tasks
+        self._active_tasks.add(task)
+        try:
+            await self.initialize()
+            identity = self.store.get_run_identity(run_id)
+            if identity is None:
+                raise LookupError("Run not found")
+            session_id = identity["session_id"]
+            workspace = self.sessions.workspace(session_id)
+            binding = self._execution_binding(run_id)
+            if binding and binding["kind"] != "worktree":
+                raise ValueError("Only local source and worktree outcomes can be checked")
+            workspace_id = binding["execution_workspace_id"] if binding else workspace.workspace_id
+            if self.session_busy(session_id) or self.workspace_busy(workspace_id):
+                raise ValueError("Wait for the task to stop before checking outcomes")
+            if not self.store.run_is_terminal(run_id):
+                raise ValueError("Outcome checks require a parked Run")
+            async with (self._session_locks[session_id], self._workspace_execution(workspace_id),
+                        self._project_git(workspace.project_id)):
+                await self._admission_check(self._reconcile_file_outcomes, run_id)
+            facts = self.store.run_outcome_events(run_id)
+            return {"run_id": run_id,
+                    "checks": [e["payload"] for e in facts
+                               if e["type"] == "tool.outcome_reconciled"],
+                    "unresolved": len(unresolved_outcomes(facts))}
+        finally:
+            if not already_active:
+                self._active_tasks.discard(task)
 
     async def undo_file_operation(self, session_id: str, operation_id: str) -> dict[str, Any]:
         """Human control-plane action; never advertised in the model tool catalog."""
@@ -3015,6 +3123,7 @@ class RuntimeHost:
         )
 
         for run_id in self.store.unfinished_runs():
+            self._reconcile_file_outcomes(run_id)
             binding = self._execution_binding(run_id)
             if binding and binding.get("kind") == "sandbox":
                 events = self.store.run_events(run_id)
@@ -3130,6 +3239,7 @@ class RuntimeHost:
             ),
             None,
         )
+        committed = self.store.reconciliation_checkpoint(run_id) or committed
         return evidence is not None and committed is not None and evidence == committed
 
     def _claim_auto_recovery(self, run_id: str, verdict_reason: str) -> None:
@@ -3328,10 +3438,11 @@ class RuntimeHost:
             if not workspace.git_root:
                 raise ValueError("Continue requires a Git workspace")
             evidence = self._workspace_checkpoint(Path(workspace.path))
-        if evidence is None or evidence != previous["checkpoint"]:
+        checkpoint = self.store.reconciliation_checkpoint(previous["id"]) or previous["checkpoint"]
+        if evidence is None or evidence != checkpoint:
             raise ValueError("Workspace changed or checkpoint unavailable; session remains parked")
         events = self.store.run_events(previous["id"])
-        if any(event["type"] == "tool.outcome_unknown" for event in events):
+        if unresolved_outcomes(self.store.run_outcome_events(previous["id"])):
             raise ValueError("Unknown tool outcome; session remains parked")
         last_checkpoint = max(
             (e["session_seq"] for e in events if e["type"] == "workspace.checkpoint"), default=0
@@ -3382,14 +3493,27 @@ class RuntimeHost:
                 approvals.add(payload["approval_id"])
             elif kind == "approval.resolved":
                 approvals.discard(payload["approval_id"])
+        reconciled = {value["call_id"]: value for value in verified_outcomes(
+            self.store.run_outcome_events(previous["id"])
+        ).values()}
         facts = [
             (
-                "tool.abandoned",
+                "tool.completed" if block["id"] in reconciled else "tool.abandoned",
                 {
                     "call_id": block["id"],
                     "name": block["name"],
-                    "is_error": True,
-                    "content": content,
+                    "is_error": block["id"] not in reconciled,
+                    "content": (
+                        "Expected builtin file state verified after interruption; "
+                        "the original tool call was not replayed."
+                        if block["id"] in reconciled else content
+                    ),
+                    **({"metadata": {"outcome_reconciled": True,
+                                      "file_operation_id": reconciled[block["id"]]["operation_id"],
+                                      "unknown_event_id": (
+                                          reconciled[block["id"]]["unknown_event_id"]
+                                      )}}
+                       if block["id"] in reconciled else {}),
                 },
                 "system",
                 "runtime",
@@ -4641,6 +4765,7 @@ class RuntimeHost:
                             "call_id": call.id,
                             "name": call.name,
                             "arguments": self._semantic(call.arguments),
+                            "arguments_fingerprint": digest(call.arguments),
                             "readonly": readonly,
                             "batch": batch,
                         },

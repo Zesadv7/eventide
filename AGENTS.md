@@ -571,6 +571,7 @@ MK06/MK09提问切片主代理接手（2026-10-26）：ZCode四路于15:30–15:
 MK06/MK09提问切片收口：原问题身份刷新/服务关闭后保留、同问题重复回执重新唤醒、明确停止阻止答案接收、Plan可提问且ReadonlyWorker不可、回答内容脱敏、后续危险工具仍需独立审批均有定向证据；类型/契约/打包同步。真实供应商与全量最终门禁仍按MK22，原项目未采纳。
 
 
+
 MK20当前窗口接手（2026-10-26，基线6873d21）：保留外部草稿审查证据，先实现唯一EventLog上的只读依赖图、全服务4节点容量、准备阶段所有权与真实取消/重启收尾，接API和任务图页面；写Agent/候选整合/Verifier仍待后续，未将本切片标完成。当前模型的协作代理并行接手MK11/MK21。
 
 MK20后端切片验证：backend2中36通过、1测试字段错误后backend3复验原例通过；worktree新增夹具修正后backend4的5项通过，backend5旁枝释放自动补位/重复停止/HTTP 3项通过（批次有重叠不累加）。Plan及真实脏worktree读取、目录无写工具、预算根与预算拒绝、草稿图不自动执行、跨图去重、准备取消和重启不重派发均验证。Mypy首次2处类型修正后5模块通过，Ruff通过；完整门禁/模型及任务图页面验收仍单列。
@@ -610,4 +611,9 @@ MK21审查修复收口：7项取消/目录项/公共入口定向通过，包含�
 MK21主集成组合边界：候选9884ae6/4953a10/94b4c7b接入后，Graph创建直接核对原Run冻结native profile并拒绝，公共旁枝入口同样拒绝；native/Docker聊天不显示未支持的Graph/旁枝写入口。3项native权限/Graph源副本定向、Vue类型（显式frontend/tsconfig）通过，尚待8da72ad写发布复核补丁及完整本地集成验收，本阶段不推送native候选。
 
 MK21统一写入回执补充完成候选：原子发布后核对当前发布inode、内容及目录项版本，观察到替换/原inode改字节返回unknown，保留编辑器实际内容；只保证回执观察点。新worker/Host插入及正常创建5项、既有worker/runner23项、Ruff/Mypy1模块通过，日志native-current-model/eventide-native-write-receipt-*。真实平台与最终集成仍待。
+
+
+MK08D文件结果核查开始（2026-10-26，当前模型子agent，基线6873d21）：新增写入前固定的目标外工作区/原调用参数证据，支持内置write/edit只读核清结果，未知事实和原终态保留。无充分证据的旧记录、Shell/MCP仍requires_review；已终态核查仅显式Continue，未终态崩溃安全边界沿原claim恢复，预算/用户停止/审批不绕过。定向验证与稳定文档完成前不标已完成。
+
+MK08D内置文件核查切片验证（2026-10-26）：新write/edit prepared固定原参数hash与目标外Git可见上下文；原unknown与终态不改写，Session核查事实统一供恢复分类/Continue/副本隔离/恢复页读取。source/worktree真实内置工具崩溃后不重放，唯一claim/ToolResult/预算根保持；before/第三种字节/目标外变化/暂存变化/缺旧证据/调用和目录不符仍停驻，用户停止/待审批/原预算不绕过，关服等只读核查真实收尾。103项关联后端（含首批16项新增）通过；再补claim后再次崩溃、目标暂存变化及真正Host完成记录丢失窗口3项定向均过（批次重叠不累计）。恢复页8项组件通过，最后受影响2项复验通过，Mypy8模块/Vue类型/Ruff/Prettier/diff检查通过。日志.task_outputs/maka-upgrade/outcome-reconcile/，失败与修复见failure-cases MK08D-RECONCILE，ADR127/README/architecture/api-contract已同步。未终态崩溃可自动核查后走原领取恢复；已终态仅核查证据+显式Continue，Shell/MCP/容器与旧缺证据仍待判断。OpenAPI/静态产物/真实浏览器/全量和真实模型由主集成MK22统一，整体MK08仍进行中，无付费请求、未采纳源项目。
 

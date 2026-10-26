@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from eventide.outcome_reconciliation import unresolved_outcomes
 from eventide.projections import TERMINALS
 
 if TYPE_CHECKING:
@@ -65,7 +66,7 @@ def _control_run(store: RuntimeStore, run_id: str, events: list[dict[str, Any]])
 
 def unresolved_tool_pairs(store: RuntimeStore, session_id: str) -> bool:
     """True when the crashed model step left tool_use blocks without results."""
-    pending: set[str] = set()
+    pending: dict[str, str | None] = {}
     for event in store.session_events(session_id):
         if event["partial"]:
             continue
@@ -73,9 +74,12 @@ def unresolved_tool_pairs(store: RuntimeStore, session_id: str) -> bool:
         if kind == "model.response":
             for block in payload.get("message", {}).get("content", []):
                 if isinstance(block, dict) and block.get("type") == "tool_use":
-                    pending.add(str(block.get("id")))
+                    pending[str(block.get("id"))] = event["run_id"]
+        elif kind == "tool.outcome_reconciled" and payload["status"] == "verified_after":
+            if pending.get(payload["call_id"]) == payload["source_run_id"]:
+                pending.pop(payload["call_id"], None)
         elif kind in {"tool.completed", "tool.abandoned"}:
-            pending.discard(str(payload.get("call_id")))
+            pending.pop(str(payload.get("call_id")), None)
     return bool(pending)
 
 
@@ -168,7 +172,7 @@ def _safe_boundary(
         return FINALIZE, "control_execution_not_auto_resumed"
     if frozen_recovery_policy(intents[0]) is None:
         return FINALIZE, "no_frozen_recovery_policy"
-    if any(event["type"] == "tool.outcome_unknown" for event in events):
+    if unresolved_outcomes(store.run_outcome_events(run_id)):
         return FINALIZE, "unknown_tool_outcome"
     if unresolved_tool_pairs(store, identity["session_id"]):
         return FINALIZE, "unresolved_tool_protocol_pair"

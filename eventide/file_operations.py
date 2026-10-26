@@ -24,7 +24,12 @@ from eventide.tools.filesystem import (
     edit_match_diagnostics,
     version_conflict_message,
 )
-from eventide.workspace import runtime_checkpoint_files
+from eventide.workspace import (
+    digest,
+    runtime_checkpoint_directories,
+    runtime_checkpoint_files,
+    workspace_checkpoint,
+)
 
 MAX_FILE_BYTES = 1_048_576
 MAX_DIFF_CHARS = 200_000
@@ -293,6 +298,8 @@ class FileOperations:
                 "before": before,
                 "after": after,
                 "status": "prepared",
+                "arguments_fingerprint": digest({k: v for k, v in arguments.items() if k != "cwd"}),
+                "recovery_context": self._recovery_context(root, relative),
                 "change_kind": (
                     "added"
                     if not before["exists"]
@@ -339,6 +346,48 @@ class FileOperations:
                 f"{'Edited' if tool == 'edit_file' else 'Wrote'} {path}",
                 metadata={"file_operation_id": record["operation_id"]},
             )
+
+    def _recovery_context(self, root: Path, relative: Path) -> dict[str, Any] | None:
+        """Freeze every Git-visible part a builtin file write cannot change."""
+        return workspace_checkpoint(
+            root, exclude_untracked=runtime_checkpoint_files(self.store.path, self.state_dir),
+            exclude_untracked_directories=runtime_checkpoint_directories(self.state_dir),
+            exclude_worktree_paths=(relative.as_posix(),),
+        )
+
+    def inspect_outcome(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Read the original journal and present bytes; never replay or undo a write."""
+        root, relative = self.validate(record)
+        baseline = record.get("recovery_context")
+        if baseline is None:
+            return {"status": "requires_review", "reason": "missing_prepared_workspace_evidence"}
+        if record["status"] not in {"prepared", "needs_review", "completed", "no_change"}:
+            return {"status": "requires_review", "reason": "file_operation_lifecycle_changed"}
+        # A backup supplies exact intended bytes, independently of the redacted prompt.
+        saved = json.loads(self.box.decrypt(
+            self.store.file_operation_backup(record["operation_id"])
+        ))
+        for key in ("before", "after"):
+            raw = saved[key].encode("utf-8")
+            self._text(raw)
+            if record[key]["exists"] and hashlib.sha256(raw).hexdigest() != record[key]["sha256"]:
+                raise ValueError("File operation backup fingerprint mismatch")
+        context = self._recovery_context(root, relative)
+        observed = self._read(root, relative)[1]
+        stable_context = self._recovery_context(root, relative)
+        observation = {"observed_file": {key: observed[key] for key in
+                       ("exists", "sha256", "mode", "size") if key in observed}}
+        if context is None or context != stable_context or context != baseline:
+            return {**observation, "status": "requires_review",
+                    "reason": "workspace_context_changed"}
+        if self._fingerprint(observed) == self._fingerprint(record["after"]):
+            return {**observation, "status": "verified_after",
+                    "reason": "expected_file_state_present"}
+        return {**observation, "status": "requires_review", "reason": (
+            "current_matches_before"
+            if self._fingerprint(observed) == self._fingerprint(record["before"])
+            else "file_state_changed"
+        )}
 
     def detail(self, session_id: str, operation_id: str) -> dict[str, Any]:
         record = self.get(session_id, operation_id)

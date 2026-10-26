@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from eventide.outcome_reconciliation import unresolved_outcomes
 from eventide.projections import TERMINALS, RuntimeStateProjection
 
 PROJECTION_VERSION = 1
@@ -50,7 +51,7 @@ def _terminal_payload(events: list[dict[str, Any]]) -> dict[str, Any]:
 def _classify_stop(
     status: str, events: list[dict[str, Any]], model_retry: dict[str, Any] | None,
 ) -> str:
-    has_unknown = any(event["type"] == "tool.outcome_unknown" for event in events)
+    has_unknown = bool(unresolved_outcomes(events))
     if status in {"completed", "failed"}:
         return "completed" if status == "completed" else "failure"
     if status == "interrupted":
@@ -126,14 +127,16 @@ def build_recovery_view(
             "error": event["payload"].get("error"),
             "at": event["ts"],
         }
-        for event in events
-        if event["type"] == "tool.outcome_unknown"
+        for event in unresolved_outcomes(events)
     ]
     pending_approvals = [
         {"approval_id": approval_id, "summary": payload.get("summary")}
         for approval_id, payload in state["pending_approvals"].items()
     ]
 
+    checks = [{**event["payload"], "at": event["ts"]} for event in events
+              if event["type"] == "tool.outcome_reconciled"]
+    reconciled = any(check["status"] == "verified_after" for check in checks)
     terminal_payload = _terminal_payload(events)
     stop = {
         "kind": _classify_stop(status, events, state["model_retry"]),
@@ -147,6 +150,8 @@ def build_recovery_view(
         stop["kind"] = "recovery_blocked"
     elif claims:
         stop["kind"] = "auto_recovered"
+    elif reconciled and not unknown_tools and stop["reason"] == "unknown_tool_outcome":
+        stop["kind"] = "file_outcome_verified"
     elif stop["reason"] == "service_shutdown":
         stop["kind"] = "service_shutdown"
 
@@ -157,7 +162,7 @@ def build_recovery_view(
     interrupted_resumable = (
         status == "interrupted"
         and not unknown_tools
-        and stop["reason"] not in NOT_RESUMABLE_REASONS
+        and (stop["reason"] not in NOT_RESUMABLE_REASONS or reconciled)
     )
     stop_action = {
         "available": not terminal and not current.get("control_session"),
@@ -215,6 +220,7 @@ def build_recovery_view(
         "model_retry": state["model_retry"],
         "stop": stop,
         "unknown_tools": unknown_tools,
+        "outcome_checks": checks,
         "pending_approvals": pending_approvals,
         "recovery": {
             "frozen_policy": frozen_policy,

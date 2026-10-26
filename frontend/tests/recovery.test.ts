@@ -311,3 +311,104 @@ it("retries an uncertain Continue with the same key and the original run binding
   wrapper.unmount();
   sessionStorage.clear();
 });
+
+it("checks unknown files only on click, then shows saved evidence without auto-continuing", async () => {
+  sessionStorage.clear();
+  const unknown = {
+    ...base,
+    unknown_tools: [
+      { call_id: "lost", name: "write_file", error: "unknown", at: 1 },
+    ],
+  };
+  const checked = {
+    ...base,
+    outcome_checks: [
+      {
+        source_run_id: "r-old",
+        unknown_event_id: "ev-unknown",
+        operation_id: "fileop-one",
+        call_id: "lost",
+        name: "write_file",
+        status: "verified_after",
+        reason: "expected_file_state_present",
+        observed_file: { exists: true, sha256: "a".repeat(64) },
+      },
+    ],
+    available_actions: {
+      ...base.available_actions,
+      continue: { ...base.available_actions.continue, available: true },
+    },
+  };
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(jsonResponse(unknown))
+    .mockResolvedValueOnce(
+      jsonResponse({
+        run_id: "r-old",
+        checks: checked.outcome_checks,
+        unresolved: 0,
+      }),
+    )
+    .mockResolvedValueOnce(jsonResponse(checked));
+  vi.stubGlobal("fetch", fetcher);
+  const wrapper = mountPanel({ runId: "r-old" });
+  await flushPromises();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await wrapper.get('[data-testid="reconcile-outcomes"]').trigger("click");
+  await flushPromises();
+  expect(fetcher.mock.calls[1]![0]).toBe("/api/runs/r-old/recovery/reconcile");
+  expect(fetcher.mock.calls[1]![1].method).toBe("POST");
+  expect(fetcher.mock.calls[1]![1].headers["Idempotency-Key"]).toBeTruthy();
+  expect(wrapper.get('[data-testid="outcome-checks"]').text()).toContain(
+    "预期文件状态已核清",
+  );
+  expect(wrapper.find('[data-testid="continue-run"]').exists()).toBe(true);
+  expect(
+    fetcher.mock.calls.some(([url]) => String(url).includes("/continue")),
+  ).toBe(false);
+  wrapper.unmount();
+});
+
+it("keeps before-state evidence honest and ignores a late check error after changing runs", async () => {
+  sessionStorage.clear();
+  const unknown = {
+    ...base,
+    unknown_tools: [{ call_id: "lost", name: "edit_file", error: null, at: 1 }],
+    outcome_checks: [
+      {
+        source_run_id: "r-old",
+        unknown_event_id: "ev-unknown",
+        operation_id: "fileop-one",
+        call_id: "lost",
+        name: "edit_file",
+        status: "requires_review",
+        reason: "current_matches_before",
+      },
+    ],
+  };
+  let fail!: (error: Error) => void;
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(jsonResponse(unknown))
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    )
+    .mockResolvedValueOnce(jsonResponse({ ...base, run_id: "r-new" }));
+  vi.stubGlobal("fetch", fetcher);
+  const wrapper = mountPanel({ runId: "r-old" });
+  await flushPromises();
+  expect(wrapper.get('[data-testid="outcome-checks"]').text()).toContain(
+    "不能证明操作从未执行",
+  );
+  await wrapper.get('[data-testid="reconcile-outcomes"]').trigger("click");
+  await flushPromises();
+  await wrapper.setProps({ runId: "r-new" });
+  fail(new TypeError("old check failed"));
+  await flushPromises();
+  expect(wrapper.text()).not.toContain("old check failed");
+  expect(wrapper.find('[data-testid="outcome-checks"]').exists()).toBe(false);
+  wrapper.unmount();
+});

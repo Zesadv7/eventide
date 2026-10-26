@@ -208,6 +208,23 @@ def create_router(context: ApiContext) -> APIRouter:
             },
         )
 
+    @router.post("/api/runs/{run_id}/recovery/reconcile")
+    async def reconcile_outcomes(run_id: str, request: Request) -> dict[str, Any]:
+        require_local_request(request)
+        mutation_key(request)
+
+        async def execute() -> dict[str, Any]:
+            try:
+                return await agent_runtime.reconcile_run_outcomes(run_id)
+            except LookupError as exc:
+                raise HTTPException(404, str(exc)) from exc
+            except (ValueError, OSError) as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+        return await mutate_run_action(
+            agent_runtime, request, "outcome_reconcile", {"run_id": run_id}, execute,
+        )
+
     @router.get(
         "/api/runs/{run_id}/sandbox-diff", response_class=Response,
         responses={200: {"content": {"text/plain": {"schema": {"type": "string"}}}}},

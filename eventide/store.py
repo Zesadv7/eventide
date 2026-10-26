@@ -864,10 +864,53 @@ class RuntimeStore:
                     "JOIN sessions s ON s.id=e.session_id "
                     "WHERE e.type='tool.outcome_unknown' AND e.partial=0 "
                     "AND COALESCE(json_extract(e.payload_json, '$.workspace_id'),s.workspace_id)=? "
-                    "AND COALESCE(json_extract(e.payload_json, '$.readonly'),0)=0)",
+                    "AND COALESCE(json_extract(e.payload_json, '$.readonly'),0)=0 "
+                    "AND NOT EXISTS (SELECT 1 FROM runtime_events r "
+                    "WHERE r.type='tool.outcome_reconciled' AND r.partial=0 "
+                    "AND json_extract(r.payload_json,'$.status')='verified_after' "
+                    "AND json_extract(r.payload_json,'$.unknown_event_id')=e.event_id "
+                    "AND json_extract(r.payload_json,'$.source_run_id')=e.run_id "
+                    "AND json_extract(r.payload_json,'$.call_id')="
+                    "json_extract(e.payload_json,'$.call_id')))",
                     (workspace_id,),
                 ).fetchone()[0]
             )
+
+    def run_outcome_events(self, run_id: str) -> list[dict[str, Any]]:
+        """The original Run facts plus its later, Session-level read-only checks."""
+        identity = self.get_run_identity(run_id)
+        if identity is None:
+            raise ValueError("Run not found")
+        return [event for event in self.session_events(identity["session_id"])
+                if event["run_id"] == run_id or (
+                    event["type"] == "tool.outcome_reconciled"
+                    and event["payload"]["source_run_id"] == run_id
+                )]
+
+    def reconciliation_checkpoint(self, run_id: str) -> dict[str, Any] | None:
+        for event in reversed(self.run_outcome_events(run_id)):
+            if (event["type"] == "tool.outcome_reconciled"
+                    and event["payload"]["status"] == "verified_after"):
+                return event["payload"]["observed_checkpoint"]
+        return None
+
+    def record_outcome_reconciliation(
+        self, session_id: str, payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Deduplicate identical observations and seal one positive result per unknown."""
+        def decide(
+            facts: list[dict[str, Any]],
+        ) -> tuple[dict[str, Any], list[tuple[str, dict[str, Any]]]]:
+            for event in reversed(facts):
+                previous = event["payload"]
+                if (previous["source_run_id"] == payload["source_run_id"]
+                        and previous["unknown_event_id"] == payload["unknown_event_id"]
+                        and (previous["status"] == "verified_after"
+                             or previous["observation_digest"] == payload["observation_digest"])):
+                    return previous, []
+            return payload, [("tool.outcome_reconciled", payload)]
+
+        return self.transact_facts(session_id, ("tool.outcome_reconciled",), decide)
 
     def generation_config(
         self, scope: str, identity: str, model_identity: str | None = None,
@@ -1206,7 +1249,8 @@ class RuntimeStore:
                 self._decode(row)
                 for row in self._connection.execute(
                     "SELECT * FROM runtime_events WHERE session_id=? AND partial=0 "
-                    "AND run_id IS NULL AND ((type IN ('recovery.blocked','recovery.claimed') "
+                    "AND run_id IS NULL AND ((type IN "
+                    "('recovery.blocked','recovery.claimed','tool.outcome_reconciled') "
                     "AND json_extract(payload_json, '$.source_run_id')=?) "
                     "OR (type='run.cancel_requested' "
                     "AND json_extract(payload_json, '$.run_id')=?)) "

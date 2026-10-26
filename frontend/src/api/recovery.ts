@@ -1,4 +1,5 @@
 import { request } from "./client";
+import { durableMutation } from "./mutations";
 
 export interface RecoveryAction {
   available: boolean;
@@ -18,6 +19,23 @@ export interface UnknownTool {
   name: string | null;
   error: string | null;
   at: number | null;
+}
+export interface OutcomeCheck {
+  source_run_id: string;
+  call_id: string;
+  unknown_event_id: string;
+  operation_id: string | null;
+  name: string;
+  status: "verified_after" | "requires_review";
+  reason: string;
+  detail?: string;
+  observed_file?: {
+    exists: boolean;
+    sha256?: string;
+    mode?: number;
+    size?: number;
+  };
+  at?: number;
 }
 export interface RecoveryClaim {
   resumed_as: string | null;
@@ -53,6 +71,7 @@ export interface RecoveryView {
   model_retry: ModelRetryWait | null;
   stop: { kind: string; reason: string | null; error: string | null };
   unknown_tools: UnknownTool[];
+  outcome_checks?: OutcomeCheck[];
   pending_approvals: { approval_id: string; summary: unknown }[];
   recovery: {
     frozen_policy: Record<string, unknown> | null;
@@ -73,6 +92,17 @@ export interface RecoveryView {
 
 const id = encodeURIComponent;
 export const recoveryApi = {
+  reconcile: (run: string) =>
+    durableMutation<{
+      run_id: string;
+      checks: OutcomeCheck[];
+      unresolved: number;
+    }>(
+      "outcome-reconcile",
+      `/api/runs/${id(run)}/recovery/reconcile`,
+      "POST",
+      {},
+    ),
   detail: (run: string) =>
     request<RecoveryView>(`/api/runs/${id(run)}/recovery`),
 };

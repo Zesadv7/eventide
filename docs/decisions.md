@@ -1484,6 +1484,7 @@ ADR-116集成补充：主代理修正真实执行副本选择、工具错误正�
 
 外部ZCode提供草稿，主代理发现并修复自由文本校验、事务外状态检查、缺调用身份、取消清理和缓存回执唤醒问题。验证覆盖真实Host+HTTP、停止、同键/内容冲突、Plan、秘密脱敏、关服后原身份保留与独立审批；网页组件和built真实API旅程见AGENTS及questions-review日志。未调用真实供应商做产品效果验收。
 
+
 <a id="adr-122"></a>
 ## ADR-122：任务图使用唯一事实日志及覆盖准备阶段的节点所有权（2026-10-26）
 
@@ -1530,4 +1531,16 @@ ADR-124独立审查补充：取消是传输边界事实，runner必须携带fram
 
 
 ADR-124统一回执补充：write_file也在原子发布后核对当前目录项与有界内容；可观察到“曾发布但当前身份/字节已不同”返回unknown，不使用Wrote成功暗示当前after版本仍被确认。通过安全父描述符与现有字节上限复核，不新增状态库或抽象；不承诺检查结束后的稳定性。
+
+
+<a id="adr-127"></a>
+## ADR-127：内置文件结果以写前上下文和只读状态核清，不重放原调用（2026-10-26）
+
+状态：Accepted（内置文件/本机源与worktree定向切片；终态自动恢复和通用副作用核查仍未实现）。
+
+单文件before/after不能证明其他文件没变化，现有Git checkpoint也只有聚合hash，不能从崩溃后的当前状态反推出旧基线。因此新FileOperations prepared冻结参数指纹与目标之外的Git可见上下文，目标的index仍完整纳入；旧记录缺证据保持requires_review。只有当前after、目标外上下文、原调用/目录/策略及核查前后完整checkpoint均能核对时，Session级tool.outcome_reconciled才记录verified_after。匹配before不推断从未执行；证据只保证观察到的文件状态，不宣称原调用实际返回成功或谁写入了这些字节。
+
+核清沿唯一Event Log投影，无第二张恢复状态表、无新schema版本；原unknown与终态不改写。正面核清记录提供后继原call的明确核查ToolResult和续做checkpoint，继续使用现有claim、冻结参数/Skills、ToolExecutor/Policy及预算根；新恢复不授予新权限。用户停止和未决审批阻止自动续跑，模型预算在真正派发时复核。
+
+范围选择：未终态崩溃在启动时自动核查并走已有领取恢复；已经终态的unknown只提供核查API和人工显式Continue，不拓宽既有terminal claim。Shell/MCP/容器没有同等执行证明时不猜测；Git忽略文件、任意外部服务及同UID并发写入不由此证明。核查不改变旧file.operation的撤销资格，也不执行撤销。定向证据、失败修复与剩余整体验收见AGENTS和failure-cases MK08D-RECONCILE。
 

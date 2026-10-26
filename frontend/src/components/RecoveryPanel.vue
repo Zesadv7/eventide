@@ -81,12 +81,44 @@ async function continueRun() {
     if (mounted && scope === revision) acting.value = false;
   }
 }
+async function reconcileOutcomes() {
+  if (acting.value || !view.value) return;
+  const scope = revision,
+    run = props.runId;
+  acting.value = true;
+  try {
+    await recoveryApi.reconcile(run);
+    if (mounted && scope === revision) await load();
+  } catch (e) {
+    if (mounted && scope === revision)
+      error.value =
+        e instanceof Error ? e.message : "核查结果未确认，请保留原请求重试";
+  } finally {
+    if (mounted && scope === revision) acting.value = false;
+  }
+}
+const checkReasons: Record<string, string> = {
+  expected_file_state_present:
+    "当前文件符合原操作预期，目标外工作区与写前证据一致。",
+  current_matches_before:
+    "当前仍是原内容；这不能证明操作从未执行，仍需你判断。",
+  file_state_changed: "当前文件既不符合原内容，也不符合预期内容。",
+  workspace_context_changed: "目标之外的工作区已变化，无法建立原执行边界。",
+  workspace_changed_during_check: "核查期间工作区发生变化，未确认结果。",
+  missing_prepared_workspace_evidence:
+    "旧记录缺少写前工作区证据，无法自动核清。",
+  original_call_evidence_mismatch: "原调用证据不完整或不匹配，无法核清。",
+  unsupported_or_missing_file_evidence: "该工具没有可核对的内置文件恢复证据。",
+  evidence_unavailable: "证据当前不可用。",
+  file_operation_lifecycle_changed: "文件操作后来已撤销或进入其他处理阶段。",
+};
 const kindLabels: Record<string, string> = {
   model_retry_wait: "模型重试等待",
   auto_recovered: "已领取自动续跑任务",
   recovery_blocked: "自动恢复受阻",
   service_shutdown: "服务关闭后等待恢复",
   unknown_outcome: "工具结果未知，已停驻",
+  file_outcome_verified: "预期文件结果已核清，原中断记录保留",
   user_cancel: "已由用户停止",
   budget: "预算停驻",
   repeated_failure: "连续失败停驻",
@@ -114,7 +146,7 @@ function time(value: number | null | undefined) {
 <template>
   <section class="recovery-panel">
     <p class="muted">
-      本页只读取该运行已保存的事件事实：不运行模型或工具，不写入任何事件；停止与继续只调用既有受控端点，服务端会重新复核。
+      恢复详情来自已保存事实。点击“只读核查”会读取实际文件并保存核查证据，不重放写入、运行命令或自动授权；停止与继续仍由服务端重新复核。
     </p>
     <button :disabled="loading" @click="load">
       {{ loading ? "读取中…" : view ? "刷新恢复详情" : "读取恢复详情" }}
@@ -167,9 +199,45 @@ function time(value: number | null | undefined) {
             {{ tool.name || "未知工具" }}（{{ tool.call_id }}）{{
               tool.error ? `：${tool.error}` : ""
             }}
-            — 需要人工检查实际副作用，不能直接继续。
+            — 尚未核清，不能直接继续。
           </li>
         </ul>
+      </template>
+      <div
+        v-if="view.unknown_tools.length && view.is_terminal"
+        class="button-row"
+      >
+        <button
+          data-testid="reconcile-outcomes"
+          :disabled="acting"
+          @click="reconcileOutcomes"
+        >
+          {{ acting ? "处理中…" : "只读核查文件结果" }}
+        </button>
+      </div>
+      <template v-if="view.outcome_checks?.length">
+        <h3>文件结果核查证据</h3>
+        <ul data-testid="outcome-checks">
+          <li
+            v-for="(check, index) in view.outcome_checks"
+            :key="`${check.unknown_event_id}:${index}`"
+          >
+            {{ check.name }}（{{ check.call_id }}）：{{
+              check.status === "verified_after"
+                ? "预期文件状态已核清"
+                : "仍需判断"
+            }}。
+            {{ checkReasons[check.reason] || check.reason }}
+            <span class="muted">核查时间 {{ time(check.at) }}</span>
+            <span v-if="check.detail">{{ check.detail }}</span>
+            <span v-if="check.observed_file?.sha256" class="mono"
+              >观察版本 {{ check.observed_file.sha256 }}</span
+            >
+          </li>
+        </ul>
+        <p class="muted">
+          核查只证明观察到的文件状态；不会改写原未知记录，也不证明作者身份、测试通过或授权后续操作。
+        </p>
       </template>
       <template v-if="view.pending_approvals.length">
         <h3>等待审批</h3>

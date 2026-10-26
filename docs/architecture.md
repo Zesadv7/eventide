@@ -1300,6 +1300,7 @@ MK09项目筛选（2026-10-26）：AttentionView复用`GET /api/projects/{id}/at
 取消在finally移除等待者并持久关闭问题；关闭错误不被静默忽略。服务关闭后重开保留原问题/答案/调用身份，未答问题关闭或过期；本切片不重建跨进程等待，不声称MK06恢复已完成。Run导航与完整投影均显示waiting_for_user。待处理查询在数据库按项目筛选未答/未闭合、无终态/无停止请求的问题，再有界取最近50条；页面显示并跳回原对话回答，刷新和切Run迟到响应隔离。Vue提交沿用durableMutation，未知结果保留原请求身份，文本不执行HTML。
 
 
+
 ### MK20 只读依赖图运行切片（2026-10-26）
 
 `AgentGraphs`是Host内的准备/等待任务所有者，不创建另一套模型循环。definition/started/claim/finish/cancel均为runtime_events的Session事实，Store.transact_facts复验同图状态与全图容量；schema仍为v6。每图最多16节点，只有显式advance启用，依赖完成自动补位，未开始的图不会随其他图被启动。只读节点复用旁枝的真实source/worktree/Plan快照、ToolExecutor/Policy和父模型预算；图节点与普通旁枝合计4个（既有delegate_readonly有其原容量，不声称全服务只读工具只有4个）。
@@ -1343,4 +1344,15 @@ state_root若为执行副本祖先，不将其整根deny以免覆盖授权副本
 
 
 原生write_file与edit_file统一回执观察契约：write原子发布后，通过现有安全parent fd重开当前目标，核对发布inode、常规单链接文件与有界字节内容，再核对目录项/元数据版本；可观察到替换、原inode改字节或无法确认时返回path_changed并由既有工具结果映射outcome_unknown。已发布事实与当前状态不同须同时如实保留，不恢复或覆盖编辑器内容。此检查只约束本次回执观察点，不是永久稳定保证。定向5项（两种worker插入、两种Host unknown投影、正常新文件）与既有worker/runner23项通过，Ruff/Mypy1模块通过。
+
+
+### MK08D内置文件未知结果核查（2026-10-26，ADR127）
+
+新内置write/edit在实际执行前，由FileOperations把原参数指纹、目标before/after和recovery_context一起保存在原恢复记录；context沿用workspace_checkpoint的Git可见范围，保留HEAD、全部index、目标外unstaged diff与untracked内容哈希，只排除该目标的工作树内容，Runtime产物排除规则不变。Git忽略文件、外部服务和同UID外部进程不在该证据保证内。旧记录无此证据时不从当前文件补造写前基线。
+
+只读核查由Host持有Session/执行副本与Git协调，先核对精确Run/call、tool.prepared原参数指纹、实际builtin恢复记录、目录身份和当前Policy，再解密原备份、读取当前字节并核对目标外context与核查前后完整checkpoint。只有expected after完整指纹与其余证据一致才verified_after；before仅表示当前原内容，第三种内容/其他变化/缺证据保持requires_review。核查不重放工具、不撤销、不执行Shell/MCP。关服等待实际读取收尾后才关闭Store。
+
+权威结果是Session级tool.outcome_reconciled，绑定source_run_id/call_id/unknown_event_id/operation_id/source_high_water、观察指纹和observation_digest。相同观察幂等，正面核清结果每个unknown最多一份；原unknown、file.operation及终态保留。run_recovery、Continue、workspace quarantine和恢复中心共用未核清unknown投影；已核清的observed_checkpoint是续做核对依据，后续文件变化仍拒绝。后继通过既有_recovery_facts给原call一次明确说明核查来源的ToolResult，不重发写操作，原恢复claim、冻结模型/Skills、审批与预算根不变。
+
+启动只对未终态Run自动核查并沿既有安全分类/claim续做。已经终态的unknown可通过显式POST核查并显示证据，核清不自动创建后继；用户需要点Continue，服务端重新复核。原用户停止/待审批不被自动续跑，原预算在真正模型请求前继续执行。任意Shell/MCP/容器、旧证据缺失、未知清理及人工撤销能力不在本切片中冒称已恢复。OpenAPI/分发/真实浏览器与整体验收由主集成统一。
 

@@ -176,6 +176,7 @@ def _excluded_untracked(
 def workspace_checkpoint(
     path: Path, *, exclude_untracked: tuple[Path, ...] = (),
     exclude_untracked_directories: tuple[Path, ...] = (),
+    exclude_worktree_paths: tuple[str, ...] = (),
 ) -> dict[str, Any] | None:
     """Hash Git-visible state without staging, refreshing the index, or following links."""
     try:
@@ -185,6 +186,10 @@ def workspace_checkpoint(
             ("staged", ("diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv")),
             ("unstaged", ("diff", "--binary", "--no-ext-diff", "--no-textconv")),
         ):
+            if key == "unstaged" and exclude_worktree_paths:
+                args = (*args, "--", ".", *(
+                    f":(exclude,literal){name}" for name in exclude_worktree_paths
+                ))
             changes[key] = hashlib.sha256(git(path, *args)).hexdigest()
         exclusions = _checkpoint_exclusions(path, exclude_untracked)
         directories = _checkpoint_exclusions(path, exclude_untracked_directories)
@@ -193,6 +198,8 @@ def workspace_checkpoint(
             if not raw:
                 continue
             name = os.fsdecode(raw)
+            if name in exclude_worktree_paths:
+                continue
             candidate = path / name
             if _excluded_untracked(path, name, exclusions, directories):
                 continue
@@ -207,6 +214,8 @@ def workspace_checkpoint(
         if git(path, "submodule", "status", "--recursive").strip():
             return None
         result: dict[str, Any] = {"head": head, **changes, "untracked": sorted(untracked)}
+        if exclude_worktree_paths:
+            result["excluded_worktree_paths"] = list(exclude_worktree_paths)
         if exclusions or directories:
             # Never silently compare an old, unfiltered baseline with a new policy.
             result["checkpoint_policy"] = {

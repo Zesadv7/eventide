@@ -767,6 +767,7 @@ MK09页面范围接线（2026-10-26）：待处理页`#/attention?project=<proje
 
 历史问题来自唯一事件记录；本阶段服务重启后不自动重建等待，不把问题卡的存在当仍可回答。OpenAPI与TS类型已同步。
 
+
 ### MK20 只读任务图 API（2026-10-26）
 
 - `GET /api/runs/{run_id}/graphs`返回仅精确root Run定义的图；`GET /api/graphs/{graph_id}`返回事实投影。
@@ -794,4 +795,13 @@ MK09页面范围接线（2026-10-26）：待处理页`#/attention?project=<proje
 
 
 原生文件工具回执补充：write_file发布后可观察到目标被替换、原inode内容变化或无法确认时，worker内部path_changed映射为现有ToolResult metadata.outcome_unknown，Host保存tool.outcome_unknown并停驻；不是普通可重试失败。正常回执仅代表本次观察点核对成功，不保证之后外部编辑不会改变文件。HTTP/OpenAPI字段不变。
+
+
+### MK08D：只读核查内置文件结果（2026-10-26）
+
+`POST /api/runs/{run_id}/recovery/reconcile`要求本机同源和Idempotency-Key（空JSON正文可用）。只接受已终态、当前无执行所有者的本机源/工作副本Run，持有原会话与实际执行副本协调后只读核查；不存在404、仍运行/忙碌/不支持环境409、来源不符403。返回`{run_id,checks,unresolved}`，不会创建后继或派发模型。相同请求键回放原回执，未知回执仍保留原键；成功后的新请求可按新观察重新核查。
+
+checks记录包含`source_run_id/call_id/unknown_event_id/name/operation_id/source_high_water/status/reason/observation_digest`及可用的`observed_file`（exists/sha256/mode/size）、`observed_checkpoint/detail`。status只有verified_after或requires_review；current_matches_before明确不能证明原调用没执行，旧记录缺写前workspace证据、目标外变化、路径/权限/备份失效或非内置写入均保留待判断。原unknown事实和终态不修改。`GET /api/runs/{id}/recovery`只读原子切面增加`outcome_checks`（附at），unknown_tools只含尚未核清的调用；核清后显式Continue仍重新核对当前checkpoint、原Run身份与现有预算/权限，用户停止不因核查变成自动恢复。
+
+恢复页新增显式核查按钮与逐条证据，不自动调用核查/Continue，跨Run迟到响应丢弃。结果含范围说明：证明的是当前目标字节和Git可见工作区状态，不保证忽略文件、外部服务、作者身份或测试成功。Shell/MCP不因核查入口而被执行或重放。
 
