@@ -1174,6 +1174,7 @@ MK21-INTEGRATION当前复验：89项原生worker/协议/路径/取消主集成�
 - MK08D-RECONCILE独立审查补修闭环：visibility1新增10项通过（ignored/初始assume或skip不核清、核清后隐藏标志变化、claim与接收后派发窗口、literal特殊路径、目标与祖先替换）；visibility-baseline2项通过，覆盖旧checkpoint不被静默补字段及正常可见目标恢复。visibility-related首轮21通过/1个生产checkpoint形状回归，delivery._checkpoint同步索引哈希后失败项及受影响交付6项全过；读取路径元数据补齐后visibility-final3项通过，批次重叠不相加。最终Ruff/Mypy4模块/Vue类型通过，diff检查通过。原19项未无故整批重复，未运行全量/模型/真实浏览器。独立只读审查由readonly_finish完成，当前子agent确认并修复，root确定Git可见目标与旧checkpoint停驻取舍；完整ignored目标恢复仍后置，不将限制写成已实现。相关提交为fix: bind reconciled outcomes to Git visibility and current paths。
 
 
+
 ### MK21-NATIVE-BROWSER — 原生文件打包页面真实API旅程
 
 - 基线8da72ad，在专用E2E服务器注入available/unverified探测与无OS包装的真实stdlib worker，仅证明产品文件接线与页面/API行为，不作为内核隔离验收。测试服务器新增场景与固定fixture证据接口，生产后端不增加任何fallback。首轮Ruff仅新fixture证据字典一处104字符长行失败（`/tmp/eventide-native-e2e-ruff.log`），拆行后继续；暂未运行浏览器，不计通过。
@@ -1193,4 +1194,11 @@ MK21-INTEGRATION当前复验：89项原生worker/协议/路径/取消主集成�
 - MK21-ANCESTOR-OBSERVATION 首批13项通过；最终write回执增加有界读取后的canonical父目录复核，覆盖在最后观察点移动祖先。静态首轮仅新增参数化测试两处101字符长行（`/tmp/eventide-native-ancestor-ruff.log`），拆行后复验；没有把旧观察点的通过当新增观察点通过。
 
 - MK21-ANCESTOR-OBSERVATION 收口：最终13项通过，包含write/edit前/后四种目录rename+canonical重建、两种Host持久unknown、原目标替换/原inode内容变更与正常写。write的后置插入发生在有界读取后的最后canonical复核，证明不只查旧parent；前置原目标未写，后置moved中保留实际agent内容而canonical仍为editor内容，源fixture文件不变且Host仅1次模型请求。既有worker/runner23项、Ruff修正后与Mypy1模块通过；日志归档native-current-model/eventide-native-ancestor*。当前代理实施，readonly_finish静态审查、父代理确认同一系统边界契约。缺陷未进入主集成或推送，没有线上事故证据；真实内核/模型验收未做。
+
+
+### MK08D-E2E — 内置文件完成记录丢失的受控浏览器复现（2026-10-26，基线63037fc）
+
+- 属受控缺陷注入：只在临时测试server，为特殊“文件核查场景”生成的确切call_id和src/reconciled.txt调用，在FileOperations._record(status=completed)处抛一次OSError；真实写入已经发生，生产ToolExecutor按原协议将结果标unknown并停驻。没有改生产故障开关，不是用户项目事故或真实供应商失败。
+- 验证：EVENTIDE_E2E_BUILT=1配合本机Runtime执行新outcome-reconcile.spec.ts，首轮1/1通过（e2e-browser1.log），无需修复/重跑；Vue类型、测试server Ruff、Prettier、Vite/package build全部通过。核查同键回放不双写事实，旧Run导出逐字保留；刷新后未自动新建Run，人工Continue和同键回放只生1后继，FileOperation仍1且文件mtime未变，Session唯一账本累计2次脚本attempt/unknown0，320px、页面错误0。
+- 当前子agent完成fixture与旅程，主代理负责最终集成复验；只用临时Git项目和ScriptedProvider，无付费模型，临时构建产物已恢复。日志.task_outputs/maka-upgrade/outcome-reconcile/e2e-*，本轮没有意外验证失败；不能据此宣称模型质量或全部升级已验收。
 

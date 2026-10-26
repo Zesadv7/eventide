@@ -82,6 +82,8 @@ def main() -> None:
     native_probe.detect_backend = native_fixture_probe
     native_execution_module.NativeSandboxRunner = native_fixture_runner
 
+    reconcile_fault_calls: set[str] = set()
+
     class JourneyProvider(FakeProvider):
         async def complete(self, request):
             if "side-question investigator" in self._prompt(request):
@@ -95,7 +97,11 @@ def main() -> None:
                                      usage={"input_tokens": 40, "output_tokens": 10})
             if any(label in self._prompt(request) for label in (
                 "交付修复场景", "检索交付场景", "文件操作编辑场景", "文件操作新建场景",
+
                 "原生文件场景",
+
+                "文件核查场景",
+
             )):
                 async for event in self.stream(request):
                     if event.response is not None:
@@ -169,6 +175,15 @@ def main() -> None:
                     })], stop_reason="tool_use", usage=usage)
                 else:
                     response = ModelResponse(text="检索调查完成：" + prompt, usage=usage)
+            elif "文件核查场景" in prompt:
+                if step == 1:
+                    call = self._call("write_file", {
+                        "path": "src/reconciled.txt", "content": "reconciled once\n",
+                    })
+                    reconcile_fault_calls.add(call.id)
+                    response = ModelResponse(tool_calls=[call], stop_reason="tool_use", usage=usage)
+                else:
+                    response = ModelResponse(text="核查后继续完成", usage=usage)
             elif "文件操作编辑场景" in prompt:
                 if step == 1:
                     response = ModelResponse(tool_calls=[self._call("edit_file", {
@@ -270,6 +285,19 @@ def main() -> None:
         provider = JourneyProvider(max_steps=6)
         runtime = RuntimeHost(settings, provider)
         provider.attach(runtime)
+        original_file_record = runtime.file_operations._record
+
+        def record_with_reconcile_fault(record, status, **extra):
+            # Disposable fixture only: fail one known scenario call after its
+            # bytes were written, never arbitrary writes in the application.
+            if (status == "completed" and record["tool"] == "write_file"
+                    and record["path"] == "src/reconciled.txt"
+                    and record["call_id"] in reconcile_fault_calls):
+                reconcile_fault_calls.remove(record["call_id"])
+                raise OSError("controlled E2E completion journal failure")
+            return original_file_record(record, status, **extra)
+
+        runtime.file_operations._record = record_with_reconcile_fault
 
         def build_offline_provider(candidate):
             if candidate.model.startswith("vue-probe-"):

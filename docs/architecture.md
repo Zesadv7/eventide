@@ -1365,10 +1365,14 @@ MK08D独立审查修正：核清目标必须由literal pathspec证明为Git真�
 索引可见性字段同时进入delivery._checkpoint，保持validate_delivery_source与ExecutionWorktrees.create的证据相等，不以忽略新字段解决兼容问题。旧交付证据同样不自动补造新索引状态，后续重新建立基线必须显式进行。
 
 
+
 原生文件Web接线新增单条真实API与打包页面旅程：验证可用性/未验证状态、真实POST、独立worker文件I/O、候选隔离与源不变、刷新冻结、只读两次消息不升级、拒绝升级及320px。探测与无OS包装的stdlib worker仅注入专用测试服务器，产品启动器未增加fallback；该证据证明接线，不证明OS隔离。原生UI构建资源由主集成统一生成，独立测试分支不提交临时产物。祖先目录替换观察点审查仍待处理。
 
 
 原生文件Web接线新增单条真实API与打包页面旅程：验证可用性/未验证状态、真实POST、独立worker文件I/O、候选隔离与源不变、刷新冻结、只读两次消息不升级、拒绝升级及320px。探测与无OS包装的stdlib worker仅注入专用测试服务器，产品启动器未增加fallback；该证据证明接线，不证明OS隔离。原生UI构建资源由主集成统一生成，独立测试分支不提交临时产物。祖先目录替换观察点后续以以下独立worker/Host定向验证覆盖。
 
 当前授权路径观察点补充：仅重复旧parent fd上的stat不足以证明canonical路径。复用_open_parent的完整nofollow路径遍历并传入expected_parent，比较重新打开的父目录与原持有描述符身份；write发布前、发布后、有界读取后的最终观察点和edit写前/后均应用。前置漂移返回path_changed_before_write，目标不发布/不改写；后置漂移返回path_changed，由既有unknown链停驻。旧目录中的真实写入与canonical编辑器文件分别保留，不修改编辑器文件来制造一致。13项四组合及Host/原文件契约专项、23项worker/runner、Ruff/Mypy1模块通过；真实平台验收仍未做。
+
+
+MK08D打包页面机制验收补充（2026-10-26，基线63037fc）：在独立临时Git项目和JourneyProvider中，已知write_file调用完成记录被测试fixture定点拒绝一次，真实文件写入后保留unknown。1条真实FastAPI+打包Vue旅程验证人工核查、同键回执、刷新持久证据、原unknown/终态原文不变、人工唯一Continue与原call核查结果配对；文件操作数和mtime证明没有第二次写入，唯一Runtime账本只含2次脚本模型attempt，unknown0。320px和页面脚本错误检查通过。fixture修改仅在frontend/scripts/e2e_server.py，不在生产实现注入故障；本地临时bundle不进入此提交，最终集成重建另验。
 

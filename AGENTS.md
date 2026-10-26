@@ -626,10 +626,16 @@ MK08D独立审查补修开始：readonly_finish发现ignored目标核清后不�
 MK08D独立审查补修验证：新11项可见性/旧checkpoint用例均有通过证据；正常可见目标复验通过，最终当前目录项读取与正常恢复3项通过；快照/撤销/副本关联首轮21通过/1回归（交付checkpoint缺新字段），同步delivery._checkpoint后失败项与交付6项通过，未重复其余通过批次。Ruff/Mypy4模块/Vue类型/Prettier/diff通过，日志outcome-reconcile/visibility-*，失败已在MK08D-RECONCILE登记闭环。核清范围现明确只含Git真实可见目标，新checkpoint携带index_visibility；旧缺字段的历史证据保留并停驻，不静默迁移基线。整体MK08D仍有非Git目标、Shell/MCP及终态自动恢复后续；本次无模型调用/分发/浏览器，主集成统一验收。
 
 
+
 MK21打包页面接线旅程（基线8da72ad，当前模型）：单条真实API+built页面验证通过；明确选择native/workspace-write后的POST、独立stdlib worker PID及实际读写、候选与source不同/源Git状态空/源无note、刷新后profile/backend冻结、只读Session两次消息不升级、显式升级422且未新增Run、320px均已核对。探测available/unverified和无OS包装launcher仅在一次性E2E服务器注入，非真实内核证据。Vue类型/Vite构建/Ruff通过，本地临时打包资源已精确恢复，主集成统一重建。祖先目录替换的最新独立审查仍待主代理处理，不能用此旅程覆盖未测边界或将MK21整体标完成。
 
 
 MK21打包页面接线旅程（基线8da72ad，当前模型）：单条真实API+built页面验证通过；明确选择native/workspace-write后的POST、独立stdlib worker PID及实际读写、候选与source不同/源Git状态空/源无note、刷新后profile/backend冻结、只读Session两次消息不升级、显式升级422且未新增Run、320px均已核对。探测available/unverified和无OS包装launcher仅在一次性E2E服务器注入，非真实内核证据。Vue类型/Vite构建/Ruff通过，本地临时打包资源已精确恢复，主集成统一重建。祖先目录替换的后续修复与定向证据见下条，不能用此浏览器旅程替代祖先边界验证或将MK21整体标完成。
 
 MK21当前授权路径观察点修复候选：复用nofollow父目录遍历，按原parent fd身份复核canonical祖先。write发布前/后及有界读取后的最终观察点，edit写前/后均重新遍历；写前漂移path_changed_before_write拒写，写后漂移path_changed→unknown。参数化父目录rename+原路径重建四种worker场景、两种Host unknown及原目标替换/内容变更/正常写共13项通过，既有worker/runner23项、Ruff/Mypy1模块通过。保留canonical编辑器文件与已发生写入，不承诺观察点之后稳定；日志native-current-model/eventide-native-ancestor*。祖先审查问题已定向闭环，主集成与真实平台/模型最终验收仍待。
+
+
+MK08D真实API浏览器核查旅程开始：独立临时项目/ScriptedProvider，在测试server中仅对“文件核查场景”的已知write调用注入完成记录OSError，验证真实写入后停驻→人工只读核查→刷新/同键回执→显式唯一Continue。打包页面本机验证，不提交产物、不调用真实模型，失败即时登记。
+
+MK08D真实API浏览器核查旅程验证：测试server仅对“文件核查场景”的确切write call_id+src/reconciled.txt注入一次完成记录OSError，真实写入后按预期unknown停驻。打包页面1条旅程首轮通过：核查前不能Continue、显式核查/同键回放仅1事实、刷新保留且不自动创建Run、原Run导出逐字不变；显式Continue与同键回放只生1后继，完成时FileOperation仍1条且mtime未变，Runtime会话attempt恰为2/unknown0，320px与页面脚本错误检查通过。Vue类型/Ruff/Prettier/build通过，日志outcome-reconcile/e2e-*。仅临时Git项目/ScriptedProvider，无真实费用；本地临时bundle已恢复不提交，主集成统一生成契约/分发并复核，不将此机制旅程当模型效果或整体升级完成。
 
