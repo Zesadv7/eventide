@@ -1101,3 +1101,9 @@ MK11-INTEGRATION复验完成：原五项中三项Shell失败链的根因已确�
 
 - MK21-NATIVE-PRODUCTION 补充：共享纯分页渲染器影响的原有版本续页/文件证据/Host源码证据20项通过。没有新增失败，未重复全仓门禁；最后格式/差异检查通过。
 
+
+
+- MK21-NATIVE-PRODUCTION 提交后跨平台装置审查：新增Host离线测试虽然注入worker launcher，可用性校验仍读取真实本机后端，Linux无bwrap时会导致环境依赖。此处是审查发现，未运行Linux失败，不虚构结果。改为该测试模块显式注入只读探测结果；验证仍只证明接线，不能当平台可用性/内核证据。相关补充提交紧接bae541e。
+
+- MK21-NATIVE-PRODUCTION 探测fixture修正后18项通过，Ruff通过，日志eventide-native-offline-probe.log；未新增真实平台验证声明。
+

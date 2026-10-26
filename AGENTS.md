@@ -595,3 +595,7 @@ MK21文件切片收口证据：原生64项通过，最后覆盖写入权限断�
 
 MK21共享分页渲染器补充复核：原有文件版本续页、文件证据边界、Host源码证据共20项通过（native-current-model/eventide-native-pages-related.log）；只读/本地/容器已有读取事实未改写。
 
+
+
+MK21离线装置补充：新增Host/HTTP测试统一注入backend探测结果，避免依赖Linux机器安装bwrap或Mac安装sandbox-exec；18项复验通过，仅证明接线，不充当真实平台可用性证明。
+

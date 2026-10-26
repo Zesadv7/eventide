@@ -37,6 +37,19 @@ from tests.test_host import make_repo
 from tests.test_runtime import settings_for
 
 
+@pytest.fixture(autouse=True)
+def native_probe(monkeypatch):
+    """Offline wiring tests must not require a real platform backend binary."""
+    def available(kind):
+        return BackendDetection(
+            kind=kind, platform="test", platform_supported=True,
+            binary_path="/test/" + kind.value, available=True,
+            detail="Test-only availability; no kernel isolation assertion",
+        )
+
+    monkeypatch.setattr("eventide.native_sandbox.probe.detect_backend", available)
+
+
 class FakeRunner:
     """In-process protocol double recording every dispatched operation."""
 
