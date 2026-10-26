@@ -1202,3 +1202,20 @@ MK21-INTEGRATION当前复验：89项原生worker/协议/路径/取消主集成�
 - 验证：EVENTIDE_E2E_BUILT=1配合本机Runtime执行新outcome-reconcile.spec.ts，首轮1/1通过（e2e-browser1.log），无需修复/重跑；Vue类型、测试server Ruff、Prettier、Vite/package build全部通过。核查同键回放不双写事实，旧Run导出逐字保留；刷新后未自动新建Run，人工Continue和同键回放只生1后继，FileOperation仍1且文件mtime未变，Session唯一账本累计2次脚本attempt/unknown0，320px、页面错误0。
 - 当前子agent完成fixture与旅程，主代理负责最终集成复验；只用临时Git项目和ScriptedProvider，无付费模型，临时构建产物已恢复。日志.task_outputs/maka-upgrade/outcome-reconcile/e2e-*，本轮没有意外验证失败；不能据此宣称模型质量或全部升级已验收。
 
+
+### MK-INTEGRATION-FINAL — 最终组合门禁（2026-10-26，基线c454ad5）
+
+- 首轮4条打包真实API浏览器旅程3通过/1失败：Graph刷新后 `panel.locator("summary")` 同时匹配外层“协作任务图”和两个“调查结果”，Playwright严格定位拒绝；新增原生、文件核查与只读并行旅程均通过。证据 `.task_outputs/maka-upgrade/outcome-review/browser-all.log`，命令 `EVENTIDE_E2E_BUILT=1 EVENTIDE_PYTHON=<本机Python> node scripts/run_e2e.mjs tests/e2e/graphs.spec.ts tests/e2e/native-execution.spec.ts tests/e2e/outcome-reconcile.spec.ts tests/e2e/readonly-parallel.spec.ts`（frontend目录）。先精确核对测试DOM并定向复验，不放宽产品状态。
+- 同轮 `python -m pytest -q --cov=eventide --cov-fail-under=85` 尚在运行；日志至81%出现两处F，具体失败项和原因待退出后的完整报告，不将其他已执行项算全量通过。证据 `.task_outputs/maka-upgrade/outcome-review/full-offline.log`，后续补完整退出状态、定位和复验。
+
+- MK-INTEGRATION-FINAL全量继续至约95%出现第3个F，仍待最终异常报告定位；已记录的两项并非最终失败总数。Graph定向复验退出0、1条通过（browser-graph-final.log），已用直接子元素summary限定展开入口；新增三条浏览器首轮通过不重复运行。
+
+- MK-INTEGRATION-FINAL文档整理后 `git diff --check` 退出2，仅README.md末尾多空行；删除本轮移除重复段落留下的尾空行再复验，不涉及运行行为。
+
+- MK-INTEGRATION-FINAL全量已退出1：2643通过/3失败/12显式跳过，覆盖93.05%达到85%门槛；失败项为 `test_host.py::test_tool_catalog_stays_within_its_budget`、`test_host.py::test_long_turn_folds_older_tool_results_instead_of_failing`、`test_web_delivery_control.py::test_queued_repair_preserves_selected_limit_on_restart`。报告时长1617.40秒，尚待根因核对，不将该次全量记为全通过；按仓库规范只针对实际影响范围修正和复验。
+
+- MK-INTEGRATION-FINAL根因核对：新增ask_user与文件版本/搜索说明使首请求工具目录6064字符超过原5400上限，属于描述体积回归。压缩四个工具的重复表述，保留分页/版本/唯一编辑/搜索范围/问答不授权契约及所有schema，未提高上限或删除工具；精确测量与长轮次影响待复验。交付队列测试用4个普通Plan Run占位，重启后普通任务按新恢复策略可实际调用模型，旧 `not restored.provider.requests` 已超出其“交付不得自动派发”目标；改查该交付及后代唯一用量事实和Writer接收记录皆为空，保持原interrupted/limit/拒绝start断言，生产恢复规则不改。
+
+- MK-INTEGRATION-FINAL三个失败精确复验退出0、3通过/3.23秒（full-failed-targeted.log）。序列化目录5390字符，较6064减少674，原5400上限与长轮次16900预算均未改变；目录回归和长轮次失败同根，最近三条工具结果保护保持。交付按精确身份无用量/后代及无Writer接收事实通过；未删除普通排队任务的自动恢复。Graph独立built复验1条通过，文档尾空行修复后diff检查通过。待补受影响上下文/问答关联和静态，原全量失败事实保留，不虚报重新全量全绿。
+
+- MK-INTEGRATION-FINAL收口：原3失败精确3通过后，上下文构建/结构化提问/补充26项关联通过（final-context-questions.log）；最终Ruff涉及4文件通过，Mypy两生产模块通过，先前全仓166模块/前端318项/服务/help/smoke12及类型构建仍有效，没有其他生产实现变化。Prettier检查通过，diff尾空行问题复验通过；最终待提交差异再次检查。对应修复与生成资源在本次“fix: close accepted upgrade checks and synchronize workbench contracts”集成提交，前置功能提交c454ad5/7d51389/925d099/6c338fe/03eb82f保留。当前模型root实施，readonly_finish独立检查工具说明关键语义保留，其他当前模型子agent负责此前原生/核查切片；无线上故障/用户影响/速度收益证据。12项跳过为可选依赖/环境测试，不算通过；真实内核、付费模型与剩余功能未验收，不因本次上传改判。

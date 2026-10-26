@@ -73,11 +73,8 @@ QUESTION_REVISION = 1
 ASK_USER_TOOL: dict[str, Any] = {
     "name": "ask_user",
     "description": (
-        "Ask the user up to 3 short clarifying questions and wait for their "
-        "answer. Use this only when a concrete, blocking detail is missing; "
-        "each question may offer short choices and may allow free text. The "
-        "run pauses while waiting and the answer returns here as the tool "
-        "result. An answer is never a tool-permission approval."
+        "Ask 1-3 blocking clarifications and wait for answers, using choices or free text. "
+        "Answers return as tool results, never permission approval."
     ),
     "input_schema": {
         "type": "object",

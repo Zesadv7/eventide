@@ -148,7 +148,7 @@ function time(value: number | null | undefined) {
 <template>
   <section class="recovery-panel">
     <p class="muted">
-      恢复详情来自已保存事实。点击“只读核查”会读取实际文件并保存核查证据，不重放写入、运行命令或自动授权；停止与继续仍由服务端重新复核。
+      恢复详情来自已保存事实。点击“只读核查”会读取实际文件并保存核查证据，不重放原工具、不执行待核查的命令，也不自动授权；停止与继续仍由服务端重新复核。
     </p>
     <button :disabled="loading" @click="load">
       {{ loading ? "读取中…" : view ? "刷新恢复详情" : "读取恢复详情" }}

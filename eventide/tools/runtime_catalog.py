@@ -24,12 +24,10 @@ TOOLS = [
     _tool("bash", "Run a command on the local host (not a sandbox)."),
     _tool(
         "read_file",
-        "Read text with one-based source line numbers (display only, not file content). "
-        "Offset is zero-based. The header carries the file sha256; pass it to edit_file as "
-        "expected_sha256 to fail when the file changed since this read. Long files return a "
-        "continuation token bound to this working copy and content version; pass it back as "
-        "continuation for the next page, which is rejected if the file changed. Very long "
-        "lines are split as line:char segments with exact source coordinates.",
+        "Read text with one-based display-only lines; offset is zero-based. "
+        "Header sha256 binds edit_file.expected_sha256. Pass continuation to page; "
+        "tokens bind working copy and file version, rejecting changes. "
+        "Long lines use exact line:char segments.",
     ),
     _tool(
         "write_file",
@@ -37,19 +35,16 @@ TOOLS = [
     ),
     _tool(
         "edit_file",
-        "Replace the single unique occurrence of old_text. Empty, missing or ambiguous "
-        "matches change nothing and report bounded match locations. Pass expected_sha256 "
-        "from read_file to reject the edit when the file changed since that read.",
+        "Replace one unique old_text match; empty/missing/ambiguous matches never write "
+        "and report bounded locations. expected_sha256 from read_file rejects stale reads.",
     ),
     _tool("glob", "Find workspace paths."),
     _tool(
-        "search_text", "Search UTF-8 workspace files without an index. mode=literal always "
-        "works; mode=regex needs the local ripgrep backend and errors when it is missing, "
-        "never degrading regex to literal. Hits render as path:line, context lines as "
-        "path:line-, and sources carry the sha256 of the exact searched bytes, accepted by "
-        "edit_file expected_sha256; the header reports scan/skip/timeout status, so an empty "
-        "result covers only the files searched. Pattern filters paths; offset counts matching "
-        "lines; hidden paths need an explicit dot.",
+        "search_text", "Search UTF-8 files without an index. literal always works; "
+        "regex requires ripgrep and never falls back. Hits: path:line; context: path:line-. "
+        "Source sha256 binds edit_file. Header reports scan/skip/timeout; empty means only "
+        "scanned files. pattern filters paths; offset counts matching lines; "
+        "hidden paths need an explicit dot.",
     ),
     _tool("compact", "Request context compaction of completed turns."),
 ]

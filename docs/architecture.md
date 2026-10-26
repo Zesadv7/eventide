@@ -1366,8 +1366,6 @@ MK08D独立审查修正：核清目标必须由literal pathspec证明为Git真�
 
 
 
-原生文件Web接线新增单条真实API与打包页面旅程：验证可用性/未验证状态、真实POST、独立worker文件I/O、候选隔离与源不变、刷新冻结、只读两次消息不升级、拒绝升级及320px。探测与无OS包装的stdlib worker仅注入专用测试服务器，产品启动器未增加fallback；该证据证明接线，不证明OS隔离。原生UI构建资源由主集成统一生成，独立测试分支不提交临时产物。祖先目录替换观察点审查仍待处理。
-
 
 原生文件Web接线新增单条真实API与打包页面旅程：验证可用性/未验证状态、真实POST、独立worker文件I/O、候选隔离与源不变、刷新冻结、只读两次消息不升级、拒绝升级及320px。探测与无OS包装的stdlib worker仅注入专用测试服务器，产品启动器未增加fallback；该证据证明接线，不证明OS隔离。原生UI构建资源由主集成统一生成，独立测试分支不提交临时产物。祖先目录替换观察点后续以以下独立worker/Host定向验证覆盖。
 
@@ -1376,3 +1374,5 @@ MK08D独立审查修正：核清目标必须由literal pathspec证明为Git真�
 
 MK08D打包页面机制验收补充（2026-10-26，基线63037fc）：在独立临时Git项目和JourneyProvider中，已知write_file调用完成记录被测试fixture定点拒绝一次，真实文件写入后保留unknown。1条真实FastAPI+打包Vue旅程验证人工核查、同键回执、刷新持久证据、原unknown/终态原文不变、人工唯一Continue与原call核查结果配对；文件操作数和mtime证明没有第二次写入，唯一Runtime账本只含2次脚本模型attempt，unknown0。320px和页面脚本错误检查通过。fixture修改仅在frontend/scripts/e2e_server.py，不在生产实现注入故障；本地临时bundle不进入此提交，最终集成重建另验。
 
+
+当前升级分支已将原生文件切片、只读图/并行与内置文件未知核查集成到同一Host、EventLog及打包Vue，OpenAPI/TS与最终4项资源同批生成。离线全量覆盖93.05%；全量发现的3项失败修正后精确复验通过，未重跑或改写原始全量结果，具体证据见AGENTS与failure-cases的MK-INTEGRATION-FINAL。四条built真实API旅程分别验证依赖图、原生文件固定环境、未知结果核查和并行读取；原生测试无OS包装worker仅验证接线。完整内核隔离、真实模型质量和计划剩余范围保持待验收。

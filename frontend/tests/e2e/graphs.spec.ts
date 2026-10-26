@@ -19,7 +19,7 @@ test("saved DAG starts explicitly, passes dependencies and survives refresh and 
     page.getByText("源码证据检查完成", { exact: true }),
   ).toBeVisible();
   const panel = page.locator(".graph-panel");
-  await panel.locator("summary").click();
+  await panel.locator(":scope > summary").click();
   await panel
     .getByRole("textbox", { name: "任务图名称", exact: true })
     .fill("调查依赖");
@@ -43,7 +43,7 @@ test("saved DAG starts explicitly, passes dependencies and survives refresh and 
     definition.nodes.every((n: { claim: unknown }) => n.claim === null),
   ).toBe(true);
   await page.reload();
-  await panel.locator("summary").click();
+  await panel.locator(":scope > summary").click();
   await expect(panel.getByText("调查依赖", { exact: true })).toBeVisible();
   await expect(panel.getByText("方案待开始", { exact: true })).toBeVisible();
   await panel.getByRole("button", { name: "开始调查", exact: true }).click();
@@ -60,7 +60,7 @@ test("saved DAG starts explicitly, passes dependencies and survives refresh and 
     expect(child.parent_run_id).toBe(root);
   }
   await page.reload();
-  await panel.locator("summary").click();
+  await panel.locator(":scope > summary").click();
   await expect(panel.getByText(/2\s*\/\s*2 个任务已完成/)).toBeVisible();
   const history = panel
     .getByRole("link", { name: "查看此任务的运行记录", exact: true })

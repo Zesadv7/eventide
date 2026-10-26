@@ -313,7 +313,10 @@ async def test_queued_repair_preserves_selected_limit_on_restart(tmp_path):
         assert not controller.delivery.load(delivery)["repair"]
         with pytest.raises(ValueError, match="awaiting execution"):
             controller.start("queued-limit")
-        assert not restored.provider.requests
+        # The four ordinary blocker Runs may now recover automatically. This
+        # queued delivery must retain its own limit without dispatching a Writer.
+        assert not restored.model_usage_events("queued-limit")
+        assert not restored.store.worker_admissions("queued-limit")
     finally:
         await restored.close()
 
