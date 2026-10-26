@@ -829,3 +829,6 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 
 - MK08C-API修复后32项恢复/API通过（integration/recovery-approval-green.log），新ASK实际进入Web broker且原审批端点可拒绝；开发接口默认拒绝保留。
 - MK06-UI-INTEGRATE修复后59项前端通过（phase4-frontend-final.log）、vue-tsc/build/4资源打包通过，built浏览器审批中补充/刷新/待处理拒绝/同一Run消费1/1通过（phase4-browser.log）。142项后端组合亦通过，Ruff及Mypy8模块通过。未重跑全仓，历史失败原日志均保留，未把组件检查当模型效果。
+
+
+MK-ZCODE-405后续（2026-10-26，用户明确指定Coding Plan）：原网关故障没有当作额度耗尽。主代理为本地桥接`/Users/zesadv/.codex/tools/zcode-start-plan/run.mjs`增加显式`--route coding`，默认auto三档顺序不变，Coding失败不回落Start；19项桥接离线测试全部通过。单次真实调用使用`account:bigmodel-individual-coding-plan`、GLM-5.3-Flash、max/yolo，退出0且ok:true，回复CODING_PLAN_OK（1请求，reported输入53074/输出53，缓存读取320；不推算费用）。证据`.task_outputs/maka-upgrade/coding-route/{offline.log,live-result.jsonl,live-progress.log}`。该调用仅验证链路，没有运行升级子任务；先前三路失败现场保留，Start网关未复测，不标其故障已修复。工具README已同步，旧文件备份位于系统临时目录zcode-coding-route-backup-n210cx9o；没有修改账号默认套餐或打印凭据。

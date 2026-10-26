@@ -533,3 +533,6 @@ MK08C主代理复核：61cf634后发现并修复claim与initialize间再次崩�
 本批集成（2026-10-26）：恢复61cf634+7bf4be6→53e6d8f；补充6f7f7ca+05c9383→4c73b0b；待处理d5bef36+b12e7cc+e65c557→3ece870。主集成另修API恢复后新审批接Broker、补充可见位置及精确输入框测试定位。142项后端组合、32项恢复/API、59项前端、1条built实际API审批/补充/刷新旅程、Ruff/Mypy8、typecheck/build/契约生成通过；最后收口提交包含产物。MK00–21均按各自切片状态，不将已开发当整项完成。正常close已取消任务不自动恢复；MK08D/E/F、MK06结构化问题、MK16持久目录/UI、MK17/20/21生产边界和MK22最终验收等仍未完成。当前后续ZCode调用因外部网关405受阻，无额度耗尽证据，待服务恢复；没有推送或采纳到原项目。
 
 本批附加分发复核：runtime contract与workbench资源定向11项通过（integration/phase4-distribution.log），源项目仍在a5f3dc6且仅既有.video_agent/未跟踪，未采纳候选。外部agent的实际wrapper退出均为1，任务ok:false，三路停止。
+
+
+2026-10-26额度链路更新：用户明确要求直接使用Coding Plan，覆盖本任务原先仅额度耗尽才切换的顺序要求。后续ZCode调用在既定`--cwd/--prompt-file/--mode yolo`后加`--route coding`，固定GLM-5.3-Flash/max。桥接19项测试及1次真实连通请求通过，见failure-cases的MK-ZCODE-405后续记录；此刻未重新派发升级子任务，已有进度和未完成现场不变。Coding可用不代表Start网关故障消失，也不能将旁枝/日志/工具目录UI记为完成。
