@@ -40,6 +40,13 @@ def main() -> None:
 
     class JourneyProvider(FakeProvider):
         async def complete(self, request):
+            if "side-question investigator" in self._prompt(request):
+                if len(request.messages) == 1:
+                    return ModelResponse(tool_calls=[self._call("read_file", {
+                        "path": "src/demo.py",
+                    })], usage={"input_tokens": 40, "output_tokens": 10})
+                return ModelResponse(text="旁枝调查完成：已读取独立只读副本。",
+                                     usage={"input_tokens": 40, "output_tokens": 10})
             if any(label in self._prompt(request) for label in (
                 "交付修复场景", "检索交付场景", "文件操作编辑场景", "文件操作新建场景",
             )):
@@ -52,7 +59,9 @@ def main() -> None:
             prompt = self._prompt(request)
             step = self.counts[prompt] = self.counts.get(prompt, 0) + 1
             usage = {"input_tokens": 100 + step, "output_tokens": 20}
-            if "命令日志场景" in prompt:
+            if "side-question investigator" in prompt:
+                response = await self.complete(request)
+            elif "命令日志场景" in prompt:
                 if step == 1:
                     response = ModelResponse(tool_calls=[self._call("bash", {
                         "command": "printf '%s' 'BEGIN'; "

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import ValidationError
 
-from eventide import attachments, model_catalog, run_policy
+from eventide import attachments, model_catalog, run_policy, side_questions
 from eventide import interactions as interactions
 from eventide.acceptance_output import AcceptanceOutputs
 from eventide.budget_prices import PriceVersion
@@ -272,6 +272,7 @@ class RuntimeHost:
         self._index_build_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._snapshot_preparing: set[str] = set()
+        self._side_question_lock = asyncio.Lock()
         self._project_git_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._admissions: dict[str, str] = {}
         self._admission_done: dict[str, _Admission] = {}
@@ -385,6 +386,27 @@ class RuntimeHost:
             working_directory if working_directory is not None else None,
             mutation=_mutation,
         )
+
+    async def create_side_question(self, source_run_id: str, question: str) -> dict[str, Any]:
+        """Human control-plane action; never advertised in the model tool catalog."""
+        await self.initialize()
+        task = asyncio.current_task()
+        assert task is not None
+        self._active_tasks.add(task)
+        try:
+            async with self._side_question_lock:
+                if (self._closed or self._configuring or self._provider_cleanup_required
+                        or self._configuration_uncertain):
+                    raise ValueError("Runtime configuration is unavailable")
+                active = sum(
+                    (self._admitted_intent(run_id) or {}).get("worker_role") == "side_question"
+                    for run_id in self._run_tasks
+                )
+                if active >= 4:
+                    raise ValueError("At most four side questions may run at once")
+                return await side_questions.create_side_question(self, source_run_id, question)
+        finally:
+            self._active_tasks.discard(task)
 
     async def manage_worktree(
         self,

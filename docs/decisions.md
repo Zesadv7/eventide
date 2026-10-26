@@ -1448,3 +1448,14 @@ Host.close在取消执行前为每个未结束Run写入绑定确切run_id/shutdo
 **验证：** `tests/test_model_capabilities.py` 8 项（异端点不继承、规范端点、未知不猜、预设来源版本、显式覆盖可追溯、冻结引用不被新配置改写、探测三状态与工具验证分离、API 卡片与 config_hash 隔离）通过；受影响既有回归 84 项通过；前端组件 14 项（含能力卡渲染与模型切换迟到响应不串）与 vue-tsc 通过；Ruff/Mypy 见提交说明。日志 `.task_outputs/maka-upgrade/model-capabilities/`。
 
 ADR-119集成复核：历史成功请求不能验证所有能力，preset.verified_at保持null。身份hash保留query/auth路由区别，公共地址去除凭据/查询参数；IPv6保留括号。12项目录专项、53项恢复/生成组合、18项前端、11项分发、built真实API页面1条及类型/构建/Ruff/Mypy通过。用户声明能力编辑页、目录过期与真实工具/流式验证仍待，不把本能力卡当完整目录交付。
+## ADR-116：旁枝提问是只读快照上的独立 Run，回传是唯一写回通道（MK-17 切片 1，2026-10-26）
+
+**状态：Proposed（离线脚本模型定向验证通过；真实模型与完整门禁未做，不作为最终验收）。**
+
+**决策：** 旁枝提问复用只读 worker 执行边界，不新造执行路径：创建时在共享 Git 协调下冻结源 Workspace 快照并绑定主 Run 事件高水位，独立 Session/Run 以 `ReadonlyProfile(role="side_question")` 执行；写类工具不在其目录，全部工具调用仍经 ToolExecutor/PolicyEngine，只读不是 prompt 承诺而是能力边界。预算与模型槽挂 `parent_run_id` 共享父 Run，`continuation_of/recovery_of` 不复制——旁枝不是主任务的恢复或续跑。证据只来自高水位内的已保存事件（目标/最近输出/工具活动，脱敏有界）并明示排除计数，不把创建后的文件冒充当时事实。主 Run 生命周期完全不受旁枝影响：不排队、不取消、不自动注入。回传必须经既有 supplement 接收路径显式触发，绑定用户所见答案的 SHA-256 指纹；同一旁枝最多注入一次，主任务终态记 late 不自动续跑，超长正文显式标注截断而非静默丢弃。创建事实为 Session 级事件——终态 Run 不能追加 Run 级事实是商店完整性规则，不绕过。快照临时目录由旁枝 Run 任务回调在终态（含 Host 关闭取消）删除，不依赖 GC。
+
+**取舍：** source/worktree旁枝各复制一份短期快照；Plan复用实际已校验的持久只读快照，所有者负责保留；旁枝答案先落独立 Run 再由用户决定回传，不做自动证据流；UI 先轮询完成态，不做旁枝独立 SSE，主链路 SSE/重连不改。刷新到新快照、选择文本提问、来源跳转属后续切片。
+
+**验证：** `tests/test_side_questions.py` 7 项：主/旁枝脚本 Provider 真实并发（旁枝写被拒、只读目录恰好5工具、快照身份入 started 事实）、共享账本含旁枝 attempt、显式回传一次且主边界消费一次、取消旁枝主任务完成、HTTP 迟到回传 409/幂等/late 不续跑、校验与畸形 id 404、超长答案显式截断标注；快照目录删除有 glob 文件证据。前端 `tests/side-questions.test.ts` 3 项（提问不触主任务、回传绑定所见文本/迟到/去重、停止按钮仅活动态）+ ChatView 回归 5 项，vue-tsc 通过；Ruff、Mypy（py310 目标 2 模块）通过。日志 `.task_outputs/maka-upgrade/coding-resume4/`（2026-10-26 续做会话全量复验：后端 7 项、前端旁枝 3 项 + ChatView/执行回归 24 项、vue-tsc、Ruff、Mypy py310 目标 2 新模块 + host/store/api 3 个改动模块均退出 0；首次验证日志随上一会话丢失，resume2 只剩崩溃 runner 会话记录）。无付费模型调用，未重跑全仓/构建产物；OpenAPI/TS 类型再生成留主集成统一收口。
+
+ADR-116集成补充：主代理修正真实执行副本选择、工具错误正文、继续任务的原目标继承、响应迟到隔离和取消前未启动的清理。临时副本由任务回调所有，去除全局注册表，清理OSError写入Session事实并报告；接收失败收尾已创建Run。并发接收用Host短期锁，全服务最多4活动旁枝，共享原模型槽/预算；控制类和旁枝子任务不允许再次创建旁枝。显式回传必须completed且HTTP答案指纹必填；文件/事件切面分别说明。58项后端关联已逐项通过（1旧时序测试修复后所在5项复验）、35项前端、11项分发、1条built真实API浏览器与Ruff/Mypy5模块/vue-tsc通过。整项MK17仍有追问/更新背景/来源跳转未完成，真实模型按MK22。

@@ -944,3 +944,28 @@ MK-CODING-1308再次触发：2026-10-26 14:22–14:23，恢复的四路中旁枝
 - MK14-REVIEW二次Ruff仍有pytest与fastapi之间多余空行（ruff-final2.log），已移除；新增12项后端全部通过（backend-final2.log）。
 
 - MK14-REVIEW复验完成：12项专项、53项相关后端、18项前端、11项分发及built页面1条通过；Ruff-final3、Mypy4模块、vue-tsc及build通过。新增测试构造和导入问题已修复；端点身份/来源标记由主代理修正，真实供应商验证仍留待最终验收。
+### MK17-SIDE — 旁枝切片续做失败登记（2026-10-26，基线 b3f6aca）
+
+- 上一外部runner达到30分钟硬限退出（非额度耗尽），未登记本轮失败；本次续做审查其遗留代码后先复现再修，日志`.task_outputs/maka-upgrade/coding-resume2/`。
+- `test_side_question_http_late_return_and_idempotency` 首轮1失败（2.53秒量级套件，pytest输出 resume2-tests.log）：主Run状态为interrupted，error="Run cancelled before execution; session parked"。原因已证实：测试用裸`TestClient`未作上下文管理器，portal不跨请求存活，后台Run任务在请求间被取消。属测试装置问题，不是生产缺陷；改为`with`后通过，另两个HTTP测试同步修正（其中一个同隐患未及运行）。
+- `test_side_question_cancellation_does_not_stop_main` KeyError 'user_prompt'：实现把证据dict整体嵌套进`source_context`键后未展平进prompt上下文。属新测试立即暴露的实现bug，展平修复后通过。
+- HTTP旁枝创建在主Run终态后422 "Run already terminated"：创建事实原以`run_id`追加到源Run，商店正确拒绝向终态Run追加非终态事实。属设计bug（合法场景"读完结果后提问"被拒）；改为Session级事实、列表路由按source_run_id过滤读取，修复后7项全过。商店的完整性规则未放宽。
+- 截断标记预留40字符不足以容纳文本（长答案时可能再超限），自查修正为140字符预留并测试9000字符答案。
+- 修复后`tests/test_side_questions.py` 7项通过、Ruff 2新模块+接线、Mypy(py310目标)2模块、vue-tsc、前端3项新测试及chat回归5项通过。全部为离线脚本模型定向验证，无付费调用；未重跑全仓。
+- 2026-10-26第二次续做（本次会话）复验：前任会话日志只剩崩溃记录，上条引用的测试日志不存在；在`.task_outputs/maka-upgrade/coding-resume4/`重新产出全部证据——后端7项、前端旁枝3项+ChatView/执行回归24项、vue-tsc、Ruff、Mypy py310（2新模块+host/store/api）全部通过，未发现新失败；两次崩溃均为Coding Plan HTTP 429外部限流，无生产代码回归。
+
+### MK17-REVIEW — 旁枝来源、生命周期与回传复核
+
+- 基线1f5076f+61bd47d候选，代码审查发现旁枝使用逻辑源目录而非主Run执行副本、仅工具名无报错正文、前端动作缺少跨Run响应隔离、全局快照注册表与清理异常被吞。主代理修正实际worktree/Plan快照来源，补事件截止前的有界工具结果和错误、明确文件与事件分别取证，去全局注册表，取消前未启动也清理并记录失败。回传须完成答案且HTTP必须携带答案指纹；创建串行检查全服务最多4旁枝，不占主任务锁，共享原模型槽和预算。后续验证另附，不将审查发现描述为已发生的用户事故。
+
+- MK17-REVIEW首轮原7项后端通过；Ruff检出主代理新增的两处长行（side-review/ruff.log），缩行后复验。没有运行失败被隐去。
+
+- MK17-REVIEW新增6项边界测试通过，Mypy5模块通过；Ruff第二轮仅新增测试函数签名101字符超长（ruff2.log），已缩行。11项前端关联通过。
+
+- MK17-REVIEW组合后端57通过/1失败（side-review/backend-final.log）：既有test_pending_supplement_does_not_stay_waiting_after_final_response期望late，实际consumed；先登记待查，不以旁枝专项通过掩盖关联失败。built真实API旁枝调查/主任务并行/显式回传/刷新/320px旅程1条通过，Mypy5模块通过。
+
+- MK17-REVIEW关联失败已定位为既有测试时序错误：running在上下文准备前已写入，不能证明首模型输入已冻结；补充若此时进入会正确被消费。用显式Provider进入/释放屏障替代700ms延时，确保本用例真的在请求进行中送补充，不改生产消费规则。
+
+- MK17-REVIEW收口：修复旧时序测试后test_interactions.py 5项通过，原58项组合均已有通过证据；35项前端、11项分发、built真实API浏览器1条、Ruff/Mypy5模块/vue-tsc及构建通过，日志side-review。外部ZCode完成原7项切片，主代理负责上述边界修正和复验；真实模型未运行，追问等剩余范围未标完成。
+
+- MK17-REVIEW提交前diff检查检出子候选tests/test_side_questions.py末尾多余空行，已去除；提交未执行，随后重检。

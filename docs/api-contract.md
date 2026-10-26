@@ -84,6 +84,10 @@ Run事件流可显式传`include_preview=true`接收`event: model.preview`。此
 | `POST /api/runs/{id}/supplements` | 运行中补充接收（本机来源 + Idempotency-Key；同键同正文重放原收据、同键不同正文 409；正文 1–8,000 字符，`body_version` 1–9） |
 | `GET /api/runs/{id}/supplements` | 补充投影（pending/consumed/late 及消费 step；迟到补充不自动续跑） |
 | `GET /api/runs/{id}/calls/{call_id}/command-log` | 完整命令日志分页回读（本机 Shell/Skill；`stream=stdout|stderr`、`offset≥0`、`limit≤12000` 字符；失败保留 200+availability，未知 Run/call 404） |
+| `POST /api/sessions/{id}/side-questions` | MK-17 旁枝创建（本机来源 + Idempotency-Key；`question` 1–8,000 字符，`source_run_id` 可省略时取该 Session 最新 Run；202 返回 side Run 身份、快照与高水位） |
+| `GET /api/runs/{id}/side-questions` | 该 Run 的旁枝列表（含答案指纹、回传状态与补充收据；创建事实为 Session 级，终态 Run 仍可查询） |
+| `GET /api/side-questions/{side_question_id}` | 单条旁枝投影（side Run 状态、answer、fingerprint、returned；未知或畸形 id 一律 404） |
+| `POST /api/side-questions/{side_question_id}/return` | 显式回传答案（本机来源 + Idempotency-Key；`answer_fingerprint` 必填64位小写十六进制，与所见版本不一致或答案未完成 409；同一旁枝重复回传重放原收据；主任务终态时 status=late 不续跑；正文超 8,000 字符显式标注 `body_truncated`） |
 | `GET` / `POST /api/sessions/{id}/attachments` | 待提交附件清单 / 上传 |
 | `GET` / `DELETE /api/sessions/{id}/attachments/{aid}` | 下载 / 删除未使用附件 |
 | `GET`/`PUT`/`DELETE /api/config/provider`、`POST /api/config/provider/test` | 模型配置（仅回环） |
@@ -710,6 +714,8 @@ MK-18回执当前状态：run memory receipts保留原content/revision，附可�
 
 MK06当前接线：`POST /api/runs/{id}/supplements`正文含body(1–8000字符)/body_version(1–9)，要求同源本机与幂等键；GET返回supplements/pending。pending只代表已接收，consumed代表已持久加入当前Run消息，不保证请求已发送或模型采纳；终态前未加入消息者投影为late。终态后收据保留在Session事实并绑定原Run，不启动新任务。Web启动的自动恢复后继使用相同ApprovalBroker，新的审批仍通过原审批端点操作。
 
+MK17当前接线：旁枝创建在共享Git协调下冻结源Workspace快照与主Run事件高水位，独立Session/Run以`readonly_profile=side_question`执行，只读工具仍经ToolExecutor/Policy，共享父Run预算与模型槽；`continuation_of/recovery_of`不复制到旁枝intent。旁枝提示中的证据只来自高水位内的已保存事件（用户目标、最近助手文本、最近工具活动，均脱敏截断），并明示之后事件数量被排除；不读取创建后的文件当当时事实。快照临时目录在旁枝Run终态（完成/失败/取消/Host关闭）即删除，有文件级测试。回传经既有supplement接收路径：绑定用户所见答案的SHA-256指纹，不符409；同一旁枝只注入一次；主任务终态记late不自动续跑；超限正文显式截断并在收据与响应标注`body_truncated/answer_length`。创建事实为Session级`side_question.created`事件（终态Run不能追加Run级事实），列表路由按`source_run_id`过滤读取。
+
 MK07/09当前注意：attention的counts是本次返回数量，limits声明审批和失败列表上限；项目过滤在截取前执行，包含该项目执行副本。全量翻页、问题等待、精确参数版本和恢复动作仍属于计划，当前响应不能冒充完整待办总量。聊天/待处理实际API旅程验证了补充刷新、精确拒绝和同一Run后续消费。
 
 ### 源码读取证据投影（MK-02/15，2026-10-26）
@@ -739,3 +745,5 @@ Vue 新增 `/runs/:runId/recovery` 页面与 `RecoveryPanel`（历史 cut 与后
 MK05集成补充：现有read_tool_result新增普通命令stdout/stderr分流回读，仍须同Session的精确Run/call身份；交付验收沿用原固定allowlist，不扩展任意跨会话读取。模型预览发生截断时附回读提示；日志过期/缺失返回明确错误，不用预览补成完整流。日志起始/回执存储故障在工具metadata中明确可见，取消时回执落库失败写错误诊断而不吞掉。
 
 正常关服恢复新增事实：Run级host.shutdown_started载明run_id/shutdown_id；run.interrupted.reason=service_shutdown及resumable=true表示待按恢复条件核查，并非跳过检查承诺。关服后的recovery.claimed为Session事实，绑定source_run_id/resumed_as；旧终态原样保留。用户停止记录Session级run.cancel_requested，其run_id精确对应原运行；GET recovery将该事实纳入高水位并优先显示用户停止（未知工具仍不伪装已解决）。若旧运行已有后继，POST旧Run/cancel返回409，调用者须选择后继Run，不能误报已停止新任务。
+
+旁枝切片复核：创建响应增加`source_execution`（主Run真实执行身份）与`files_captured_at`；文件取证和source_high_water为两次独立观察。source/worktree/Plan可用，其他执行环境明确422；全服务最多4活动旁枝，容量不足接收前422。列表包含可选cleanup_error，清理故障不静默隐藏。source_context提供有界tool_results与latest_failure；用户回传只接受completed答案，指纹必填；读取/回传不重新运行主任务。追问链、选中文字及刷新背景尚待实现。

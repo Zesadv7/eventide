@@ -14,6 +14,7 @@ import RunMemoryPanel from "../components/RunMemoryPanel.vue";
 import InputManifestPanel from "../components/InputManifestPanel.vue";
 import RunSupplementPanel from "../components/RunSupplementPanel.vue";
 import RunToolsPanel from "../components/RunToolsPanel.vue";
+import SideQuestionPanel from "../components/SideQuestionPanel.vue";
 import EventideLogo from "../components/EventideLogo.vue";
 import ToolActivity from "../components/ToolActivity.vue";
 import RetrievalStatus from "../components/RetrievalStatus.vue";
@@ -476,6 +477,13 @@ async function abandon() {
         <RunSupplementPanel
           v-if="run"
           :run-id="run.run_id"
+          :run-status="run.status"
+          :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
+        />
+        <SideQuestionPanel
+          v-if="run"
+          :run-id="run.run_id"
+          :session-id="store.selectedSession"
           :run-status="run.status"
           :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
         />

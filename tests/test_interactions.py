@@ -1,5 +1,7 @@
 """In-run supplement persistence, one-time consumption, and late-arrival boundaries."""
 
+import asyncio
+import threading
 import time
 import uuid
 
@@ -8,6 +10,7 @@ from fastapi.testclient import TestClient
 from eventide import interactions
 from eventide.api import create_app
 from eventide.host import RuntimeHost
+from eventide.models import ModelResponse
 from eventide.providers import ScriptedProvider
 from tests.test_runtime import settings_for
 
@@ -245,18 +248,29 @@ def test_supplement_rejects_invalid_input_and_unknown_run(isolated_workspace):
 
 
 def test_pending_supplement_does_not_stay_waiting_after_final_response(isolated_workspace):
-    runtime = RuntimeHost(
-        settings_for(isolated_workspace),
-        ScriptedProvider([{"text": "done", "delay_ms": 700}]),
-    )
+    class PendingFinal:
+        def __init__(self):
+            self.requests = []
+            self.entered = threading.Event()
+            self.release = asyncio.Event()
+
+        async def complete(self, request):
+            self.requests.append(request)
+            self.entered.set()
+            await self.release.wait()
+            return ModelResponse(text="done")
+
+    provider = PendingFinal()
+    runtime = RuntimeHost(settings_for(isolated_workspace), provider)
     with _client(runtime) as client:
         run_id = _start_run(client)
-        wait_for_status(client, run_id, {"running"})
+        assert provider.entered.wait(5), "the first model input must already be frozen"
         response = client.post(
             f"/api/runs/{run_id}/supplements", json={"body": "extra instruction"},
             headers={"Idempotency-Key": uuid.uuid4().hex},
         )
         assert response.json()["status"] == "pending"
+        client.portal.call(provider.release.set)
         wait_for_status(client, run_id, {"completed"})
         records = client.get(f"/api/runs/{run_id}/supplements").json()
         assert records["pending"] == 0

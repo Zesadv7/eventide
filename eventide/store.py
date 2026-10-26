@@ -1492,6 +1492,44 @@ class RuntimeStore:
                     item["status"] = "late"
         return projected
 
+    def record_side_question_return(
+        self, run_id: str, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Record a side-question return as a supplement receipt at most once.
+
+        The uniqueness scan and the append share one immediate transaction, so
+        repeated clicks cannot inject a second copy of the same answer. Returns
+        (existing_receipt, None) when this side question was already returned,
+        else (None, recorded_receipt).
+        """
+        run = self.get_run_identity(run_id)
+        if not run:
+            raise ValueError("Run not found")
+        active_run = self.get_run(run_id)
+        assert active_run is not None
+        side_question_id = payload["side_question_id"]
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            existing = self._connection.execute(
+                "SELECT payload_json FROM runtime_events WHERE session_id=? AND type=? "
+                "AND json_extract(payload_json,'$.side_question_id')=? "
+                "ORDER BY session_seq LIMIT 1",
+                (run["session_id"], interactions.SUPPLEMENT_EVENT, side_question_id),
+            ).fetchone()
+            if existing:
+                return (json.loads(existing["payload_json"]), None)
+            status = interactions.supplement_status(active_run["status"])
+            record = {**payload, "status": status}
+            self._append_fact_locked(
+                run["session_id"],
+                interactions.SUPPLEMENT_EVENT,
+                redact(record),
+                run_id=run_id if status == "pending" else None,
+                role="user",
+                author="user",
+            )
+            return (None, record)
+
     def consume_supplement(
         self, run_id: str, supplement_id: str, *, step: int, message: dict[str, Any]
     ) -> bool:
