@@ -167,6 +167,40 @@ export interface GenerationState {
     top_p_min?: number;
     sampling_precision?: number | null;
     max_output_tokens?: number | null;
+    context_window?: number | null;
+    tools_supported?: boolean | null;
+    streaming_supported?: boolean | null;
+  };
+  capability?: CapabilityRecord;
+}
+
+export interface CapabilityRecord {
+  identity: {
+    provider: string;
+    protocol: string;
+    canonical_endpoint: string;
+    model: string;
+    identity_hash: string;
+  };
+  source: "documented" | "declared" | "unknown";
+  catalog_version: string;
+  capabilities: GenerationState["capabilities"];
+  preset: {
+    key: string;
+    reference: string | null;
+    verified_at: string | null;
+    documented_url: string | null;
+  } | null;
+  overrides: { fields: string[]; note?: string; declaration_ref?: string };
+  verification: {
+    config_saved: boolean;
+    connection: {
+      status: "never_probed" | "passed" | "failed" | "unknown";
+      checked_at: string | null;
+      run_id: string | null;
+      error_type: string | null;
+    };
+    tool_verification: { status: string; note?: string };
   };
 }
 export interface InputComposition {

@@ -237,6 +237,66 @@ const labels: Record<string, string> = {
             : "能力尚未确认"
       }}。运行接收后参数固定。
     </p>
+    <details v-if="state?.capability" class="capability-card">
+      <summary>模型能力与验证记录</summary>
+      <p class="muted">
+        身份 {{ state.capability.identity.provider }} ·
+        {{ state.capability.identity.protocol }} ·
+        <code>{{
+          state.capability.identity.canonical_endpoint || "（未配置端点）"
+        }}</code>
+        · 目录版本 {{ state.capability.catalog_version }}
+      </p>
+      <p class="muted">
+        来源：{{
+          state.capability.source === "documented"
+            ? `代码预设 ${state.capability.preset?.key ?? ""}（尚未逐项实测）`
+            : state.capability.source === "declared"
+              ? `用户声明${state.capability.overrides.fields.length ? `，覆盖字段 ${state.capability.overrides.fields.join("、")}` : ""}`
+              : "能力尚未确认，参数按未知拒绝"
+        }}
+      </p>
+      <p class="muted">
+        上下文 {{ state.capability.capabilities.context_window ?? "未知" }} ·
+        最大输出
+        {{ state.capability.capabilities.max_output_tokens ?? "未知" }} · 思考
+        {{ state.capability.capabilities.thinking ? "支持" : "未知/不支持" }} ·
+        工具
+        {{
+          state.capability.capabilities.tools_supported === null
+            ? "未知"
+            : state.capability.capabilities.tools_supported
+              ? "已声明支持"
+              : "已声明不支持"
+        }}
+        · 流式
+        {{
+          state.capability.capabilities.streaming_supported === null
+            ? "未知"
+            : state.capability.capabilities.streaming_supported
+              ? "已声明支持"
+              : "已声明不支持"
+        }}
+      </p>
+      <p class="muted">
+        验证状态：配置{{
+          state.capability.verification.config_saved ? "已保存" : "未保存"
+        }}
+        · 连接检查
+        {{
+          state.capability.verification.connection.status === "passed"
+            ? "通过"
+            : state.capability.verification.connection.status === "failed"
+              ? `失败（${state.capability.verification.connection.error_type ?? "原因未知"}）`
+              : state.capability.verification.connection.status === "unknown"
+                ? "结果未知"
+                : "未检查"
+        }}<template v-if="state.capability.verification.connection.run_id">
+          · Run {{ state.capability.verification.connection.run_id }}</template
+        >
+        · 工具验证：未验证（连接通过不代表工具验证通过）
+      </p>
+    </details>
     <fieldset :disabled="busy" class="generation-fields">
       <div v-for="key in keys" :key="key" class="generation-row">
         <label :for="`mode-${scope}-${key}`">{{ labels[key] }}</label
@@ -381,5 +441,8 @@ const labels: Record<string, string> = {
   padding: 0;
   margin: 0;
   min-width: 0;
+}
+.capability-card {
+  margin: 0.25rem 0;
 }
 </style>

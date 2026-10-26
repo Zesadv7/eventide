@@ -2183,6 +2183,12 @@ export interface components {
        * @default []
        */
       response_formats: ("text" | "json_object")[];
+      /** Context Window */
+      context_window?: number | null;
+      /** Tools Supported */
+      tools_supported?: boolean | null;
+      /** Streaming Supported */
+      streaming_supported?: boolean | null;
     };
     /**
      * GenerationPatch

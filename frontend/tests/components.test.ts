@@ -8,6 +8,7 @@ import UsageView from "../src/views/UsageView.vue";
 import { api } from "../src/api/client";
 import { budgetsApi } from "../src/api/budgets";
 import { useWorkbench } from "../src/stores/workbench";
+import type { GenerationState } from "../src/api/types";
 import { provider, generation, costs } from "./fixtures";
 beforeEach(() => {
   sessionStorage.clear();
@@ -309,6 +310,96 @@ describe("content and generation controls", () => {
     expect(composition.text()).toContain("已压缩的摘要计入对话历史");
     expect(wrapper.get(".call-details").text()).toContain("未报告");
     expect(wrapper.get(".stat-grid").text()).toContain("统计不完整");
+    wrapper.unmount();
+  });
+});
+
+describe("MK-14 model capability card", () => {
+  const capability = {
+    identity: {
+      provider: "openai_compatible",
+      protocol: "openai_chat",
+      canonical_endpoint: "https://open.bigmodel.cn/api/coding/paas/v4",
+      model: "glm-5.3-flash",
+      identity_hash: "c".repeat(64),
+    },
+    source: "documented" as const,
+    catalog_version: "1",
+    capabilities: {
+      source: "documented",
+      temperature_max: 1,
+      top_p: true,
+      reasoning_efforts: ["low", "high", "max"],
+      response_formats: ["text"],
+      thinking: true,
+      context_window: null,
+      tools_supported: null,
+      streaming_supported: null,
+      max_output_tokens: 131072,
+    },
+    preset: {
+      key: "bigmodel-coding-chat/glm-5.3-flash",
+      reference: "eventide/generation.py capabilities() BigModel chat 映射",
+      verified_at: "2026-10-16",
+      documented_url: null,
+    },
+    overrides: { fields: [] },
+    verification: {
+      config_saved: true,
+      connection: {
+        status: "failed" as const,
+        checked_at: null,
+        run_id: "probe_abc",
+        error_type: "authentication",
+      },
+      tool_verification: { status: "not_verified" },
+    },
+  };
+  it("shows source, unknown facts as null, and separated verification states", async () => {
+    vi.spyOn(api, "generation").mockResolvedValue({
+      ...generation,
+      capability,
+    });
+    const wrapper = mount(GenerationEditor, {
+      props: { model: "glm-5.3-flash" },
+    });
+    await flushPromises();
+    const card = wrapper.get(".capability-card");
+    expect(card.text()).toContain("bigmodel-coding-chat/glm-5.3-flash");
+    expect(card.text()).toContain("https://open.bigmodel.cn/api/coding/paas/v4");
+    expect(card.text()).toContain("目录版本 1");
+    expect(card.text()).toContain("上下文 未知");
+    expect(card.text()).toContain("工具 未知");
+    expect(card.text()).toContain("流式 未知");
+    expect(card.text()).toContain("最大输出 131072");
+    expect(card.text()).toContain("配置已保存");
+    expect(card.text()).toContain("连接检查 失败（authentication）");
+    expect(card.text()).toContain("Run probe_abc");
+    expect(card.text()).toContain("工具验证：未验证");
+    wrapper.unmount();
+  });
+  it("keeps a stale capability card from crossing after a model switch", async () => {
+    const resolvers: Array<(value: GenerationState) => void> = [];
+    vi.spyOn(api, "generation").mockImplementation(
+      () =>
+        new Promise<GenerationState>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const wrapper = mount(GenerationEditor, {
+      props: { model: "glm-5.3-flash" },
+    });
+    await flushPromises();
+    await wrapper.setProps({ model: "other-model" });
+    await flushPromises();
+    // The request issued for the previous model resolves late.
+    resolvers[0]?.({
+      ...generation,
+      model: "glm-5.3-flash",
+      capability,
+    });
+    await flushPromises();
+    expect(wrapper.find(".capability-card").exists()).toBe(false);
     wrapper.unmount();
   });
 });

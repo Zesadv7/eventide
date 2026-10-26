@@ -16,6 +16,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from pydantic import ValidationError
+
 from eventide import attachments, model_catalog, run_policy
 from eventide import interactions as interactions
 from eventide.acceptance_output import AcceptanceOutputs
@@ -46,6 +48,11 @@ from eventide.generation import (
 from eventide.input_manifest import input_manifest
 from eventide.mcp.client import MCPManager
 from eventide.model_budget import ModelBudgetController
+from eventide.model_capabilities import (
+    capability_record,
+    connection_verification,
+    endpoint_identity,
+)
 from eventide.model_failures import (
     MODEL_STEP_ATTEMPTS,
     classify_failure,
@@ -1902,11 +1909,34 @@ class RuntimeHost:
             "defaults": saved.get("generation", {}), "session": overrides,
             "capabilities": supported.model_dump(),
         }
+        saved_record = self.store.get_provider_config()
+        config_saved = saved_record is not None and endpoint_identity(
+            normalize_provider(str(saved_record["provider"])),
+            str(saved_record["base_url"]) if saved_record["base_url"] else None,
+            str(saved_record["model"]),
+        ) == endpoint_identity(self.settings.provider, self.settings.base_url, model)
+        # MK-14: cheap config-derived record only; the connection verification
+        # scan is a separate read projection for the settings API, never part
+        # of admission or the config hash input path below.
+        result["capability"] = capability_record(
+            provider=self.settings.provider, base_url=self.settings.base_url, model=model,
+            declared=declared, model_identity=identity, config_saved=config_saved,
+        ).to_dict()
         result["config_hash"] = digest([
             result, self.provider_config_status()["config_hash"],
             record["created_at"] if record else None,
         ])
         return result
+
+    def model_connection_verification(self, model: str) -> dict[str, Any]:
+        """MK-14 read projection: latest probe outcome for this exact endpoint.
+
+        Scans stored probe Run facts; calling it per admission would be too
+        expensive, so only the settings API uses it.
+        """
+        return connection_verification(
+            self.store, self.settings.provider, self.settings.base_url, model,
+        )
 
     def configure_generation(
         self, model: str, generation: dict[str, Any], *, session_id: str | None = None,
@@ -1996,21 +2026,60 @@ class RuntimeHost:
         state = self.generation_settings(
             model, session_id or (request.session_id if request else None)
         )
+        # MK-14: a Run that reuses a prior request also reuses the capability
+        # reference frozen at its original admission. Later default or catalog
+        # changes cannot reshape what the continued Run validates against.
+        frozen_caps: GenerationCapabilities | None = None
+        frozen_ref: dict[str, Any] | None = None
+        if generation is not None:
+            frozen = old_intent.get("capability_ref")
+            if "capability_ref" in old_intent:
+                if not isinstance(frozen, dict) or "capabilities" not in frozen:
+                    raise ValueError("Frozen capability reference is invalid; Continue refused")
+                try:
+                    frozen_caps = GenerationCapabilities.model_validate(frozen["capabilities"])
+                except ValidationError as exc:
+                    raise ValueError(
+                        f"Frozen capability reference is invalid; Continue refused: {exc}"
+                    ) from exc
+                frozen_ref = frozen
         if generation is None:
             layers = [state["defaults"], state["session"], request.generation if request else {}]
         else:
             layers = [generation]
         generation = resolve_generation(
             layers, provider=self.settings.provider, base_url=self.settings.base_url, model=model,
-            declared=GenerationCapabilities.model_validate(state["capabilities"]),
+            declared=(
+                frozen_caps if frozen_caps is not None
+                else GenerationCapabilities.model_validate(state["capabilities"])
+            ),
             default_max_output_tokens=self.settings.max_tokens,
         )
+        if frozen_ref is None:
+            capability = state["capability"]
+            # None fields are omitted: the redaction rules rewrite non-integer
+            # max_output_tokens values, and absent means unknown on re-read.
+            frozen_capabilities = {
+                key: value
+                for key, value in GenerationCapabilities.model_validate(
+                    state["capabilities"]
+                ).model_dump().items()
+                if value is not None
+            }
+            frozen_ref = {
+                "identity": capability["identity"],
+                "source": capability["source"],
+                "preset_key": (capability.get("preset") or {}).get("key"),
+                "catalog_version": capability["catalog_version"],
+                "capabilities": frozen_capabilities,
+            }
         return {
             "mode": mode,
             "model": model,
             "provider": self.settings.provider,
             "endpoint_hash": digest(self.settings.base_url),
             "generation": generation,
+            "capability_ref": frozen_ref,
             "recovery_policy": recovery_policy,
             **retrieval,
             **({"skill_snapshot": skill_snapshot} if skill_snapshot is not None else {}),

@@ -60,6 +60,7 @@ uv run eventide-server --host 127.0.0.1 --port 8000
 独立 worktree 首次创建要求 Git 项目有可信 HEAD、源目录干净。
 
 支持 Anthropic Messages、OpenAI-compatible Chat Completions 和 OpenAI Responses。
+设置页的“模型能力与验证记录”显示端点、能力来源和目录版本，分开标示配置保存、连接检查和工具验证；未知能力不会标成已支持，连接通过也不代表工具验证通过。已接收任务保存能力引用，续做不随默认配置变化。
 具体模型的工具与参数支持按能力校验；页面保存的密钥在本地状态中加密存储，不要写入 Git。
 
 其他安装方式、状态备份及 [Docker 部署](docs/user-guide.md#docker-部署与执行沙箱) 见用户指南。

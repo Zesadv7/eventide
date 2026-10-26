@@ -1075,6 +1075,8 @@ API 只按受授权的产物身份读取，支持有界文本分页及类型正�
 
 以 Provider+协议+端点+模型为身份保存有来源和版本的预设，覆盖上下文、输出、思考、工具、流式及可重试协议特征。用户显式覆盖可追溯，未知不猜，保存配置、连接通过、工具验证通过分开。按接收冻结有效配置，恢复不静默换模型；目录更新不能改历史请求。API/UI 复用设置页升级为能力卡、差异和验证状态。验收同名不同端点、目录过期、未知参数、断连探测及无密钥启动；不加入自动供应商路由。
 
+切片 1 已实现（2026-10-26）：`eventide/model_capabilities.py` 提供规范端点身份（折叠尾斜杠/默认端口，异路径异主机不继承）、代码预设来源（`generation.capability_preset`，仅 BigModel chat 与 DeepSeek 的代码映射，附引用，逐项验证日期未知，不臆造供应商规格）与能力记录组装；用户显式声明以 `source="declared"` 覆盖并列出与预设的字段差异，`context_window/tools_supported/streaming_supported` 仅信息性、未知保持 `null`，不参与请求校验，不加自动路由。三状态分离：`config_saved` 来自持久 Provider 记录的身份匹配，`connection` 是探测 Run 终态的只读投影（只在设置 API 读取时扫描，passed/failed/unknown/never_probed，按原 `endpoint_hash` 字节匹配，不跨端点继承），`tool_verification` 恒为 `not_verified`。`run.admitted` 持久化 `capability_ref`（身份/来源/预设键/目录版本/有效能力），Continue 复用旧请求时按冻结能力校验，后续默认或目录变化不改写历史请求；冻结引用无效则明确拒绝 Continue。`GET /api/generation/defaults` 与 session generation 附 `capability` 与连接验证（在 `config_hash` 之后附加）；GenerationEditor 能力卡显示身份/来源/版本/未知项/三状态，模型切换迟到响应由既有 revision 守卫隔离。离线无密钥可用，无启动下载/联网。真实供应商工具与流式验证、目录过期提示、`GET /api/models` 目录视图扩展属后续切片，见 [ADR-119](decisions.md#adr-119)。
+
 ### MK-15：更强代码搜索
 
 在现有字面搜索基础上增加显式正则、上下文行和文件过滤，优先使用可探测的 rg 后端；不可用时准确声明支持集，不把正则静默当字面处理。保留真实路径/行号、上限、省略量、扫描不完整及文件版本。原生/容器搜索进入对应执行边界，不能回到宿主搜索。API/UI 支持查看检索证据和继续读取，不要求用户手工写正则才能使用。验收转义、超长匹配、超时取消、隐藏目录、路径注入和同条件定位质量。

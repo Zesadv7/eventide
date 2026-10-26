@@ -38,6 +38,12 @@ class GenerationCapabilities(BaseModel):
     sampling_precision: int | None = Field(default=None, ge=0, le=6)
     max_output_tokens: int | None = Field(default=None, gt=0, le=1_000_000)
     response_formats: tuple[Literal["text", "json_object"], ...] = ()
+    # MK-14: informational capability facts. ``None`` means unknown and is
+    # never guessed from a provider name; explicit user declarations stay
+    # traceable as ``source="declared"``. They do not gate request validation.
+    context_window: int | None = Field(default=None, gt=0, le=100_000_000)
+    tools_supported: bool | None = None
+    streaming_supported: bool | None = None
 
 
 def _bigmodel_chat(provider: str, base_url: str | None, model: str) -> bool:
@@ -71,6 +77,22 @@ def capabilities(provider: str, base_url: str | None, model: str) -> GenerationC
             thinking=provider == "openai_compatible",
         )
     return GenerationCapabilities()
+
+
+def capability_preset(
+    provider: str, base_url: str | None, model: str,
+) -> tuple[str, GenerationCapabilities] | None:
+    """Return the code-verified preset ``(key, capabilities)`` or ``None``.
+
+    The key names the exact endpoint/model family matched above; capability
+    values come only from these in-repo mappings, never from vendor memory.
+    """
+    caps = capabilities(provider, base_url, model)
+    if caps.source != "documented":
+        return None
+    if _bigmodel_chat(provider, base_url, model):
+        return "bigmodel-coding-chat/glm-5.3-flash", caps
+    return f"deepseek/{model}", caps
 
 
 def resolve_generation(

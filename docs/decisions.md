@@ -1429,3 +1429,22 @@ Host.close在取消执行前为每个未结束Run写入绑定确切run_id/shutdo
 关服记录写入异常仍完成任务取消与资源清理，随后向调用者报告异常；不会吞掉磁盘失败。恢复中心原子切面包含精确绑定的用户停止事实，仍保留已领取记录及其高水位，展示用户停止而不是继续显示自动恢复。
 
 验证：32项恢复/接收/投影组合和101项Host/队列/副本/Worker关联通过；补充停止投影后的22项复验、Ruff/Mypy4模块通过。覆盖真实Host关闭/重开、连续恢复、领取后再次退出、用户停止竞态、不同Session、新Run不继承旧关服标记、持久化失败、原预算归属和Web审批处理器。日志.task_outputs/maka-upgrade/graceful-review；外部ZCode实现初稿，主代理修正历史断言、接收竞态与页面事实范围。未知工具核查与控制任务恢复不在本切片冒充完成。
+
+## ADR-119：版本化模型能力目录与三种验证状态分离（MK-14，2026-10-26）
+
+**状态：Proposed（离线定向验证通过；真实供应商端点与完整门禁未做）。**
+
+**背景：** 保存 Provider 配置、连接探测通过、真实工具调用验证是三件不同的事；此前设置页只有能力 source（documented/declared/unknown），没有目录身份、来源版本与验证状态，恢复链路复用冻结 generation 但能力校验始终取当前配置。
+
+**决策：**
+- 身份是 Provider + 协议 + 规范端点 + 模型（`eventide/model_capabilities.py:endpoint_identity`）。规范端点折叠尾斜杠与显式默认端口，不同路径/主机/模型互不继承；连接验证按原始 `endpoint_hash` 字节精确匹配，同样不跨端点继承。
+- 能力值只来自两处：`eventide/generation.py` 内代码预设映射（`capability_preset`，附代码来源引用；逐项真实验证日期保持未知，不臆造供应商文档 URL 或记忆规格），或用户显式声明（`source="declared"`，`declaration_ref` 绑定 model_identity，覆盖字段相对预设列出差异）。未知能力保持 `null`（context_window/tools_supported/streaming_supported 仅信息性，不参与请求校验），不从 Provider 名称猜测，不新增自动供应商路由。
+- 三状态分离：`config_saved`（持久 Provider 记录解析到同一端点身份）、`connection`（探测 Run 终态投影：passed/failed/unknown/never_probed，附 run_id 与原因；扫描只发生在设置 API 读取投影，不进 admission 热路径）、`tool_verification`（本切片恒为 `not_verified`，连接通过不冒充工具验证）。
+- 接收冻结：`run.admitted` 持久化 `capability_ref`（身份、来源、预设键、目录版本、有效能力）。Continue 复用旧请求时按冻结能力校验，之后默认/目录变化不能改写历史请求或复活被新上限拒绝的参数；冻结引用无效时 Continue 明确拒绝，不静默回退当前配置。旧历史无 `capability_ref` 保持原行为。冻结能力中 `None` 字段省略，避免与脱敏规则冲突（见 MK14-ZCODE-01）。
+- API/UI：`GET /api/generation/defaults` 与 session generation 响应附 `capability` 记录与连接验证（验证证据在 `config_hash` 计算之后附加，不改变可编辑配置的并发语义）；GenerationEditor 增加能力卡，迟到响应由既有 revision 守卫隔离。
+
+**取舍：** 目录版本是代码常量（当前 `1`），预设集合变化时整体升级，不做每条目独立版本迁移；连接验证投影全表扫描 `run.started`（探测 Run 稀少，设置页读取频率低），量大后再加索引。真实供应商工具/流式验证属后续切片，当前不宣称任何端点已通过工具验证。
+
+**验证：** `tests/test_model_capabilities.py` 8 项（异端点不继承、规范端点、未知不猜、预设来源版本、显式覆盖可追溯、冻结引用不被新配置改写、探测三状态与工具验证分离、API 卡片与 config_hash 隔离）通过；受影响既有回归 84 项通过；前端组件 14 项（含能力卡渲染与模型切换迟到响应不串）与 vue-tsc 通过；Ruff/Mypy 见提交说明。日志 `.task_outputs/maka-upgrade/model-capabilities/`。
+
+ADR-119集成复核：历史成功请求不能验证所有能力，preset.verified_at保持null。身份hash保留query/auth路由区别，公共地址去除凭据/查询参数；IPv6保留括号。12项目录专项、53项恢复/生成组合、18项前端、11项分发、built真实API页面1条及类型/构建/Ruff/Mypy通过。用户声明能力编辑页、目录过期与真实工具/流式验证仍待，不把本能力卡当完整目录交付。

@@ -925,3 +925,22 @@ MK-CODING-1308后续：用户报告额度重置并授权继续后，四路Coding
 - MK08C-GRACEFUL-REVIEW：集成32项恢复专项与101项Host/队列/副本/worker关联通过；补显式停止的恢复页投影后Ruff检出一处101字符SQL长行（graceful-review/ruff-final.log），Mypy因&&未运行。缩行后单独复验，不将未运行计为通过。
 
 - MK08C-GRACEFUL-REVIEW完成复验：原claim历史断言已修正；32项恢复专项、101项关联通过，随后停止投影与接收竞态最终22项通过，Ruff/Mypy4模块通过。主代理同时修正接收等待时停止可能丢失、旧Run已生后继仍假报取消成功，以及恢复投影遗漏Session停止事实。相关实现为本切片提交，原ZCode初稿/失败日志均保留；未宣称未知工具核查或控制任务自动恢复完成。
+
+### MK14-ZCODE-01 — 冻结能力引用被脱敏规则改写导致 Continue 拒绝
+
+- 2026-10-26 外部子agent开发循环，基线b3f6aca；新增 `capability_ref` 持久化进 `run.admitted` 后，`tests/test_generation.py::test_session_inheritance_freezes_at_admission_and_continue` 失败（`frozen-ref-red.log`）。根因：事件落库统一经 `redact`，`max_output_tokens` 在 `_USAGE_KEYS` 白名单中只豁免非负整数，冻结引用里声明的 `max_output_tokens: None` 被改写为 `"[REDACTED]"`，Continue 再按 `GenerationCapabilities.model_validate` 校验冻结能力时因字符串解析失败整体拒绝。
+- 修复：构建冻结引用时丢弃值为 `None` 的能力字段（缺省即未知，重读时由模型默认值补齐），不放宽脱敏规则、不改 `_USAGE_KEYS`。复验：原失败用例及受影响 `test_generation/test_glm_generation/test_json_generation/test_probe_http/test_model_catalog` 共84项通过；新增 `tests/test_model_capabilities.py` 8项通过（`mk14-tests.log`）。日志在 `.task_outputs/maka-upgrade/model-capabilities/`。
+
+MK-CODING-1308再次触发：2026-10-26 14:22–14:23，恢复的四路中旁枝61bd47d、模型能力6774cd6正常退出0并交付待审候选；Graph和结构化提问退出1，仍是HTTP429/1308五小时上限，供应商重置时间16:53:02。各自resume3/structured-questions-zcode日志保留，不将候选当验收通过；未继续重试或自动换套餐。
+
+### MK14-REVIEW — 能力来源与端点身份复核
+
+- 基线1da86f6+6774cd6候选：代码审查发现端点规范化丢弃query/auth身份、IPv6显示丢括号，可能把不同路由显示成同一身份；修复为身份hash保留、展示地址去除凭据。移除“预设全部在2026-10-16实测”的无充分证据声明，历史成功调用不能验证每项能力。另持久capability_ref存在但形状损坏时明确拒绝，不悄悄改用当前能力。属于审查发现，尚未声称用户事故，后续定向结果另附。
+
+- MK14-REVIEW：新增端点身份测试首轮Ruff因103字符长行退出1（tests/test_model_capabilities.py:269，E501）；53项后端与4模块Mypy已通过，静态失败单独记录。缩行后复验，不改运行行为。
+
+- MK14-REVIEW新增损坏引用用例首轮3失败/9通过（backend-final.log），原因是测试误把intent字典传给Store要求的事实元组列表，尚未触发被测路径；同步Ruff发现新增pytest导入顺序错误（ruff-final.log）。修正测试构造及导入，再复验。
+
+- MK14-REVIEW二次Ruff仍有pytest与fastapi之间多余空行（ruff-final2.log），已移除；新增12项后端全部通过（backend-final2.log）。
+
+- MK14-REVIEW复验完成：12项专项、53项相关后端、18项前端、11项分发及built页面1条通过；Ruff-final3、Mypy4模块、vue-tsc及build通过。新增测试构造和导入问题已修复；端点身份/来源标记由主代理修正，真实供应商验证仍留待最终验收。

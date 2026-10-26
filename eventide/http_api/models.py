@@ -11,6 +11,18 @@ from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.schemas import GenerationBody
 
 
+def _attach_connection_verification(runtime: Any, result: dict[str, Any]) -> dict[str, Any]:
+    """MK-14: connection evidence is a read projection over probe Run facts.
+
+    Attached after ``config_hash`` was computed; verification status is
+    evidence about the endpoint, not part of the editable configuration.
+    """
+    result["capability"]["verification"]["connection"] = runtime.model_connection_verification(
+        result["model"]
+    )
+    return result
+
+
 def create_router(context: ApiContext) -> APIRouter:
     router = APIRouter(tags=["models"])
     agent_runtime = context.runtime
@@ -18,7 +30,8 @@ def create_router(context: ApiContext) -> APIRouter:
 
     @router.get("/api/generation/defaults")
     async def generation_defaults(model: str | None = None) -> dict[str, Any]:
-        return agent_runtime.generation_settings(model or agent_runtime.settings.model)
+        result = agent_runtime.generation_settings(model or agent_runtime.settings.model)
+        return _attach_connection_verification(agent_runtime, result)
 
     @router.put("/api/generation/defaults")
     async def update_generation_defaults(body: GenerationBody, request: Request) -> dict[str, Any]:
@@ -39,7 +52,10 @@ def create_router(context: ApiContext) -> APIRouter:
     @router.get("/api/sessions/{session_id}/generation")
     async def session_generation(session_id: str, model: str | None = None) -> dict[str, Any]:
         await get_session(session_id)
-        return agent_runtime.generation_settings(model or agent_runtime.settings.model, session_id)
+        result = agent_runtime.generation_settings(
+            model or agent_runtime.settings.model, session_id
+        )
+        return _attach_connection_verification(agent_runtime, result)
 
     @router.put("/api/sessions/{session_id}/generation")
     async def update_session_generation(
