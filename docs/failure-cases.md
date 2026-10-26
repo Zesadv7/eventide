@@ -1144,3 +1144,9 @@ MK21-INTEGRATION组合守卫复验：Graph创建/公共旁枝拒绝与普通Grap
 
 - MK21-WRITE-RECEIPT 收口：5项定向全部通过（发布后替换、原inode改字节的worker验证及Host持久unknown投影各2项，正常新文件/覆盖权限既有场景1项），worker/runner23项通过。Ruff修正后通过、Mypy1模块通过；编辑器内容保留，Host只有1次模型请求并停驻，未冒充成功after版本。日志已归档native-current-model/eventide-native-write-receipt-*；当前代理实施、readonly_finish审查发现、父代理确认统一契约。对应本次发布后回执核对提交；没有真实内核/模型与线上影响证据。
 
+
+- MK21-INTEGRATION前端关联首批23通过/1失败：execution.test.ts第76行用通用button[type=submit]定位预期聊天发送按钮，GraphPanel新增保存表单后读到了“保存方案”按钮disabled。日志native-review/frontend.log；原因先按实际DOM与测试代码核对，不改产品权限判定以满足断言。原生89项主集成定向全部通过（native-review/backend.log），不以其替代前端复验。
+
+- MK21-INTEGRATION执行测试定位修正后首次复验又因维护命令在仓库根运行Vitest，未加载frontend的Vue插件，.vue导入变换失败、未收集用例（frontend-execution.log）。改在frontend目录执行，不把零用例计为通过；与此前Vue类型命令同属目录选择错误。生产页面和权限逻辑未改。
+
+MK21-INTEGRATION当前复验：89项原生worker/协议/路径/取消主集成通过，Mypy15模块通过；首批前端23通过中的旧发送按钮定位修正后，该文件11项通过（frontend-execution2.log），未更改页面权限判断。Vue类型正确项目复验通过；两个目录选择错误均已保留日志且未虚报检查结果。真实内核尚未验证，原生候选仍待生成契约/资源与built页面，不因本条提前上传。

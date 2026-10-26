@@ -72,7 +72,7 @@ describe("session execution copy controls", () => {
       .get('textarea[aria-label="任务输入"]')
       .setValue("已有副本继续工作");
     expect(
-      wrapper.get('button[type="submit"]').attributes("disabled"),
+      wrapper.get('form.composer button[type="submit"]').attributes("disabled"),
     ).toBeUndefined();
     store.sessions[session.workspace_id]!.push({
       ...session,
@@ -94,7 +94,7 @@ describe("session execution copy controls", () => {
       .get('textarea[aria-label="任务输入"]')
       .setValue("新副本需要短期源锁");
     expect(
-      wrapper.get('button[type="submit"]').attributes("disabled"),
+      wrapper.get('form.composer button[type="submit"]').attributes("disabled"),
     ).toBeDefined();
     wrapper.unmount();
   });
