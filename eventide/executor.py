@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import os
 import signal
+import sqlite3
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
 from eventide.budgets import BudgetExceeded
+from eventide.command_logs import (
+    CommandLogCapture,
+    CommandLogs,
+    activate_capture,
+    deactivate_capture,
+)
 from eventide.file_operations import FileOperations
 from eventide.models import CommandResult, ToolCall, ToolOutput, ToolResult
 from eventide.policy import PolicyDecision, PolicyEngine
@@ -299,10 +307,12 @@ class ToolExecutor:
         tools: list[dict[str, Any]] | None = None,
         file_operations: FileOperations | None = None,
         workspace_id: str | None = None,
+        command_logs: CommandLogs | None = None,
     ):
         self.handlers = dict(handlers)
         self.file_operations = file_operations
         self.workspace_id = workspace_id
+        self.command_logs = command_logs
         self.readonly_tools = set(readonly_tools or ())
         self.command_executor = command_executor or LocalCommandExecutor()
         self.contracts = contract_catalog(
@@ -336,6 +346,82 @@ class ToolExecutor:
             self.readonly_tools.add(name)
 
     async def execute(self, call: ToolCall, context: ToolContext) -> ToolResult:
+        capture, start_error = self._start_command_log(call, context)
+        token = activate_capture(capture) if capture is not None else None
+        try:
+            try:
+                result = await self._dispatch(call, context)
+            except BaseException:
+                # Cancel or abort still seals what was captured before the cut.
+                if capture is not None:
+                    self._settle_command_log(capture, None, "cancelled")
+                raise
+            ran = result.metadata.get("exit_code") is not None or (
+                result.metadata.get("outcome_unknown")
+            )
+            self._settle_command_log(
+                capture, result, "complete" if ran else "not_started",
+            )
+            if start_error is not None:
+                result.metadata.setdefault(
+                    "command_log",
+                    {"available": False, "availability": "start_failed",
+                     "run_id": context.run_id, "call_id": call.id, "streams": {},
+                     "detail": start_error},
+                )
+            if capture is not None and (
+                result.metadata.get("stdout_omitted_bytes")
+                or result.metadata.get("stderr_omitted_bytes")
+            ):
+                result = replace(result, content=result.content + (
+                    "\n[Recorded command streams may contain omitted output. "
+                    f'Use read_tool_result run_id="{capture.run_id}", '
+                    f'call_id="{capture.call_id}", stream="stdout" or "stderr", '
+                    "offset and limit. Availability and capture limits are reported.]"
+                ))
+            return result
+        finally:
+            deactivate_capture(token)
+
+    def _start_command_log(
+        self, call: ToolCall, context: ToolContext,
+    ) -> tuple[CommandLogCapture | None, str | None]:
+        """Bind this exact call's full streams to a redacted disk log (MK05)."""
+        if self.command_logs is None or call.name not in {"bash", "run_skill_script"}:
+            return None, None
+        try:
+            capture = self.command_logs.start(
+                context.run_id, call.id,
+                secrets=self.command_logs.secrets, clean=self.command_logs.clean,
+            )
+        except (OSError, sqlite3.Error) as exc:
+            # Storage errors do not change the actual command result.
+            return None, type(exc).__name__
+        return capture, None
+
+    def _settle_command_log(
+        self, capture: CommandLogCapture | None, result: ToolResult | None, outcome: str,
+    ) -> None:
+        if capture is None:
+            return
+        try:
+            reference = capture.finish(outcome)
+        except (OSError, sqlite3.Error) as exc:
+            logging.getLogger(__name__).error(
+                "Command log receipt failed: run=%s call=%s error=%s",
+                capture.run_id, capture.call_id, type(exc).__name__,
+            )
+            reference = {
+                "artifact_id": capture.artifact, "run_id": capture.run_id,
+                "call_id": capture.call_id, "streams": {},
+                "available": False, "availability": "record_failed",
+                "detail": type(exc).__name__,
+            }
+        if result is not None:
+            result.metadata["command_log"] = reference
+
+
+    async def _dispatch(self, call: ToolCall, context: ToolContext) -> ToolResult:
         handler = self.handlers.get(call.name)
         if handler is None:
             return ToolResult(

@@ -997,6 +997,15 @@ class RuntimeStore:
             ).fetchone()
         return json.loads(row[0]) if row else None
 
+    def command_log_events(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM runtime_events WHERE partial=0 AND type IN "
+                "('command.log_started','command.log_recorded',"
+                "'command.log_expired','command.log_cleanup_failed') ORDER BY rowid"
+            ).fetchall()
+        return [self._decode(row) for row in rows]
+
     def run_terminal_at(self, run_id: str) -> float | None:
         with self._lock:
             row = self._connection.execute(

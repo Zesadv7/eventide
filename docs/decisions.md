@@ -1403,3 +1403,17 @@ ADR-111补充：恢复领取后、initialize前再次退出时，下一进程从
 **验证：** `tests/test_recovery_center.py` 4 项真实 EventLog/HTTP：重启 claim 后唯一后继且重复读取不改事件数、blocked 为按 source 绑定的 session 事实、用户停止/预算/未知结果的分类与"无自动重试"断言、旧历史缺策略显式标注；既有恢复套件 7 项回归通过。前端 5 项组件测试（事实与后继链接纯查询、预算/用户停止无自动重试按钮、未知结果不可继续、服务端可用时才出现停止并在动作后重读、切 Run 丢弃迟到响应）；受影响 chat/navigation/diagnostics/model-retry 套件 33 项通过。Ruff、Mypy（py310 目标 3 模块）、vue-tsc、Prettier、git diff --check 通过。日志 `.task_outputs/maka-upgrade/recovery-center/`。无模型调用；MK-08 整项仍进行中。
 
 ADR-117集成补充：恢复页Continue必须携带expected_run_id并在实际接收锁内复核；未知网络结果复用sessionStorage中的原幂等键，不按每次点击新建意图。高水位包含按源绑定的Session恢复事实，服务正常关闭的claim也可展示。动作可用性不是源码/配置/预算的预先验收；这些仍在接收路径核查。built实际API恢复旅程已通过1条，真实模型/全平台和整仓门禁仍待。
+
+## ADR-115：完整命令日志是绑定身份的独立脱敏备份（MK-05 切片 1，2026-10-26）
+
+**状态：Proposed（定向验证通过；真实浏览器旅程与完整门禁未做，不作为最终验收）。**
+
+**决策：** 超出模型预览的本机 Shell/Skill 输出在 `ToolExecutor` 内经既有命令执行器观察口捕获两流，先跨块脱敏（复用 `SafeTextBuffer` lookahead 与 Host 语义清洗）再写入状态根 `command-logs/<run哈希>/<artifact>/`，路径只接受事件事实派生的 32 位十六进制 artifact 身份，不接受任何客户端路径。唯一 Event Log 仍是权威：`command.log_started/recorded/expired/cleanup_failed` 记录身份、received/stored 字节、SHA-256、字符数与诚实 capture_state；脱敏正文不能从这些元数据重建，磁盘文件是独立有界备份，读取时必须校验摘要与字符数，不一致返回 `corrupt` 而非部分内容。
+
+配额（单流 1 MiB/Run 24 MiB/全局 256 MiB）与保留期（终态后 7 天）只影响日志，不影响命令：超额继续排空进程输出、标记 `quota_exceeded` 及省略量；写盘失败、fsync 失败、跨块密钥过长（`redaction_unavailable`）都不改变真实退出码，也不让命令看似失败。取消等待真实进程回收后以 `interrupted` 收尾；超时以命令结果的timed_out/退出码为准，capture_state=complete只代表已采集全部实际排出的字节，不代表命令成功；服务重启把未收尾捕获标为 `process_restart`，rename+目录 fsync 保证 sealed 文件原子可见。分页按 Unicode 字符（单页上限 12,000）经 `GET /api/runs/{run_id}/calls/{call_id}/command-log` 提供；未知 Run/call/流 404，非法分页 422，读取失败保留 200+显式 availability——"日志曾存在"本身是运行历史。Vue `CommandLogPanel` 挂 `ToolActivity` 的 `command_log` metadata，按需分页并静态声明覆盖范围：仅本机普通 Shell 与 Skill 脚本；容器/沙箱执行不接入此采集，也不降级为宿主采集。
+
+**取舍：** 不复用验收归档（AcceptanceOutputs）——授权模型不同（验收调用显式开启 vs 普通 Shell 自动采集），混用会扩大任意写日志的面；不为 MCP/文件工具建通用输出存盘（MK-05 明确排除）；日志压缩、按流采样和 MK-10 受管后台命令身份属后续切片。
+
+**验证：** 后端 11 项定向（中段标记分页回读、跨块密钥不落盘、取消中断收尾、超时诚实事实、流配额显式截断、重启恢复、Skill argv 路径、拒绝调用 not_started、过期显式不可用、HTTP 全栈分页/404/422）通过；前端 4 项组件测试（按需分页、诚实事实、显式不可用、请求错误与迟到响应隔离）通过；Ruff、Mypy（py310 目标 6 模块）、vue-tsc、Prettier 通过。日志 `.task_outputs/maka-upgrade/command-logs/` 及 `coding-resume*/`。无模型调用、无真实浏览器或完整门禁。
+
+ADR-115集成补充：普通命令流回读进入既有read_tool_result，同Session权限不变；返回真实availability/capture_state，不因日志缺失重放命令。每Run执行器组装时取当前冻结Provider密钥，跨块脱敏包含从持久配置加载的密钥；错误处理只捕获磁盘/SQLite边界异常，未知程序错误保留。已补真实Host长输出→模型中段回读、持久密钥分片、跨Session拒绝与磁盘故障不改退出码，built页面1条通过。

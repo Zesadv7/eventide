@@ -1027,6 +1027,8 @@ Maka 提供参考，不作为效果保证：它会对可安全重放的模型步
 
 把现有独立验收归档能力扩展到普通 Shell、Skill 脚本和受管后台进程；统一按调用身份、流、偏移分页，保留退出码、超时和采集完整性。先脱敏再保存，有配额和保留期，超额继续排空进程输出，明确哪段已丢失。控制日志和模型正文分开，不能把所有 MCP 返回任意存盘当成默认权限。API/UI 显示短摘要并按需展开中段日志，缺失/过期不假装空输出。验收中段唯一错误可回读、跨块密钥、存储失败不改退出码和取消无泄漏。
 
+切片 1 已实现（2026-10-26，[ADR-115](decisions.md#adr-115)）：`eventide/command_logs.py` 在 `ToolExecutor` 内对 `bash`/`run_skill_script` 捕获完整两流，经既有 `LocalCommandExecutor` 观察口与 `SafeTextBuffer` 先脱敏再写入状态根 `command-logs/<run哈希>/<artifact>/`；配额（单流 1 MiB/Run 24 MiB/全局 256 MiB）超额只标记 `quota_exceeded` 并继续排空，不改变真实退出码，取消/超时以 `interrupted` 收尾并照常回收进程。事实（`command.log_started/recorded/expired/cleanup_failed`）只落唯一 Event Log，记录身份、字节、SHA-256 与诚实状态；脱敏正文不能从事件元数据重建，文件是独立有界备份，分页读取须校验摘要，越权/串 Run/越界分页显式拒绝。HTTP 为 `GET /api/runs/{run_id}/calls/{call_id}/command-log`，Vue `ToolActivity` 内 `CommandLogPanel` 按需分页、显示不可用原因并声明覆盖范围（仅本机 Shell/Skill；容器/沙箱不接入也不降级宿主采集）。重启恢复将中断捕获标为 `process_restart`，清理失败保留 `cleanup_failed` 事实。受管后台命令（MK-10）属后续切片，本切片未实现。
+
 ### MK-06：运行中补充与 Agent 主动提问
 
 运行中可选择“补充当前任务”或“排到下一轮”；接收先持久化，当前补充在下一安全模型边界生效，展示 accepted/consumed/superseded 等状态和实际生效 attempt。正在执行的工具不会被一句新消息追溯撤销；与当前操作冲突时明确停止/核查路径。
@@ -1273,3 +1275,5 @@ MK16目录补充：冻结发生在执行器和目录组装后、首次模型请�
 MK08F恢复详情切片（2026-10-26，ADR-117）：`GET /api/runs/{id}/recovery`从`store.recovery_snapshot`原子切面（身份+Run事件+按source绑定的`recovery.blocked`/`recovery.claimed` session事实）投影停止分类、已记录执行进度、未知工具/待审批、claim唯一后继及其当前状态和可信`available_actions`；admission早于冻结恢复策略的旧历史显式`history_available=false`。动作仅复用既有cancel/continue端点并由服务端计算可用性，无自动重试、无`POST recovery/actions`。Vue新增`/runs/:runId/recovery`恢复详情页与Chat停驻卡片入口，历史切面与后继实时状态分开呈现，切换Run丢弃迟到响应。4项真实EventLog/HTTP定向（重复读取纯查询、唯一后继、blocked绑定、缺历史/停止/预算/未知分类）、7项既有恢复回归、5项前端组件及33项受影响套件通过；Ruff/Mypy/vue-tsc/Prettier通过。未知工具只读核查（08D）、正常关闭恢复、`POST recovery/actions`及真实模型/平台验收仍待，MK-08整体仍进行中。
 
 MK08F集成复核：继续按钮使用持久幂等请求与expected_run_id，将用户意图绑定到页面所见原运行；源/副本接收锁内拒绝过期目标，先回放既有202回执。Session级claim/blocked纳入同一high_water，已领取与实际派发分开。页面有接收后继链接及晚到响应隔离；步骤/调用次数仅称执行进度，不称完成成果。新增源/worktree/snapshot真实接收用例和built实际API停止→继续→刷新→320px旅程通过；完整重连及未知核查仍按MK08后续验收。
+
+MK05主代理复核：捕获密钥在实际执行器组装时更新为已加载/当前Provider配置，修复持久密钥加载晚于日志对象构造的问题；模型经同Session read_tool_result读取完整流，UI用请求代次隔离stdout/stderr和切调用迟到结果。capture_state=complete表示已排空的输出采集完成，真实命令是否超时/成功仍看原timed_out/exit_code。44项后端通过、1项显式容器跳过；7项前端、Ruff/Mypy6模块/vue-tsc和1条built分页/切流/刷新/320px旅程通过。普通日志落盘不等于后台命令或容器日志已完成。

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from eventide.acceptance_output import AcceptanceOutputs
+from eventide.command_logs import CommandLogs
 from eventide.store import RuntimeStore
 
 INLINE_RESULT_CHARS = 12_000
@@ -17,7 +18,7 @@ PREVIEW_TAIL_CHARS = 2_000
 
 TOOL = {
     "name": "read_tool_result",
-    "description": "Page results or acceptance stdout/stderr.",
+    "description": "Page results or recorded command/acceptance stdout/stderr.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -53,6 +54,7 @@ def reader(
     store: RuntimeStore, session_id: str, *, acceptance: dict[str, Any] | None = None,
     current_run_id: str | None = None,
     outputs: AcceptanceOutputs | None = None,
+    command_logs: CommandLogs | None = None,
 ) -> Callable[..., str]:
     """Session lookup plus a controller-frozen allowlist of prior acceptance calls."""
 
@@ -76,6 +78,8 @@ def reader(
             return "Error: stream must be stdout or stderr, or omitted for legacy content"
         result = store.get_tool_result(session_id, run_id, call_id)
         evidence = store.get_acceptance_output(session_id, run_id, call_id)
+        command = (command_logs.recorded(session_id, run_id, call_id)
+                   if command_logs is not None else None)
         origin = ""
         if (
             result is None and evidence is None and acceptance is not None
@@ -88,15 +92,26 @@ def reader(
                 f"[Acceptance evidence: delivery={acceptance['delivery_id']}; "
                 f"round={acceptance['round']}; patch={acceptance['patch_sha256']}]\n"
             )
-        if result is None and evidence is None:
+        if result is None and evidence is None and command is None:
             return "Error: tool result not found in this session"
+        if stream is not None and command is not None:
+            assert command_logs is not None
+            page = command_logs.page(run_id, call_id, stream, offset, limit)
+            if not page["available"]:
+                return f"Error: recorded command log unavailable: {page['availability']}"
+            return (
+                f"[Command {stream} {page['start']}:{page['end']} "
+                f"of {page['total_chars']} characters; "
+                f"capture={page['capture_state']}; reason={page['reason']}; "
+                f"next_offset={page['next_offset']}]\n{page['text']}"
+            )
         if stream is not None:
             if evidence is None:
                 return "Error: this result has no separate stdout/stderr evidence"
             archive = outputs or AcceptanceOutputs(store, store.path.parent)
             return origin + archive.page(run_id, evidence, stream, offset, limit)
         if result is None:
-            return "Error: no completed tool content; use a recorded acceptance stream"
+            return "Error: no completed tool content; use a recorded command or acceptance stream"
         content = result["content"]
         total = len(content)
         start = min(offset, total)

@@ -52,7 +52,16 @@ def main() -> None:
             prompt = self._prompt(request)
             step = self.counts[prompt] = self.counts.get(prompt, 0) + 1
             usage = {"input_tokens": 100 + step, "output_tokens": 20}
-            if "源码证据场景" in prompt:
+            if "命令日志场景" in prompt:
+                if step == 1:
+                    response = ModelResponse(tool_calls=[self._call("bash", {
+                        "command": "printf '%s' 'BEGIN'; "
+                        "i=0; while [ $i -lt 700 ]; do printf 'abcdefghij'; i=$((i+1)); done; "
+                        "printf 'PAGE-MIDDLE-MARKER'; printf 'ERR-STREAM-MARKER' >&2",
+                    })], stop_reason="tool_use", usage=usage)
+                else:
+                    response = ModelResponse(text="命令日志检查完成", usage=usage)
+            elif "源码证据场景" in prompt:
                 if step == 1:
                     response = ModelResponse(tool_calls=[self._call("read_file", {
                         "path": "src/demo.py", "offset": 1, "limit": 2,

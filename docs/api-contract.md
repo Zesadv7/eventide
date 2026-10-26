@@ -83,6 +83,7 @@ Run事件流可显式传`include_preview=true`接收`event: model.preview`。此
 | `POST /api/runs/{id}/approvals/{approval_id}` | 审批决定 |
 | `POST /api/runs/{id}/supplements` | 运行中补充接收（本机来源 + Idempotency-Key；同键同正文重放原收据、同键不同正文 409；正文 1–8,000 字符，`body_version` 1–9） |
 | `GET /api/runs/{id}/supplements` | 补充投影（pending/consumed/late 及消费 step；迟到补充不自动续跑） |
+| `GET /api/runs/{id}/calls/{call_id}/command-log` | 完整命令日志分页回读（本机 Shell/Skill；`stream=stdout|stderr`、`offset≥0`、`limit≤12000` 字符；失败保留 200+availability，未知 Run/call 404） |
 | `GET` / `POST /api/sessions/{id}/attachments` | 待提交附件清单 / 上传 |
 | `GET` / `DELETE /api/sessions/{id}/attachments/{aid}` | 下载 / 删除未使用附件 |
 | `GET`/`PUT`/`DELETE /api/config/provider`、`POST /api/config/provider/test` | 模型配置（仅回环） |
@@ -133,6 +134,10 @@ Run事件流可显式传`include_preview=true`接收`event: model.preview`。此
 ### Run summary 增加 `usage` —— 已实现
 
 `GET /api/sessions/{id}/runs` 与 `latest_run` 每条 Run 增加 `usage: {"input_tokens": n, "output_tokens": n}`，供用量分区的会话累计。
+
+### 完整命令日志分页 —— 已实现（MK-05 切片 1）
+
+`GET /api/runs/{run_id}/calls/{call_id}/command-log?stream=stdout|stderr&offset=0&limit=4000`：本机原生 Shell（`bash`）与 Skill 脚本（`run_skill_script`）调用的完整脱敏输出回读。日志在执行时绑定 Run/call/副本身份保存，先脱敏再落盘，单流 1 MiB、每 Run 24 MiB、全局 256 MiB 配额，终态后保留 7 天。响应为 `available` 页：`start/end/total_chars`（Unicode 字符分页）、`stored_bytes/received_bytes`（`received>stored` 即明确截断）、`capture_state`（complete/interrupted/quota_exceeded/write_failed/not_started/redaction_unavailable）及 `encoding_loss`；配额只标记省略，不改变命令真实退出码。不可用时返回 `availability`（expired/missing/corrupt/not_saved/not_recorded），不假装空输出；未知 Run/call/流为 404，`limit>12000` 或非法流为 422。日志正文不能从事件元数据重建，文件为独立脱敏备份，读取校验 recorded 摘要；容器/沙箱执行未接入此采集，也不降级为宿主采集。工具结果 metadata `command_log` 携带 `artifact_id/run_id/call_id/streams` 供工作台绑定。
 
 ### 计划依赖与命令结果 —— 已实现
 
@@ -632,7 +637,7 @@ Run、交付repair与手动索引请求共用 `code_structure: boolean=false`、
 | MK-02 文件分页 | `read_file` 返回不透明 continuation_token；受控证据读取接口接同一版本凭据 | Workspace/文件内容版本、行及行内范围、完整性、next_token | 连续读取/文件变化提示/定位；旧页不与新页悄悄拼接 |
 | MK-03 摘要 | `GET /api/runs/{run_id}/context/summaries`；只读查看，生成由 Runtime 调度 | covered_seq、来源 digest、schema_version、证据引用、校验结果 | 上下文侧栏显示替换范围、失败原因、原文入口；刷新保持同一版本 |
 | MK-04 输入与规则 | `GET /api/runs/{run_id}/attempts/{attempt_id}/context`；项目规则来源查询 | 规则/Skill/记忆/工具目录及裁剪清单、大小、来源/版本；脱敏有效投影 | “本次模型看到了什么”面板，切换尝试不串数据；截断和未加载明显区分 |
-| MK-05 长日志 | `GET /api/runs/{run_id}/tools/{call_id}/output?stream=stdout&cursor=...`；复用归档授权与分页 | capture_state、availability、偏移/下一页、退出码、超时、省略量 | 工具卡日志展开/分页/缺失提示；中间错误能找到，过期不显示为空成功 |
+| MK-05 长日志 | 切片 1 已实现：`GET /api/runs/{run_id}/calls/{call_id}/command-log`（本机 Shell/Skill）；受管后台进程（MK-10）与容器/沙箱采集属后续，不做宿主降级 | capture_state、availability、偏移/下一页、received/stored 字节、省略量；退出/超时仍在原工具结果 | 工具卡日志展开/分页/缺失提示；中间错误能找到，过期不显示为空成功 |
 | MK-06 补充与提问 | 已实现 `POST/GET /api/runs/{id}/supplements`；以下为后续计划：`POST /api/sessions/{id}/messages` 带 current/next 意图；`GET /api/sessions/{id}/questions`；`POST /api/questions/{id}/answer` | `message.accepted/consumed`、question opened/answered/expired、来源 Run/revision、生效 attempt | 输入区选择补充/下一轮；问题卡含选择与自由回答；刷新、重复回答、停止后迟到答复有明确结果 |
 | MK-07 审批 | 切片 1 已实现：`GET /api/attention`/`GET /api/projects/{id}/attention` 返回结构化审批卡，动作仍走既有 `POST /api/runs/{run_id}/approvals/{approval_id}`；扩展现有 approval GET/resolve DTO，不另造授权通道 | command/cwd/paths、effect、执行边界、参数 digest、revision、scope | 可读审批卡及原始详情；源/副本/native/Docker 一目了然；过期批准拒绝 |
 | MK-08 恢复 | `GET /api/runs/{id}/recovery`；`POST /api/runs/{id}/recovery/actions`；扩展现有 Run 状态/SSE/停止 | recovery_id、classification、检查项、next_retry_at、attempt/max_attempts、claim、successor、核查证据、available_actions | 聊天恢复条+恢复详情；断网接回、倒计时、重启自动续跑、未知核查、停止、双标签去重 |
@@ -730,3 +735,5 @@ MK07/09当前注意：attention的counts是本次返回数量，limits声明审�
 Vue 新增 `/runs/:runId/recovery` 页面与 `RecoveryPanel`（历史 cut 与后继实时状态分开呈现，切换 Run 丢弃迟到响应），Chat 停驻卡片新增"查看恢复详情"入口；停止/继续按钮只在服务端判定可用时出现，动作后重新读取事实。页面纯查询 + 导航到既有受控操作，旧事实页不触发模型、文件或审批。`POST recovery/actions` 未实现，不伪造。
 
 恢复详情的 high_water 包含按 source_run_id 绑定的 Session 级恢复事实；当前后继状态单独标明实时读取。claim 只表示领取后继，不能当作已派发或已成功。恢复中心继续操作发送 `POST /api/sessions/{id}/continue`、`{"expected_run_id":"原运行ID"}`，服务在源/副本实际接收锁内核对最新Run，过期返回409 rejected；省略body仍兼容既有开发接口。相同内容的未知请求保留持久幂等键，已接收回执先回放，不因后续最新Run改变而二次派发；变更内容不能复用旧键。available_actions只给出当前动作入口，执行时仍复核源码、配置、预算及审批条件。
+
+MK05集成补充：现有read_tool_result新增普通命令stdout/stderr分流回读，仍须同Session的精确Run/call身份；交付验收沿用原固定allowlist，不扩展任意跨会话读取。模型预览发生截断时附回读提示；日志过期/缺失返回明确错误，不用预览补成完整流。日志起始/回执存储故障在工具metadata中明确可见，取消时回执落库失败写错误诊断而不吞掉。

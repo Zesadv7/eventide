@@ -901,3 +901,17 @@ MK-ZCODE-405后续（2026-10-26，用户明确指定Coding Plan）：原网关�
 - 证据：各独立worktree `.task_outputs/maka-upgrade/{coding-resume2,graceful-recovery-resume2,model-capabilities-coding-retry1,agent-graph-zcode}/{result.jsonl,progress.log}`；调度记录dispatch.json已标外部受阻。未提交代码完整保留，外部失败不代表代码已验收；主代理继续验证已有候选。用户明确指定Coding，本次不擅自回落Start，也不创建定时任务。恢复时间仅引用服务端，不承诺届时任务自动运行。
 
 MK08F-REVIEW收口：上述测试等待与fixture问题修复后，56项后端（恢复/精确接收/副本/分发）、25项前端组合、Ruff/Mypy5模块/vue-tsc以及1条built真实API恢复旅程通过。日志recovery-center-review/{backend-final.log,frontend-final4.log,ruff-final.log,mypy.log,typecheck-final.log,browser.log}。本切片未执行真实模型；源码变化/未知工具核查等后续能力不列完成。
+
+### MK05-REVIEW — 命令日志集成复核
+
+- 基线5209e8c+52387f5，主代理发现普通日志未接模型read_tool_result、持久配置加载后密钥lookahead仍为旧值，以及前端跨流迟到覆盖。补齐过程中首轮Ruff/pytest收集/Prettier失败（command-logs-review/{ruff.log,backend.log,format.log}）：冲突处理正则跨行误吃api.py与ToolActivity尾部，批量替换误改独立验收executor缩进，均为主代理集成错误，尚未运行测试用例。恢复HEAD完整文件后做精确接线，不改独立验收路径；待下文复验。
+
+- MK05-REVIEW第二轮12项中2失败/10通过（backend2.log）：主代理追加模型回读提示时修改frozen ToolResult.content，触发FrozenInstanceError，实际Host因此失败。修复为在execute返回前用dataclasses.replace产生新结果，不改变命令执行/退出码。前端7项通过。
+
+- MK05-REVIEW Mypy也准确检出同一frozen content写入（mypy.log）；与上述运行失败合并。修复后重跑定向静态，不将此前退出非零当通过。
+
+- MK05-REVIEW日志磁盘故障用例新增后Ruff检出1处102字符长行（ruff-final.log），已缩行；此前12项命令专项复验通过（backend3.log），新增故障与相关回归另验。
+
+- MK05-REVIEW built浏览器首轮45秒超时（browser.log）；页面上下文显示命令已完成，但测试只展开工具总览、未展开内层bash调用详情，日志按钮不可见。修复E2E逐层展开，不修改生产权限或延长超时。44项后端通过/1显式容器跳过，Mypy6模块通过，保持页面失败单列。
+
+- MK05-REVIEW修复复验：44项后端通过/1项显式容器跳过（backend-final.log）、7项前端、Ruff（ruff-final2.log）/Mypy6模块（mypy-final.log）/vue-tsc、1条built真实API日志分页切流刷新及320px旅程（browser2.log）通过。父代理修复模型回读、密钥更新、UI竞态与自己引入的冲突/不可变结果错误；无模型付费调用。整体MK05/MK10仍有后台与容器接线未完成。

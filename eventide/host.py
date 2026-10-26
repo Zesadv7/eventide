@@ -21,6 +21,7 @@ from eventide import interactions as interactions
 from eventide.acceptance_output import AcceptanceOutputs
 from eventide.budget_prices import PriceVersion
 from eventide.budgets import BudgetExceeded, BudgetScope, is_service_probe_run
+from eventide.command_logs import CommandLogs, stream_observer
 from eventide.config import SUPPORTED_PROVIDERS, Settings, normalize_provider
 from eventide.context_builder import ContextBuilder, request_size, tool_catalog_size
 from eventide.delivery_limits import delivery_usage
@@ -233,6 +234,11 @@ class RuntimeHost:
             self.file_operations.recover()
             self.acceptance_output = AcceptanceOutputs(self.store, self.state_dir)
             self.acceptance_output.recover()
+            self.command_logs = CommandLogs(
+                self.store, self.state_dir,
+                secrets=(self.settings.api_key or "",), clean=self._semantic,
+            )
+            self.command_logs.recover()
             self._secret_box = SecretBox(self.settings.state_dir)
             self._provider_secret_error: str | None = None
             self._load_persisted_provider()
@@ -250,7 +256,9 @@ class RuntimeHost:
         self.policy = PolicyEngine()
         self.executor = ToolExecutor(
             self.handlers,
-            command_executor=LocalCommandExecutor(self.settings.command_timeout),
+            command_executor=LocalCommandExecutor(
+                self.settings.command_timeout, output_observer=stream_observer,
+            ),
             tools=self.tools,
         )
         self._workspace_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -3566,7 +3574,7 @@ class RuntimeHost:
                 "read_tool_result": tool_result_reader(
                     self.store, session_id, acceptance=execution_config.get("acceptance_evidence"),
                     current_run_id=run_id,
-                    outputs=self.acceptance_output,
+                    outputs=self.acceptance_output, command_logs=self.command_logs,
                 ),
                 "todo_write": write_task_plan,
                 **({"load_skill": load_skill, "read_skill_resource": read_skill_resource,
@@ -3588,7 +3596,9 @@ class RuntimeHost:
                 tools = run_policy.filter_tool_catalog(tools, mode)
                 handlers = {**{name: HANDLERS[name] for name in ("bash", "compact")},
                             **SandboxFileTools(command_executor, workspace_root).handlers,
-                            "read_tool_result": tool_result_reader(self.store, session_id),
+                            "read_tool_result": tool_result_reader(
+                            self.store, session_id, command_logs=self.command_logs,
+                        ),
                             "todo_write": write_task_plan}
             if readonly_profile:
                 names = {"read_file", "glob", "search_text", "compact", "read_tool_result"}
@@ -3597,7 +3607,9 @@ class RuntimeHost:
                     name: handler
                     for name, handler in {
                         **HANDLERS,
-                        "read_tool_result": tool_result_reader(self.store, session_id),
+                        "read_tool_result": tool_result_reader(
+                            self.store, session_id, command_logs=self.command_logs,
+                        ),
                     }.items()
                     if name in names
                 }
@@ -3608,6 +3620,9 @@ class RuntimeHost:
                 visible = {tool.get("name") for tool in tools}
                 handlers = {name: handler for name, handler in handlers.items() if name in visible}
             tools = production_tool_catalog(tools)
+            # Provider configuration is frozen while runs are active. Capture the
+            # loaded/current credential, not the pre-persistence constructor value.
+            self.command_logs.secrets = (self.settings.api_key or "",)
             executor = ToolExecutor(
                 handlers,
                 {
@@ -3623,6 +3638,12 @@ class RuntimeHost:
                 tools=tools,
                 file_operations=self.file_operations if not sandbox_execution else None,
                 workspace_id=execution_workspace.workspace_id,
+                # Container/sandbox backends have no local stream observer wired;
+                # claiming command-log coverage there would be dishonest (MK05).
+                command_logs=(
+                    self.command_logs
+                    if execution_config.get("kind") not in {"container", "sandbox"} else None
+                ),
             )
             if discovery is not None:
                 discovery.bind_executor(executor)

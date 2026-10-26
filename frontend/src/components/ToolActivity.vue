@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import CommandLogPanel from "./CommandLogPanel.vue";
+import type { CommandLogReference } from "../api/commandLogs";
 import FileOperationPanel from "./FileOperationPanel.vue";
 import SourceEvidencePanel from "./SourceEvidencePanel.vue";
 import type { SourceEvidence } from "../api/sourceEvidence";
@@ -37,7 +39,11 @@ const entries = computed(() =>
       value && typeof value === "object" ? value : { output: value }
     ) as Record<string, unknown>;
     const metadata = data.metadata as
-      | { retrieval?: RetrievalEvidence; source_evidence?: SourceEvidence }
+      | {
+          retrieval?: RetrievalEvidence;
+          source_evidence?: SourceEvidence;
+          command_log?: CommandLogReference;
+        }
       | undefined;
     const builtinSource = ["read_file", "search_text"].includes(
       String(data.name || data.tool_name),
@@ -47,6 +53,11 @@ const entries = computed(() =>
       data,
       retrieval: metadata?.retrieval,
       source: builtinSource ? metadata?.source_evidence : undefined,
+      log: ["bash", "run_skill_script"].includes(
+        String(data.name || data.tool_name),
+      )
+        ? metadata?.command_log
+        : undefined,
     };
   }),
 );
@@ -138,7 +149,11 @@ function status(data: Record<string, unknown>) {
         >
           这条历史记录没有结构化源码证据，请查看原始工具记录。
         </p>
-        <details v-if="entry.retrieval || entry.source">
+        <details v-if="entry.log" class="command-log-entry">
+          <summary>完整命令日志</summary>
+          <CommandLogPanel :log="entry.log" />
+        </details>
+        <details v-if="entry.retrieval || entry.source || entry.log">
           <summary>原始工具记录</summary>
           <pre>{{ JSON.stringify(entry.data, null, 2) }}</pre>
         </details>
