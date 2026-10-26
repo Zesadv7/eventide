@@ -1011,6 +1011,7 @@ MK-CODING-1308于2026-10-26 15:30–15:31再次出现：Graph review1、native r
 
 MK06-MK21-EARLY-REVIEW后续：提问草稿的问题已由主代理按ADR123修复，并在questions-review验证；原生草稿的清理、权限和文件契约问题仍未修复/验收，不能把本条当MK21闭环。MK20与MK11提前审查项仍待后续候选验证。
 
+
 ### MK20-CURRENT — 当前模型接手任务图
 
 - 基线6873d21，保留外部ZCode未集成草稿后重新实现唯一Runtime EventLog上的只读图。首轮 `python -m pytest -q tests/test_agent_graph.py` 为9通过/1失败，退出1；新增预算断言误调用不存在的Store.model_call_attempts，尚未执行该条预算归属核对。日志`.task_outputs/maka-upgrade/graph-review/backend1.log`；先按真实账本接口修正测试，不改生产预算以通过测试。任务图整体和写协作仍未完成。
@@ -1024,3 +1025,14 @@ MK06-MK21-EARLY-REVIEW后续：提问草稿的问题已由主代理按ADR123修�
 - MK20-CURRENT第三批原失败已过、Plan快照通过，worktree新增场景因测试fixture未提交code.py而被既有“源必须干净”规则正确拒绝（2通过/1失败，backend3.log）。只在临时测试仓库提交fixture文件，再验证真实脏工作副本读取；不放宽生产源检查。Mypy5模块修正后通过（mypy2.log）。
 
 MK20-CURRENT当前复验：测试账本接口/Settings字段/未提交临时fixture均按真实约束修正，backend3原失败通过、Plan通过；backend4五项全部通过（含worktree与重复停止/关服事实），backend5三项通过。Mypy5模块及Ruff修正后通过。未修改生产预算、干净源要求或冻结模型评测。外部草稿的双日志/不完整收尾未进入本实现，当前只读范围已改用唯一Runtime事件和真实任务所有权；写协作与自动续接仍待，不将其标完成。相关提交为本切片本地提交。
+
+### MK20-GRAPH-UI — 任务图前端定向验证（2026-10-26，基线6873d21）
+
+- 首轮命令：`node node_modules/vitest/vitest.mjs run tests/graphs.test.ts tests/side-questions.test.ts tests/questions.test.ts tests/chat-experience.test.ts`，退出1，31通过/1失败；证据`.task_outputs/maka-upgrade/graph-ui/components1.log`。新增测试用匿名RouterLink stub，却按组件名RouterLink查询，返回空VueWrapper；页面字面HTML与内容断言已通过，该失败属于测试定位问题。为stub命名并复验该文件，不改生产链接行为。关联ChatView测试还发出localhost:3000连接拒绝日志，先核对来源，不把测试通过描述为真实服务已接通。
+
+- components2退出1（7通过/同一链接定位失败）：修复脚本在frontend工作目录仍用frontend/tests路径，FileNotFoundError导致预期修复未应用，随后命令仍继续运行；属于维护命令错误，原日志保留。改绝对路径实施同一修复，避免将未生效修改当复验依据。types1已退出0。
+
+- MK20-GRAPH-UI复验：正确应用stub命名后components3全部8项通过；补跨Run停止失败隔离及终态停止轮询后components-final全部10项通过。types1与format-final通过，最终类型与节选展示补充另附。相邻旁枝/提问/聊天24项在components1均通过；该聊天fixture本就会挂载多个未mock读取面板，localhost连接日志不代表真实服务验证，未修改其他面板或将其计产品故障。当前模型子agent实现前端并修正测试定位；后端/契约/产物与真实浏览器由主集成验收。
+
+- MK20-GRAPH-UI最终：补节选字段后truncated-output中对应展示用例1通过/9未运行（非全量10重跑），types-output退出0、format-output通过，diff检查通过。前两次相同定位问题均已修复，不存在未登记的验证失败。提交为本切片feat: add explicit-start read-only task graphs to chat；commit hash以Git记录为准。
+

@@ -1297,8 +1297,16 @@ MK09项目筛选（2026-10-26）：AttentionView复用`GET /api/projects/{id}/at
 
 取消在finally移除等待者并持久关闭问题；关闭错误不被静默忽略。服务关闭后重开保留原问题/答案/调用身份，未答问题关闭或过期；本切片不重建跨进程等待，不声称MK06恢复已完成。Run导航与完整投影均显示waiting_for_user。待处理查询在数据库按项目筛选未答/未闭合、无终态/无停止请求的问题，再有界取最近50条；页面显示并跳回原对话回答，刷新和切Run迟到响应隔离。Vue提交沿用durableMutation，未知结果保留原请求身份，文本不执行HTML。
 
+
 ### MK20 只读依赖图运行切片（2026-10-26）
 
 `AgentGraphs`是Host内的准备/等待任务所有者，不创建另一套模型循环。definition/started/claim/finish/cancel均为runtime_events的Session事实，Store.transact_facts复验同图状态与全图容量；schema仍为v6。每图最多16节点，只有显式advance启用，依赖完成自动补位，未开始的图不会随其他图被启动。只读节点复用旁枝的真实source/worktree/Plan快照、ToolExecutor/Policy和父模型预算；图节点与普通旁枝合计4个（既有delegate_readonly有其原容量，不声称全服务只读工具只有4个）。
 
 claim覆盖准备阶段；取消先冻结图再取消全部所有者，重复停止等待实际Provider与文件清理。正常关服不添加用户停止事实。结果与claim绑定，输出最多8000字符并注明节选/原长度，依赖输入每项600字符、总5000，均标省略。来源快照与事件高水位分别保存。重启仅把孤立claim按实际Run收尾，已完成节点不重跑，未完成节点interrupted且阻塞下游；未实现跨重启节点续做。当前只读图不具备写协作/候选整合/Verifier能力，也未提供模型自主拆图工具，整项MK20继续进行中。
+
+### MK20只读任务图前端切片（2026-10-26）
+
+GraphPanel挂在聊天中，按精确root_run_id读取已保存图。编辑器提供最多16个只读节点、添加/删除及依赖多选；保存只产生定义，“开始调查”是独立写动作，started后的自动接续由Host负责。列表显示依赖箭头、节点状态、原调用结果与错误；停止接口返回cancelling时持续显示真实清理等待。结果纯文本渲染，后端标记节选时提示原字符数；只有已记录child_session_id时才链接该子任务运行历史，不把父Session当作子Session。
+
+所有写操作经durableMutation绑定原URL和正文，未知响应保留同一请求键且浏览器不保存任务正文。切换Run立即清空旧内容/动作并隔离迟到读取及写入响应；仅已启动且ready/running/cancelling的图轮询，读取不重叠，完成或卸载即停止。前端组件与类型验证为局部证据；HTTP契约生成、打包、真实API浏览器及最终门禁由主集成统一，写协作/整合/Verifier仍未在本切片交付。
+
