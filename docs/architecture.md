@@ -1262,3 +1262,9 @@ MK08C API集成：FastAPI lifespan通过initialize(recovery_approval_handler=App
 生产目录使用 `read_file_output` / `search_text_output` 返回 ToolOutput；原 Python 文本接口保留同一内容。元数据 `source_evidence` 来自本次实际读取/搜索的同一份字节，不重新读文件，不解析路径或任意结果文本来推断范围。按已有 ToolExecutor → tool.completed → Store Run 投影 → HTTP/SSE → ToolActivity 传递，模型仍收到原有有界正文，工具 schema 和上下文预算不变。文件显示相对路径、SHA256、总行数、页的行/字符范围及版本绑定续页凭据；搜索显示来源版本、命中/上下文行、扫描/跳过/未核对计数及分页/不完整原因。旧历史和未携带该元数据的后端明确提示缺少结构化证据。
 
 这些是历史调用证据，不等于当前源码仍一致。Vue 不执行结果内 HTML、不凭路径打开任意文件，也不自动发起新工具调用。搜索长行仍按原有窗口截断并标注省略；搜索页偏移不是文件版本续页凭据。Docker 文件 worker 的文本契约不变，本切片未宣称它已输出同样结构化元数据。ADR-120。
+
+### MK-04 实际模型输入清单（2026-10-26）
+
+`RuntimeHost._complete_request` 在记忆最后资格检查后同步写入 `model.input_manifest`，再进入 provider 的 complete/stream；记录每次 attempt 的系统/消息/工具目录指纹、工具名称、实际输入中工具结果call_id、消息/工具数量与已有序列化字符组成。实际请求正文不在清单重复保存，包含附件时也只有摘要和计数。model.request仍代表逻辑步骤；attempt_started中的预算估算不被清单改写，清单不成为第二账本，也不保证供应商已接收。
+
+规则加载现在只读一次 `instructions_record`，context.configured附工作区根AGENTS.md来源、加载字符/文件字节/截断/上限和实际注入指纹。HTTP按Run与事件位置分页读取，Vue聊天内“模型输入记录”按需展开、显式刷新、较早记录分页，切换Run丢弃迟到结果。旧历史没有清单时说明未记录。子目录规则继承、摘要内容对照和引用自动跳转仍待后续，不宣称MK-03/04整项完成。ADR-121。

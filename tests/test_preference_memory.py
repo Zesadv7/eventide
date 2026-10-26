@@ -181,6 +181,12 @@ async def test_edits_freeze_pause_revoke_next_actual_attempt(isolated_workspace)
         refs = host.memory.run_details(result.run_id)["injections"]
         assert refs[0]["memories"] and not refs[1]["memories"]
         assert refs[0]["attempt_id"] != refs[1]["attempt_id"]
+        from eventide.workspace import digest
+
+        manifests = [e["payload"] for e in host.store.run_events(result.run_id)
+                     if e["type"] == "model.input_manifest"]
+        assert [m["system_hash"] for m in manifests] == [digest(r.system) for r in requests]
+        assert manifests[0]["system_hash"] != manifests[1]["system_hash"]
         assert result.status == "completed"
     finally:
         release.set()

@@ -542,3 +542,7 @@ MK08C主代理复核：61cf634后发现并修复claim与initialize间再次崩�
 Coding并发扩展：恢复详情/正常关闭恢复分别独立派发（ADR117/118），模型能力目录MK14随后派发（ADR119）；已有第4路工具执行事实，不能把Start历史3路限制当Coding最大值。主代理保留最终集成权，不自动采纳到源项目。
 
 MK-02/15源码证据展示切片（2026-10-26，主代理）：本地read/search从同一实际字节生成source_evidence，保存到原tool.completed，Run API/SSE与Vue工具活动展示版本/范围/续页/命中上下文/扫描不完整，刷新不重读改写历史；旧记录及未接线后端显示缺失，Docker文本契约保留。83项后端、36项前端、真实API构建页面1条（含文件变更后历史恢复及320px）、vue-tsc、Ruff/Mypy2模块通过；ADR-120和稳定文档同步，证据.task_outputs/maka-upgrade/source-evidence/。整体仍进行中，最终平台验收和MK-22未完成。
+
+MK-04输入诊断切片开始（2026-10-26，主代理，基线f47b7b2）：在实际provider adapter入口前同步记录无正文的attempt输入指纹/工具和结果引用/字符组成，规则加载范围随context.configured记录，补只读分页API与按需页面。验收以实际捕获provider请求和重试分离为准，目录规则继承及摘要对比仍单列。
+
+MK-04输入诊断切片验证（2026-10-26，主代理，ADR-121）：实际adapter入口前同步记录每次attempt无正文清单；真实请求hash/字符组成、重试身份、记忆撤销后输入变化、分页与API边界验证通过。首批65项、派发/记忆/流式关联42项、最终记忆+清单+分发13项（批次有重叠，不累计为独立用例）；16项前端、vue-tsc、Ruff/Mypy4模块、built实际API浏览器1条含刷新/三次尝试和320px通过。OpenAPI/TS/资源同步；失败与修复见MK04-INPUT-MANIFEST。子目录规则继承/摘要对照及MK-22仍待，不标整项完成。

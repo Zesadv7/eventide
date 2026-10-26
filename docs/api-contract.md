@@ -715,3 +715,9 @@ MK07/09当前注意：attention的counts是本次返回数量，limits声明审�
 - `kind=search`：`mode/case_sensitive/context_lines/scanned/skipped/unverified/timed_out/output_capped/partial/next_offset`；`sources[]` 含 path、实际搜索字节 sha256、已呈现的 `lines[{line,match,text}]`。`match=false` 是上下文，text 可包含明确省略标记。`partial` 是扫描不完整，非空 next_offset 是还有结果页；任一成立都不能宣称全仓完整搜索。搜索失败的旧文本错误路径可不含此对象。
 
 刷新读取的是已保存事实；不重新访问现在的源码来改写历史版本。接口不提供该对象对应的额外文件权限。
+
+### MK-04 输入清单 API（2026-10-26）
+
+`GET /api/runs/{run_id}/input-manifests?before=<exclusive session_seq>&limit=50`：只读，limit为1–100；未知Run404、无效分页422。返回run_id、entries（页内时间正序）、next_before（可空，供较早页查询）、recorded_count（当前before范围内条数）、high_water（读取的Run事件上界）。不读取当前源码重建旧清单，不触发模型或工具。
+
+每条带manifest_version=1、request_id/attempt_id/kind/model、seq/at、system_hash/messages_hash/tools_hash、message_count/tool_count、tool_names、tool_result_ids、composition（serialized_unicode_characters_v1字符计数）、可空instructions与instruction_hash。instructions只对agent调用关联同Run该事件之前最近的context.configured规则加载记录；摘要等辅助请求不继承此记录，不凭当前配置填补旧历史。清单在适配器入口落库，不能当成网络到达回执；使用量仍以原attempt账本为准。OpenAPI与前端类型同步生成。

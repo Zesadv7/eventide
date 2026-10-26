@@ -627,6 +627,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/runs/{run_id}/input-manifests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Manifests */
+    get: operations["manifests_api_runs__run_id__input_manifests_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/skills/bundled": {
     parameters: {
       query?: never;
@@ -2352,6 +2369,82 @@ export interface components {
       skipped_reasons?: {
         [key: string]: number;
       } | null;
+    };
+    /** InputComposition */
+    InputComposition: {
+      /** Method */
+      method: string;
+      /** Unit */
+      unit: string;
+      /** Total Characters */
+      total_characters: number;
+      /** Components */
+      components: {
+        [key: string]: number;
+      };
+    };
+    /** InputManifest */
+    InputManifest: {
+      /** Manifest Version */
+      manifest_version: number;
+      /** Request Id */
+      request_id: string;
+      /** Attempt Id */
+      attempt_id: string;
+      /** Kind */
+      kind: string;
+      /** Model */
+      model: string;
+      /** Seq */
+      seq: number;
+      /** At */
+      at: number;
+      /** System Hash */
+      system_hash: string;
+      /** Messages Hash */
+      messages_hash: string;
+      /** Tools Hash */
+      tools_hash: string;
+      /** Message Count */
+      message_count: number;
+      /** Tool Count */
+      tool_count: number;
+      /** Tool Names */
+      tool_names: string[];
+      /** Tool Result Ids */
+      tool_result_ids: string[];
+      composition: components["schemas"]["InputComposition"];
+      instructions: components["schemas"]["InstructionsInfo"] | null;
+      /** Instruction Hash */
+      instruction_hash: string | null;
+    };
+    /** InputManifestPage */
+    InputManifestPage: {
+      /** Run Id */
+      run_id: string;
+      /** Entries */
+      entries: components["schemas"]["InputManifest"][];
+      /** Next Before */
+      next_before: number | null;
+      /** Recorded Count */
+      recorded_count: number;
+      /** High Water */
+      high_water: number;
+    };
+    /** InstructionsInfo */
+    InstructionsInfo: {
+      /** Source */
+      source: string;
+      /** Scope */
+      scope: string;
+      /** Loaded Characters */
+      loaded_characters: number;
+      /** Truncated */
+      truncated: boolean;
+      /** File Bytes */
+      file_bytes: number | null;
+      /** Limit */
+      limit: number;
     };
     /** KnownCause */
     KnownCause: {
@@ -8651,6 +8744,130 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           };
+        };
+      };
+      /** @description bad request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description method not allowed */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description rate limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  manifests_api_runs__run_id__input_manifests_get: {
+    parameters: {
+      query?: {
+        before?: number | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InputManifestPage"];
         };
       };
       /** @description bad request */

@@ -11,6 +11,7 @@ import GenerationEditor from "../components/GenerationEditor.vue";
 import SafeContent from "../components/SafeContent.vue";
 import SandboxEvidence from "../components/SandboxEvidence.vue";
 import RunMemoryPanel from "../components/RunMemoryPanel.vue";
+import InputManifestPanel from "../components/InputManifestPanel.vue";
 import RunSupplementPanel from "../components/RunSupplementPanel.vue";
 import EventideLogo from "../components/EventideLogo.vue";
 import ToolActivity from "../components/ToolActivity.vue";
@@ -482,6 +483,7 @@ async function abandon() {
           :run-id="run.run_id"
           :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
         />
+        <InputManifestPanel v-if="run" :run-id="run.run_id" />
         <RetrievalStatus v-if="run" :state="run.retrieval" />
         <ToolActivity
           v-if="run"

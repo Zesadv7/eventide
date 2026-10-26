@@ -843,3 +843,12 @@ MK-ZCODE-405后续（2026-10-26，用户明确指定Coding Plan）：原网关�
 - 2026-10-26主代理，基线b3f6aca+源码证据改动；83项后端与36项前端通过、vue-tsc通过，Ruff失败（`.task_outputs/maka-upgrade/source-evidence/ruff.log`），后续Mypy因&&未运行；按静态诊断修正后再验，未算全部通过。
 
 - 已证实为新增导入顺序和长行静态问题，已缩行并按 Ruff 修正导入；定向 Ruff 通过、Mypy 两模块通过，vue-tsc复验通过；83项后端/36项前端及构建后实际API浏览器1条通过。参与：主代理实现并检查，未宣称这些机制用例等于真实模型理解效果。修复见本切片提交；最终整合门禁仍待MK-22。
+
+### MK04-INPUT-MANIFEST — 输入清单静态检查
+
+- 2026-10-26主代理，基线f47b7b2；65项后端通过，定向Ruff首轮3处（2处导入自动修正，测试zip缺显式strict未修）。证据`.task_outputs/maka-upgrade/input-manifests/ruff.log`；属测试/静态问题，已定位，补strict后复验。未改变生产预算或冻结模型评测。
+- 随后的Mypy发现新清单函数空列表缺显式类型，日志`input-manifests/mypy.log`；补`list[str]`后复验。首轮16项前端通过，尚未将静态检查失败记为通过。
+- 新增built浏览器输入清单检查首轮失败（`input-manifests/browser.log`，retrieval.spec.ts:400）；65项初始后端、42项派发/记忆/流式关联和16项前端组件通过，不替代页面结果。原因先待查，保留Playwright上下文后定位。
+
+- 页面失败已证实是新增E2E用原始GET Run的不存在`run_id`字段发出`/runs/undefined/input-manifests`（原API身份字段为id，页面正常收到3条）；测试改用创建回执的精确runId。生产接口/页面逻辑不改，不把404当空清单，复验见browser-final.log。
+- 已完成修复复验：Ruff通过、Mypy4模块通过；输入/记忆/流式42项以及最终定向13项通过，16项前端和built页面复验1条通过。页面失败来自测试身份字段误用，生产清单仍只记录适配器入口事实、不代表网络到达。实际参与：主代理实现、复核及修复；相关提交为本切片提交，整体验收仍待MK-22。

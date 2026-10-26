@@ -347,7 +347,8 @@ test("source tools expose exact historical versions and page boundaries after re
   page,
   project,
 }) => {
-  const run = await completedRun(page, await submit(page, "源码证据场景"));
+  const runId = await submit(page, "源码证据场景");
+  const run = await completedRun(page, runId);
   const originalHash = createHash("sha256").update(sourceCode).digest("hex");
   const tools = Object.values(run.tools || {}) as {
     name: string;
@@ -388,6 +389,17 @@ test("source tools expose exact historical versions and page boundaries after re
   await expect(search).toContainText("命中 4:");
   await expect(search).toContainText("上下文 3:");
   await expect(search).not.toContainText("changed after evidence");
+  await page.locator(".input-manifests > summary").click();
+  await expect(page.locator(".input-manifests article")).toHaveCount(3);
+  await expect(page.locator(".input-manifests")).toContainText(
+    "字符数不是 Token 数",
+  );
+  const manifest = await (
+    await page.request.get(`/api/runs/${runId}/input-manifests`)
+  ).json();
+  await expect(page.locator(".input-manifests article").last()).toContainText(
+    manifest.entries.at(-1).attempt_id,
+  );
   await page.setViewportSize({ width: 320, height: 844 });
   expect(
     await page.evaluate(

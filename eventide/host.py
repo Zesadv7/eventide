@@ -42,6 +42,7 @@ from eventide.generation import (
     capabilities,
     resolve_generation,
 )
+from eventide.input_manifest import input_manifest
 from eventide.mcp.client import MCPManager
 from eventide.model_budget import ModelBudgetController
 from eventide.model_failures import (
@@ -1117,6 +1118,13 @@ class RuntimeHost:
                     "request_id": request_id, "attempt_id": memory_attempt,
                     "memories": refs, "digest": digest([refs, prompt]),
                 }, run_id=run_id)
+        if attempt_id is not None:
+            identity = self.store.get_run_identity(run_id)
+            assert identity is not None
+            self.store.append_fact(identity["session_id"], "model.input_manifest", {
+                **input_manifest(request), "request_id": request_id,
+                "attempt_id": attempt_id, "kind": kind, "model": request.model,
+            }, run_id=run_id)
         stream = getattr(self._provider(), "stream", None)
         if not callable(stream) or kind != "agent":
             return await self._provider().complete(request)
@@ -3609,7 +3617,8 @@ class RuntimeHost:
                 runtime_readonly_tools.add("delegate_readonly")
             if skills:
                 runtime_readonly_tools.update({"load_skill", "read_skill_resource"})
-            instructions = self._clean(ContextBuilder.instructions(workspace_root))
+            instructions_load = ContextBuilder.instructions_record(workspace_root)
+            instructions = self._clean(instructions_load.visible_text())
             skill_prompt = skills.prompt()
             mode_note = run_policy.mode_system_note(mode)
             if sandbox_execution:
@@ -3644,6 +3653,14 @@ class RuntimeHost:
                 "context.configured",
                 {
                     "instruction_hash": digest(instructions),
+                    "instructions": {
+                        "source": instructions_load.source,
+                        "scope": "workspace_root",
+                        "loaded_characters": instructions_load.loaded_characters,
+                        "truncated": instructions_load.truncated,
+                        "file_bytes": instructions_load.file_bytes,
+                        "limit": instructions_load.limit,
+                    },
                     "skill_catalog_hash": skills.catalog_hash,
                     "skill_count": len(skills.skills),
                     "tool_catalog_hash": catalog_hash,

@@ -6993,6 +6993,177 @@
         }
       }
     },
+    "/api/runs/{run_id}/input-manifests": {
+      "get": {
+        "tags": [
+          "input-diagnostics"
+        ],
+        "summary": "Manifests",
+        "operationId": "manifests_api_runs__run_id__input_manifests_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputManifestPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "payload too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/skills/bundled": {
       "get": {
         "tags": [
@@ -18998,6 +19169,236 @@
           "generation"
         ],
         "title": "IndexStatistics"
+      },
+      "InputComposition": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "total_characters": {
+            "type": "integer",
+            "title": "Total Characters"
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Components"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "unit",
+          "total_characters",
+          "components"
+        ],
+        "title": "InputComposition"
+      },
+      "InputManifest": {
+        "properties": {
+          "manifest_version": {
+            "type": "integer",
+            "title": "Manifest Version"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "attempt_id": {
+            "type": "string",
+            "title": "Attempt Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "at": {
+            "type": "number",
+            "title": "At"
+          },
+          "system_hash": {
+            "type": "string",
+            "title": "System Hash"
+          },
+          "messages_hash": {
+            "type": "string",
+            "title": "Messages Hash"
+          },
+          "tools_hash": {
+            "type": "string",
+            "title": "Tools Hash"
+          },
+          "message_count": {
+            "type": "integer",
+            "title": "Message Count"
+          },
+          "tool_count": {
+            "type": "integer",
+            "title": "Tool Count"
+          },
+          "tool_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tool Names"
+          },
+          "tool_result_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tool Result Ids"
+          },
+          "composition": {
+            "$ref": "#/components/schemas/InputComposition"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstructionsInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "instruction_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instruction Hash"
+          }
+        },
+        "type": "object",
+        "required": [
+          "manifest_version",
+          "request_id",
+          "attempt_id",
+          "kind",
+          "model",
+          "seq",
+          "at",
+          "system_hash",
+          "messages_hash",
+          "tools_hash",
+          "message_count",
+          "tool_count",
+          "tool_names",
+          "tool_result_ids",
+          "composition",
+          "instructions",
+          "instruction_hash"
+        ],
+        "title": "InputManifest"
+      },
+      "InputManifestPage": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/InputManifest"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before"
+          },
+          "recorded_count": {
+            "type": "integer",
+            "title": "Recorded Count"
+          },
+          "high_water": {
+            "type": "integer",
+            "title": "High Water"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "entries",
+          "next_before",
+          "recorded_count",
+          "high_water"
+        ],
+        "title": "InputManifestPage"
+      },
+      "InstructionsInfo": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "loaded_characters": {
+            "type": "integer",
+            "title": "Loaded Characters"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "file_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Bytes"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "scope",
+          "loaded_characters",
+          "truncated",
+          "file_bytes",
+          "limit"
+        ],
+        "title": "InstructionsInfo"
       },
       "KnownCause": {
         "properties": {

@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source_sha256": "e806f338290d4988bf028a443d1a9b23517fe1aec4b5f2afbdeb52264e77eff7",
+  "source_sha256": "87ca6555021fd8999670228cb456e9987641f5bcef493933607f6b8309368a09",
   "files": {
     "assets/favicon-CWOdeYzi.svg": "ad955d0d8fcf9fc8d9bab277a89144af9c2e167ce3c66f5e173a4932e65914a5",
-    "assets/index-CvW0kij7.js": "4d7b6e02f843489bcb68a43f0c00bf8ddc3c97796cb3a3a4c166964b73bacc8c",
-    "assets/index-Dm7l30nG.css": "b93ab9afa3652525242ff9e5a9d02b2d5cf20251e3db5973207dcfe5e82d8bcd",
-    "index.html": "2a146895d2158b7175c1b85b80cc9bad4bd833cb3423da7be27804ce34e9c761"
+    "assets/index-D-0jiUZn.js": "8e0fe76ab26f3959b4d4480a366c9f2a7b2a37a67c91a3341fcaffffbc7d16ea",
+    "assets/index-Dr59Em3p.css": "d89759ecfb6a7c92d96788a57ddd1f60ec2d8cb1674353771a52603dfadfed6f",
+    "index.html": "a5866b0dd3a8974f15f3567c770d46dacf16f6a208992ba67ccdb6eb49003950"
   }
 }
