@@ -791,3 +791,7 @@ MK09页面范围接线（2026-10-26）：待处理页`#/attention?project=<proje
 
 原生工具目录只开放文件与Runtime元数据操作，readonly目录无write_file/edit_file；未知写入沿原outcome_unknown投影停驻；清理失败增加Session事实native.cleanup_failed，载荷run_id/error。文件读取source_evidence沿用原结构并带native_worker=true。页面需展示未知/不可用原因、冻结权限和当前支持范围；不得用探测passed代替平台验收。
 
+
+
+原生文件工具回执补充：write_file发布后可观察到目标被替换、原inode内容变化或无法确认时，worker内部path_changed映射为现有ToolResult metadata.outcome_unknown，Host保存tool.outcome_unknown并停驻；不是普通可重试失败。正常回执仅代表本次观察点核对成功，不保证之后外部编辑不会改变文件。HTTP/OpenAPI字段不变。
+

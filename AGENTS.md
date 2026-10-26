@@ -606,4 +606,8 @@ MK21独立审查修正候选（待主集成）：主代理发现并要求修复�
 MK21审查修复收口：7项取消/目录项/公共入口定向通过，包含实际worker写成功后阻塞回执、重复取消等待真实进程退出、持久unknown/拒绝Continue/重启无模型派发、未派发取消不记unknown、写前/后目录项替换，以及清理异常不覆盖unknown。关联runner/原旁枝15项、Ruff、Mypy4模块通过。原失败仅新测试错误匹配大小写与静态格式，已修复登记；日志native-current-model/eventide-native-cancel-*。Graph.create跨候选保护仍由主代理集成验证，真实平台和整体MK21/MK22未完成。
 
 
+
 MK21主集成组合边界：候选9884ae6/4953a10/94b4c7b接入后，Graph创建直接核对原Run冻结native profile并拒绝，公共旁枝入口同样拒绝；native/Docker聊天不显示未支持的Graph/旁枝写入口。3项native权限/Graph源副本定向、Vue类型（显式frontend/tsconfig）通过，尚待8da72ad写发布复核补丁及完整本地集成验收，本阶段不推送native候选。
+
+MK21统一写入回执补充完成候选：原子发布后核对当前发布inode、内容及目录项版本，观察到替换/原inode改字节返回unknown，保留编辑器实际内容；只保证回执观察点。新worker/Host插入及正常创建5项、既有worker/runner23项、Ruff/Mypy1模块通过，日志native-current-model/eventide-native-write-receipt-*。真实平台与最终集成仍待。
+

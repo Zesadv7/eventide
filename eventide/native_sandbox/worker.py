@@ -396,7 +396,36 @@ class FileWorker:
                     handle.write(content)
                     handle.flush()
                     os.fsync(handle.fileno())
+                    published = os.fstat(handle.fileno())
                 os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+                try:
+                    descriptor = os.open(
+                        name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent,
+                    )
+                    with os.fdopen(descriptor, "rb") as observed_file:
+                        observed = os.fstat(observed_file.fileno())
+                        if (not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1
+                                or (observed.st_dev, observed.st_ino)
+                                != (published.st_dev, published.st_ino)):
+                            raise WorkerError(
+                                "path_changed", "File was published but its current path changed",
+                            )
+                        current_content = observed_file.read(MAX_WRITE_FILE_BYTES + 1)
+                        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                except OSError as error:
+                    raise WorkerError(
+                        "path_changed",
+                        "File was published but its current path cannot be verified",
+                    ) from error
+                if (current_content != content
+                        or (current.st_dev, current.st_ino, current.st_size,
+                            current.st_mtime_ns, current.st_ctime_ns)
+                        != (observed.st_dev, observed.st_ino, observed.st_size,
+                            observed.st_mtime_ns, observed.st_ctime_ns)):
+                    raise WorkerError(
+                        "path_changed",
+                        "File was published but current content changed before confirmation",
+                    )
             finally:
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(temporary, dir_fd=parent)

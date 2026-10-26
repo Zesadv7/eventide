@@ -1340,3 +1340,7 @@ state_root若为执行副本祖先，不将其整根deny以免覆盖授权副本
 
 原生文件接线独立审查修正：runner对取消保留实际请求frame已派发状态；已派发write/edit在等待回执时取消，必须等真实worker关闭后通过ToolResult返回unknown，让Host原取消结算持久保存tool.outcome_unknown，重启不得盲续做。启动/派发前取消不制造未知写入；清理失败不覆盖已派发写的unknown，runner.closed只在实际清理完成后设置。编辑额外持有parent fd并在写前/写后核对目录项身份：前变更不写，后变更报告unknown，原fd字节一致不能单独证明当前路径。公共旁枝入口按原Run冻结native配置拒绝该组合，Graph等调用方不能剥掉环境边界。具体故障与定向证据见MK21-CANCELLED-WRITE/MK21-EDIT-PATH/MK21-NATIVE-CHILD。
 
+
+
+原生write_file与edit_file统一回执观察契约：write原子发布后，通过现有安全parent fd重开当前目标，核对发布inode、常规单链接文件与有界字节内容，再核对目录项/元数据版本；可观察到替换、原inode改字节或无法确认时返回path_changed并由既有工具结果映射outcome_unknown。已发布事实与当前状态不同须同时如实保留，不恢复或覆盖编辑器内容。此检查只约束本次回执观察点，不是永久稳定保证。定向5项（两种worker插入、两种Host unknown投影、正常新文件）与既有worker/runner23项通过，Ruff/Mypy1模块通过。
+

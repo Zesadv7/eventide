@@ -778,3 +778,113 @@ async def test_cancelled_dispatched_write_keeps_unknown_when_cleanup_fails(tmp_p
         assert tools._runner is not None
     finally:
         cleanup_native_tmp(tools.policy)
+
+
+@pytest.mark.parametrize("change", ["replace", "inplace"])
+def test_write_receipt_checks_published_inode_and_content(tmp_path, monkeypatch, change):
+    import base64
+    import io
+
+    from eventide.native_sandbox.worker import FileWorker
+
+    workspace = tmp_path / "copy"
+    workspace.mkdir()
+    target = workspace / "code.txt"
+    replacement = workspace / "editor.txt"
+    replacement.write_text("editor")
+    policy = build_native_policy(
+        workspace, profile="workspace-write", state_root=tmp_path / "state",
+    )
+    worker = FileWorker(policy.grant(), io.BytesIO(), io.BytesIO())
+    original_replace = os.replace
+    published = []
+
+    def interfere(source, destination, *args, **kwargs):
+        original_replace(source, destination, *args, **kwargs)
+        if destination == "code.txt" and kwargs.get("dst_dir_fd") is not None:
+            published.append((target.stat().st_ino, target.read_text()))
+            if change == "replace":
+                original_replace(replacement, target)
+            else:
+                target.write_text("editor")
+
+    monkeypatch.setattr("eventide.native_sandbox.worker.os.replace", interfere)
+    try:
+        result = worker.handle({"v": 1, "id": "write", "op": "write_file", "params": {
+            "path": str(target), "overwrite": True,
+            "content_b64": base64.b64encode(b"agent").decode(),
+        }})
+        assert published and published[0][1] == "agent"
+        assert not result["ok"] and result["error"]["code"] == "path_changed"
+        assert "published" in result["error"]["message"]
+        assert target.read_text() == "editor"
+        assert (target.stat().st_ino == published[0][0]) == (change == "inplace")
+    finally:
+        cleanup_native_tmp(policy)
+
+
+@pytest.mark.parametrize("change", ["replace", "inplace"])
+async def test_published_write_change_projects_unknown_in_host(tmp_path, monkeypatch, change):
+    import io
+
+    from eventide.native_sandbox.runner import WorkerOperationError
+    from eventide.native_sandbox.worker import FileWorker
+
+    workers = []
+
+    class InProcessWorker(FakeRunner):
+        def __init__(self, policy):
+            super().__init__()
+            self.worker = FileWorker(policy.grant(), io.BytesIO(), io.BytesIO())
+
+        async def call(self, operation, **params):
+            result = self.worker.handle({"v": 1, "id": "test", "op": operation, "params": params})
+            if not result["ok"]:
+                raise WorkerOperationError(result["error"]["code"], result["error"]["message"])
+            return result["result"]
+
+    def factory(policy, backend=None):
+        worker = InProcessWorker(policy)
+        workers.append(worker)
+        return worker
+
+    original_replace = os.replace
+
+    def interfere(source, destination, *args, **kwargs):
+        original_replace(source, destination, *args, **kwargs)
+        if destination == "code.py" and kwargs.get("dst_dir_fd") is not None:
+            descriptor = os.open(
+                destination, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW,
+                dir_fd=kwargs["dst_dir_fd"],
+            ) if change == "inplace" else os.open(
+                "editor.tmp", os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600, dir_fd=kwargs["dst_dir_fd"],
+            )
+            with os.fdopen(descriptor, "w") as editor:
+                editor.write("editor\n")
+            if change == "replace":
+                original_replace("editor.tmp", destination, **kwargs)
+
+    monkeypatch.setattr("eventide.native_execution.NativeSandboxRunner", factory)
+    monkeypatch.setattr("eventide.native_sandbox.worker.os.replace", interfere)
+    provider = ScriptedProvider([
+        {"tool_calls": [{"name": "write_file", "arguments": {
+            "path": "code.py", "content": "agent\n",
+        }}]},
+        {"text": "must not continue"},
+    ])
+    host = make_host(tmp_path, provider)
+    try:
+        result = await host.run(RunRequest(
+            "write", execution_profile="native", execution_target="worktree",
+        ))
+        assert result.status == "interrupted"
+        assert host.store.get_run(result.run_id)["reason"] == "unknown_tool_outcome"
+        unknown = [event for event in host.store.run_events(result.run_id)
+                   if event["type"] == "tool.outcome_unknown"]
+        assert len(unknown) == 1 and "published" in unknown[0]["payload"]["error"]
+        root, _ = host._execution_paths(host._execution_binding(result.run_id))
+        assert (root / "code.py").read_text() == "editor\n"
+        assert len(provider.requests) == 1 and workers[0].closed
+    finally:
+        await host.close()
