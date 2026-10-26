@@ -1347,6 +1347,7 @@ state_root若为执行副本祖先，不将其整根deny以免覆盖授权副本
 
 
 
+
 ### MK08D内置文件未知结果核查（2026-10-26，ADR127）
 
 新内置write/edit在实际执行前，由FileOperations把原参数指纹、目标before/after和recovery_context一起保存在原恢复记录；context沿用workspace_checkpoint的Git可见范围，保留HEAD、全部index、目标外unstaged diff与untracked内容哈希，只排除该目标的工作树内容，Runtime产物排除规则不变。Git忽略文件、外部服务和同UID外部进程不在该证据保证内。旧记录无此证据时不从当前文件补造写前基线。
@@ -1365,4 +1366,9 @@ MK08D独立审查修正：核清目标必须由literal pathspec证明为Git真�
 
 
 原生文件Web接线新增单条真实API与打包页面旅程：验证可用性/未验证状态、真实POST、独立worker文件I/O、候选隔离与源不变、刷新冻结、只读两次消息不升级、拒绝升级及320px。探测与无OS包装的stdlib worker仅注入专用测试服务器，产品启动器未增加fallback；该证据证明接线，不证明OS隔离。原生UI构建资源由主集成统一生成，独立测试分支不提交临时产物。祖先目录替换观察点审查仍待处理。
+
+
+原生文件Web接线新增单条真实API与打包页面旅程：验证可用性/未验证状态、真实POST、独立worker文件I/O、候选隔离与源不变、刷新冻结、只读两次消息不升级、拒绝升级及320px。探测与无OS包装的stdlib worker仅注入专用测试服务器，产品启动器未增加fallback；该证据证明接线，不证明OS隔离。原生UI构建资源由主集成统一生成，独立测试分支不提交临时产物。祖先目录替换观察点后续以以下独立worker/Host定向验证覆盖。
+
+当前授权路径观察点补充：仅重复旧parent fd上的stat不足以证明canonical路径。复用_open_parent的完整nofollow路径遍历并传入expected_parent，比较重新打开的父目录与原持有描述符身份；write发布前、发布后、有界读取后的最终观察点和edit写前/后均应用。前置漂移返回path_changed_before_write，目标不发布/不改写；后置漂移返回path_changed，由既有unknown链停驻。旧目录中的真实写入与canonical编辑器文件分别保留，不修改编辑器文件来制造一致。13项四组合及Host/原文件契约专项、23项worker/runner、Ruff/Mypy1模块通过；真实平台验收仍未做。
 

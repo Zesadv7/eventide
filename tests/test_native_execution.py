@@ -12,6 +12,7 @@ import os
 import subprocess
 from contextlib import suppress
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -886,5 +887,132 @@ async def test_published_write_change_projects_unknown_in_host(tmp_path, monkeyp
         root, _ = host._execution_paths(host._execution_binding(result.run_id))
         assert (root / "code.py").read_text() == "editor\n"
         assert len(provider.requests) == 1 and workers[0].closed
+    finally:
+        await host.close()
+
+
+@pytest.mark.parametrize("operation", ["write_file", "edit_file"])
+@pytest.mark.parametrize("phase", ["before", "after"])
+def test_native_write_observation_reopens_canonical_parent(
+    tmp_path, monkeypatch, operation, phase,
+):
+    import base64
+    import io
+
+    from eventide.native_sandbox.worker import FileWorker
+
+    workspace = tmp_path / "copy"
+    nested = workspace / "nested"
+    nested.mkdir(parents=True)
+    target = nested / "note.txt"
+    target.write_text("original")
+    moved = workspace / "moved"
+    policy = build_native_policy(
+        workspace, profile="workspace-write", state_root=tmp_path / "state",
+    )
+    worker = FileWorker(policy.grant(), io.BytesIO(), io.BytesIO())
+    original_open = worker._open_parent
+    checks = 0
+    shifted = False
+
+    def shift_before_observation(path, *, create, expected_parent=None):
+        nonlocal checks, shifted
+        if expected_parent is not None:
+            checks += 1
+            final_check = 3 if operation == "write_file" else 2
+            if checks == (1 if phase == "before" else final_check):
+                os.rename(nested, moved)
+                nested.mkdir()
+                target.write_text("editor")
+                shifted = True
+        return original_open(path, create=create, expected_parent=expected_parent)
+
+    monkeypatch.setattr(worker, "_open_parent", shift_before_observation)
+    params = {
+        "path": str(target), "overwrite": True,
+        "content_b64": base64.b64encode(b"agent").decode(),
+    } if operation == "write_file" else {
+        "path": str(target), "old_text": "original", "new_text": "agent",
+    }
+    try:
+        result = worker.handle({"v": 1, "id": "ancestry", "op": operation, "params": params})
+        assert shifted and not result["ok"]
+        expected_code = "path_changed_before_write" if phase == "before" else "path_changed"
+        assert result["error"]["code"] == expected_code
+        assert target.read_text() == "editor"
+        assert (moved / "note.txt").read_text() == ("original" if phase == "before" else "agent")
+        assert not list(moved.glob(".eventide-write-*"))
+    finally:
+        cleanup_native_tmp(policy)
+
+
+@pytest.mark.parametrize("operation", ["write_file", "edit_file"])
+async def test_canonical_parent_shift_after_write_persists_unknown_in_host(
+    tmp_path, monkeypatch, operation,
+):
+    import io
+
+    from eventide.native_sandbox.runner import WorkerOperationError
+    from eventide.native_sandbox.worker import FileWorker
+
+    original_open = FileWorker._open_parent
+    counts = {}
+
+    def shift_parent(worker, path, *, create, expected_parent=None):
+        if expected_parent is not None and path.endswith("/nested/note.txt"):
+            counts[worker] = counts.get(worker, 0) + 1
+            if counts[worker] == (3 if operation == "write_file" else 2):
+                target = Path(path)
+                os.rename(target.parent, target.parent.parent / "moved")
+                target.parent.mkdir()
+                target.write_text("editor\n")
+        return original_open(worker, path, create=create, expected_parent=expected_parent)
+
+    class InProcessWorker(FakeRunner):
+        def __init__(self, policy):
+            super().__init__()
+            self.worker = FileWorker(policy.grant(), io.BytesIO(), io.BytesIO())
+
+        async def call(self, operation, **params):
+            response = self.worker.handle({"v": 1, "id": "host", "op": operation, "params": params})
+            if not response["ok"]:
+                raise WorkerOperationError(response["error"]["code"], response["error"]["message"])
+            return response["result"]
+
+    monkeypatch.setattr(FileWorker, "_open_parent", shift_parent)
+    monkeypatch.setattr("eventide.native_execution.NativeSandboxRunner",
+                        lambda policy, backend=None: InProcessWorker(policy))
+    arguments = {
+        "path": "nested/note.txt", "content": "agent\n",
+    } if operation == "write_file" else {
+        "path": "nested/note.txt", "old_text": "original", "new_text": "agent",
+    }
+    provider = ScriptedProvider([
+        {"tool_calls": [{"name": operation, "arguments": arguments}]},
+        {"text": "must not continue"},
+    ])
+    host = make_host(tmp_path, provider)
+    source_file = host.settings.workdir / "nested/note.txt"
+    source_file.parent.mkdir()
+    source_file.write_text("original\n")
+    subprocess.run(["git", "-C", str(host.settings.workdir), "add", "nested"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(host.settings.workdir), "-c", "user.name=Test",
+                    "-c", "user.email=t@e.invalid", "commit", "-m", "nested fixture"],
+                   check=True, capture_output=True)
+    try:
+        result = await host.run(RunRequest(
+            "change nested", execution_profile="native", execution_target="worktree",
+        ))
+        assert result.status == "interrupted"
+        assert host.store.get_run(result.run_id)["reason"] == "unknown_tool_outcome"
+        unknown = [event for event in host.store.run_events(result.run_id)
+                   if event["type"] == "tool.outcome_unknown"]
+        assert len(unknown) == 1 and unknown[0]["payload"]["name"] == operation
+        root, _ = host._execution_paths(host._execution_binding(result.run_id))
+        assert (root / "nested/note.txt").read_text() == "editor\n"
+        assert (root / "moved/note.txt").read_text() == "agent\n"
+        assert source_file.read_text() == "original\n"
+        assert len(provider.requests) == 1
     finally:
         await host.close()

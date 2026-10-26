@@ -1180,7 +1180,17 @@ MK21-INTEGRATION当前复验：89项原生worker/协议/路径/取消主集成�
 
 - MK21-NATIVE-BROWSER 收口：新增单条built页面真实API旅程首次执行通过（9.2秒），类型检查、Vite构建、Ruff修正后通过。验证独立真实stdlib worker PID/读写、source无改、刷新profile/backend固定、只读连续两条消息与拒绝升级、320px。探测为测试available/unverified，OS包装明确未启用，不能作为内核验收。临时eventide/workbench资源从预先备份精确恢复，不提交；日志与本次served manifest归档native-current-model/eventide-native-e2e-*及native-e2e-served-manifest.json。没有新增浏览器运行失败。
 
-### MK21-ANCESTOR-OBSERVATION — 父目录被替换后旧parent fd不等于canonical路径（待处理）
+### MK21-ANCESTOR-OBSERVATION — 父目录被替换后旧parent fd不等于canonical路径（候选修复已定向验证）
+
 
 - readonly_finish最终静态审查8da72ad指出：发布后若父目录被rename并在原路径重建目录/目标，当前open/stat仍走旧parent fd，可核对旧目录而未核对canonical祖先绑定。当前代理只读核实没有额外重遍历guard；此项未在本次浏览器旅程覆盖，也未修复或运行缺陷验证，不虚构故障重现结果。已报告主代理决定处理范围，原生整体仍不能标完成；本次提交只增加接线旅程fixture/test/docs。
+
+
+- readonly_finish最终静态审查8da72ad指出：发布后若父目录被rename并在原路径重建目录/目标，当前open/stat仍走旧parent fd，可核对旧目录而未核对canonical祖先绑定。当前代理只读核实没有额外重遍历guard；此项未在当次浏览器旅程覆盖，记录时尚未修复或运行缺陷验证，不虚构故障重现结果。已报告主代理决定处理范围，原生整体仍不能标完成；本次提交只增加接线旅程fixture/test/docs。
+
+- MK21-ANCESTOR-OBSERVATION 处理开始（基线0567f75）：父代理确认统一当前授权路径观察点；现有nofollow父目录遍历增加expected_parent身份比对，write发布前/后及edit写前/后均从绝对授权路径重新遍历。写前漂移以path_changed_before_write拒绝，已写后漂移为path_changed→unknown，保留canonical编辑器文件。新增四种worker插入和两种Host投影验证，尚待结果。
+
+- MK21-ANCESTOR-OBSERVATION 首批13项通过；最终write回执增加有界读取后的canonical父目录复核，覆盖在最后观察点移动祖先。静态首轮仅新增参数化测试两处101字符长行（`/tmp/eventide-native-ancestor-ruff.log`），拆行后复验；没有把旧观察点的通过当新增观察点通过。
+
+- MK21-ANCESTOR-OBSERVATION 收口：最终13项通过，包含write/edit前/后四种目录rename+canonical重建、两种Host持久unknown、原目标替换/原inode内容变更与正常写。write的后置插入发生在有界读取后的最后canonical复核，证明不只查旧parent；前置原目标未写，后置moved中保留实际agent内容而canonical仍为editor内容，源fixture文件不变且Host仅1次模型请求。既有worker/runner23项、Ruff修正后与Mypy1模块通过；日志归档native-current-model/eventide-native-ancestor*。当前代理实施，readonly_finish静态审查、父代理确认同一系统边界契约。缺陷未进入主集成或推送，没有线上事故证据；真实内核/模型验收未做。
 

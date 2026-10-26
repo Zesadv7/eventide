@@ -797,6 +797,7 @@ MK09页面范围接线（2026-10-26）：待处理页`#/attention?project=<proje
 原生文件工具回执补充：write_file发布后可观察到目标被替换、原inode内容变化或无法确认时，worker内部path_changed映射为现有ToolResult metadata.outcome_unknown，Host保存tool.outcome_unknown并停驻；不是普通可重试失败。正常回执仅代表本次观察点核对成功，不保证之后外部编辑不会改变文件。HTTP/OpenAPI字段不变。
 
 
+
 ### MK08D：只读核查内置文件结果（2026-10-26）
 
 `POST /api/runs/{run_id}/recovery/reconcile`要求本机同源和Idempotency-Key（空JSON正文可用）。只接受已终态、当前无执行所有者的本机源/工作副本Run，持有原会话与实际执行副本协调后只读核查；不存在404、仍运行/忙碌/不支持环境409、来源不符403。返回`{run_id,checks,unresolved}`，不会创建后继或派发模型。相同请求键回放原回执，未知回执仍保留原键；成功后的新请求可按新观察重新核查。
@@ -808,4 +809,7 @@ checks记录包含`source_run_id/call_id/unknown_event_id/name/operation_id/sour
 
 
 MK08D范围修正：`target_not_git_visible`与`target_hidden_in_index`均为requires_review，页面显示具体限制。新workspace checkpoint附index_visibility，当前源/副本接收和派发沿已有比较拒绝索引隐藏标志变化；旧checkpoint缺此字段不补造，保持停驻等待明确重新建基线。本文的“目标after核清”只覆盖Git真实可见目标；任意ignored文件的持久目标指纹与接收/派发方案仍是后续工作，不能从一次读取推断为已支持。
+
+
+原生路径观察点补充：写入前从授权路径重新nofollow遍历，父目录身份漂移返回普通工具错误code=path_changed_before_write（目标未写）；已写后发现canonical父目录/目标/内容不同，仍映射现有outcome_unknown停驻。write在有界读取后的最后回执观察点也重新确认父目录绑定。HTTP/OpenAPI字段不变，不保证之后目录与文件永久不变。
 

@@ -346,7 +346,9 @@ class FileWorker:
         entry[0].close()
         return {}
 
-    def _open_parent(self, path: str, *, create: bool) -> int:
+    def _open_parent(
+        self, path: str, *, create: bool, expected_parent: int | None = None,
+    ) -> int:
         descriptor = os.open(os.path.sep, os.O_RDONLY | os.O_DIRECTORY)
         try:
             for part in os.path.dirname(path).split(os.path.sep)[1:]:
@@ -357,6 +359,10 @@ class FileWorker:
                                 dir_fd=descriptor)
                 os.close(descriptor)
                 descriptor = child
+            if expected_parent is not None:
+                current, expected = os.fstat(descriptor), os.fstat(expected_parent)
+                if (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
+                    raise WorkerError("path_changed", "Parent directory identity changed")
             return descriptor
         except BaseException:
             os.close(descriptor)
@@ -397,25 +403,46 @@ class FileWorker:
                     handle.flush()
                     os.fsync(handle.fileno())
                     published = os.fstat(handle.fileno())
+                try:
+                    current_parent = self._open_parent(
+                        path, create=False, expected_parent=parent,
+                    )
+                    os.close(current_parent)
+                except (OSError, WorkerError) as error:
+                    raise WorkerError(
+                        "path_changed_before_write",
+                        f"Parent directory changed before publication; no write applied: {error}",
+                    ) from error
                 os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
                 try:
-                    descriptor = os.open(
-                        name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent,
+                    current_parent = self._open_parent(
+                        path, create=False, expected_parent=parent,
                     )
-                    with os.fdopen(descriptor, "rb") as observed_file:
-                        observed = os.fstat(observed_file.fileno())
-                        if (not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1
-                                or (observed.st_dev, observed.st_ino)
-                                != (published.st_dev, published.st_ino)):
-                            raise WorkerError(
-                                "path_changed", "File was published but its current path changed",
+                    try:
+                        descriptor = os.open(
+                            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                            dir_fd=current_parent,
+                        )
+                        with os.fdopen(descriptor, "rb") as observed_file:
+                            observed = os.fstat(observed_file.fileno())
+                            if (not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1
+                                    or (observed.st_dev, observed.st_ino)
+                                    != (published.st_dev, published.st_ino)):
+                                raise WorkerError("path_changed", "Published file identity changed")
+                            current_content = observed_file.read(MAX_WRITE_FILE_BYTES + 1)
+                            final_parent = self._open_parent(
+                                path, create=False, expected_parent=parent,
                             )
-                        current_content = observed_file.read(MAX_WRITE_FILE_BYTES + 1)
-                        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
-                except OSError as error:
+                            try:
+                                current = os.stat(name, dir_fd=final_parent, follow_symlinks=False)
+                            finally:
+                                os.close(final_parent)
+                    finally:
+                        os.close(current_parent)
+                except (OSError, WorkerError) as error:
                     raise WorkerError(
                         "path_changed",
-                        "File was published but its current path cannot be verified",
+                        f"File was published but current path cannot be confirmed: {error}",
                     ) from error
                 if (current_content != content
                         or (current.st_dev, current.st_ino, current.st_size,
@@ -481,23 +508,41 @@ class FileWorker:
                 if handle.read(MAX_READ_FILE_BYTES + 1) != raw:
                     raise WorkerError("hash_mismatch", "File changed during edit; no write applied")
                 try:
-                    current = os.stat(os.path.basename(path), dir_fd=parent, follow_symlinks=False)
+                    current_parent = self._open_parent(
+                        path, create=False, expected_parent=parent,
+                    )
+                except (OSError, WorkerError) as error:
+                    raise WorkerError(
+                        "path_changed_before_write",
+                        f"Parent directory changed before edit; no write applied: {error}",
+                    ) from error
+                try:
+                    current = os.stat(
+                        os.path.basename(path), dir_fd=current_parent, follow_symlinks=False,
+                    )
                 except FileNotFoundError as error:
                     raise WorkerError(
                         "hash_mismatch", "File path disappeared; no write applied",
                     ) from error
+                finally:
+                    os.close(current_parent)
                 if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
                     raise WorkerError("hash_mismatch", "File path was replaced; no write applied")
                 handle.seek(0)
                 handle.write(updated)
                 handle.truncate()
                 handle.flush()
+                current_parent = self._open_parent(path, create=False, expected_parent=parent)
                 try:
-                    current = os.stat(os.path.basename(path), dir_fd=parent, follow_symlinks=False)
+                    current = os.stat(
+                        os.path.basename(path), dir_fd=current_parent, follow_symlinks=False,
+                    )
                 except FileNotFoundError as error:
                     raise WorkerError(
                         "path_changed", "File path disappeared during edit",
                     ) from error
+                finally:
+                    os.close(current_parent)
                 if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
                     raise WorkerError("path_changed", "File path was replaced during edit")
             return {"size": len(updated)}

@@ -614,6 +614,7 @@ MK21统一写入回执补充完成候选：原子发布后核对当前发布inod
 
 
 
+
 MK08D文件结果核查开始（2026-10-26，当前模型子agent，基线6873d21）：新增写入前固定的目标外工作区/原调用参数证据，支持内置write/edit只读核清结果，未知事实和原终态保留。无充分证据的旧记录、Shell/MCP仍requires_review；已终态核查仅显式Continue，未终态崩溃安全边界沿原claim恢复，预算/用户停止/审批不绕过。定向验证与稳定文档完成前不标已完成。
 
 MK08D内置文件核查切片验证（2026-10-26）：新write/edit prepared固定原参数hash与目标外Git可见上下文；原unknown与终态不改写，Session核查事实统一供恢复分类/Continue/副本隔离/恢复页读取。source/worktree真实内置工具崩溃后不重放，唯一claim/ToolResult/预算根保持；before/第三种字节/目标外变化/暂存变化/缺旧证据/调用和目录不符仍停驻，用户停止/待审批/原预算不绕过，关服等只读核查真实收尾。103项关联后端（含首批16项新增）通过；再补claim后再次崩溃、目标暂存变化及真正Host完成记录丢失窗口3项定向均过（批次重叠不累计）。恢复页8项组件通过，最后受影响2项复验通过，Mypy8模块/Vue类型/Ruff/Prettier/diff检查通过。日志.task_outputs/maka-upgrade/outcome-reconcile/，失败与修复见failure-cases MK08D-RECONCILE，ADR127/README/architecture/api-contract已同步。未终态崩溃可自动核查后走原领取恢复；已终态仅核查证据+显式Continue，Shell/MCP/容器与旧缺证据仍待判断。OpenAPI/静态产物/真实浏览器/全量和真实模型由主集成MK22统一，整体MK08仍进行中，无付费请求、未采纳源项目。
@@ -626,4 +627,9 @@ MK08D独立审查补修验证：新11项可见性/旧checkpoint用例均有通�
 
 
 MK21打包页面接线旅程（基线8da72ad，当前模型）：单条真实API+built页面验证通过；明确选择native/workspace-write后的POST、独立stdlib worker PID及实际读写、候选与source不同/源Git状态空/源无note、刷新后profile/backend冻结、只读Session两次消息不升级、显式升级422且未新增Run、320px均已核对。探测available/unverified和无OS包装launcher仅在一次性E2E服务器注入，非真实内核证据。Vue类型/Vite构建/Ruff通过，本地临时打包资源已精确恢复，主集成统一重建。祖先目录替换的最新独立审查仍待主代理处理，不能用此旅程覆盖未测边界或将MK21整体标完成。
+
+
+MK21打包页面接线旅程（基线8da72ad，当前模型）：单条真实API+built页面验证通过；明确选择native/workspace-write后的POST、独立stdlib worker PID及实际读写、候选与source不同/源Git状态空/源无note、刷新后profile/backend冻结、只读Session两次消息不升级、显式升级422且未新增Run、320px均已核对。探测available/unverified和无OS包装launcher仅在一次性E2E服务器注入，非真实内核证据。Vue类型/Vite构建/Ruff通过，本地临时打包资源已精确恢复，主集成统一重建。祖先目录替换的后续修复与定向证据见下条，不能用此浏览器旅程替代祖先边界验证或将MK21整体标完成。
+
+MK21当前授权路径观察点修复候选：复用nofollow父目录遍历，按原parent fd身份复核canonical祖先。write发布前/后及有界读取后的最终观察点，edit写前/后均重新遍历；写前漂移path_changed_before_write拒写，写后漂移path_changed→unknown。参数化父目录rename+原路径重建四种worker场景、两种Host unknown及原目标替换/内容变更/正常写共13项通过，既有worker/runner23项、Ruff/Mypy1模块通过。保留canonical编辑器文件与已发生写入，不承诺观察点之后稳定；日志native-current-model/eventide-native-ancestor*。祖先审查问题已定向闭环，主集成与真实平台/模型最终验收仍待。
 

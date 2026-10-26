@@ -1533,6 +1533,7 @@ ADR-124独立审查补充：取消是传输边界事实，runner必须携带fram
 ADR-124统一回执补充：write_file也在原子发布后核对当前目录项与有界内容；可观察到“曾发布但当前身份/字节已不同”返回unknown，不使用Wrote成功暗示当前after版本仍被确认。通过安全父描述符与现有字节上限复核，不新增状态库或抽象；不承诺检查结束后的稳定性。
 
 
+
 <a id="adr-127"></a>
 ## ADR-127：内置文件结果以写前上下文和只读状态核清，不重放原调用（2026-10-26）
 
@@ -1547,4 +1548,7 @@ ADR-124统一回执补充：write_file也在原子发布后核对当前目录项
 
 
 ADR-127独立审查后的范围收紧：53d3e0d的ignored目标当次可读，但后续Git checkpoint看不到其变化，不能核清后永久解除守卫。本切片选择只接受Git真实可见目标（literal pathspec，正常H tracked或未忽略untracked），ignored及assume-unchanged/skip-worktree条目保留待判断。通用checkpoint增加index_visibility哈希，覆盖核清后再设隐藏标志并改文件的接收/派发窗口；旧checkpoint原样保留并因缺新证据停驻，不自动重建或放宽比较，代价是旧任务续做需后续MK08E明确基线。FileOperations读取结束重新走当前nofollow路径并比对文件身份，不能把稳定旧fd当作当前目录项。完整非Git目标指纹接收/派发方案后置；不新增人工undo历史冻结，仍按当前状态和显式Continue处理。
+
+
+ADR-124祖先绑定补充：旧parent描述符自洽不等于canonical路径自洽。各写入前后与write最终内容观察点都从授权绝对路径重新nofollow遍历并核对原parent身份，复用现有目录fd助手；前置漂移拒写，后置漂移unknown。没有新增状态路径、抽象层或永远不变承诺。
 
