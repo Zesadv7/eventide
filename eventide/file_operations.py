@@ -26,6 +26,7 @@ from eventide.tools.filesystem import (
 )
 from eventide.workspace import (
     digest,
+    git,
     runtime_checkpoint_directories,
     runtime_checkpoint_files,
     workspace_checkpoint,
@@ -164,6 +165,22 @@ class FileOperations:
                         after.st_ctime_ns,
                     ):
                         raise FileOperationConflict("File changed while reading")
+                    # Re-open the path walk: a stable old fd is not evidence
+                    # that the directory entry still names that file.
+                    with self._parent(root, relative) as (current_parent, current_name):
+                        current = os.stat(
+                            current_name, dir_fd=current_parent, follow_symlinks=False,
+                        )
+                    if (current.st_dev, current.st_ino, current.st_size,
+                        current.st_mtime_ns, current.st_ctime_ns, current.st_mode) != (
+                        after.st_dev, after.st_ino, after.st_size,
+                        after.st_mtime_ns, after.st_ctime_ns, after.st_mode,
+                    ):
+                        raise FileOperationConflict("File path changed while reading")
+                    if not stat.S_ISREG(current.st_mode) or current.st_nlink != 1:
+                        raise FileOperationConflict(
+                            "File path is no longer a regular single-link file"
+                        )
                     self._text(raw)
                     return raw, {
                         "exists": True,
@@ -358,6 +375,16 @@ class FileOperations:
     def inspect_outcome(self, record: dict[str, Any]) -> dict[str, Any]:
         """Read the original journal and present bytes; never replay or undo a write."""
         root, relative = self.validate(record)
+        literal = f":(literal){relative.as_posix()}"
+        encoded_path = os.fsencode(relative.as_posix()) + b"\0"
+        tracked = git(root, "ls-files", "-v", "-z", "--", literal)
+        if tracked:
+            if tracked != b"H " + encoded_path:
+                return {"status": "requires_review", "reason": "target_hidden_in_index"}
+        elif git(
+            root, "ls-files", "--others", "--exclude-standard", "-z", "--", literal,
+        ) != encoded_path:
+            return {"status": "requires_review", "reason": "target_not_git_visible"}
         baseline = record.get("recovery_context")
         if baseline is None:
             return {"status": "requires_review", "reason": "missing_prepared_workspace_evidence"}

@@ -3417,6 +3417,8 @@ class RuntimeHost:
             return files, None
         checkpoint = self._workspace_checkpoint(root)
         previous = run.get("checkpoint") if run else None
+        if checkpoint and previous and "index_visibility" not in previous:
+            return ["checkpoint index visibility policy changed"], None
         if checkpoint and checkpoint.get("checkpoint_policy") != (
             previous.get("checkpoint_policy") if previous else None
         ):

@@ -805,3 +805,7 @@ checks记录包含`source_run_id/call_id/unknown_event_id/name/operation_id/sour
 
 恢复页新增显式核查按钮与逐条证据，不自动调用核查/Continue，跨Run迟到响应丢弃。结果含范围说明：证明的是当前目标字节和Git可见工作区状态，不保证忽略文件、外部服务、作者身份或测试成功。Shell/MCP不因核查入口而被执行或重放。
 
+
+
+MK08D范围修正：`target_not_git_visible`与`target_hidden_in_index`均为requires_review，页面显示具体限制。新workspace checkpoint附index_visibility，当前源/副本接收和派发沿已有比较拒绝索引隐藏标志变化；旧checkpoint缺此字段不补造，保持停驻等待明确重新建基线。本文的“目标after核清”只覆盖Git真实可见目标；任意ignored文件的持久目标指纹与接收/派发方案仍是后续工作，不能从一次读取推断为已支持。
+

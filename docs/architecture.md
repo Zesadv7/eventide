@@ -1356,3 +1356,9 @@ state_root若为执行副本祖先，不将其整根deny以免覆盖授权副本
 
 启动只对未终态Run自动核查并沿既有安全分类/claim续做。已经终态的unknown可通过显式POST核查并显示证据，核清不自动创建后继；用户需要点Continue，服务端重新复核。原用户停止/待审批不被自动续跑，原预算在真正模型请求前继续执行。任意Shell/MCP/容器、旧证据缺失、未知清理及人工撤销能力不在本切片中冒称已恢复。OpenAPI/分发/真实浏览器与整体验收由主集成统一。
 
+
+
+MK08D独立审查修正：核清目标必须由literal pathspec证明为Git真实可见（正常H tracked条目，或未被忽略的untracked）；ignored、assume-unchanged、skip-worktree目标明确requires_review。通用workspace_checkpoint新增index_visibility=SHA256(git ls-files -v -z)，使核清后新设隐藏标志也会被原恢复/接收/派发检查点比较拒绝，包含no_change目标原先没有diff的情形。当前目录项通过重新nofollow路径遍历并核对st_dev/st_ino，拒绝旧fd已稳定而当前目标或祖先已替换的读取证据。旧checkpoint不静默补字段，crash-gap也不能重新写当前基线来抹去缺失，旧任务需后续MK08E明确建基线；历史事实仍可读。此切片不冻结后续人工undo历史：核查事实只说明当次观察，后续Continue重新核对当前Git和index状态。
+
+索引可见性字段同时进入delivery._checkpoint，保持validate_delivery_source与ExecutionWorktrees.create的证据相等，不以忽略新字段解决兼容问题。旧交付证据同样不自动补造新索引状态，后续重新建立基线必须显式进行。
+

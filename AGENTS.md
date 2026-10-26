@@ -617,3 +617,9 @@ MK08D文件结果核查开始（2026-10-26，当前模型子agent，基线6873d2
 
 MK08D内置文件核查切片验证（2026-10-26）：新write/edit prepared固定原参数hash与目标外Git可见上下文；原unknown与终态不改写，Session核查事实统一供恢复分类/Continue/副本隔离/恢复页读取。source/worktree真实内置工具崩溃后不重放，唯一claim/ToolResult/预算根保持；before/第三种字节/目标外变化/暂存变化/缺旧证据/调用和目录不符仍停驻，用户停止/待审批/原预算不绕过，关服等只读核查真实收尾。103项关联后端（含首批16项新增）通过；再补claim后再次崩溃、目标暂存变化及真正Host完成记录丢失窗口3项定向均过（批次重叠不累计）。恢复页8项组件通过，最后受影响2项复验通过，Mypy8模块/Vue类型/Ruff/Prettier/diff检查通过。日志.task_outputs/maka-upgrade/outcome-reconcile/，失败与修复见failure-cases MK08D-RECONCILE，ADR127/README/architecture/api-contract已同步。未终态崩溃可自动核查后走原领取恢复；已终态仅核查证据+显式Continue，Shell/MCP/容器与旧缺证据仍待判断。OpenAPI/静态产物/真实浏览器/全量和真实模型由主集成MK22统一，整体MK08仍进行中，无付费请求、未采纳源项目。
 
+
+
+MK08D独立审查补修开始：readonly_finish发现ignored目标核清后不受Git checkpoint保护。修正为只核清Git真实可见目标，normal tracked H/未忽略untracked按literal pathspec确认；通用checkpoint新增index_visibility以拒绝核清后新增assume/skip隐藏标志，旧checkpoint不补造。读取后重走当前路径核对目录项身份；完整非Git目标的持久目标指纹接收/派发后置，不引入额外undo冻结。定向验证通过前不将该缺口标为已修。
+
+MK08D独立审查补修验证：新11项可见性/旧checkpoint用例均有通过证据；正常可见目标复验通过，最终当前目录项读取与正常恢复3项通过；快照/撤销/副本关联首轮21通过/1回归（交付checkpoint缺新字段），同步delivery._checkpoint后失败项与交付6项通过，未重复其余通过批次。Ruff/Mypy4模块/Vue类型/Prettier/diff通过，日志outcome-reconcile/visibility-*，失败已在MK08D-RECONCILE登记闭环。核清范围现明确只含Git真实可见目标，新checkpoint携带index_visibility；旧缺字段的历史证据保留并停驻，不静默迁移基线。整体MK08D仍有非Git目标、Shell/MCP及终态自动恢复后续；本次无模型调用/分发/浏览器，主集成统一验收。
+

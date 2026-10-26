@@ -1162,3 +1162,13 @@ MK21-INTEGRATION当前复验：89项原生worker/协议/路径/取消主集成�
 
 - MK08D-RECONCILE收口：ruff3及ruff-last通过；types2修复测试定位后通过，mypy-final8模块通过。backend2共103项通过（含新增16项及原恢复/关服/文件撤销/详情/Store）；后补backend-final2项、backend-production1项分别通过，未重复整批。frontend1恢复页8项通过，核查时间与测试类型修复后frontend2定向2项通过/其余6项未运行，格式通过。实际Host完成记录OSError是受控故障注入：按预期停驻，核查后原写入只有一次、显式Continue仅回送原call的核查结果；不是线上事故。原长行/导入和测试类型问题均已修复，未留未登记失败。当前模型子agent实现后端/API/UI与定向验证，真实浏览器/产物及全量由主集成负责；相关本地提交以feat: reconcile builtin file outcomes from frozen read-only evidence的Git记录为准。
 
+
+
+- MK08D-RECONCILE独立审查后续：readonly_finish发现53d3e0d允许ignored目标核清，但Git checkpoint不含该目标，后来变化可能绕过Continue。子代理只读复核确认没有其他目标指纹守卫；属于未集成候选的审查缺陷，不是已发生用户事故。当前修正收敛为只核清Git真实可见目标，并覆盖assume-unchanged/skip-worktree等隐藏index情形；派发前的持久指纹方案尚待明确，修复与验证后再追加结论。
+
+- 可见性补丁关联复验visibility-related退出1：21通过/1失败，`test_worktree_operation_targets_execution_copy_and_subdirectory`在ExecutionWorktrees.create比较validate_delivery_source与workspace_checkpoint时拒绝。新checkpoint字段导致两个生产checkpoint来源形状不一致，先登记待查并沿validate_delivery_source定位，不将旧撤销/副本能力变窄视为通过。证据outcome-reconcile/visibility-related.log；基线53d3e0d+本补丁。
+
+- visibility-related失败原因已证实：delivery._checkpoint是validate_delivery_source的独立生产来源，尚无新增index_visibility；ExecutionWorktrees.create原比较正确拒绝形状不同的证据。给该来源同步同一只读索引可见性哈希，不放松比较，定向复验失败项并检查交付准备/采纳及隐藏index保护。
+
+- MK08D-RECONCILE独立审查补修闭环：visibility1新增10项通过（ignored/初始assume或skip不核清、核清后隐藏标志变化、claim与接收后派发窗口、literal特殊路径、目标与祖先替换）；visibility-baseline2项通过，覆盖旧checkpoint不被静默补字段及正常可见目标恢复。visibility-related首轮21通过/1个生产checkpoint形状回归，delivery._checkpoint同步索引哈希后失败项及受影响交付6项全过；读取路径元数据补齐后visibility-final3项通过，批次重叠不相加。最终Ruff/Mypy4模块/Vue类型通过，diff检查通过。原19项未无故整批重复，未运行全量/模型/真实浏览器。独立只读审查由readonly_finish完成，当前子agent确认并修复，root确定Git可见目标与旧checkpoint停驻取舍；完整ignored目标恢复仍后置，不将限制写成已实现。相关提交为fix: bind reconciled outcomes to Git visibility and current paths。
+

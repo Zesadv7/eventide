@@ -213,7 +213,10 @@ def workspace_checkpoint(
         # Dirty submodules have state that a top-level diff cannot fully describe.
         if git(path, "submodule", "status", "--recursive").strip():
             return None
-        result: dict[str, Any] = {"head": head, **changes, "untracked": sorted(untracked)}
+        result: dict[str, Any] = {
+            "head": head, **changes, "untracked": sorted(untracked),
+            "index_visibility": hashlib.sha256(git(path, "ls-files", "-v", "-z")).hexdigest(),
+        }
         if exclude_worktree_paths:
             result["excluded_worktree_paths"] = list(exclude_worktree_paths)
         if exclusions or directories:

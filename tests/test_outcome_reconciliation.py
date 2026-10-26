@@ -1,7 +1,9 @@
 """Only proven builtin file states may close unknown outcomes; writes are never replayed."""
 
 import asyncio
+import os
 import subprocess
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +11,7 @@ from fastapi.testclient import TestClient
 from eventide.api import create_app
 from eventide.budgets import BudgetScope
 from eventide.executor import ToolContext, ToolExecutor
-from eventide.file_operations import FileOperations
+from eventide.file_operations import FileOperationConflict, FileOperations
 from eventide.host import RuntimeHost
 from eventide.model_budget import ModelBudgetController
 from eventide.models import RunRequest, ToolCall
@@ -32,8 +34,34 @@ def prepare_repo(path):
     return repo
 
 
-async def lost_file_result(path, *, target="source", tool="write_file", terminal=False):
+async def lost_file_result(
+    path,
+    *,
+    target="source",
+    tool="write_file",
+    terminal=False,
+    filename="code.py",
+    content="new\n",
+    ignore_target=False,
+    index_flag=None,
+):
     repo = prepare_repo(path)
+    if ignore_target:
+        (repo / ".gitignore").write_text(filename + "\n")
+        subprocess.run(
+            ["git", "-C", str(repo), "add", ".gitignore"], check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-m", "ignore fixture"],
+            check=True,
+            capture_output=True,
+        )
+    if index_flag:
+        subprocess.run(
+            ["git", "-C", str(repo), "update-index", index_flag, "--", filename],
+            check=True,
+            capture_output=True,
+        )
     settings = settings_for(repo, state_dir=path / "state")
     host = RuntimeHost(settings, ScriptedProvider([]), enable_mcp=False)
     session = host.create_session()
@@ -44,9 +72,9 @@ async def lost_file_result(path, *, target="source", tool="write_file", terminal
         binding["execution_workspace_id"] if binding else host.default_workspace.workspace_id
     )
     args = (
-        {"path": "code.py", "content": "new\n"}
+        {"path": filename, "content": content}
         if tool == "write_file"
-        else {"path": "code.py", "old_text": "old", "new_text": "new"}
+        else {"path": filename, "old_text": "old", "new_text": "new"}
     )
     host.store.append_event(
         run_id,
@@ -474,3 +502,196 @@ async def test_real_host_unknown_completion_can_be_checked_without_a_second_writ
         assert len(pairs) == 1 and pairs[0]["payload"]["call_id"] == "actual"
     finally:
         await host.close()
+
+
+@pytest.mark.parametrize("hidden", ["ignored", "--assume-unchanged", "--skip-worktree"])
+async def test_git_invisible_targets_stay_unknown_without_replay(isolated_workspace, hidden):
+    ignored = hidden == "ignored"
+    host, settings, _, old, root, _ = await lost_file_result(
+        isolated_workspace,
+        filename="ignored.txt" if ignored else "code.py",
+        ignore_target=ignored,
+        index_flag=None if ignored else hidden,
+    )
+    crash(host)
+    provider = ScriptedProvider([])
+    restarted = RuntimeHost(settings, provider, enable_mcp=False)
+    try:
+        await restarted.initialize()
+        checks = restarted.store.facts_by_type(("tool.outcome_reconciled",))
+        assert checks[0]["payload"]["status"] == "requires_review"
+        assert checks[0]["payload"]["reason"] == (
+            "target_not_git_visible" if ignored else "target_hidden_in_index"
+        )
+        assert not restarted.store.facts_by_type(("recovery.claimed",))
+        assert provider.requests == []
+        assert len(restarted.file_operations.records()) == 1
+        assert (root / ("ignored.txt" if ignored else "code.py")).read_text() == "new\n"
+    finally:
+        await restarted.close()
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+async def test_new_index_flags_after_verification_cannot_hide_target_changes(
+    isolated_workspace, flag
+):
+    host, _, session, old, root, _ = await lost_file_result(
+        isolated_workspace,
+        content="old\n",
+        terminal=True,
+    )
+    try:
+        check = await host.reconcile_run_outcomes(old)
+        assert check["unresolved"] == 0
+        checkpoint = host.store.reconciliation_checkpoint(old)
+        subprocess.run(
+            ["git", "-C", str(root), "update-index", flag, "--", "code.py"],
+            check=True,
+            capture_output=True,
+        )
+        (root / "code.py").write_text("hidden later change\n")
+        current = host._workspace_checkpoint(root)
+        assert current["unstaged"] == checkpoint["unstaged"]
+        assert current["index_visibility"] != checkpoint["index_visibility"]
+        with pytest.raises(ValueError, match="Workspace changed"):
+            await host.continue_session(session)
+        repeated = await host.reconcile_run_outcomes(old)
+        assert repeated == check
+        assert len(host.store.facts_by_type(("tool.outcome_reconciled",))) == 1
+        assert host.provider.requests == []
+    finally:
+        await host.close()
+
+
+async def test_index_flags_changed_after_claim_block_automatic_admission(isolated_workspace):
+    host, settings, _, _, root, _ = await lost_file_result(isolated_workspace, content="old\n")
+    crash(host)
+    provider = ScriptedProvider([])
+    restarted = RuntimeHost(settings, provider, enable_mcp=False)
+    try:
+        claim = restarted.store.facts_by_type(("recovery.claimed",))[0]["payload"]
+        subprocess.run(
+            ["git", "-C", str(root), "update-index", "--assume-unchanged", "code.py"],
+            check=True,
+            capture_output=True,
+        )
+        (root / "code.py").write_text("changed after claim\n")
+        await restarted.initialize()
+        assert restarted.store.get_run_identity(claim["resumed_as"]) is None
+        assert restarted.store.facts_by_type(("recovery.blocked",))
+        assert len(restarted.file_operations.records()) == 1
+        assert provider.requests == []
+    finally:
+        await restarted.close()
+
+
+async def test_index_flags_changed_after_admission_block_actual_dispatch(isolated_workspace):
+    host, _, session, old, root, _ = await lost_file_result(
+        isolated_workspace,
+        content="old\n",
+        terminal=True,
+    )
+    try:
+        await host.reconcile_run_outcomes(old)
+        successor = "run_pre_dispatch_change"
+        await host.admit_continue(session, successor, expected_run_id=old)
+        subprocess.run(
+            ["git", "-C", str(root), "update-index", "--skip-worktree", "code.py"],
+            check=True,
+            capture_output=True,
+        )
+        (root / "code.py").write_text("changed after admission\n")
+        task = host.start_admitted_run(successor)
+        with pytest.raises(ValueError, match="changed after admission"):
+            await task
+        assert host.store.run_is_terminal(successor)
+        assert len(host.file_operations.records()) == 1
+        assert host.provider.requests == []
+    finally:
+        await host.close()
+
+
+async def test_git_visibility_uses_literal_special_filename(isolated_workspace):
+    filename = ":(glob)literal[1]*.txt"
+    host, settings, _, _, root, _ = await lost_file_result(isolated_workspace, filename=filename)
+    crash(host)
+    provider = ScriptedProvider([])
+    restarted = RuntimeHost(settings, provider, enable_mcp=False)
+    try:
+        await restarted.initialize()
+        claim = restarted.store.facts_by_type(("recovery.claimed",))[0]["payload"]
+        assert (await wait_terminal(restarted, claim["resumed_as"]))["status"] == "completed"
+        assert (root / filename).read_text() == "new\n"
+        assert len(restarted.file_operations.records()) == 1
+    finally:
+        await restarted.close()
+
+
+@pytest.mark.parametrize("swap", ["target", "parent"])
+def test_file_read_does_not_confuse_old_fd_with_current_path(isolated_workspace, monkeypatch, swap):
+    repo = prepare_repo(isolated_workspace)
+    parent = repo / "nested"
+    parent.mkdir()
+    target = parent / "file.txt"
+    target.write_text("old fd content\n")
+    inode = target.stat().st_ino
+    host = RuntimeHost(
+        settings_for(repo, state_dir=isolated_workspace / "state"),
+        ScriptedProvider([]),
+        enable_mcp=False,
+    )
+    fstat = os.fstat
+    seen = 0
+
+    def replace_path(fd):
+        nonlocal seen
+        info = fstat(fd)
+        if info.st_ino == inode:
+            seen += 1
+            if seen == 2:
+                if swap == "target":
+                    target.rename(isolated_workspace / "old-file.txt")
+                else:
+                    parent.rename(isolated_workspace / "old-parent")
+                    parent.mkdir()
+                target.write_text("current entry content\n")
+        return info
+
+    monkeypatch.setattr(os, "fstat", replace_path)
+    try:
+        with pytest.raises(FileOperationConflict, match="File path changed"):
+            host.file_operations._read(repo, Path("nested/file.txt"))
+        assert target.read_text() == "current entry content\n"
+    finally:
+        asyncio.run(host.close())
+
+
+async def test_old_checkpoint_without_index_visibility_is_not_silently_rebased(isolated_workspace):
+    repo = prepare_repo(isolated_workspace)
+    settings = settings_for(repo, state_dir=isolated_workspace / "state")
+    host = RuntimeHost(settings, ScriptedProvider([]), enable_mcp=False)
+    session = host.create_session()
+    old = await host.admit_run(RunRequest("continue old saved task", session))
+    old_checkpoint = {
+        key: value
+        for key, value in host.store.get_run(old)["checkpoint"].items()
+        if key != "index_visibility"
+    }
+    host.store.append_event(old, "workspace.checkpoint", {"checkpoint": old_checkpoint})
+    host.store.append_event(old, "run.started", {"session_id": session, "mode": "auto"})
+    checkpoints = [e for e in host.store.run_events(old) if e["type"] == "workspace.checkpoint"]
+    crash(host)
+    provider = ScriptedProvider([])
+    restarted = RuntimeHost(settings, provider, enable_mcp=False)
+    try:
+        await restarted.initialize()
+        assert restarted.store.get_run(old)["checkpoint"] == old_checkpoint
+        assert len(
+            [e for e in restarted.store.run_events(old) if e["type"] == "workspace.checkpoint"]
+        ) == len(checkpoints)
+        assert not restarted.store.facts_by_type(("recovery.claimed",))
+        assert provider.requests == []
+        with pytest.raises(ValueError, match="Workspace changed"):
+            await restarted.continue_session(session)
+    finally:
+        await restarted.close()

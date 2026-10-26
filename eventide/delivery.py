@@ -235,6 +235,7 @@ def _checkpoint(root: Path) -> dict[str, Any]:
             raise ValueError("Delivery exceeds its byte limit")
         untracked.append([name, hashlib.sha256(body).hexdigest()])
     evidence["untracked"] = sorted(untracked)
+    evidence["index_visibility"] = hashlib.sha256(_git(root, "ls-files", "-v", "-z")).hexdigest()
     return evidence
 
 

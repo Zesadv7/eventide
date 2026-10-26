@@ -1544,3 +1544,7 @@ ADR-124统一回执补充：write_file也在原子发布后核对当前目录项
 
 范围选择：未终态崩溃在启动时自动核查并走已有领取恢复；已经终态的unknown只提供核查API和人工显式Continue，不拓宽既有terminal claim。Shell/MCP/容器没有同等执行证明时不猜测；Git忽略文件、任意外部服务及同UID并发写入不由此证明。核查不改变旧file.operation的撤销资格，也不执行撤销。定向证据、失败修复与剩余整体验收见AGENTS和failure-cases MK08D-RECONCILE。
 
+
+
+ADR-127独立审查后的范围收紧：53d3e0d的ignored目标当次可读，但后续Git checkpoint看不到其变化，不能核清后永久解除守卫。本切片选择只接受Git真实可见目标（literal pathspec，正常H tracked或未忽略untracked），ignored及assume-unchanged/skip-worktree条目保留待判断。通用checkpoint增加index_visibility哈希，覆盖核清后再设隐藏标志并改文件的接收/派发窗口；旧checkpoint原样保留并因缺新证据停驻，不自动重建或放宽比较，代价是旧任务续做需后续MK08E明确基线。FileOperations读取结束重新走当前nofollow路径并比对文件身份，不能把稳定旧fd当作当前目录项。完整非Git目标指纹接收/派发方案后置；不新增人工undo历史冻结，仍按当前状态和显式Continue处理。
+

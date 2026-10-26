@@ -100,6 +100,8 @@ async function reconcileOutcomes() {
 const checkReasons: Record<string, string> = {
   expected_file_state_present:
     "当前文件符合原操作预期，目标外工作区与写前证据一致。",
+  target_hidden_in_index: "目标被Git索引标志隐藏，当前无法安全核清。",
+  target_not_git_visible: "目标不在Git可见范围内，当前无法安全核清。",
   current_matches_before:
     "当前仍是原内容；这不能证明操作从未执行，仍需你判断。",
   file_state_changed: "当前文件既不符合原内容，也不符合预期内容。",
