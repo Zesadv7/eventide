@@ -747,3 +747,9 @@ MK05集成补充：现有read_tool_result新增普通命令stdout/stderr分流�
 正常关服恢复新增事实：Run级host.shutdown_started载明run_id/shutdown_id；run.interrupted.reason=service_shutdown及resumable=true表示待按恢复条件核查，并非跳过检查承诺。关服后的recovery.claimed为Session事实，绑定source_run_id/resumed_as；旧终态原样保留。用户停止记录Session级run.cancel_requested，其run_id精确对应原运行；GET recovery将该事实纳入高水位并优先显示用户停止（未知工具仍不伪装已解决）。若旧运行已有后继，POST旧Run/cancel返回409，调用者须选择后继Run，不能误报已停止新任务。
 
 旁枝切片复核：创建响应增加`source_execution`（主Run真实执行身份）与`files_captured_at`；文件取证和source_high_water为两次独立观察。source/worktree/Plan可用，其他执行环境明确422；全服务最多4活动旁枝，容量不足接收前422。列表包含可选cleanup_error，清理故障不静默隐藏。source_context提供有界tool_results与latest_failure；用户回传只接受completed答案，指纹必填；读取/回传不重新运行主任务。追问链、选中文字及刷新背景尚待实现。
+
+### 摘要版本与原始证据（MK03，已实现切片）
+
+- `GET /api/sessions/{id}/context-summaries?before=&limit=`：新到旧checkpoint元数据，limit 1–50（默认20），next_before游标；未知Session404。没有摘要返回空列表，不补造。
+- `GET /api/sessions/{id}/context-summaries/{checkpoint_id}`：严格同Session；返回覆盖位置、原历史/摘要指纹、policy/provider/model，结构化摘要或保留的旧文本。`source_verified`仅代表事件前缀/终态/策略能核对，`input_verification=matched|claim_missing|projection_changed|unavailable`单独说明原请求输入。`citations_problem`保留不匹配原因，不把失败解析为正常摘要。summary最多24,000字符，summary_truncated和原字符数显式；不改变数据库原文。
+- `GET /api/sessions/{id}/context-summaries/{checkpoint_id}/messages/{index}?offset=&limit=`：原摘要消息投影的JSON文本分页，offset≥0，limit 1–12,000（默认8,000）；返回history_hash/输入核对状态和next_offset。不是原文件正文，也可能包含生成摘要前已裁剪的工具预览。来源不可核对409，越Session/未知消息404，分页越界422。GET不写事件、不调用模型、不读取当前源码。

@@ -1459,3 +1459,13 @@ ADR-119集成复核：历史成功请求不能验证所有能力，preset.verifi
 **验证：** `tests/test_side_questions.py` 7 项：主/旁枝脚本 Provider 真实并发（旁枝写被拒、只读目录恰好5工具、快照身份入 started 事实）、共享账本含旁枝 attempt、显式回传一次且主边界消费一次、取消旁枝主任务完成、HTTP 迟到回传 409/幂等/late 不续跑、校验与畸形 id 404、超长答案显式截断标注；快照目录删除有 glob 文件证据。前端 `tests/side-questions.test.ts` 3 项（提问不触主任务、回传绑定所见文本/迟到/去重、停止按钮仅活动态）+ ChatView 回归 5 项，vue-tsc 通过；Ruff、Mypy（py310 目标 2 模块）通过。日志 `.task_outputs/maka-upgrade/coding-resume4/`（2026-10-26 续做会话全量复验：后端 7 项、前端旁枝 3 项 + ChatView/执行回归 24 项、vue-tsc、Ruff、Mypy py310 目标 2 新模块 + host/store/api 3 个改动模块均退出 0；首次验证日志随上一会话丢失，resume2 只剩崩溃 runner 会话记录）。无付费模型调用，未重跑全仓/构建产物；OpenAPI/TS 类型再生成留主集成统一收口。
 
 ADR-116集成补充：主代理修正真实执行副本选择、工具错误正文、继续任务的原目标继承、响应迟到隔离和取消前未启动的清理。临时副本由任务回调所有，去除全局注册表，清理OSError写入Session事实并报告；接收失败收尾已创建Run。并发接收用Host短期锁，全服务最多4活动旁枝，共享原模型槽/预算；控制类和旁枝子任务不允许再次创建旁枝。显式回传必须completed且HTTP答案指纹必填；文件/事件切面分别说明。58项后端关联已逐项通过（1旧时序测试修复后所在5项复验）、35项前端、11项分发、1条built真实API浏览器与Ruff/Mypy5模块/vue-tsc通过。整项MK17仍有追问/更新背景/来源跳转未完成，真实模型按MK22。
+
+## ADR-126：摘要对照绑定已保存版本与历史输入，不从当前源码补证据（2026-10-26）
+
+**状态：Accepted（本切片定向验证通过，整体验收与真实模型效果仍按MK22）。**
+
+版本列表与详情复用原context_checkpoints。按Session+checkpoint身份查找，原事件只读截至covered_seq，验证完整终态与source_digest、policy_version，再用ContextBuilder共用summary_history投影重建。原context.summary_claimed.prefix_hash可证明重建输入与原摘要请求一致；缺失claim或规则变化只显示重建内容，明确不保证历史输入一致。不会从当前源码拼接看似原始证据。
+
+结构化摘要引用重新校验；匹配不代表结论正确。旧纯文本、无效引用、缺历史分别显示，不悄悄换成新摘要。摘要显示上限24k字符，消息原文按身份/索引/字符分页，全部纯文本渲染；用户可并排比较两个版本并回读引用。既有摘要生成/采用/预算机制不变，只将私有_summary_history命名为可复用summary_history。这个页面不能证明某次后续模型请求使用了某摘要，逐attempt关联需另加真实派发事实，不作推断。
+
+验证：真实Host历史经ContextBuilder生成并保存摘要，API重建hash与实际捕获的摘要请求逐字节匹配；后续会话变化不改旧版本。42项后端、6项组件、11项分发及built真实API页面1条（原文回读、刷新、320px）通过，Ruff/Mypy4模块/vue-tsc通过。legacy/缺claim/投影变化/源摘要不匹配、分页/跨Session身份及HTML字面显示覆盖；无付费模型。

@@ -969,3 +969,9 @@ MK-CODING-1308再次触发：2026-10-26 14:22–14:23，恢复的四路中旁枝
 - MK17-REVIEW收口：修复旧时序测试后test_interactions.py 5项通过，原58项组合均已有通过证据；35项前端、11项分发、built真实API浏览器1条、Ruff/Mypy5模块/vue-tsc及构建通过，日志side-review。外部ZCode完成原7项切片，主代理负责上述边界修正和复验；真实模型未运行，追问等剩余范围未标完成。
 
 - MK17-REVIEW提交前diff检查检出子候选tests/test_side_questions.py末尾多余空行，已去除；提交未执行，随后重检。
+
+### MK03-SUMMARY-VIEW — 摘要与原始证据对照
+
+- 基线6ab4029，主代理开始只读API/UI。首轮Ruff失败，日志summary-review/ruff.log；记录原结果，修复后定向复验。该功能只读取已保存checkpoint和原事件，不能用前端展示替代摘要语义正确性或模型效果验收。
+
+- MK03-SUMMARY-VIEW已证实首轮静态失败为输入核对状态表达式103字符长行（另1个导入顺序Ruff自动修正）；缩行后ruff2通过。42项后端、6项前端、11项分发、1条built真实API原文/刷新/320px及Mypy4模块/vue-tsc通过，日志summary-review。主代理实施和验证；未运行真实供应商摘要效果验收。

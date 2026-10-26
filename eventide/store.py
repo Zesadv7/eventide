@@ -1640,6 +1640,25 @@ class RuntimeStore:
                 )
             ]
 
+    def checkpoint_page(
+        self, session_id: str, *, before: int | None = None, limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(row) for row in self._connection.execute(
+                "SELECT id, covered_seq, source_digest, policy_version, provider, model, "
+                "length(summary) AS summary_characters FROM context_checkpoints "
+                "WHERE session_id=? AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?",
+                (session_id, before, before, limit),
+            )]
+
+    def checkpoint_record(self, session_id: str, checkpoint_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM context_checkpoints WHERE session_id=? AND id=?",
+                (session_id, checkpoint_id),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
     def save_checkpoint(
         self,
         session_id: str,

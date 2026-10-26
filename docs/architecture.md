@@ -1013,7 +1013,9 @@ Maka 提供参考，不作为效果保证：它会对可安全重放的模型步
 
 摘要保存目标、硬约束、已证实事实、待验证判断、检查结果、未完成事项和证据入口，绑定 covered_seq/source_digest/schema_version。结构合法之外增加证据引用与否定/失败状态检查；缺证据不能自动升级为事实。先保留可用历史，不能用无效摘要覆盖；上下文仍超限则明确停驻。滚动/轮内压缩只在完整工具配对边界做，不能丢未决提问、恢复核查和用户补充。API/UI 可比较覆盖范围、摘要版本、保留/省略部分及原证据。验收长期对话中的“不能改 API”、失败测试、被否定假设及用户纠正，真实效果最终评测。
 
-> Context 切片已实现（2026-10-26，MKCTX-ZCODE，ADR-104）：schema v2 结构化摘要、证据引用校验、无效摘要拒绝与旧历史保留、否定/失败保留提示、结构化渲染，均落在 `eventide/context_summary.py` 与 `context_builder.py`，checkpoint/claim/digest/账本机制不变。API/UI 比较、轮内滚动压缩边界与真实模型效果仍待后续切片。
+> Context 切片已实现（2026-10-26，MKCTX-ZCODE，ADR-104）：schema v2 结构化摘要、证据引用校验、无效摘要拒绝与旧历史保留、否定/失败保留提示、结构化渲染，均落在 `eventide/context_summary.py` 与 `context_builder.py`，checkpoint/claim/digest/账本机制不变。API/UI版本比较已由后续ADR126接通；轮内滚动压缩边界与真实模型效果仍待后续切片。
+
+摘要对照切片（2026-10-26，ADR126）：复用既有context_checkpoints，不新增状态库或生成动作。Store按Session分页元数据，HTTP详情按covered_seq重建不可变事件前缀并核对source_digest/终态/policy_version；复用ContextBuilder同一summary_history投影及context.summary_claimed.prefix_hash核对原摘要输入。没有claim或投影指纹变化时明确标示，不能宣称与历史输入相同；结构化引文重新校验，不将“存在引文”当语义正确性。原始消息按checkpoint+消息索引+字符偏移分页，不读当前源码替换历史。Vue聊天面板按需加载两个版本并排展示目标/约束/事实/未证实/检查/失败/下一步、覆盖范围与摘要/源指纹，支持引用回读；旧格式保留原文，超过24k字符明示截断。版本切换和会话切换丢弃迟到响应；显示的是已保存摘要，不推断任何特定attempt使用过它。
 
 ### MK-04：项目规则加载与请求诊断
 

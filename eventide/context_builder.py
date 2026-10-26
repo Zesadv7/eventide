@@ -36,7 +36,7 @@ SUMMARY_MIN_NEW_CHARACTERS = 4_000
 SUMMARY_CLAIM = "context.summary_claimed"
 
 
-def _summary_history(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def summary_history(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     history = MessagesProjection.project(
         events, tool_result_content=lambda event: preview(event)[0]
     )
@@ -64,7 +64,7 @@ def _claim_summary(
                 return "newer_completed_prefix_already_claimed", []
             if attempted_at - previous["attempted_at"] < SUMMARY_MIN_INTERVAL_SECONDS:
                 return "summary_cooldown", []
-            added = _summary_history([
+            added = summary_history([
                 event for event in prefix if event["session_seq"] > previous["covered_seq"]
             ])
             added_characters = len(json.dumps(added, ensure_ascii=False)) - 2
@@ -382,7 +382,7 @@ class ContextBuilder:
         boundary = max((e["session_seq"] for e in events if e["type"] in TERMINALS), default=0)
         if boundary and (not checkpoint or boundary > checkpoint["covered_seq"]):
             prefix = [e for e in events if e["session_seq"] <= boundary]
-            history = _summary_history(prefix)
+            history = summary_history(prefix)
             summary_skipped = _claim_summary(
                 self.store, session_id, prefix, history, provider_name, model,
             )

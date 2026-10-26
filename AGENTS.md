@@ -477,7 +477,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-00 | 进行中 | 2026-10-26 契约/兼容纵向切片已完成：新增显式 `GET /api/runtime/contract`（contract_version=1、schema_version 只读自真实运行库、capabilities 仅列已实现功能，不可读明确 503），OpenAPI/TS 类型已同批生成；Vue 启动先核对契约版本，不匹配显示版本屏障并阻止全部写入口，网络/服务故障单独呈现、不误判为版本问题，均有"重新检查"入口。状态副本迁移可重复验证：WAL 一致快照副本重新初始化后历史事件/身份/记忆/用量/加密撤销产物逐字节保留、迁移记录不重复，pre-v6 副本迁移保留历史且不伪造备份；未为空新字段升 schema。定向验证：后端47项（契约5、迁移2、API等关联40）、前端 232 项全量组件、3 条真实浏览器契约旅程（真实 API、版本不匹配屏障与重试、连接故障区分）、真实 HTTP 契约读取、Ruff/Mypy(3模块)/vue-tsc/Prettier 通过；证据 `.task_outputs/maka-upgrade/contract/`，失败见 failure-cases MK00-ZCODE。api-contract/architecture/README 已同步。剩余：执行身份与恢复/Graph 引用设计、迁移维护页与 `migration_status`、副本迁移恢复演练及整体验收仍待后续 MK-00 工作。 |
 | MK-01 | 进行中 | 编辑精确唯一匹配、版本冲突与可读诊断；沿用diff/undo，歧义不改文件。 |
 | MK-02 | 进行中 | 文件版本绑定续页、超长行、跨副本校验；页面范围/变化提示。 |
-| MK-03 | 进行中 | 摘要目标/约束/事实/假设/检查/证据，结构和来源校验；上下文版本对照。 |
+| MK-03 | 进行中 | 结构化摘要已有来源校验；2026-10-26补已保存版本对照API/UI（ADR126）：按Session+checkpoint查询、原历史指纹/终态边界核对、摘要请求claim输入指纹对照、引用消息分页；旧记录缺事实/无效引用/投影变化/截断明示，读接口不生成或改写摘要。42项后端、6项前端、11项分发、built实际API页面1条含原文/刷新/320px及Ruff/Mypy4模块/vue-tsc通过。日志summary-review，静态失败已登记。轮内滚动压缩与最终模型保真效果仍待。 |
 | MK-04 | 进行中 | 规则来源/作用域/截断及attempt输入清单；请求诊断面板不串轮。 |
 | MK-05 | 进行中 | 普通本机Shell/Skill两流脱敏归档、配额/过期/缺失与HTTP/Vue分页已接通；模型read_tool_result同Session精确回读，持久密钥跨块保护。44项后端通过/1显式容器跳过，7项前端、静态检查、1条built页面通过；后台/容器及整体验收仍待。 |
 | MK-06 | 进行中 | 2026-10-26 切片1（自由文本运行中补充，基线0c86c75）：`interaction.supplement`/`consumed` 只落唯一EventLog（新interactions.py+Store三窄方法），Host仅每步context_builder.build前消费一次并同事务追加带前缀message.user，工具不倒带；POST/GET /api/runs/{id}/supplements复用本机来源+write receipts/origin幂等，终态后收据记late不自动续跑、不建Run、同Session其他Run不消费；Vue RunSupplementPanel挂ChatView。后端4项定向（边界单次消费/同键重放与409/迟到隔离/4xx）、前端4项组件+39项chat/memory/sandbox回归、vue-tsc、Ruff全仓、Mypy(py310)5模块通过；首轮测试迭代失败已记MK-06-SLICE1，日志.task_outputs/maka-upgrade/interactions/。ADR-112、architecture/api-contract同步。结构化提问持久等待/回答（切片2）未实现，OpenAPI/schema.d.ts未重新生成，不计整项完成。 |
@@ -485,7 +485,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-08 | 进行中 | 整体恢复重做：A连接与回执、B模型分类重试、C持久恢复、D未知结果只读核查、E源码变化重新建立基线、F恢复UI；故障注入矩阵。B首批主调用10次分类重试/Retry-After/等待释放槽/用量预算/尝试预览隔离实现，179项定向、Ruff和Mypy11模块通过，ADR-101及MK08B-REVIEW记录。已补等待页面及无终态Run的持久恢复。2026-10-26 F首批：`GET /api/runs/{id}/recovery`原子切面投影（`store.recovery_snapshot`+`recovery_center`，ADR-117）展示停止分类/已记录执行进度/未知与待审批/claim唯一后继实时状态/可信available_actions，旧历史缺冻结策略显式标注；动作仅复用既有cancel/continue端点，无自动重试与`POST recovery/actions`；Vue新增`/runs/:runId/recovery`页与Chat停驻入口。4项真实EventLog/HTTP定向、7项恢复回归、5项前端组件及33项受影响套件、Ruff/Mypy/vue-tsc/Prettier通过；日志.task_outputs/maka-upgrade/recovery-center/。正常服务关闭恢复已接入ADR-118，32项专项/101项关联/22项最终复验及静态通过；未知核查/源码重新建立基线/恢复动作端点仍待，不计整项完成，无真实模型验收。 |
 | MK-09 | 进行中 | 2026-10-26 切片1：GET /api/attention与/api/projects/{id}/attention纯事实投影（待审批/失败停驻运行/待采纳交付候选），去重键approval:{id}、run:{id}:{status}、delivery:{id}；Vue /attention独立页+导航，动作复用既有接口不自动采纳，待回答类别明示不支持。后端5项+前端3项定向通过（证据同MK-07），ADR-113 Proposed；待回答/核查不明类别、项目筛选UI与多标签旅程待后续切片。 |
 | MK-10 | 待开始 | 后台命令身份/日志/就绪/停止/重启核查；进程树清理与UI。 |
-| MK-11 | 待开始 | 可信无依赖只读工具并行、共享调度、稳定结果及部分失败；批次展示。 |
+| MK-11 | 进行中 | 可信无依赖只读工具并行、共享调度、稳定结果及部分失败；批次展示。 |
 | MK-12 | 待开始 | 有来源的产物列表、Markdown/图片/隔离HTML/报告预览；证据保护和访问校验。 |
 | MK-13 | 待开始 | 同条件外部Agent及单项消融比较器/页面，冻结开发留出；真实比较放最终批次。 |
 | MK-14 | 进行中 | 切片 1 已完成（2026-10-26，外部子agent）：`model_capabilities.py` 规范端点身份（异端点不继承、折叠尾斜杠/默认端口）、代码预设来源（BigModel chat/DeepSeek 映射附引用，逐项验证日期未知，不臆造供应商规格）、能力记录（context/tools/streaming 信息性字段未知即 null）、三状态分离（config_saved/connection 探测投影/tool_verification 恒 not_verified）；`run.admitted` 冻结 `capability_ref`，Continue 按冻结能力校验、新配置不改写历史请求；generation GET API 附能力卡与连接验证（config_hash 之后附加），GenerationEditor 能力卡与迟到响应隔离。验证：新增8项定向、受影响84项回归、前端组件14项（含迟到不串）、vue-tsc 通过；Ruff/Mypy 见提交。未完成：真实供应商工具/流式验证状态、目录过期提示、GET /api/models 目录视图扩展及声明能力编辑页面；真实端点验收按 MK-22。ADR-119；失败 MK14-ZCODE-01（redact 改写冻结引用 None 字段）已修复闭环；日志 .task_outputs/maka-upgrade/model-capabilities/。 |
@@ -556,3 +556,5 @@ MK20独立ZCode实现启动（Coding/max/yolo，codex/maka-agent-graph基线5378
 2026-10-26用户报告额度恢复并授权继续：Coding/max/yolo四路实际恢复工具执行（旁枝、模型能力、Graph、结构化提问），各独立工作副本保留原草稿，新会话接续不冒称恢复旧会话。主代理接手正常关闭恢复候选，修正停止与续做接收竞态；仍待定向复验。
 
 MK14主代理复核集成：修正无依据的逐项实测日期、端点query/auth身份碰撞及IPv6展示，冻结引用损坏明确拒绝。53项恢复/生成组合、补充12项目录专项、18项前端、11项分发及1条built实际API页面/刷新/320px旅程通过；Ruff/Mypy4模块/vue-tsc通过，OpenAPI/types/页面产物已同步。日志model-capabilities-review，失败已登记。真实工具/流式验证、目录过期和声明编辑仍未完成，MK14保持进行中。
+
+2026-10-26用户再次确认额度重置：Graph/结构化提问已恢复实际工具调用，独立native-runtime/readonly-parallel分支从6ab4029补位，共4路Coding/max/yolo。主代理开始MK03摘要与原始证据对照（ADR126），所有子结果继续独立复核；历史1308不删除，未把新进程当旧会话恢复。

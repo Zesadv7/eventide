@@ -19,6 +19,7 @@ from eventide.http_api import (
     budgets,
     command_logs,
     config,
+    context_summaries,
     contracts,
     deliveries,
     diagnostics,
@@ -105,7 +106,7 @@ def create_app(runtime: RuntimeHost | None = None) -> FastAPI:
 
     for domain in (
         contracts, projects, workspaces, sessions, runs, models, config, attachments, streams,
-        attention, input_manifests,
+        attention, input_manifests, context_summaries,
         skills, budgets, queue, evaluations, indexes, deliveries, traces, worktrees,
         history_imports, directories, memory, file_operations, diagnostics, tools, run_tools,
         interactions, command_logs, side_questions,

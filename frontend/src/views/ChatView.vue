@@ -11,6 +11,7 @@ import GenerationEditor from "../components/GenerationEditor.vue";
 import SafeContent from "../components/SafeContent.vue";
 import SandboxEvidence from "../components/SandboxEvidence.vue";
 import RunMemoryPanel from "../components/RunMemoryPanel.vue";
+import ContextSummaryPanel from "../components/ContextSummaryPanel.vue";
 import InputManifestPanel from "../components/InputManifestPanel.vue";
 import RunSupplementPanel from "../components/RunSupplementPanel.vue";
 import RunToolsPanel from "../components/RunToolsPanel.vue";
@@ -480,6 +481,7 @@ async function abandon() {
           :run-status="run.status"
           :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
         />
+        <ContextSummaryPanel :session-id="store.selectedSession" />
         <SideQuestionPanel
           v-if="run"
           :run-id="run.run_id"

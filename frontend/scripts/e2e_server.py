@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -61,6 +62,8 @@ def main() -> None:
             usage = {"input_tokens": 100 + step, "output_tokens": 20}
             if "side-question investigator" in prompt:
                 response = await self.complete(request)
+            elif "摘要对照场景" in prompt:
+                response = ModelResponse(text="摘要对照的原始任务已完成", usage=usage)
             elif "命令日志场景" in prompt:
                 if step == 1:
                     response = ModelResponse(tool_calls=[self._call("bash", {
@@ -201,6 +204,21 @@ def main() -> None:
         host_module.build_provider = build_offline_provider
         app = create_app(runtime)
         held_index_locks: dict[str, asyncio.Lock] = {}
+
+        @app.post("/api/__e2e/summary/{session_id}")
+        async def prepare_summary(session_id: str):
+            from eventide.context_builder import ContextBuilder
+            from eventide.providers import ScriptedProvider
+
+            summary = {"schema_version": 2, "goal": "解释代码", "hard_constraints": [
+                {"text": "不修改接口", "src": [{"msg": 0, "quote": "不要修改 API"}]},
+            ], "facts": [], "checks": [], "failures": [],
+                "unverified": ["尚未确认原因"], "next_steps": ["继续调查"]}
+            await ContextBuilder(runtime.store).build(
+                session_id, provider=ScriptedProvider([{"text": json.dumps(summary)}]),
+                provider_name=settings.provider, model=settings.model, budget=20000, force=True,
+            )
+            return {"saved": len(runtime.store.checkpoints(session_id))}
 
         @app.post("/api/__e2e/retrieval-hold/{workspace_id}")
         async def hold_retrieval(workspace_id: str):
