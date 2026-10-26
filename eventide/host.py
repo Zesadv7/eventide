@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from eventide import attachments, model_catalog, run_policy, side_questions
 from eventide import interactions as interactions
 from eventide.acceptance_output import AcceptanceOutputs
+from eventide.agent_graph import AgentGraphs
 from eventide.budget_prices import PriceVersion
 from eventide.budgets import BudgetExceeded, BudgetScope, is_service_probe_run
 from eventide.command_logs import CommandLogs, stream_observer
@@ -274,6 +275,8 @@ class RuntimeHost:
         self._session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._snapshot_preparing: set[str] = set()
         self._side_question_lock = asyncio.Lock()
+        self._side_question_preparing = 0
+        self.agent_graphs = AgentGraphs(self)
         self._project_git_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._admissions: dict[str, str] = {}
         self._admission_done: dict[str, _Admission] = {}
@@ -404,9 +407,13 @@ class RuntimeHost:
                     (self._admitted_intent(run_id) or {}).get("worker_role") == "side_question"
                     for run_id in self._run_tasks
                 )
-                if active >= 4:
+                if active + len(self.agent_graphs.tasks) >= 4:
                     raise ValueError("At most four side questions may run at once")
-                return await side_questions.create_side_question(self, source_run_id, question)
+                self._side_question_preparing += 1
+                try:
+                    return await side_questions.create_side_question(self, source_run_id, question)
+                finally:
+                    self._side_question_preparing -= 1
         finally:
             self._active_tasks.discard(task)
 
@@ -703,6 +710,7 @@ class RuntimeHost:
             self._config_path = config_path
         # MCP transports are opened/closed in the owning run task (SDK task-affinity).
         # Each workspace reads its own catalog, never another project's MCP configuration.
+        self.agent_graphs.recover()
         await self._dispatch_pending_recoveries(recovery_approval_handler)
 
     async def close(self) -> None:

@@ -494,7 +494,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-17 | 进行中 | 旁枝纵向切片已集成：source/worktree/Plan实际副本、事件截止前目标/工具结果/错误，独立只读Session/Run共享模型槽及父预算，全服务最多4活动旁枝；仅用户显式回传完成答案，指纹/幂等/迟到不续跑，UI停止与跨Run迟到响应隔离。58项后端组合中57首轮通过、1旧时序测试修正后所在5项通过；35项前端、11项分发、built真实API并行/回传/刷新/320px旅程1条及Ruff/Mypy5模块/vue-tsc通过。日志side-review，失败见MK17-REVIEW；ADR116及稳定文档同步。剩余：选中文本/来源跳转、旁枝追问与显式刷新背景、容器环境与最终真实模型验收。 |
 | MK-18 | 进行中 | 2026-10-26 纵向切片已落地：新增 eventide/memory_intake.py 确定性有限语法（声明支持：意图开头 记住/remember + 长期标记 以后/永久/长期/每次/always 等才直接保存；裸“记住X”仅观察、同会话重复才成 pending 建议；“这次/本次/this time”给拒绝回执不保存；否定/引文/反引号/尖括号/多行/非开头意图一律不记；全局需原话明确 全局/global 词且后随分隔符，否则默认项目并在回执标 scope_defaulted）。经 PreferenceMemory.observe_run 可信接收路径接线（仅 user 作者、无附件、非控制/子 Run），来源含 span:{start,end} 精确绑定原文偏移，自然语句 key 为 nl_<sha256前缀> 稳定派生；同事件重复投递与撤销后原来源均不重复保存，同内容新投递命中冲突回执。RunMemoryPanel 新增已记住卡片（内容/作用域/默认说明/来源/撤销按钮），memory.ts 回执类型扩充，vue-tsc 通过。定向验证：test_memory_intake.py 18 项 + test_preference_memory.py 38 项通过（旧用例“记住：以后用中文回答”按新语法迁为正例），Ruff/Mypy 2 模块通过，前端 memory.test.ts 14 项通过。主代理补齐直接“以后这个项目都用中文”、已知语言偏好冲突键及撤销后的当前状态。聊天流内已显示卡片；29项前端关联及1条built实际API浏览器保存/撤销/刷新旅程通过，类型/构建与资源同步；全量及付费模型未做。证据 .task_outputs/maka-upgrade/integration/memory-*。|
 | MK-19 | 进行中 | 2026-10-26切片一：`eventide/diagnostics.py`事实投影+`GET /api/runs/{id}/diagnostics`及`download?format=json\|markdown`，报告绑定`(run_id, high_water)`、`report_version=1`，旧版本不随后续事件漂移；中文五段摘要（发生/停驻/完成/未知/下一步）、已知原因与待查分列、事件文本有界脱敏、缺事件明确不可用；生成不调用模型、不执行工具、不追加事件、不自动外发。Vue报告页`/runs/:runId/diagnostics`+历史页运行详情入口，覆盖加载/错误/缺事实/重新生成与高水位绑定下载。后端12项、前端6项定向、vue-tsc/Vite构建/OpenAPI/schema重生成/4资源打包、Ruff、3.10目标Mypy通过；验证失败已登记MK19-ZCODE。ADR-107、api-contract/architecture切片小节同步；恢复动作入口、证据跳转、Graph/恢复关系、产物化导出未实现，不宣称故障报告完成。 |
-| MK-20 | 进行中 | 自主Graph/依赖/领取/恢复/公平预算/独立写副本/候选整合/Verifier/人工采纳；任务图与列表。 |
+| MK-20 | 进行中 | 只读图运行切片：唯一EventLog定义/显式开始/依赖/事务领取/全图与旁枝共享4名额/取消与重启真实收尾；16节点、实际副本、父预算、同源幂等API均有定向证据（graph-review）。页面候选待统一集成验证；写副本/模型自主拆图/候选整合/Verifier/人工采纳以及最终真实验收仍待，未标整体完成。 |
 | MK-21 | 进行中 | 2026-10-26切片1：`eventide/native_sandbox/`集中库落地（严格类型policy与能力矩阵、probe只读探测、Seatbelt profile/argv、bubblewrap挂载白名单argv、纯stdlib有界JSON行协议文件worker、无回退runner及测试注入点声明）；allow_network/allow_subprocess本切片显式拒绝，探测存在≠隔离有效。44项离线定向（策略/路径边界、矩阵、argv文本、协议与输入边界、真子进程握手/写读/shutdown、显式失败）、Ruff、Mypy(py310目标)7模块通过，无网络无模型。宿主接线（executor/policy/HTTP/前端/Skill与Shell同边界/Docker并存）及真实OS越界验证未做，清单见architecture#native-sandbox-slice与ADR-105；完整MK-21仍含网络/环境/后台/Skills/Graph矩阵、环境页/扩权审批和实机证据。 |
 | MK-22 | 待开始 | API/Vue/分发统一、一次全量收口、真实浏览器与本机平台边界、最终真实模型比较；缺平台/额度与效果未达标分开记录。 |
 
@@ -567,3 +567,7 @@ MK09项目筛选验证：6项前端组件（迟到全局响应、范围切换立
 MK06/MK09提问切片主代理接手（2026-10-26）：ZCode四路于15:30–15:31再次返回Coding Plan HTTP429/1308，重置19:54:35；Graph/native/readonly草稿保留未集成，结构化问题由主代理接手修正。ask_user现在经真实工具调用身份、持久问题/答案、事务内停止/版本/幂等复验及精确唤醒接线，Plan主任务可提问、子任务不越界；API/OpenAPI/TS/聊天问题卡与待处理类别同步。服务重启不自动恢复等待，仍作为未完成项；验证收口与失败证据见下条，整体MK06/09保持进行中。
 
 MK06/MK09提问切片收口：原问题身份刷新/服务关闭后保留、同问题重复回执重新唤醒、明确停止阻止答案接收、Plan可提问且ReadonlyWorker不可、回答内容脱敏、后续危险工具仍需独立审批均有定向证据；类型/契约/打包同步。真实供应商与全量最终门禁仍按MK22，原项目未采纳。
+
+MK20当前窗口接手（2026-10-26，基线6873d21）：保留外部草稿审查证据，先实现唯一EventLog上的只读依赖图、全服务4节点容量、准备阶段所有权与真实取消/重启收尾，接API和任务图页面；写Agent/候选整合/Verifier仍待后续，未将本切片标完成。当前模型的协作代理并行接手MK11/MK21。
+
+MK20后端切片验证：backend2中36通过、1测试字段错误后backend3复验原例通过；worktree新增夹具修正后backend4的5项通过，backend5旁枝释放自动补位/重复停止/HTTP 3项通过（批次有重叠不累加）。Plan及真实脏worktree读取、目录无写工具、预算根与预算拒绝、草稿图不自动执行、跨图去重、准备取消和重启不重派发均验证。Mypy首次2处类型修正后5模块通过，Ruff通过；完整门禁/模型及任务图页面验收仍单列。

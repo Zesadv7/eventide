@@ -1010,3 +1010,17 @@ MK-CODING-1308于2026-10-26 15:30–15:31再次出现：Graph review1、native r
 - format-final仅新增questions.test.ts格式检查失败，Prettier重排后复核。最终2项（重复选项拒绝、回答后危险工具仍独立审批）通过，Ruff全涉及文件通过。此前关服fixture修正后，含目录/Plan/Skills/只读Worker/快照的37项通过；恢复/分发组合其余51项已通过，未为补记录重复整批。15项前端与2条built浏览器分别通过，vue-tsc/build/Mypy8模块通过。所有失败均为开发期fixture/格式或新增目录导致机制预算底座过低，修正过程与原日志保留；不代表真实模型效果。主代理接手并验证，Graph/原生/并发草稿仍未集成。
 
 MK06-MK21-EARLY-REVIEW后续：提问草稿的问题已由主代理按ADR123修复，并在questions-review验证；原生草稿的清理、权限和文件契约问题仍未修复/验收，不能把本条当MK21闭环。MK20与MK11提前审查项仍待后续候选验证。
+
+### MK20-CURRENT — 当前模型接手任务图
+
+- 基线6873d21，保留外部ZCode未集成草稿后重新实现唯一Runtime EventLog上的只读图。首轮 `python -m pytest -q tests/test_agent_graph.py` 为9通过/1失败，退出1；新增预算断言误调用不存在的Store.model_call_attempts，尚未执行该条预算归属核对。日志`.task_outputs/maka-upgrade/graph-review/backend1.log`；先按真实账本接口修正测试，不改生产预算以通过测试。任务图整体和写协作仍未完成。
+
+- MK20-CURRENT首轮Ruff退出1：新模块/测试长行与两处导入排序、一个未用导入（12项），日志graph-review/ruff1.log；代码尚未提交，按现有100字符约定修正。首轮功能失败已确认仅测试接口名错误，替换为真实model_budget.context与usage_events核对；生产预算不变。
+
+- MK20-CURRENT：Mypy首次检查5模块失败2项（lambda回调类型推断、布尔别名未能收窄record可空类型），日志graph-review/mypy1.log；按实际类型修正。backend2仍在执行，已观察到一项断言失败，具体原因和剩余状态待本批退出后补齐，不将进行中计通过。
+
+- MK20-CURRENT第二批退出1：36通过/1失败，backend2.log；原预算接口修正后归属断言通过，剩余新增测试误用Settings.workspace（真实字段workdir），未触及产品路径。Mypy回调与可空收窄已修正，后续单独复验。保持原批次证据，不重复所有已通过的旁枝/提问用例。
+
+- MK20-CURRENT第三批原失败已过、Plan快照通过，worktree新增场景因测试fixture未提交code.py而被既有“源必须干净”规则正确拒绝（2通过/1失败，backend3.log）。只在临时测试仓库提交fixture文件，再验证真实脏工作副本读取；不放宽生产源检查。Mypy5模块修正后通过（mypy2.log）。
+
+MK20-CURRENT当前复验：测试账本接口/Settings字段/未提交临时fixture均按真实约束修正，backend3原失败通过、Plan通过；backend4五项全部通过（含worktree与重复停止/关服事实），backend5三项通过。Mypy5模块及Ruff修正后通过。未修改生产预算、干净源要求或冻结模型评测。外部草稿的双日志/不完整收尾未进入本实现，当前只读范围已改用唯一Runtime事件和真实任务所有权；写协作与自动续接仍待，不将其标完成。相关提交为本切片本地提交。

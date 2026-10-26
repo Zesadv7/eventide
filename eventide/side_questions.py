@@ -190,9 +190,18 @@ def side_question_view(store: Any, record: dict[str, Any]) -> dict[str, Any]:
 
 
 async def create_side_question(
-    host: Any, source_run_id: str, question: str
+    host: Any, source_run_id: str, question: str, *,
+    run_id: str | None = None, graph_node: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Snapshot, admit, and start one read-only side Run; the main Run is untouched."""
+    from eventide.workspace import digest
+
+    if graph_node is not None:
+        original = host._admitted_intent(source_run_id)
+        assert original is not None
+        if (original["provider"] != host.settings.provider
+                or original["endpoint_hash"] != digest(host.settings.base_url)):
+            raise ValueError("Graph root provider configuration changed")
     normalized = normalize_question(question)
     source = host.store.get_run_identity(source_run_id)
     if source is None:
@@ -215,7 +224,7 @@ async def create_side_question(
     else:
         workspace_root, working_root = Path(workspace.path), Path(logical_working)
     snapshot: SourceSnapshot | None = None
-    side_run_id = f"run_{uuid.uuid4().hex[:16]}"
+    side_run_id = run_id or f"run_{uuid.uuid4().hex[:16]}"
     side_question_id = f"{SIDE_QUESTION_ID_PREFIX}{side_run_id[4:]}"
     try:
         if binding and binding["kind"] == "snapshot":
@@ -249,8 +258,9 @@ async def create_side_question(
                 snapshot.root, snapshot.identity, snapshot.checkpoint,
             )
         captured_at = datetime.now(timezone.utc).isoformat()
-        if host._closed:
-            raise ValueError("RuntimeHost is closed")
+        if (host._closed or host._configuring or host._provider_cleanup_required
+                or host._configuration_uncertain):
+            raise ValueError("Runtime configuration is unavailable")
         side_session = host.create_session(
             workspace_id=workspace.workspace_id, working_directory=str(logical_working),
         )
@@ -259,7 +269,8 @@ async def create_side_question(
             archived=True,
         )
         profile = ReadonlyProfile(
-            parent_run_id=source_run_id, role="side_question", snapshot_id=snapshot_id,
+            parent_run_id=source_run_id, role="graph_node" if graph_node else "side_question",
+            snapshot_id=snapshot_id,
         )
         intent = {
             **(host._admitted_intent(source_run_id) or {}),
@@ -270,6 +281,7 @@ async def create_side_question(
             "parent_run_id": source_run_id, "worker_role": profile.role,
             "snapshot_id": snapshot_id,
             "recovery_policy": {"auto_resume": False, "version": 1},
+            **({"graph_node": graph_node} if graph_node else {}),
             "side_question": {
                 "side_question_id": side_question_id, "question": normalized,
                 "source_run_id": source_run_id, "source_session_id": source_session_id,
@@ -307,7 +319,8 @@ async def create_side_question(
                 (SIDE_QUESTION_EVENT, fact_payload, "system", "runtime"),
             ],
         )
-        host.store.append_fact(source_session_id, SIDE_QUESTION_EVENT, fact_payload)
+        if graph_node is None:
+            host.store.append_fact(source_session_id, SIDE_QUESTION_EVENT, fact_payload)
 
         task = asyncio.create_task(host._execute(
             side_session, side_run_id, workspace, None, None, None, None,
@@ -326,6 +339,8 @@ async def create_side_question(
                         "side_run_id": side_run_id, "error": host._semantic(str(exc)),
                     })
                     raise
+            if not host._closed:
+                host.agent_graphs.refill()
 
         task.add_done_callback(release_snapshot)
     except BaseException as exc:

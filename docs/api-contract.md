@@ -764,3 +764,12 @@ MK09页面范围接线（2026-10-26）：待处理页`#/attention?project=<proje
 - `GET /api/attention`与项目attention新增questions和counts.questions，limits.questions与approvals_limit相同。每项稳定question:<id>身份、原Run/Session/问题版本、可操作状态与对话链接。回答页只调用上述端点，普通工具审批保持原独立协议。
 
 历史问题来自唯一事件记录；本阶段服务重启后不自动重建等待，不把问题卡的存在当仍可回答。OpenAPI与TS类型已同步。
+
+### MK20 只读任务图 API（2026-10-26）
+
+- `GET /api/runs/{run_id}/graphs`返回仅精确root Run定义的图；`GET /api/graphs/{graph_id}`返回事实投影。
+- `POST /api/runs/{run_id}/graphs`接收`{title,nodes:[{id,kind:"readonly",goal,depends_on:[]}]}`，201仅表示保存定义；最多16节点，重复id/未知依赖/环/写入kind均422。
+- `POST /api/graphs/{graph_id}/advance`显式开始，依赖完成后自动派发；`POST .../cancel`冻结新增派发并等待真实收尾。图有active节点时显示cancelling，终态取消不改写已完成图。
+- 写接口要求本机同源和内容绑定Idempotency-Key，绑定精确root/graph路径身份；重复创建保留原图、同键异内容409。未知Run/图404。结果包含nodes[].claim.run_id及已完成result.child_session_id，不能在准备期猜Session；output_truncated/output_length说明节选。unknown请求保留原键，查询图不引发执行。
+
+契约类型与网页产物由任务图页面集成时统一生成，不能以新增API代替UI/真实浏览器验收。

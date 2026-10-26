@@ -1296,3 +1296,9 @@ MK09项目筛选（2026-10-26）：AttentionView复用`GET /api/projects/{id}/at
 回答接收先验证冻结问题，再由Store同一写事务复核revision、原问题、相同答案摘要、终态、关闭及run.cancel_requested，写入answered后才唤醒该问题的Event。相同内容返回原回执，不同内容409，旧revision409，跨Run问题404；当前Run没有活跃等待者时拒绝，不把答案存成无人消费的“已送达”。原终态孤立问题可留late Session事实，但绝不新建/恢复Run。重复HTTP回执也可重新唤醒同一等待者。答案由原ask_user工具结果进入消息投影，不追加用户审批或改变权限；答案先脱敏保存，接收不等于模型已消费。
 
 取消在finally移除等待者并持久关闭问题；关闭错误不被静默忽略。服务关闭后重开保留原问题/答案/调用身份，未答问题关闭或过期；本切片不重建跨进程等待，不声称MK06恢复已完成。Run导航与完整投影均显示waiting_for_user。待处理查询在数据库按项目筛选未答/未闭合、无终态/无停止请求的问题，再有界取最近50条；页面显示并跳回原对话回答，刷新和切Run迟到响应隔离。Vue提交沿用durableMutation，未知结果保留原请求身份，文本不执行HTML。
+
+### MK20 只读依赖图运行切片（2026-10-26）
+
+`AgentGraphs`是Host内的准备/等待任务所有者，不创建另一套模型循环。definition/started/claim/finish/cancel均为runtime_events的Session事实，Store.transact_facts复验同图状态与全图容量；schema仍为v6。每图最多16节点，只有显式advance启用，依赖完成自动补位，未开始的图不会随其他图被启动。只读节点复用旁枝的真实source/worktree/Plan快照、ToolExecutor/Policy和父模型预算；图节点与普通旁枝合计4个（既有delegate_readonly有其原容量，不声称全服务只读工具只有4个）。
+
+claim覆盖准备阶段；取消先冻结图再取消全部所有者，重复停止等待实际Provider与文件清理。正常关服不添加用户停止事实。结果与claim绑定，输出最多8000字符并注明节选/原长度，依赖输入每项600字符、总5000，均标省略。来源快照与事件高水位分别保存。重启仅把孤立claim按实际Run收尾，已完成节点不重跑，未完成节点interrupted且阻塞下游；未实现跨重启节点续做。当前只读图不具备写协作/候选整合/Verifier能力，也未提供模型自主拆图工具，整项MK20继续进行中。
