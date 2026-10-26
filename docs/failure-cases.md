@@ -832,3 +832,14 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 
 
 MK-ZCODE-405后续（2026-10-26，用户明确指定Coding Plan）：原网关故障没有当作额度耗尽。主代理为本地桥接`/Users/zesadv/.codex/tools/zcode-start-plan/run.mjs`增加显式`--route coding`，默认auto三档顺序不变，Coding失败不回落Start；19项桥接离线测试全部通过。单次真实调用使用`account:bigmodel-individual-coding-plan`、GLM-5.3-Flash、max/yolo，退出0且ok:true，回复CODING_PLAN_OK（1请求，reported输入53074/输出53，缓存读取320；不推算费用）。证据`.task_outputs/maka-upgrade/coding-route/{offline.log,live-result.jsonl,live-progress.log}`。该调用仅验证链路，没有运行升级子任务；先前三路失败现场保留，Start网关未复测，不标其故障已修复。工具README已同步，旧文件备份位于系统临时目录zcode-coding-route-backup-n210cx9o；没有修改账号默认套餐或打印凭据。
+
+### MK-CODING-CONCURRENCY — 第六路Coding开发代理限频
+
+- 2026-10-26，集成基线b3f6aca；前5路Coding GLM-5.3-Flash/max/yolo已有工具执行，第6路MK14模型能力目录出现供应商1302“账户已达到速率限制”，未产生工具执行/代码改动。证据maka-contract工作副本`.task_outputs/maka-upgrade/model-capabilities-zcode/progress.log`（原始诊断18次出现1302，不能据此推算18个独立请求）。
+- 分类：环境/外部限频。不是额度耗尽，未换模型/账号。主代理向该精确runner进程发送SIGTERM停止继续尝试，将MK14排队，暂维持5路已有进展的Coding任务。该实测不是官方账户并发上限声明；后续按有效工作和限频反馈控制。
+
+### MK-SOURCE-EVIDENCE — 结构化文件/搜索证据静态检查
+
+- 2026-10-26主代理，基线b3f6aca+源码证据改动；83项后端与36项前端通过、vue-tsc通过，Ruff失败（`.task_outputs/maka-upgrade/source-evidence/ruff.log`），后续Mypy因&&未运行；按静态诊断修正后再验，未算全部通过。
+
+- 已证实为新增导入顺序和长行静态问题，已缩行并按 Ruff 修正导入；定向 Ruff 通过、Mypy 两模块通过，vue-tsc复验通过；83项后端/36项前端及构建后实际API浏览器1条通过。参与：主代理实现并检查，未宣称这些机制用例等于真实模型理解效果。修复见本切片提交；最终整合门禁仍待MK-22。

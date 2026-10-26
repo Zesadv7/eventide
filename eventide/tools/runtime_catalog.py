@@ -3,7 +3,13 @@
 from typing import Any
 
 from eventide.tool_contracts import builtin_schema
-from eventide.tools.filesystem import run_edit, run_glob, run_read, run_search_text, run_write
+from eventide.tools.filesystem import (
+    read_file_output,
+    run_edit,
+    run_glob,
+    run_write,
+    search_text_output,
+)
 
 
 def _tool(name: str, description: str) -> dict[str, Any]:
@@ -56,10 +62,10 @@ def _command_boundary(**_arguments: object) -> str:
 
 HANDLERS = {
     "bash": _command_boundary,
-    "read_file": run_read,
+    "read_file": read_file_output,
     "write_file": run_write,
     "edit_file": run_edit,
     "glob": run_glob,
-    "search_text": run_search_text,
+    "search_text": search_text_output,
     "compact": lambda focus="": "Compaction requested",
 }

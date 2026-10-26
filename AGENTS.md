@@ -479,7 +479,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-02 | 进行中 | 文件版本绑定续页、超长行、跨副本校验；页面范围/变化提示。 |
 | MK-03 | 进行中 | 摘要目标/约束/事实/假设/检查/证据，结构和来源校验；上下文版本对照。 |
 | MK-04 | 进行中 | 规则来源/作用域/截断及attempt输入清单；请求诊断面板不串轮。 |
-| MK-05 | 受阻 | 普通Shell/Skill/后台长日志归档回读，保留配额/脱敏/退出事实；页面分页与缺失状态。 |
+| MK-05 | 进行中 | 普通Shell/Skill/后台长日志归档回读，保留配额/脱敏/退出事实；页面分页与缺失状态。 |
 | MK-06 | 进行中 | 2026-10-26 切片1（自由文本运行中补充，基线0c86c75）：`interaction.supplement`/`consumed` 只落唯一EventLog（新interactions.py+Store三窄方法），Host仅每步context_builder.build前消费一次并同事务追加带前缀message.user，工具不倒带；POST/GET /api/runs/{id}/supplements复用本机来源+write receipts/origin幂等，终态后收据记late不自动续跑、不建Run、同Session其他Run不消费；Vue RunSupplementPanel挂ChatView。后端4项定向（边界单次消费/同键重放与409/迟到隔离/4xx）、前端4项组件+39项chat/memory/sandbox回归、vue-tsc、Ruff全仓、Mypy(py310)5模块通过；首轮测试迭代失败已记MK-06-SLICE1，日志.task_outputs/maka-upgrade/interactions/。ADR-112、architecture/api-contract同步。结构化提问持久等待/回答（切片2）未实现，OpenAPI/schema.d.ts未重新生成，不计整项完成。 |
 | MK-07 | 进行中 | 2026-10-26 切片1：attention.py 从冻结参数+run_execution绑定派生命令/目标/cwd/执行位置/影响范围，网络与权限显示未声明；approval_id与原始参数原样透传，动作复用既有审批端点，取消后过期审批保留显示且仍被拒绝（404/409）。后端5项+test_api 25项、前端3项组件、Ruff/Mypy4模块/vue-tsc/Prettier通过，日志.task_outputs/maka-upgrade/attention/。ADR-113 Proposed；operation/revision绑定与批准前参数失效待后续切片，未跑全量/浏览器/真实平台。 |
 | MK-08 | 进行中 | 整体恢复重做：A连接与回执、B模型分类重试、C持久恢复、D未知结果只读核查、E源码变化重新建立基线、F恢复UI；故障注入矩阵。B首批主调用10次分类重试/Retry-After/等待释放槽/用量预算/尝试预览隔离实现，179项定向、Ruff和Mypy11模块通过，ADR-101及MK08B-REVIEW记录。已补等待页面及无终态Run的持久恢复；未知核查/正常服务关闭恢复/恢复中心仍待，不计整项完成，无真实模型验收。 |
@@ -488,10 +488,10 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-11 | 待开始 | 可信无依赖只读工具并行、共享调度、稳定结果及部分失败；批次展示。 |
 | MK-12 | 待开始 | 有来源的产物列表、Markdown/图片/隔离HTML/报告预览；证据保护和访问校验。 |
 | MK-13 | 待开始 | 同条件外部Agent及单项消融比较器/页面，冻结开发留出；真实比较放最终批次。 |
-| MK-14 | 待开始 | 版本化模型/端点能力目录、配置/连接/工具验证分开；设置页能力卡。 |
+| MK-14 | 进行中 | 版本化模型/端点能力目录、配置/连接/工具验证分开；设置页能力卡。 |
 | MK-15 | 进行中 | 2026-10-26 后端切片（ZCode 子agent）：`search_text` 新增 mode=literal/regex、case_sensitive、context_lines(0–10)；regex 需本机 rg（eventide/tools/regex_backend.py），缺失返回能力错误不降级，子进程带 wall-clock 截止+16MiB 输出上限并 kill/reap，命中行逐行与边界内读取字节核对后才采信，不引入边界外内容；命中 path:line: 与上下文 path:line- 区分、同文件区间合并去重、长行 240 字符窗口标注省略；每来源带实际搜索字节 sha256（与 read_file/edit_file 版本凭据一致）；扫描/跳过/超时/核对计数显式，空结果不声称全仓无匹配；路径边界与隐藏规则沿用原实现，regex 不扩大权限；沙箱任务副本本轮仍不提供 search_text，不谎报覆盖。定向验证：tests/test_text_search.py 29 项（真实 rg 接线、超时 kill/reap、伪造输出核对排除、路径注入、sha256 与 edit_file 绑定、严格契约/接线）包含关联在内共159项通过（另1项旧基线失败单列），Ruff 全仓、Mypy 133 模块、服务 help 通过；日志 .task_outputs/maka-upgrade/search/。既有 test_runtime_retries_and_compacts 失败为 3898ffc 引入、已登记 failure-cases MK15-ZCODE，与本切片无关。剩余：源码定位 UI、OpenAPI 集成重建及 MK-22 整体效果验收。 |
 | MK-16 | 进行中 | 2026-10-26纵向最小切片：`tool_discovery.py`确定性目录快照（版本指纹/来源/效果/环境/状态）与四级排序分页搜索；`tool_discover`/`tool_load`模型工具加载精确schema回执并绑定目录版本，Host在存在MCP工具且非沙箱/只读时把MCP工具改为按需投影（host.py工具组装块），未加载调用被Unknown tool拒绝、加载不改变Policy审批；`ToolExecutor.register_discovered_tool`只解锁同快照schema。新增5项定向、executor/contracts/tools/worker/mcp关联76项通过，host26项中3项为基线3898ffc既有失败（failure-cases MK16-BASELINE），Ruff/Mypy4模块通过；`GET /api/workspaces/{id}/tools`提供常备基础目录，不伪造已加载。ADR-109；已加载面板/加载事实持久化/Run已加载查询API及真实Host+MCP端到端旅程待后续。 |
-| MK-17 | 受阻 | 独立只读旁枝、主任务已提交快照、用户选择回传；聊天侧栏及消息幂等接线。 |
+| MK-17 | 进行中 | 独立只读旁枝、主任务已提交快照、用户选择回传；聊天侧栏及消息幂等接线。 |
 | MK-18 | 进行中 | 2026-10-26 纵向切片已落地：新增 eventide/memory_intake.py 确定性有限语法（声明支持：意图开头 记住/remember + 长期标记 以后/永久/长期/每次/always 等才直接保存；裸“记住X”仅观察、同会话重复才成 pending 建议；“这次/本次/this time”给拒绝回执不保存；否定/引文/反引号/尖括号/多行/非开头意图一律不记；全局需原话明确 全局/global 词且后随分隔符，否则默认项目并在回执标 scope_defaulted）。经 PreferenceMemory.observe_run 可信接收路径接线（仅 user 作者、无附件、非控制/子 Run），来源含 span:{start,end} 精确绑定原文偏移，自然语句 key 为 nl_<sha256前缀> 稳定派生；同事件重复投递与撤销后原来源均不重复保存，同内容新投递命中冲突回执。RunMemoryPanel 新增已记住卡片（内容/作用域/默认说明/来源/撤销按钮），memory.ts 回执类型扩充，vue-tsc 通过。定向验证：test_memory_intake.py 18 项 + test_preference_memory.py 38 项通过（旧用例“记住：以后用中文回答”按新语法迁为正例），Ruff/Mypy 2 模块通过，前端 memory.test.ts 14 项通过。主代理补齐直接“以后这个项目都用中文”、已知语言偏好冲突键及撤销后的当前状态。聊天流内已显示卡片；29项前端关联及1条built实际API浏览器保存/撤销/刷新旅程通过，类型/构建与资源同步；全量及付费模型未做。证据 .task_outputs/maka-upgrade/integration/memory-*。|
 | MK-19 | 进行中 | 2026-10-26切片一：`eventide/diagnostics.py`事实投影+`GET /api/runs/{id}/diagnostics`及`download?format=json\|markdown`，报告绑定`(run_id, high_water)`、`report_version=1`，旧版本不随后续事件漂移；中文五段摘要（发生/停驻/完成/未知/下一步）、已知原因与待查分列、事件文本有界脱敏、缺事件明确不可用；生成不调用模型、不执行工具、不追加事件、不自动外发。Vue报告页`/runs/:runId/diagnostics`+历史页运行详情入口，覆盖加载/错误/缺事实/重新生成与高水位绑定下载。后端12项、前端6项定向、vue-tsc/Vite构建/OpenAPI/schema重生成/4资源打包、Ruff、3.10目标Mypy通过；验证失败已登记MK19-ZCODE。ADR-107、api-contract/architecture切片小节同步；恢复动作入口、证据跳转、Graph/恢复关系、产物化导出未实现，不宣称故障报告完成。 |
 | MK-20 | 待开始 | 自主Graph/依赖/领取/恢复/公平预算/独立写副本/候选整合/Verifier/人工采纳；任务图与列表。 |
@@ -536,3 +536,9 @@ MK08C主代理复核：61cf634后发现并修复claim与initialize间再次崩�
 
 
 2026-10-26额度链路更新：用户明确要求直接使用Coding Plan，覆盖本任务原先仅额度耗尽才切换的顺序要求。后续ZCode调用在既定`--cwd/--prompt-file/--mode yolo`后加`--route coding`，固定GLM-5.3-Flash/max。桥接19项测试及1次真实连通请求通过，见failure-cases的MK-ZCODE-405后续记录；此刻未重新派发升级子任务，已有进度和未完成现场不变。Coding可用不代表Start网关故障消失，也不能将旁枝/日志/工具目录UI记为完成。
+
+2026-10-26用户再次确认yolo全权限并要求继续分配：工具目录、命令日志、旁枝三路在独立codex/*-coding分支基于b3f6aca重新派发，--mode yolo --route coding固定max；MK16三份未完成草稿完整保留。此前Start405不是额度耗尽，Coding实际连通已验证。新调用为新会话，未虚称保留已退出进程会话。
+
+Coding并发扩展：恢复详情/正常关闭恢复分别独立派发（ADR117/118），模型能力目录MK14随后派发（ADR119）；已有第4路工具执行事实，不能把Start历史3路限制当Coding最大值。主代理保留最终集成权，不自动采纳到源项目。
+
+MK-02/15源码证据展示切片（2026-10-26，主代理）：本地read/search从同一实际字节生成source_evidence，保存到原tool.completed，Run API/SSE与Vue工具活动展示版本/范围/续页/命中上下文/扫描不完整，刷新不重读改写历史；旧记录及未接线后端显示缺失，Docker文本契约保留。83项后端、36项前端、真实API构建页面1条（含文件变更后历史恢复及320px）、vue-tsc、Ruff/Mypy2模块通过；ADR-120和稳定文档同步，证据.task_outputs/maka-upgrade/source-evidence/。整体仍进行中，最终平台验收和MK-22未完成。

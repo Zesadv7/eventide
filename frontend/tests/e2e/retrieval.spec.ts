@@ -342,3 +342,56 @@ test("cancelling a preparation waiting for its workspace lock consumes no model 
     expect(released.ok()).toBe(true);
   }
 });
+
+test("source tools expose exact historical versions and page boundaries after reload", async ({
+  page,
+  project,
+}) => {
+  const run = await completedRun(page, await submit(page, "源码证据场景"));
+  const originalHash = createHash("sha256").update(sourceCode).digest("hex");
+  const tools = Object.values(run.tools || {}) as {
+    name: string;
+    metadata: { source_evidence: { sha256?: string } };
+  }[];
+  expect(
+    tools.find((t) => t.name === "read_file")?.metadata.source_evidence.sha256,
+  ).toBe(originalHash);
+  await writeFile(
+    join(project.root, "src/demo.py"),
+    "changed after evidence\n",
+  );
+  await page.reload();
+  await page.locator(".tool-activity > summary").click();
+  await page
+    .locator(".tool-entry > summary")
+    .filter({ hasText: "read_file" })
+    .click();
+  const read = page
+    .locator(".tool-entry")
+    .filter({ has: page.locator("summary", { hasText: "read_file" }) })
+    .getByRole("region", { name: "源码读取证据" });
+  await expect(read).toContainText("第 2–3 行");
+  await expect(read).toContainText(originalHash);
+  await expect(read).toContainText("文件后来可能发生变化");
+  await read.getByText("还有内容：查看下一页凭据", { exact: true }).click();
+  await expect(read).toContainText("evtfile1:");
+  await page
+    .locator(".tool-entry > summary")
+    .filter({ hasText: "search_text" })
+    .click();
+  const search = page
+    .locator(".tool-entry")
+    .filter({ has: page.locator("summary", { hasText: "search_text" }) })
+    .getByRole("region", { name: "源码读取证据" });
+  await expect(search).toContainText("文本搜索来源");
+  await expect(search).toContainText(originalHash);
+  await expect(search).toContainText("命中 4:");
+  await expect(search).toContainText("上下文 3:");
+  await expect(search).not.toContainText("changed after evidence");
+  await page.setViewportSize({ width: 320, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});

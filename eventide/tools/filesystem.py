@@ -7,7 +7,9 @@ import time
 from fnmatch import fnmatchcase
 from functools import cache
 from pathlib import Path
+from typing import Any
 
+from eventide.models import ToolOutput
 from eventide.policy import resolve_scoped_path
 from eventide.tools import regex_backend
 
@@ -101,6 +103,7 @@ class _PageBuilder:
         self.context_lines = context_lines
         self.budget = 9_000
         self.page: list[str] = []
+        self.sources: list[dict[str, Any]] = []
         self.hits_shown = 0
         self.files_shown = 0
         self.more = False
@@ -136,6 +139,7 @@ class _PageBuilder:
             self.more = True
             return
         rendered_header = False
+        source: dict[str, Any] = {"path": relative, "sha256": sha, "lines": []}
         for start, end in ranges:
             for number in range(start, end + 1):
                 is_hit = number in hit_numbers
@@ -157,7 +161,9 @@ class _PageBuilder:
                     self.budget -= header_cost
                     rendered_header = True
                     self.files_shown += 1
+                    self.sources.append(source)
                 self.page.append(entry)
+                source["lines"].append({"line": number, "match": is_hit, "text": segment})
                 self.budget -= len(entry) + 1
                 if is_hit:
                     self.hits_shown += 1
@@ -262,6 +268,18 @@ def run_search_text(
     mode: str = "literal", case_sensitive: bool = True, context_lines: int = 0,
     cwd: Path | None = None,
 ) -> str:
+    """Text-only developer interface for the same bounded search result."""
+    output = search_text_output(
+        query, pattern, offset, limit, mode, case_sensitive, context_lines, cwd,
+    )
+    return output.content if isinstance(output, ToolOutput) else output
+
+
+def search_text_output(
+    query: str, pattern: str = "**/*", offset: int = 0, limit: int = 50,
+    mode: str = "literal", case_sensitive: bool = True, context_lines: int = 0,
+    cwd: Path | None = None,
+) -> str | ToolOutput:
     """Search workspace files without an index, with versioned source evidence.
 
     Line numbers are one-based source coordinates; hit lines render as
@@ -457,7 +475,14 @@ def run_search_text(
             body = "(no matches in searched text)"
     else:
         body = "\n".join(builder.page)
-    return header + "\n" + body
+    return ToolOutput(header + "\n" + body, metadata={"source_evidence": {
+        "kind": "search", "mode": mode, "case_sensitive": case_sensitive,
+        "context_lines": context_lines, "scanned": scanned, "skipped": skipped,
+        "unverified": unverified, "timed_out": timed_out, "output_capped": output_capped,
+        "partial": bool(exhausted or skipped or unverified or backend_error),
+        "next_offset": offset + builder.hits_shown if builder.more else None,
+        "sources": builder.sources,
+    }})
 
 
 def _literal_hits(
@@ -509,12 +534,20 @@ def _verify_regex_matches(
 
 
 def run_read(
+    path: str, limit: int | None = None, offset: int = 0,
+    continuation: str | None = None, cwd: Path | None = None,
+) -> str:
+    """Text-only developer interface; production also records structured evidence."""
+    return read_file_output(path, limit, offset, continuation, cwd).content
+
+
+def read_file_output(
     path: str,
     limit: int | None = None,
     offset: int = 0,
     continuation: str | None = None,
     cwd: Path | None = None,
-) -> str:
+) -> ToolOutput:
     """Read a text file, paging long files and reporting the content version.
 
     Line numbers are one-based source coordinates, including when resuming;
@@ -525,6 +558,14 @@ def run_read(
     pages are never silently stitched across different file states. A plain
     line offset still works for a first read without a token.
     """
+    evidence: dict[str, Any] = {"kind": "file", "path": path}
+
+    def result(content: str, code: str | None = None, **page: Any) -> ToolOutput:
+        return ToolOutput(content, code is not None, {
+            "source_evidence": {**evidence, **page, "status": "error" if code else "read"},
+            **({"code": code} if code else {}),
+        })
+
     try:
         base = (cwd or Path.cwd()).resolve()
         file_path = resolve_scoped_path(base, path)
@@ -534,30 +575,34 @@ def run_read(
         relative = file_path.relative_to(base).as_posix()
         lines = text.splitlines()
         total = len(lines)
+        evidence.update(path=relative, sha256=sha, total_lines=total)
         if continuation is not None:
             if offset:
-                return "Error: pass either continuation or a line offset, not both."
+                return result(
+                    "Error: pass either continuation or a line offset, not both.", "invalid_page",
+                )
             match = _PAGE_TOKEN_PATTERN.fullmatch(continuation)
             if match is None:
-                return f"Error: {TOKEN_MALFORMED}"
+                return result(f"Error: {TOKEN_MALFORMED}", "invalid_page")
             start_line, start_char = int(match.group(1)), int(match.group(2))
             if match.group(3) != _page_path_id(base, relative):
-                return f"Error: {TOKEN_FOREIGN}"
+                return result(f"Error: {TOKEN_FOREIGN}", "foreign_page")
             if match.group(4) != sha:
-                return f"Error: {TOKEN_STALE}"
+                return result(f"Error: {TOKEN_STALE}", "stale_page")
             if start_line >= total:
-                return (
+                return result(
                     f"[{path} — {total} lines total; sha256={sha}; continuation is past "
                     "the end of the file; re-read from offset 0]"
                 )
             if start_char > len(lines[start_line]):
-                return f"Error: {TOKEN_BEYOND_LINE}"
+                return result(f"Error: {TOKEN_BEYOND_LINE}", "invalid_page")
         else:
             if not total:
-                return f"[{path} — 0 lines total; empty file; sha256={sha}]"
+                return result(f"[{path} — 0 lines total; empty file; sha256={sha}]",
+                              complete=True, next_token=None)
             start_line, start_char = max(int(offset or 0), 0), 0
             if start_line >= total:
-                return (
+                return result(
                     f"[{path} — {total} lines total; sha256={sha}; "
                     f"offset {start_line} is past the end]"
                 )
@@ -582,13 +627,14 @@ def run_read(
                 budget = 0
             entered += 1
         if not entries:
-            return f"[{path} — {total} lines total; sha256={sha}; no lines returned]"
+            return result(f"[{path} — {total} lines total; sha256={sha}; no lines returned]")
         body = "\n".join(
             f"{number + 1}: {segment}" if whole and at == 0
             else f"{number + 1}:{at}: {segment}"
             for number, at, segment, whole in entries
         )
         end_of_file = index >= total
+        token = None
         if end_of_file and start_line == 0 and start_char == 0:
             header = f"[{path} — {total} lines total; sha256={sha}]"
         else:
@@ -607,9 +653,14 @@ def run_read(
             footer = f"... ({total - index} more lines)"
         else:
             footer = f"... (line {entries[-1][0] + 1} continues at char {char})"
-        return "\n".join(part for part in (header, body, footer) if part)
-    except Exception as exc:
-        return f"Error: {exc}"
+        return result(
+            "\n".join(part for part in (header, body, footer) if part),
+            start_line=entries[0][0] + 1, end_line=entries[-1][0] + 1,
+            start_character=entries[0][1], end_character=entries[-1][1] + len(entries[-1][2]),
+            next_token=token, complete=end_of_file,
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        return result(f"Error: {exc}", "read_failed")
 
 
 def run_write(path: str, content: str, cwd: Path | None = None) -> str:

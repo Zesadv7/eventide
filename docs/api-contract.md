@@ -706,3 +706,12 @@ MK-18回执当前状态：run memory receipts保留原content/revision，附可�
 MK06当前接线：`POST /api/runs/{id}/supplements`正文含body(1–8000字符)/body_version(1–9)，要求同源本机与幂等键；GET返回supplements/pending。pending只代表已接收，consumed代表已持久加入当前Run消息，不保证请求已发送或模型采纳；终态前未加入消息者投影为late。终态后收据保留在Session事实并绑定原Run，不启动新任务。Web启动的自动恢复后继使用相同ApprovalBroker，新的审批仍通过原审批端点操作。
 
 MK07/09当前注意：attention的counts是本次返回数量，limits声明审批和失败列表上限；项目过滤在截取前执行，包含该项目执行副本。全量翻页、问题等待、精确参数版本和恢复动作仍属于计划，当前响应不能冒充完整待办总量。聊天/待处理实际API旅程验证了补充刷新、精确拒绝和同一Run后续消费。
+
+### 源码读取证据投影（MK-02/15，2026-10-26）
+
+既有 Run 的 `tools[call_id].metadata.source_evidence` 与 `tool.completed` 事件保存相同对象，无新增写接口。仅已实现的内置 read_file/search_text 生产处理器输出它，旧记录可缺省。
+
+- `kind=file`：`path`、`status=read|error`；成功页含原始字节 `sha256`、`total_lines`，有正文时含一基 `start_line/end_line`、零基 Unicode 字符 `start_character/end_character`（结束偏移不包含）、`complete` 与可空 `next_token`。空文件无正文坐标。越界范围无正文坐标，不虚构已读范围。错误保留明确文本及 `metadata.code`，即使返回当前 SHA 也不能解释为已读到请求页；旧凭据不能继续拼接。
+- `kind=search`：`mode/case_sensitive/context_lines/scanned/skipped/unverified/timed_out/output_capped/partial/next_offset`；`sources[]` 含 path、实际搜索字节 sha256、已呈现的 `lines[{line,match,text}]`。`match=false` 是上下文，text 可包含明确省略标记。`partial` 是扫描不完整，非空 next_offset 是还有结果页；任一成立都不能宣称全仓完整搜索。搜索失败的旧文本错误路径可不含此对象。
+
+刷新读取的是已保存事实；不重新访问现在的源码来改写历史版本。接口不提供该对象对应的额外文件权限。

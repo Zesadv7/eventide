@@ -52,7 +52,18 @@ def main() -> None:
             prompt = self._prompt(request)
             step = self.counts[prompt] = self.counts.get(prompt, 0) + 1
             usage = {"input_tokens": 100 + step, "output_tokens": 20}
-            if "检索旅程" in prompt or "检索交付场景" in prompt:
+            if "源码证据场景" in prompt:
+                if step == 1:
+                    response = ModelResponse(tool_calls=[self._call("read_file", {
+                        "path": "src/demo.py", "offset": 1, "limit": 2,
+                    })], stop_reason="tool_use", usage=usage)
+                elif step == 2:
+                    response = ModelResponse(tool_calls=[self._call("search_text", {
+                        "query": "source", "pattern": "src/*.py", "context_lines": 1,
+                    })], stop_reason="tool_use", usage=usage)
+                else:
+                    response = ModelResponse(text="源码证据检查完成", usage=usage)
+            elif "检索旅程" in prompt or "检索交付场景" in prompt:
                 if step == 1:
                     response = ModelResponse(tool_calls=[self._call("search_knowledge", {
                         "query": "demo", "k": 5,

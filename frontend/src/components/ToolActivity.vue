@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import FileOperationPanel from "./FileOperationPanel.vue";
+import SourceEvidencePanel from "./SourceEvidencePanel.vue";
+import type { SourceEvidence } from "../api/sourceEvidence";
 interface RetrievalEvidence {
   workspace_id: string;
   index_generation?: number | null;
@@ -35,8 +37,17 @@ const entries = computed(() =>
       value && typeof value === "object" ? value : { output: value }
     ) as Record<string, unknown>;
     const metadata = data.metadata as
-      { retrieval?: RetrievalEvidence } | undefined;
-    return { id, data, retrieval: metadata?.retrieval };
+      | { retrieval?: RetrievalEvidence; source_evidence?: SourceEvidence }
+      | undefined;
+    const builtinSource = ["read_file", "search_text"].includes(
+      String(data.name || data.tool_name),
+    );
+    return {
+      id,
+      data,
+      retrieval: metadata?.retrieval,
+      source: builtinSource ? metadata?.source_evidence : undefined,
+    };
   }),
 );
 function status(data: Record<string, unknown>) {
@@ -108,7 +119,26 @@ function status(data: Record<string, unknown>) {
         >
           检索来源：未记录
         </p>
-        <details v-if="entry.retrieval">
+        <SourceEvidencePanel
+          v-if="entry.source"
+          :evidence="entry.source"
+          :content="
+            typeof entry.data.content === 'string'
+              ? entry.data.content
+              : undefined
+          "
+        />
+        <p
+          v-else-if="
+            ['read_file', 'search_text'].includes(
+              String(entry.data.name || entry.data.tool_name),
+            )
+          "
+          class="muted"
+        >
+          这条历史记录没有结构化源码证据，请查看原始工具记录。
+        </p>
+        <details v-if="entry.retrieval || entry.source">
           <summary>原始工具记录</summary>
           <pre>{{ JSON.stringify(entry.data, null, 2) }}</pre>
         </details>
