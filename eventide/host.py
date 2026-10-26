@@ -68,6 +68,7 @@ from eventide.models import (
     RunRequest,
     RunResult,
     ToolCall,
+    ToolResult,
     WorkspaceRecord,
     WorkspaceTarget,
 )
@@ -92,6 +93,7 @@ from eventide.sandbox_profile import (
     resolve_sandbox_profile,
     validate_sandbox_profile,
 )
+from eventide.scheduler import ToolBatch, plan_readonly_batches
 from eventide.secrets import SecretBox, SecretKeyError
 from eventide.skill_packages import SkillPackageError
 from eventide.skill_runtime import SkillRuntime, execute_skill_script, script_tool
@@ -107,6 +109,7 @@ from eventide.tool_discovery import ToolCatalog, ToolDiscovery
 from eventide.tool_loops import failure_fingerprint, failure_loop_candidate
 from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
 from eventide.tool_results import reader as tool_result_reader
+from eventide.tools.filesystem import read_file_output, run_glob, search_text_output
 from eventide.tools.runtime_catalog import HANDLERS, TOOLS
 from eventide.usage import build_usage_ledger
 from eventide.workers import (
@@ -140,6 +143,14 @@ READONLY_WORKER_TIMEOUT = 60.0
 BASE_RUNTIME_READONLY_TOOLS = frozenset(
     {"read_file", "glob", "search_text", "compact", "read_tool_result", "todo_write",
      "search_knowledge"}
+)
+# Same-batch parallel execution (MK-11) is gated on the exact trusted builtin
+# implementation object, never on the tool name or a declared readonly flag: a
+# custom handler registered under the same name, a sandbox/container file tool
+# or any coroutine handler keeps serial dispatch. Every handler here is a pure
+# workspace read with no Runtime state dependency.
+PARALLEL_READONLY_HANDLERS: frozenset[Callable[..., object]] = frozenset(
+    {read_file_output, run_glob, search_text_output}
 )
 
 
@@ -4183,14 +4194,17 @@ class RuntimeHost:
             active_since_step = 1
             parameter_repair_used = False
 
-            async def record_unknown(call: ToolCall, content: str) -> None:
+            async def record_unknown(
+                call: ToolCall, content: str, batch: dict[str, Any] | None = None,
+            ) -> None:
                 await self._emit(
                     run_id,
                     "tool.outcome_unknown",
                     {
                         "call_id": call.id,
                         "name": call.name,
-                        "readonly": snapshot_execution,
+                        "readonly": snapshot_execution or bool(batch and batch["parallel"]),
+                        **({"batch": batch} if batch else {}),
                         "workspace_id": (f"sandbox:{execution_binding['sandbox_id']}"
                                          if sandbox_execution and execution_binding
                                          else execution_workspace.workspace_id),
@@ -4426,7 +4440,75 @@ class RuntimeHost:
                     output = self._semantic(response.text)
                     break
                 invalid_arguments = False
-                for call_index, call in enumerate(calls):
+
+                async def settle_tool_result(
+                    call: ToolCall, result: ToolResult, batch: dict[str, Any] | None,
+                    *, record_only: bool = False,
+                ) -> None:
+                    """Durable facts for one settled execution; raises keep serial semantics."""
+                    nonlocal invalid_arguments, force_compact, failure_park
+                    if result.metadata.get("outcome_unknown"):
+                        await record_unknown(call, result.content, batch)
+                        raise _UnknownToolOutcome(result.content)
+                    if result.metadata.get("code") == "invalid_arguments":
+                        invalid_arguments = True
+                    fingerprint = failure_fingerprint(call, result)
+                    await self._emit(
+                        run_id,
+                        "tool.completed",
+                        {
+                            "call_id": call.id,
+                            "name": call.name,
+                            "content": self._semantic(result.content),
+                            "is_error": result.is_error,
+                            "metadata": self._semantic(result.metadata),
+                            **({"failure_fingerprint": fingerprint} if fingerprint else {}),
+                            **({"batch": batch} if batch else {}),
+                        },
+                        sink,
+                    )
+                    if record_only:
+                        # The run is already stopping for an earlier member of this
+                        # step; keep the remaining real results but do not extend
+                        # the stop analysis with facts recorded after the decision.
+                        return
+                    if result.metadata.get("code") == "budget_exceeded":
+                        raise BudgetExceeded(result.metadata.get("violations", []))
+                    if call.name == "compact" and not result.is_error:
+                        force_compact = True
+                    readonly = call.name in runtime_readonly_tools
+                    if not readonly:
+                        await self._emit(
+                            run_id,
+                            "workspace.checkpoint",
+                            {
+                                "checkpoint": await asyncio.to_thread(
+                                    execution_checkpoint, workspace_root
+                                ),
+                            },
+                            sink,
+                        )
+                    candidate = failure_loop_candidate(self.store, run_id) if fingerprint else None
+                    if candidate and readonly:
+                        # Successful reads never scan again; only a proposed failure
+                        # stop needs fresh proof that external edits made no progress.
+                        await self._emit(
+                            run_id, "workspace.checkpoint", {
+                                "checkpoint": await asyncio.to_thread(
+                                    execution_checkpoint, workspace_root,
+                                ),
+                            }, sink,
+                        )
+                        candidate = failure_loop_candidate(self.store, run_id)
+                    if candidate:
+                        await self._emit(run_id, "tool.failure_loop_detected", candidate, sink)
+                        failure_park = self._clean(
+                            f"Tool {call.name} failed identically three times without source "
+                            "progress; session parked for an explicit decision"
+                        )
+
+                async def run_serial_call(call: ToolCall, batch: dict[str, Any]) -> None:
+                    nonlocal tool_count
                     tool_count += 1
                     # MCP and unknown/custom tools are always conservative recovery boundaries.
                     readonly = call.name in runtime_readonly_tools
@@ -4438,6 +4520,7 @@ class RuntimeHost:
                             "name": call.name,
                             "arguments": self._semantic(call.arguments),
                             "readonly": readonly,
+                            "batch": batch,
                         },
                         sink,
                     )
@@ -4476,70 +4559,140 @@ class RuntimeHost:
                                         "metadata": self._semantic(settled.metadata),
                                         **({"failure_fingerprint": fingerprint}
                                            if fingerprint else {}),
+                                        "batch": batch,
                                     },
                                     sink,
                                 )
                         raise
-                    if result.metadata.get("outcome_unknown"):
-                        await record_unknown(call, result.content)
-                        raise _UnknownToolOutcome(result.content)
-                    if result.metadata.get("code") == "invalid_arguments":
-                        invalid_arguments = True
-                    fingerprint = failure_fingerprint(call, result)
-                    await self._emit(
-                        run_id,
-                        "tool.completed",
-                        {
-                            "call_id": call.id,
-                            "name": call.name,
-                            "content": self._semantic(result.content),
-                            "is_error": result.is_error,
-                            "metadata": self._semantic(result.metadata),
-                            **({"failure_fingerprint": fingerprint} if fingerprint else {}),
-                        },
-                        sink,
-                    )
-                    if result.metadata.get("code") == "budget_exceeded":
-                        raise BudgetExceeded(result.metadata.get("violations", []))
-                    if call.name == "compact" and not result.is_error:
-                        force_compact = True
-                    if not readonly:
-                        await self._emit(
-                            run_id,
-                            "workspace.checkpoint",
-                            {
-                                "checkpoint": await asyncio.to_thread(
-                                    execution_checkpoint, workspace_root
-                                ),
-                            },
-                            sink,
-                        )
-                    candidate = failure_loop_candidate(self.store, run_id) if fingerprint else None
-                    if candidate and readonly:
-                        # Successful reads never scan again; only a proposed failure
-                        # stop needs fresh proof that external edits made no progress.
-                        await self._emit(
-                            run_id, "workspace.checkpoint", {
-                                "checkpoint": await asyncio.to_thread(
-                                    execution_checkpoint, workspace_root,
-                                ),
-                            }, sink,
-                        )
-                        candidate = failure_loop_candidate(self.store, run_id)
-                    if candidate:
-                        await self._emit(run_id, "tool.failure_loop_detected", candidate, sink)
-                        for remaining in calls[call_index + 1:]:
-                            await self._emit(run_id, "tool.abandoned", {
-                                "call_id": remaining.id, "name": remaining.name,
-                                "is_error": True, "content": (
-                                    "Tool not dispatched: repeated failure without source progress"
-                                ),
-                                "reason": "repeated_tool_failure", "dispatched": False,
+                    await settle_tool_result(call, result, batch)
+
+                async def run_parallel_batch(group: ToolBatch, batch_id: str) -> None:
+                    """Retain ownership and every real result through cancellation."""
+                    nonlocal tool_count
+                    size = len(group.calls)
+                    states: list[dict[str, Any]] = [
+                        {"call": call, "position": position, "dispatched": False}
+                        for position, call in enumerate(group.calls)
+                    ]
+                    tasks: list[asyncio.Task[ToolResult]] = []
+                    stopping = False
+
+                    def batch_metadata(position: int) -> dict[str, Any]:
+                        return {
+                            "batch_id": batch_id, "position": position,
+                            "size": size, "parallel": True,
+                        }
+
+                    async def member(state: dict[str, Any]) -> ToolResult:
+                        async with self.dispatch.scheduler.readonly_slot():
+                            state["dispatched"] = True
+                            await self._emit(run_id, "tool.started", {
+                                "call_id": state["call"].id, "name": state["call"].name,
+                                "batch": batch_metadata(state["position"]),
                             }, sink)
-                        failure_park = self._clean(
-                            f"Tool {call.name} failed identically three times without source "
-                            "progress; session parked for an explicit decision"
+                            return await executor.execute(
+                                state["call"],
+                                ToolContext(working_root, run_id, self.policy, approve),
+                            )
+
+                    async def finish_batch() -> None:
+                        nonlocal tool_count
+                        # Prepare all members before dispatch. The coordinator owns
+                        # persistence too, including a stop during an event sink await.
+                        for state in states:
+                            call = state["call"]
+                            tool_count += 1
+                            await self._emit(run_id, "tool.prepared", {
+                                "call_id": call.id, "name": call.name,
+                                "arguments": self._semantic(call.arguments), "readonly": True,
+                                "batch": batch_metadata(state["position"]),
+                            }, sink)
+                        if not stopping:
+                            tasks.extend(asyncio.create_task(member(state)) for state in states)
+                        if tasks:
+                            await asyncio.wait(tasks)
+                        terminal: Exception | None = None
+                        for index, state in enumerate(states):
+                            call = state["call"]
+                            meta = batch_metadata(state["position"])
+                            if not tasks or tasks[index].cancelled():
+                                await self._emit(run_id, "tool.abandoned", {
+                                    "call_id": call.id, "name": call.name,
+                                    "is_error": True,
+                                    "content": (
+                                        "Tool not dispatched: run cancelled before execution"
+                                    ),
+                                    "reason": "cancelled_before_dispatch", "dispatched": False,
+                                    "batch": meta,
+                                }, sink)
+                                continue
+                            try:
+                                result = tasks[index].result()
+                            except Exception as exc:
+                                await record_unknown(
+                                    call,
+                                    f"Tool executor failed: {type(exc).__name__}: {exc}", meta,
+                                )
+                                if terminal is None:
+                                    terminal = exc
+                                continue
+                            try:
+                                await settle_tool_result(
+                                    call, result, meta,
+                                    record_only=(
+                                        stopping or terminal is not None or failure_park is not None
+                                    ),
+                                )
+                            except Exception as exc:
+                                # Preserve other already executed results before
+                                # propagating the first failure to the Run boundary.
+                                if terminal is None:
+                                    terminal = exc
+                        if terminal is not None:
+                            raise terminal
+
+                    coordinator = asyncio.create_task(finish_batch())
+                    cancelled = False
+                    while not coordinator.done():
+                        try:
+                            await asyncio.shield(coordinator)
+                        except asyncio.CancelledError:
+                            cancelled = stopping = True
+                            # No await before every queued member is cancelled: a
+                            # finishing reader must never start a queued call after stop.
+                            for state, task in zip(states, tasks, strict=False):
+                                if not state["dispatched"]:
+                                    task.cancel()
+                    coordinator.result()
+                    if cancelled:
+                        raise asyncio.CancelledError
+
+                batch_plan = plan_readonly_batches(
+                    calls, executor.handlers, PARALLEL_READONLY_HANDLERS
+                )
+                for batch_number, batch in enumerate(batch_plan, 1):
+                    batch_id = f"s{steps}b{batch_number}"
+                    if batch.parallel:
+                        await run_parallel_batch(batch, batch_id)
+                    else:
+                        await run_serial_call(
+                            batch.calls[0],
+                            {
+                                "batch_id": batch_id, "position": 0,
+                                "size": 1, "parallel": False,
+                            },
                         )
+                    if failure_park:
+                        for remaining_batch in batch_plan[batch_number:]:
+                            for remaining in remaining_batch.calls:
+                                await self._emit(run_id, "tool.abandoned", {
+                                    "call_id": remaining.id, "name": remaining.name,
+                                    "is_error": True, "content": (
+                                        "Tool not dispatched: repeated failure "
+                                        "without source progress"
+                                    ),
+                                    "reason": "repeated_tool_failure", "dispatched": False,
+                                }, sink)
                         break
                 if failure_park:
                     break

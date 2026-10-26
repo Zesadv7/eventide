@@ -748,6 +748,7 @@ MK05集成补充：现有read_tool_result新增普通命令stdout/stderr分流�
 
 旁枝切片复核：创建响应增加`source_execution`（主Run真实执行身份）与`files_captured_at`；文件取证和source_high_water为两次独立观察。source/worktree/Plan可用，其他执行环境明确422；全服务最多4活动旁枝，容量不足接收前422。列表包含可选cleanup_error，清理故障不静默隐藏。source_context提供有界tool_results与latest_failure；用户回传只接受completed答案，指纹必填；读取/回传不重新运行主任务。追问链、选中文字及刷新背景尚待实现。
 
+
 ### 摘要版本与原始证据（MK03，已实现切片）
 
 - `GET /api/sessions/{id}/context-summaries?before=&limit=`：新到旧checkpoint元数据，limit 1–50（默认20），next_before游标；未知Session404。没有摘要返回空列表，不补造。
@@ -773,3 +774,10 @@ MK09页面范围接线（2026-10-26）：待处理页`#/attention?project=<proje
 - 写接口要求本机同源和内容绑定Idempotency-Key，绑定精确root/graph路径身份；重复创建保留原图、同键异内容409。未知Run/图404。结果包含nodes[].claim.run_id及已完成result.child_session_id，不能在准备期猜Session；output_truncated/output_length说明节选。unknown请求保留原键，查询图不引发执行。
 
 任务图OpenAPI/TS类型与网页产物已统一生成，12项HTTP/契约/分发及built真实API页面旅程通过；配置不可用在派发前明确409 rejected，不留下未知接收。此证据不等于完整MK20或真实模型效果验收。
+
+### MK-11 只读批次事件与队列增量（2026-10-26）
+
+无新增写HTTP入口。原Run详情/快照tools及SSE复用同call_id，tool.prepared/completed/abandoned/outcome_unknown可附`batch:{batch_id:"s1b1",position:0,size:2,parallel:true}`；batch_id只在本Run内有意义，position为原请求内该连续组的零基位置。parallel表示使用可信读取调度，同组单项也共用4槽，不保证每项在同一时刻运行。非可信工具组使用parallel=false并单项顺序执行。新增tool.started事实绑定call_id/name/batch，表示该项已获读取槽、进入派发；投影合并原prepared参数并显示running。prepared仍可能排队，abandoned+dispatched=false明确没有执行；单项is_error和unknown独立呈现，不能把整组统一显示成功。结果按原请求顺序回填；停止后已执行结果仍可在终态之前补齐。
+
+`GET /api/queue`及项目队列同一limits增加`readonly_tools:4`，counts增加active_readonly_tools/waiting_readonly_tools，均为当前进程实际所有权；不新建持久任务或第二事件库，原根任务/模型槽字段含义保持。Vue事件订阅识别tool.started，工具活动显示等待/执行中/未执行和批次位置。
+

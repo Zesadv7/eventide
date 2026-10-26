@@ -45,6 +45,7 @@ export const eventNames = [
   "tool.request",
   "tool.result",
   "tool.prepared",
+  "tool.started",
   "tool.completed",
   "tool.abandoned",
   "tool.outcome_unknown",

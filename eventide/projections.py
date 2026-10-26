@@ -115,6 +115,10 @@ class RuntimeStateProjection:
             if kind == "tool.prepared":
                 state["tool_calls"] += 1
                 state["tools"][payload["call_id"]] = {**payload, "status": "prepared"}
+            if kind == "tool.started":
+                state["tools"][payload["call_id"]] = {
+                    **state["tools"][payload["call_id"]], **payload, "status": "running",
+                }
             if kind in {"tool.completed", "tool.abandoned"}:
                 state["tools"][payload["call_id"]] = {**payload, "status": kind.split(".")[1]}
             if kind == "tool.outcome_unknown":

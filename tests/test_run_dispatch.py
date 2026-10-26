@@ -84,13 +84,17 @@ async def test_default_limits_http_capacity_idempotency_and_exact_cancel(isolate
             accepted.append(response.json()["run_id"])
         await entered(provider, 2)
         queue = (await client.get("/api/queue")).json()
-        assert queue["limits"] == {"active_roots": 4, "model_requests": 2, "waiting_roots": 20}
+        assert queue["limits"] == {
+            "active_roots": 4, "model_requests": 2, "waiting_roots": 20, "readonly_tools": 4,
+        }
         assert queue["counts"] == {
             "active_roots": 4,
             "waiting_roots": 20,
             "preparing_admissions": 0,
             "active_models": 2,
             "waiting_models": 2,
+            "active_readonly_tools": 0,
+            "waiting_readonly_tools": 0,
         }
         assert [row["run_id"] for row in queue["queued"]] == accepted[4:]
         assert [row["position"] for row in queue["queued"]] == list(range(1, 21))

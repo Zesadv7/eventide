@@ -18,6 +18,7 @@ export interface QueueSnapshot {
     active_roots: number;
     model_requests: number;
     waiting_roots: number;
+    readonly_tools?: number;
   };
   counts: {
     active_roots: number;
@@ -25,6 +26,8 @@ export interface QueueSnapshot {
     preparing_admissions: number;
     active_models: number;
     waiting_models: number;
+    active_readonly_tools?: number;
+    waiting_readonly_tools?: number;
   };
   queued: QueueEntry[];
   active: QueueEntry[];

@@ -8,11 +8,13 @@ and recover unfinished Runs before admitting work after restart.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+import inspect
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from eventide.models import ToolCall
 from eventide.store import RuntimeStore
 
 SCHEDULING_FACTS = (
@@ -26,9 +28,10 @@ class SchedulingLimits:
     active_roots: int = 4
     model_requests: int = 2
     waiting_roots: int = 20
+    readonly_tools: int = 4
 
     def __post_init__(self) -> None:
-        for name in ("active_roots", "model_requests", "waiting_roots"):
+        for name in ("active_roots", "model_requests", "waiting_roots", "readonly_tools"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"{name} must be an integer")
@@ -45,6 +48,55 @@ class QueueEntry:
     admitted_at: float
     admission_event_id: str
     intent: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolBatch:
+    """One dispatch group over the tool calls of a single model response."""
+
+    parallel: bool
+    calls: tuple[ToolCall, ...]
+
+
+def plan_readonly_batches(
+    calls: Sequence[ToolCall],
+    handlers: Mapping[str, Callable[..., object]],
+    eligible: Iterable[Callable[..., object]],
+) -> tuple[ToolBatch, ...]:
+    """Split one model response into consecutive dispatch groups.
+
+    A group uses the shared read slots only when every call resolves to the
+    exact trusted read-only implementation object.
+    Eligibility is never the tool name, a declared flag or MCP metadata: a
+    custom handler registered under the same name, a coroutine handler or any
+    write/unknown/interactive call executes alone, and that singleton is the
+    barrier between parallel groups. Handlers may be unhashable objects, so
+    matching uses identity and never dict/set membership.
+    """
+
+    eligible_tuple = tuple(eligible)
+
+    def trusted(call: ToolCall) -> bool:
+        handler = handlers.get(call.name)
+        return (
+            handler is not None
+            and any(handler is candidate for candidate in eligible_tuple)
+            and not inspect.iscoroutinefunction(handler)
+        )
+
+    batches: list[ToolBatch] = []
+    group: list[ToolCall] = []
+    for call in calls:
+        if not trusted(call):
+            if group:
+                batches.append(ToolBatch(True, tuple(group)))
+                group = []
+            batches.append(ToolBatch(False, (call,)))
+        else:
+            group.append(call)
+    if group:
+        batches.append(ToolBatch(True, tuple(group)))
+    return tuple(batches)
 
 
 def project_queue(events: Iterable[Mapping[str, Any]]) -> tuple[QueueEntry, ...]:
@@ -122,6 +174,9 @@ class RuntimeScheduler:
         self._models = asyncio.BoundedSemaphore(self.limits.model_requests)
         self._active_models = 0
         self._waiting_models = 0
+        self._readonly = asyncio.BoundedSemaphore(self.limits.readonly_tools)
+        self._active_readonly = 0
+        self._waiting_readonly = 0
 
     def entries(self) -> tuple[QueueEntry, ...]:
         return project_queue(self.store.facts_by_type(SCHEDULING_FACTS))
@@ -138,6 +193,8 @@ class RuntimeScheduler:
             "preparing_admissions": len(self._tickets),
             "active_models": self._active_models,
             "waiting_models": self._waiting_models,
+            "active_readonly_tools": self._active_readonly,
+            "waiting_readonly_tools": self._waiting_readonly,
         }
 
     def reserve_admission(
@@ -237,3 +294,26 @@ class RuntimeScheduler:
         finally:
             self._active_models -= 1
             self._models.release()
+
+    @asynccontextmanager
+    async def readonly_slot(self) -> AsyncIterator[None]:
+        """One service-wide trusted read-only tool execution (MK-11).
+
+        The cap is shared by every Run of this Host, including workers and child
+        copies. A cancelled wait never grants a slot, so a queued call that is
+        cancelled before dispatch cannot start executing. The caller must keep
+        the slot until the tool's actual work is finished: a synchronous file
+        tool runs in a thread, and releasing early would break the ownership
+        guarantee even though the coroutine already returned.
+        """
+        self._waiting_readonly += 1
+        try:
+            await self._readonly.acquire()
+        finally:
+            self._waiting_readonly -= 1
+        self._active_readonly += 1
+        try:
+            yield
+        finally:
+            self._active_readonly -= 1
+            self._readonly.release()

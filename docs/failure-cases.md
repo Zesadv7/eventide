@@ -970,6 +970,7 @@ MK-CODING-1308再次触发：2026-10-26 14:22–14:23，恢复的四路中旁枝
 
 - MK17-REVIEW提交前diff检查检出子候选tests/test_side_questions.py末尾多余空行，已去除；提交未执行，随后重检。
 
+
 ### MK03-SUMMARY-VIEW — 摘要与原始证据对照
 
 - 基线6ab4029，主代理开始只读API/UI。首轮Ruff失败，日志summary-review/ruff.log；记录原结果，修复后定向复验。该功能只读取已保存checkpoint和原事件，不能用前端展示替代摘要语义正确性或模型效果验收。
@@ -1046,3 +1047,28 @@ MK20-CURRENT当前复验：测试账本接口/Settings字段/未提交临时fixt
 - MK20-CURRENT浏览器失败已定位为测试定位：保存的error-context显示两节点均已完成、历史链接正确，计数与“已完成”状态徽标共处同一段落，exact文字匹配错误。改为定位包含计数的实际段落后仅复验该旅程，不延长等待、不改产品执行行为。组件24项、类型与生产构建已通过，均不冒充浏览器已通过。
 
 MK20-CURRENT最终：prestart-red复现后3项Green通过；持久完成结果取消/关服窗口与恢复/API4项通过，最终HTTP配置拒绝/契约/分发12项通过。browser2真实页面旅程通过（4.8秒场景），首轮已证实仅exact定位错误，无延长等待。24项集成组件、Ruff/Mypy5、Vue类型/build/生成资源通过；前端组件未mock面板的localhost日志仍只属测试装置，真实API验证独立记录。测试夹具/格式/类型、受控并发缺陷均已修正复验，未遗留未登记失败；真实供应商、全量、写协作和重启自动续接不作已完成声明。主代理负责后端/集成与修复，当前模型协作代理负责UI/独立代码审查，ZCode仅遗留草稿；相关提交f39beb4/767afe2及本次集成收口。
+
+### MK11-CURRENT — 当前窗口接手只读并发草稿（2026-10-26）
+
+- 基线6ab4029+ZCode未提交Host/scheduler草稿，主代理指出的取消/落库风险由当前窗口模型接手。首次定向命令`python -m pytest -q tests/test_readonly_parallel.py`退出1，4通过/3失败；日志`.task_outputs/maka-upgrade/readonly-finish/backend1.log`。已证实均为新测试装置错误：全服务并发用例要求snapshot却未创建Git仓库；两处读取断言忽略实际工具版本头。未改生产权限或文件返回契约，修正测试前提/正文断言后复验。首次未收集的快照任务异常也在该日志，不计为生产回归。
+
+- MK11-CURRENT首轮Ruff退出1：Host新导入未排序及4处长行，日志ruff1.log；7项修正后的后端专项通过。仅调整格式后复验，静态失败不隐去。
+
+- MK11-CURRENT首轮Mypy退出1：三种不同签名的内置函数集合被推断为frozenset[function]，与批次规划器Callable契约不符；日志mypy1.log。显式标注可信handler集合类型后复验，不改资格匹配逻辑。关联backend3已出现至少一项失败，完整原因仍待该批收尾，先保留待查记录。
+
+- MK11-CURRENT新增失败循环用例在backend4复现1失败/8通过：测试把缺文件ToolOutput错误当成原失败窗口接受的execution_failed异常，且非Git根无可信checkpoint；实际窗口按既有规则未停驻。改用Git临时仓库与可信读取handler抛固定OSError，让真实ToolExecutor生成原规则接受的异常证据；不扩大失败识别规则或降低checkpoint要求。backend3同一失败归并此项。
+
+- MK11-CURRENT第二轮Ruff仍有新异常事实那一行101字符（ruff2.log），已缩行后复验；未改运行行为。
+
+- MK11-CURRENT关联backend3完整结束：59通过/7失败，退出1（278.44秒）。其中新增失败循环fixture已由backend5定向复验通过；其余为既有交付预算、Shell失败链与读取头断言，原因尚待基线对照，不擅自归因。保留完整backend3.log，先从原HEAD的隔离导出验证原失败，避免无关改动掩盖回归。
+
+- MK11-CURRENT基线核对：原HEAD6ab4029完整导出至`/tmp/eventide-mk11-baseline-nmsf1mzw`，仅复现上述5个既有失败，5失败/5.36秒；复制日志为readonly-finish/baseline-failures.log。它们在未应用并发改动时同样失败，因此不夹带修改，交主集成最终核对；不把59项关联通过写成整批通过。
+
+- MK11-CURRENT交付并发8秒等待单项原样复验通过（final-targeted.log），该批另含准备阶段取消与两种只读/无工具重开Continue共4通过/8.45秒；首批失败保留，未放宽8秒断言。Ruff3、Mypy2（三模块）和Vue类型通过。
+
+- MK11-CURRENT提交前格式检查仅ToolActivity.vue失败（format-final.log）：模板内重复类型断言经首轮Prettier输出仍非幂等。改为computed条目上的明确batch类型，简化模板表达式后格式/类型复验；不影响批次语义。
+
+- MK11-CURRENT模板简化的首次替换脚本未命中已格式化的多行v-if（ValueError），未写入组件；按实际模板定位后完成替换，未把前一命令末尾格式成功当成替换成功。
+
+- MK11-CURRENT切片收口：新13场景逐项通过，关联首次59通过中的既有5失败已在原HEAD复现保留；其余失败均按上述装置/静态/格式或原样等待复验闭环。最后Ruff-final、Mypy2、types-final、format-final3及前端15项+最后受影响1项通过；未重复整批/全仓、浏览器、真实模型或平台。当前窗口模型审查并修正ZCode草稿，实际参与限于此切片；未知结果保守规则/原失败窗口未放宽，不宣称性能或模型效果收益。对应本地提交主题为feat: schedule trusted read-only tools in bounded ordered batches；原基线5失败交主集成继续处理。
+

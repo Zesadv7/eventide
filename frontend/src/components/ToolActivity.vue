@@ -51,6 +51,14 @@ const entries = computed(() =>
     return {
       id,
       data,
+      batch: data.batch as
+        | {
+            batch_id: string;
+            position: number;
+            size: number;
+            parallel: boolean;
+          }
+        | undefined,
       retrieval: metadata?.retrieval,
       source: builtinSource ? metadata?.source_evidence : undefined,
       log: ["bash", "run_skill_script"].includes(
@@ -64,7 +72,10 @@ const entries = computed(() =>
 function status(data: Record<string, unknown>) {
   if (data.status === "unknown" || data.status === "outcome_unknown")
     return "结果待确认";
+  if (data.status === "abandoned" && data.dispatched === false) return "未执行";
   if (data.is_error || data.status === "failed") return "执行失败";
+  if (data.status === "prepared") return "等待执行";
+  if (data.status === "running") return "执行中";
   if (data.status === "completed") return "已完成";
   return String(data.status || "已记录");
 }
@@ -86,6 +97,11 @@ function status(data: Record<string, unknown>) {
           <span>{{ entry.data.name || entry.data.tool_name || entry.id }}</span
           ><small>{{ status(entry.data) }}</small>
         </summary>
+        <p v-if="entry.batch?.parallel" class="muted">
+          只读批次 {{ entry.batch.batch_id }} · 第
+          {{ entry.batch.position + 1 }} / {{ entry.batch.size }} 项；
+          全服务最多同时执行 4 项。结果按请求顺序交给模型。
+        </p>
         <section
           v-if="entry.retrieval"
           class="retrieval-evidence"

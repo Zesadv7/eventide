@@ -1286,6 +1286,7 @@ MK05主代理复核：捕获密钥在实际执行器组装时更新为已加载/
 
 MK08C正常关闭恢复（ADR-118）：host.shutdown_started绑定确切Run及一次关服身份；取消终态只在该标记存在且无用户停止时记service_shutdown。Run关闭后不再追加Run事件，恢复claim及用户停止以精确关联的Session事实持久化；恢复页将其计入同一high_water。新Host复用安全边界、唯一后继与父根预算，接收时绑定source Run，等待检查期间收到停止也在实际派发前取消后继。代码初稿由ZCode提供，主代理补接收竞态与恢复投影；32项初始专项、101项关联及22项最终复验通过。正常关服可恢复不代表任意未知工具可重放，MK08D/E继续待实施。
 
+
 MK09项目筛选（2026-10-26）：AttentionView复用`GET /api/projects/{id}/attention`，筛选身份保存在路由query.project；选项使用已注册Workspace的稳定project_id去重，不通过显示名称或目录名推断身份。切范围立即移除旧列表/动作，按请求代次拒绝晚到读取与审批结果；项目不可用显示真实错误，不回退全局列表。轮询仍每5秒读取选定范围，审批继续由原Run端点复验；六项组件及built实际API筛选/刷新/原审批旅程通过，尚未补全待回答与核查不明类别。
 
 
@@ -1312,3 +1313,12 @@ GraphPanel挂在聊天中，按精确root_run_id读取已保存图。编辑器�
 
 
 MK20集成复核：首次执行前取消的done回调也补位；取消/正常关服按子Run持久终态收尾，已完成结果不会被Graph包装任务取消改写。配置暂不可用在接收前明确409 rejected；系统关服不伪造用户停止。页面/生成契约/manifest与12项分发关联、24项组件、built真实API依赖/刷新/停止/320px、Ruff/Mypy5/Vue类型构建均通过，失败保留在MK20-CURRENT。原外部草稿仍在独立副本，不把写协作和未完成重启续接算入本切片。
+
+### MK-11 本机可信只读并发切片（2026-10-26）
+
+RuntimeScheduler新增服务级readonly_slot，默认4槽，和根Run/模型请求所有权分别计数。一个模型响应按连续可信读取片段分组；资格以read_file_output/run_glob/search_text_output的精确实现对象判定，自定义同名handler、MCP的readonly声明、Shell、修改、压缩、结果回读和交互均不能取得该资格，而是顺序屏障。单项可信读取也取得同一读取槽，防止跨Run单项调用绕过全服务上限。全部调用仍逐项经过原ToolExecutor/PolicyEngine/参数契约。Plan、普通本机源/执行副本和只读快照可使用；Docker/原生不同实现保持串行。
+
+Host先保存每项tool.prepared及Run内batch身份，取得槽后保存tool.started，再调用原执行器。独立协调任务一直拥有批次执行和事实落库；结果按请求原位置保存，不能因线程先完成而改变后续模型上下文。局部错误保留其他结果；失败循环、预算或unknown可以阻止后续组，但已执行项仍保存真实结果，不改写为未执行。取消先同步撤销所有未获槽任务，再等待已派发线程与结果事实收尾，重复取消不释放实际所有权或丢结果。准备阶段取消则整组不派发。异常工具结果保留unknown证据；既有不确定结果/预算与源checkpoint规则不放宽。
+
+Run/API/SSE投影展示各项prepared/running/completed/abandoned/outcome_unknown；Vue工具活动显示批次位置和真实状态。排队/运行读取数由原队列查询按当前调度所有权提供，批次历史仍只有runtime_events一个事实源。此切片只验证机制，不宣称模型质量或耗时提升；最终浏览器/平台/模型与整仓收口按MK22。
+
