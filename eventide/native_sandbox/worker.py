@@ -420,44 +420,60 @@ class FileWorker:
         try:
             descriptor = os.open(os.path.basename(path), os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
                                  dir_fd=parent)
+            with os.fdopen(descriptor, "r+b") as handle:
+                info = os.fstat(handle.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise WorkerError("path_denied", "File is not a regular file with one link")
+                raw = handle.read(MAX_READ_FILE_BYTES + 1)
+                if len(raw) > MAX_READ_FILE_BYTES:
+                    raise WorkerError("too_large", "File exceeds the edit byte limit")
+                actual = hashlib.sha256(raw).hexdigest()
+                if expected is not None and expected.lower() != actual:
+                    raise WorkerError(
+                        "hash_mismatch", "Content hash mismatch; re-read the changed file",
+                    )
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError as error:
+                    raise WorkerError("not_text", "File is not valid UTF-8") from error
+                first = text.find(old)
+                if first < 0:
+                    raise WorkerError("not_found", "old_text not found; file unchanged")
+                if text.find(old, first + 1) >= 0:
+                    raise WorkerError(
+                        "ambiguous", "old_text matches multiple locations; file unchanged",
+                    )
+                updated = (text[:first] + new + text[first + len(old):]).encode("utf-8")
+                if len(updated) > MAX_WRITE_FILE_BYTES:
+                    raise WorkerError("too_large", "Edited file exceeds the size limit")
+                # Hash validation and mutation happen in the same worker operation,
+                # against the same descriptor, with no host read/write round trip.
+                handle.seek(0)
+                if handle.read(MAX_READ_FILE_BYTES + 1) != raw:
+                    raise WorkerError("hash_mismatch", "File changed during edit; no write applied")
+                try:
+                    current = os.stat(os.path.basename(path), dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError as error:
+                    raise WorkerError(
+                        "hash_mismatch", "File path disappeared; no write applied",
+                    ) from error
+                if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+                    raise WorkerError("hash_mismatch", "File path was replaced; no write applied")
+                handle.seek(0)
+                handle.write(updated)
+                handle.truncate()
+                handle.flush()
+                try:
+                    current = os.stat(os.path.basename(path), dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError as error:
+                    raise WorkerError(
+                        "path_changed", "File path disappeared during edit",
+                    ) from error
+                if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+                    raise WorkerError("path_changed", "File path was replaced during edit")
+            return {"size": len(updated)}
         finally:
             os.close(parent)
-        with os.fdopen(descriptor, "r+b") as handle:
-            info = os.fstat(handle.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                raise WorkerError("path_denied", "File is not a regular file with one link")
-            raw = handle.read(MAX_READ_FILE_BYTES + 1)
-            if len(raw) > MAX_READ_FILE_BYTES:
-                raise WorkerError("too_large", "File exceeds the edit byte limit")
-            actual = hashlib.sha256(raw).hexdigest()
-            if expected is not None and expected.lower() != actual:
-                raise WorkerError(
-                    "hash_mismatch", "Content hash mismatch; re-read the changed file",
-                )
-            try:
-                text = raw.decode("utf-8")
-            except UnicodeDecodeError as error:
-                raise WorkerError("not_text", "File is not valid UTF-8") from error
-            first = text.find(old)
-            if first < 0:
-                raise WorkerError("not_found", "old_text not found; file unchanged")
-            if text.find(old, first + 1) >= 0:
-                raise WorkerError(
-                    "ambiguous", "old_text matches multiple locations; file unchanged",
-                )
-            updated = (text[:first] + new + text[first + len(old):]).encode("utf-8")
-            if len(updated) > MAX_WRITE_FILE_BYTES:
-                raise WorkerError("too_large", "Edited file exceeds the size limit")
-            # Hash validation and mutation happen in the same worker operation,
-            # against the same descriptor, with no host read/write round trip.
-            handle.seek(0)
-            if handle.read(MAX_READ_FILE_BYTES + 1) != raw:
-                raise WorkerError("hash_mismatch", "File changed during edit; no write applied")
-            handle.seek(0)
-            handle.write(updated)
-            handle.truncate()
-            handle.flush()
-        return {"size": len(updated)}
 
     def _op_glob(self, params: dict[str, Any]) -> dict[str, Any]:
         base = self._grant.authorize(params.get("cwd"), need_write=False)

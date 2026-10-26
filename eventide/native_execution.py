@@ -43,6 +43,7 @@ from eventide.native_sandbox.policy import (
 from eventide.native_sandbox.runner import (
     NativeSandboxError,
     NativeSandboxRunner,
+    WorkerCallCancelledError,
     WorkerOperationError,
 )
 from eventide.tools.filesystem import render_read_file
@@ -203,11 +204,32 @@ class NativeFileTools:
         runner = await self.ensure_started()
         try:
             return await runner.call(operation, **params)
+        except WorkerCallCancelledError as exc:
+            # The frame may have completed its write before the cancelled read.
+            # Close the real worker before returning the uncertainty to Host.
+            try:
+                await self.aclose()
+            except (OSError, NativeSandboxError) as cleanup_error:
+                error = NativeExecutionError(
+                    f"Native {operation} cancelled; cleanup failed: {cleanup_error}"
+                )
+                error.code = (
+                    "outcome_unknown" if operation in {"write_file", "edit_file"}
+                    and exc.dispatched else "worker_failed"
+                )
+                raise error from cleanup_error
+            if operation in {"write_file", "edit_file"} and exc.dispatched:
+                error = NativeExecutionError(
+                    f"Native {operation} cancelled after dispatch; tool outcome unknown"
+                )
+                error.code = "outcome_unknown"
+                raise error from exc
+            raise asyncio.CancelledError() from exc
         except WorkerOperationError as exc:
             error = NativeExecutionError(f"Worker refused {operation}: {exc.message}")
             error.code = (
                 "outcome_unknown" if operation in {"write_file", "edit_file"}
-                and exc.code == "io_error" else exc.code
+                and exc.code in {"io_error", "path_changed"} else exc.code
             )
             raise error from exc
         except NativeSandboxError as exc:

@@ -206,6 +206,9 @@ async def create_side_question(
     source = host.store.get_run_identity(source_run_id)
     if source is None:
         raise LookupError("Source run not found")
+    source_intent = host._admitted_intent(source_run_id) or {}
+    if source_intent.get("execution_profile_config", {}).get("kind") == "native":
+        raise ValueError("Side questions are unavailable for native execution")
     source_session_id = source["session_id"]
     if host.is_worker_session(source_session_id) or host.is_control_session(source_session_id):
         raise ValueError("Side questions require an ordinary main task")

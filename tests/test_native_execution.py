@@ -493,6 +493,10 @@ async def test_native_readonly_catalog_and_session_permission_freeze(tmp_path, h
         assert first.status == "completed"
         with pytest.raises(ValueError, match="unavailable for native"):
             await host.create_side_question(first.run_id, "explain")
+        from eventide.side_questions import create_side_question
+
+        with pytest.raises(ValueError, match="unavailable for native"):
+            await create_side_question(host, first.run_id, "direct public call")
         names = {tool["name"] for tool in provider.requests[0].tools}
         assert not names & {"bash", "write_file", "edit_file", "delegate_readonly", "load_skill"}
         second = await host.run(RunRequest(
@@ -564,3 +568,205 @@ def test_native_capabilities_api_separates_probe_from_verification(tmp_path):
         )
         assert invalid.status_code == 422
         assert not host.store.latest_run(session)
+
+
+@pytest.mark.parametrize("operation", ["write_file", "edit_file"])
+async def test_cancel_after_native_write_dispatch_persists_unknown_and_waits_for_worker(
+    tmp_path, monkeypatch, operation,
+):
+    import json
+
+    from eventide.native_sandbox.runner import _unsandboxed_test_launcher
+
+    written, closing, release_close = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    runners = []
+
+    class HeldResponse(NativeSandboxRunner):
+        async def start(self):
+            await super().start()
+            reader = self._process.stdout
+            original = reader.readline
+
+            async def hold_result():
+                raw = await original()
+                response = json.loads(raw)
+                if response.get("ok") and set(response.get("result", {})) == {"size"}:
+                    written.set()
+                    await asyncio.Event().wait()
+                return raw
+
+            reader.readline = hold_result
+
+        async def aclose(self):
+            closing.set()
+            await release_close.wait()
+            await super().aclose()
+
+    def factory(policy, backend=None):
+        runner = HeldResponse(
+            policy, backend=NativeBackendKind.SEATBELT,
+            launcher=_unsandboxed_test_launcher,
+        )
+        runners.append(runner)
+        return runner
+
+    monkeypatch.setattr("eventide.native_execution.NativeSandboxRunner", factory)
+    args = {"path": "code.py", "content": "changed\n"} if operation == "write_file" else {
+        "path": "code.py", "old_text": "original", "new_text": "changed",
+    }
+    provider = ScriptedProvider([
+        {"tool_calls": [{"name": operation, "arguments": args}]},
+        {"text": "must not continue"},
+    ])
+    host = make_host(tmp_path, provider)
+    run_id = "run_native_cancelled_write"
+    task = asyncio.create_task(host.run(RunRequest(
+        "change", run_id=run_id, execution_target="worktree", execution_profile="native",
+    )))
+    try:
+        await asyncio.wait_for(written.wait(), 5)
+        binding = host._execution_binding(run_id)
+        root, _ = host._execution_paths(binding)
+        assert (root / "code.py").read_text() == "changed\n"
+        owner = host._run_tasks[run_id]
+        owner.cancel()
+        await asyncio.wait_for(closing.wait(), 5)
+        owner.cancel()
+        await asyncio.sleep(0)
+        assert not owner.done()
+        process = runners[0]._process
+        assert process is not None and process.returncode is None
+        release_close.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert process.returncode is not None
+        record = host.store.get_run(run_id)
+        assert record["reason"] == "unknown_tool_outcome"
+        unknown = [event for event in host.store.run_events(run_id)
+                   if event["type"] == "tool.outcome_unknown"]
+        assert len(unknown) == 1 and unknown[0]["payload"]["name"] == operation
+        assert len(provider.requests) == 1
+        with pytest.raises(ValueError, match="Unknown tool outcome"):
+            host.validate_continue(record["session_id"])
+        settings = host.settings
+        session_id = record["session_id"]
+    finally:
+        release_close.set()
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        await host.close()
+    next_provider = ScriptedProvider([{"text": "must not recover"}])
+    reopened = RuntimeHost(settings, next_provider)
+    try:
+        await reopened.initialize()
+        assert reopened.store.latest_run(session_id)["id"] == run_id
+        assert not next_provider.requests
+    finally:
+        await reopened.close()
+
+
+async def test_cancel_before_native_write_dispatch_does_not_claim_unknown(tmp_path, monkeypatch):
+    starting = asyncio.Event()
+    runners = []
+
+    class BeforeDispatch(FakeRunner):
+        async def start(self):
+            starting.set()
+            await asyncio.Event().wait()
+
+    def factory(policy, backend=None):
+        runner = BeforeDispatch()
+        runners.append(runner)
+        return runner
+
+    monkeypatch.setattr("eventide.native_execution.NativeSandboxRunner", factory)
+    provider = ScriptedProvider([{"tool_calls": [{"name": "write_file", "arguments": {
+        "path": "code.py", "content": "not dispatched",
+    }}]}])
+    host = make_host(tmp_path, provider)
+    run_id = "run_native_before_dispatch"
+    task = asyncio.create_task(host.run(RunRequest(
+        "write", run_id=run_id, execution_target="worktree", execution_profile="native",
+    )))
+    try:
+        await asyncio.wait_for(starting.wait(), 5)
+        host._run_tasks[run_id].cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        events = host.store.run_events(run_id)
+        assert not any(event["type"] == "tool.outcome_unknown" for event in events)
+        assert runners[0].closed and not runners[0].ops
+        root, _ = host._execution_paths(host._execution_binding(run_id))
+        assert (root / "code.py").read_text() == "original\n"
+    finally:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        await host.close()
+
+
+@pytest.mark.parametrize("phase", ["before", "after"])
+def test_edit_checks_directory_entry_before_and_after_writing(tmp_path, monkeypatch, phase):
+    import io
+
+    from eventide.native_sandbox.worker import FileWorker
+
+    workspace = tmp_path / "copy"
+    workspace.mkdir()
+    target = workspace / "code.txt"
+    target.write_text("original")
+    replacement = workspace / "replacement.txt"
+    replacement.write_text("replacement")
+    policy = build_native_policy(
+        workspace, profile="workspace-write", state_root=tmp_path / "state",
+    )
+    worker = FileWorker(policy.grant(), io.BytesIO(), io.BytesIO())
+    held = os.open(target, os.O_RDONLY)
+    original_stat = os.stat
+    calls = 0
+
+    def replace_on_check(path, *args, **kwargs):
+        nonlocal calls
+        if path == "code.txt" and kwargs.get("dir_fd") is not None:
+            calls += 1
+            if calls == (1 if phase == "before" else 2):
+                os.replace(replacement, target)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr("eventide.native_sandbox.worker.os.stat", replace_on_check)
+    try:
+        result = worker.handle({"v": 1, "id": "edit", "op": "edit_file", "params": {
+            "path": str(target), "old_text": "original", "new_text": "changed",
+        }})
+        assert not result["ok"]
+        assert result["error"]["code"] == ("hash_mismatch" if phase == "before" else "path_changed")
+        assert target.read_text() == "replacement"
+        assert os.read(held, 100) == (b"original" if phase == "before" else b"changed")
+    finally:
+        os.close(held)
+        cleanup_native_tmp(policy)
+
+
+async def test_cancelled_dispatched_write_keeps_unknown_when_cleanup_fails(tmp_path):
+    from eventide.native_sandbox.runner import WorkerCallCancelledError
+
+    class CleanupFailed(FakeRunner):
+        async def call(self, operation, **params):
+            raise WorkerCallCancelledError(operation, dispatched=True)
+
+        async def aclose(self):
+            raise OSError("worker cleanup blocked")
+
+    workspace = tmp_path / "copy"
+    workspace.mkdir()
+    _, tools = make_tools(workspace, tmp_path / "state", factory=lambda _: CleanupFailed())
+    try:
+        result = await tools.write_file("code.py", "x", cwd=workspace)
+        assert result.is_error and result.metadata["outcome_unknown"] is True
+        assert "cleanup blocked" in result.content
+        assert tools._runner is not None
+    finally:
+        cleanup_native_tmp(tools.policy)

@@ -1107,3 +1107,23 @@ MK11-INTEGRATION复验完成：原五项中三项Shell失败链的根因已确�
 
 - MK21-NATIVE-PRODUCTION 探测fixture修正后18项通过，Ruff通过，日志eventide-native-offline-probe.log；未新增真实平台验证声明。
 
+
+
+### MK21-CANCELLED-WRITE — 已派发写入取消后丢失未知事实（审查发现）
+
+- 基线1955b38：主代理独立审查发现NativeFileTools._call未处理已派发write/edit等待响应时的取消。Host取消异步工具后若execution.cancelled()为True，不会从结果metadata记录unknown；worker可能已写入，Run却只留下普通cancelled。属于候选审查发现，尚未集成/推送，不宣称已发生用户事故。当前代理接手修正传输派发事实、实际清理和Host持久unknown验证；原生候选暂不能通过集成。
+
+- MK21-CANCELLED-WRITE 首轮新验证4通过/2失败，日志 `/tmp/eventide-native-cancel-review.log`。真实write/edit均已写入、重复取消等待worker退出、Host持久unknown且仅1个模型请求的断言已过；失败是测试匹配小写unknown，而既有Continue错误为“Unknown tool outcome”，尚未执行该用例的重启断言。按实际错误大小写修正后精确复验，不将未运行的重启步骤算通过。目录项写前/写后替换与未派发取消场景已通过。
+
+- MK21-CANCELLED-WRITE 静态首轮4项失败：新增异常导入顺序与worker/test的3处长行（`/tmp/eventide-native-cancel-ruff.log`），按规则拆行和排序后复验。
+
+### MK21-EDIT-PATH — 编辑器替换目录项时旧描述符不能证明当前文件
+
+- 基线1955b38，独立审查指出worker编辑只复读原fd：外部编辑器os.replace目标后，旧fd可保持原字节，可能写入已卸链inode却返回Edited成功。属于未集成候选审查发现，没有线上事故证据。修复为持有parent fd，实际写前、写后都核对目录项dev/inode；写前替换以hash_mismatch拒绝且不写，写后替换以path_changed报告并由原生工具映射unknown，不误报当前路径编辑成功。两项确定性测试保留旧fd并在精确检查点os.replace，核对当前路径与旧inode内容；不宣称任意外部写入者参与的CAS。
+
+### MK21-NATIVE-CHILD — 公共旁枝入口也须拒绝原生来源
+
+- 主代理交叉审查发现Graph直接调用公共side_questions.create_side_question，包装器Host.create_side_question中的原生拒绝可被绕过。修复将原冻结execution_profile_config.kind=native检查移至公共入口，在创建快照/子Run之前拒绝；原包装器委托同一检查，不保留两套规则。已有原生只读测试新增直接公共调用拒绝断言，证明不借旁枝剥掉原生环境。Graph.create跨候选拒绝与测试由主代理集成负责。
+
+MK21-CANCELLED-WRITE/MK21-EDIT-PATH/MK21-NATIVE-CHILD收口：7项定向、15项runner/旁枝关联、Ruff、Mypy4模块全部通过。真实worker协议链已证明写可能完成时取消不会变成普通cancelled，原有预算、调用身份与恢复边界未放宽；清理失败也保留unknown，关闭标记延后到实际收尾。失败regex已按既有文案修正，静态问题已修复；当前代理实施、父代理及readonly_finish独立审查。没有真实OS/模型验证，不虚构线上用户影响。日志已归档 `.task_outputs/maka-upgrade/native-current-model/eventide-native-cancel-*.log`；对应本次原生审查修复提交，Graph集成验证另由父代理负责。
+

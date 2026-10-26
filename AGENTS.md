@@ -599,3 +599,9 @@ MK21共享分页渲染器补充复核：原有文件版本续页、文件证据�
 
 MK21离线装置补充：新增Host/HTTP测试统一注入backend探测结果，避免依赖Linux机器安装bwrap或Mac安装sandbox-exec；18项复验通过，仅证明接线，不充当真实平台可用性证明。
 
+
+
+MK21独立审查修正候选（待主集成）：主代理发现并要求修复已派发写取消丢unknown、编辑器替换目录项误报成功和Graph绕过包装器的原生旁枝组合。已改为传输派发事实+真实清理后unknown结算、dentry前后核对，以及公共旁枝入口拒绝；7项定向通过，Ruff/Mypy4模块通过，关联runner/旁枝复验收口后追加。原生候选未直接推送，仍由主代理审查集成。
+
+MK21审查修复收口：7项取消/目录项/公共入口定向通过，包含实际worker写成功后阻塞回执、重复取消等待真实进程退出、持久unknown/拒绝Continue/重启无模型派发、未派发取消不记unknown、写前/后目录项替换，以及清理异常不覆盖unknown。关联runner/原旁枝15项、Ruff、Mypy4模块通过。原失败仅新测试错误匹配大小写与静态格式，已修复登记；日志native-current-model/eventide-native-cancel-*。Graph.create跨候选保护仍由主代理集成验证，真实平台和整体MK21/MK22未完成。
+

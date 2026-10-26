@@ -61,6 +61,14 @@ class WorkerProtocolError(NativeSandboxError):
     """Protocol framing violated; the runner stops being usable."""
 
 
+class WorkerCallCancelledError(asyncio.CancelledError):
+    """Cancellation retains whether a request crossed the worker transport."""
+
+    def __init__(self, operation: str, dispatched: bool) -> None:
+        super().__init__(f"Native worker {operation} cancelled; dispatched={dispatched}")
+        self.dispatched = dispatched
+
+
 class WorkerOperationError(NativeSandboxError):
     """The worker refused or failed the requested operation."""
 
@@ -253,50 +261,55 @@ class NativeSandboxRunner:
             {"v": PROTOCOL_VERSION, "id": identifier, "op": operation, "params": params}
         )
         assert process.stdin is not None and process.stdout is not None
+        dispatched = False
         try:
-            process.stdin.write(line.encode("utf-8") + b"\n")
-            await process.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError) as error:
-            self._broken = "worker stdin closed"
-            raise WorkerCrashedError("Worker stdin closed before request") from error
-        try:
-            raw = await asyncio.wait_for(process.stdout.readline(), self._call_timeout)
-        except asyncio.TimeoutError as error:
-            self._broken = f"timeout waiting for {operation}"
-            raise WorkerProtocolError(f"Timed out waiting for {operation} response") from error
-        except (ValueError, asyncio.LimitOverrunError) as error:
-            self._broken = "response exceeded the stream limit"
-            raise WorkerProtocolError("Worker response exceeded the stream limit") from error
-        if not raw:
-            self._broken = "worker exited"
-            tail = await self._stderr_tail()
-            raise WorkerCrashedError(f"Worker exited before responding; stderr: {tail!r}")
-        try:
-            response = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            self._broken = "malformed response"
-            raise WorkerProtocolError("Worker response is not valid JSON") from error
-        if not isinstance(response, dict) or response.get("id") != identifier:
-            self._broken = "response id mismatch"
-            raise WorkerProtocolError("Worker response does not match the request id")
-        if response.get("ok") is not True:
-            error_payload = response.get("error")
-            if not isinstance(error_payload, dict):
-                self._broken = "malformed error response"
-                raise WorkerProtocolError("Worker error response is malformed")
-            raise WorkerOperationError(
-                str(error_payload.get("code")), str(error_payload.get("message"))
-            )
-        result = response.get("result")
-        if not isinstance(result, dict):
-            self._broken = "malformed result"
-            raise WorkerProtocolError("Worker result is not an object")
-        return result
+            try:
+                process.stdin.write(line.encode("utf-8") + b"\n")
+                dispatched = True
+                await process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError) as error:
+                self._broken = "worker stdin closed"
+                raise WorkerCrashedError("Worker stdin closed before request") from error
+            try:
+                raw = await asyncio.wait_for(process.stdout.readline(), self._call_timeout)
+            except asyncio.TimeoutError as error:
+                self._broken = f"timeout waiting for {operation}"
+                raise WorkerProtocolError(f"Timed out waiting for {operation} response") from error
+            except (ValueError, asyncio.LimitOverrunError) as error:
+                self._broken = "response exceeded the stream limit"
+                raise WorkerProtocolError("Worker response exceeded the stream limit") from error
+            if not raw:
+                self._broken = "worker exited"
+                tail = await self._stderr_tail()
+                raise WorkerCrashedError(f"Worker exited before responding; stderr: {tail!r}")
+            try:
+                response = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                self._broken = "malformed response"
+                raise WorkerProtocolError("Worker response is not valid JSON") from error
+            if not isinstance(response, dict) or response.get("id") != identifier:
+                self._broken = "response id mismatch"
+                raise WorkerProtocolError("Worker response does not match the request id")
+            if response.get("ok") is not True:
+                error_payload = response.get("error")
+                if not isinstance(error_payload, dict):
+                    self._broken = "malformed error response"
+                    raise WorkerProtocolError("Worker error response is malformed")
+                raise WorkerOperationError(
+                    str(error_payload.get("code")), str(error_payload.get("message"))
+                )
+            result = response.get("result")
+            if not isinstance(result, dict):
+                self._broken = "malformed result"
+                raise WorkerProtocolError("Worker result is not an object")
+            return result
+        except asyncio.CancelledError as error:
+            self._broken = f"cancelled while awaiting {operation}"
+            raise WorkerCallCancelledError(operation, dispatched) from error
 
     async def aclose(self) -> None:
         if self._closed:
             return
-        self._closed = True
         process = self._process
         if process is not None:
             graceful = (NativeSandboxError, asyncio.TimeoutError, asyncio.CancelledError)
@@ -319,6 +332,7 @@ class NativeSandboxRunner:
                 os.unlink(self._profile_path)
             self._profile_path = None
         self._process = None
+        self._closed = True
 
     def _require_process(self) -> asyncio.subprocess.Process:
         if self._process is None:

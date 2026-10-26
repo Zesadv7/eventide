@@ -422,10 +422,6 @@ class RuntimeHost:
                 if (self._closed or self._configuring or self._provider_cleanup_required
                         or self._configuration_uncertain):
                     raise ValueError("Runtime configuration is unavailable")
-                source_intent = self._admitted_intent(source_run_id) or {}
-                if (source_intent.get("execution_profile_config", {}).get("kind")
-                        == NATIVE_PROFILE_KIND):
-                    raise ValueError("Side questions are unavailable for native execution")
                 active = sum(
                     (self._admitted_intent(run_id) or {}).get("worker_role") == "side_question"
                     for run_id in self._run_tasks

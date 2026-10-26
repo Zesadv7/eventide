@@ -1336,3 +1336,7 @@ state_root若为执行副本祖先，不将其整根deny以免覆盖授权副本
 
 取消启动和重复取消均等待worker真实收尾；清理失败持久化native.cleanup_failed Session事实并返回失败，不静默吞掉，也不把失败清理当完成。页面可选择权限/后端，显示平台不可用原因、未验证状态、固定环境和明确支持范围；OpenAPI/TS同步。真实内核/浏览器分发与完整门禁仍须主集成完成，Linux没有环境时保持待外部验证。
 
+
+
+原生文件接线独立审查修正：runner对取消保留实际请求frame已派发状态；已派发write/edit在等待回执时取消，必须等真实worker关闭后通过ToolResult返回unknown，让Host原取消结算持久保存tool.outcome_unknown，重启不得盲续做。启动/派发前取消不制造未知写入；清理失败不覆盖已派发写的unknown，runner.closed只在实际清理完成后设置。编辑额外持有parent fd并在写前/写后核对目录项身份：前变更不写，后变更报告unknown，原fd字节一致不能单独证明当前路径。公共旁枝入口按原Run冻结native配置拒绝该组合，Graph等调用方不能剥掉环境边界。具体故障与定向证据见MK21-CANCELLED-WRITE/MK21-EDIT-PATH/MK21-NATIVE-CHILD。
+
