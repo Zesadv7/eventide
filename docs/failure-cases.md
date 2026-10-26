@@ -1146,6 +1146,7 @@ MK21-INTEGRATION组合守卫复验：Graph创建/公共旁枝拒绝与普通Grap
 - MK21-WRITE-RECEIPT 收口：5项定向全部通过（发布后替换、原inode改字节的worker验证及Host持久unknown投影各2项，正常新文件/覆盖权限既有场景1项），worker/runner23项通过。Ruff修正后通过、Mypy1模块通过；编辑器内容保留，Host只有1次模型请求并停驻，未冒充成功after版本。日志已归档native-current-model/eventide-native-write-receipt-*；当前代理实施、readonly_finish审查发现、父代理确认统一契约。对应本次发布后回执核对提交；没有真实内核/模型与线上影响证据。
 
 
+
 - MK21-INTEGRATION前端关联首批23通过/1失败：execution.test.ts第76行用通用button[type=submit]定位预期聊天发送按钮，GraphPanel新增保存表单后读到了“保存方案”按钮disabled。日志native-review/frontend.log；原因先按实际DOM与测试代码核对，不改产品权限判定以满足断言。原生89项主集成定向全部通过（native-review/backend.log），不以其替代前端复验。
 
 - MK21-INTEGRATION执行测试定位修正后首次复验又因维护命令在仓库根运行Vitest，未加载frontend的Vue插件，.vue导入变换失败、未收集用例（frontend-execution.log）。改在frontend目录执行，不把零用例计为通过；与此前Vue类型命令同属目录选择错误。生产页面和权限逻辑未改。
@@ -1171,4 +1172,15 @@ MK21-INTEGRATION当前复验：89项原生worker/协议/路径/取消主集成�
 - visibility-related失败原因已证实：delivery._checkpoint是validate_delivery_source的独立生产来源，尚无新增index_visibility；ExecutionWorktrees.create原比较正确拒绝形状不同的证据。给该来源同步同一只读索引可见性哈希，不放松比较，定向复验失败项并检查交付准备/采纳及隐藏index保护。
 
 - MK08D-RECONCILE独立审查补修闭环：visibility1新增10项通过（ignored/初始assume或skip不核清、核清后隐藏标志变化、claim与接收后派发窗口、literal特殊路径、目标与祖先替换）；visibility-baseline2项通过，覆盖旧checkpoint不被静默补字段及正常可见目标恢复。visibility-related首轮21通过/1个生产checkpoint形状回归，delivery._checkpoint同步索引哈希后失败项及受影响交付6项全过；读取路径元数据补齐后visibility-final3项通过，批次重叠不相加。最终Ruff/Mypy4模块/Vue类型通过，diff检查通过。原19项未无故整批重复，未运行全量/模型/真实浏览器。独立只读审查由readonly_finish完成，当前子agent确认并修复，root确定Git可见目标与旧checkpoint停驻取舍；完整ignored目标恢复仍后置，不将限制写成已实现。相关提交为fix: bind reconciled outcomes to Git visibility and current paths。
+
+
+### MK21-NATIVE-BROWSER — 原生文件打包页面真实API旅程
+
+- 基线8da72ad，在专用E2E服务器注入available/unverified探测与无OS包装的真实stdlib worker，仅证明产品文件接线与页面/API行为，不作为内核隔离验收。测试服务器新增场景与固定fixture证据接口，生产后端不增加任何fallback。首轮Ruff仅新fixture证据字典一处104字符长行失败（`/tmp/eventide-native-e2e-ruff.log`），拆行后继续；暂未运行浏览器，不计通过。
+
+- MK21-NATIVE-BROWSER 收口：新增单条built页面真实API旅程首次执行通过（9.2秒），类型检查、Vite构建、Ruff修正后通过。验证独立真实stdlib worker PID/读写、source无改、刷新profile/backend固定、只读连续两条消息与拒绝升级、320px。探测为测试available/unverified，OS包装明确未启用，不能作为内核验收。临时eventide/workbench资源从预先备份精确恢复，不提交；日志与本次served manifest归档native-current-model/eventide-native-e2e-*及native-e2e-served-manifest.json。没有新增浏览器运行失败。
+
+### MK21-ANCESTOR-OBSERVATION — 父目录被替换后旧parent fd不等于canonical路径（待处理）
+
+- readonly_finish最终静态审查8da72ad指出：发布后若父目录被rename并在原路径重建目录/目标，当前open/stat仍走旧parent fd，可核对旧目录而未核对canonical祖先绑定。当前代理只读核实没有额外重遍历guard；此项未在本次浏览器旅程覆盖，也未修复或运行缺陷验证，不虚构故障重现结果。已报告主代理决定处理范围，原生整体仍不能标完成；本次提交只增加接线旅程fixture/test/docs。
 

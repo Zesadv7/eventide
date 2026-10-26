@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+
 import json
+
+import hashlib
+
 import os
 import sys
 import tempfile
@@ -38,6 +42,45 @@ def main() -> None:
             pass
 
     import eventide.host as host_module
+    import eventide.native_execution as native_execution_module
+    import eventide.native_sandbox.probe as native_probe
+    from eventide.native_sandbox.policy import NativeBackendKind
+    from eventide.native_sandbox.probe import BackendDetection
+    from eventide.native_sandbox.runner import NativeSandboxRunner, _unsandboxed_test_launcher
+
+    # Only this disposable journey server replaces the OS launcher/probe.
+    # Product defaults still launch through Seatbelt/bubblewrap without fallback.
+    native_workers = []
+    native_calls = []
+
+    def native_fixture_probe(kind):
+        available = kind is NativeBackendKind.SEATBELT
+        return BackendDetection(
+            kind=kind, platform="e2e-test-fixture", platform_supported=available,
+            binary_path="/test/sandbox-exec" if available else None,
+            available=available,
+            detail="测试注入：可验证文件接线，内核隔离未验证" if available
+            else "本旅程未启用该测试后端",
+        )
+
+    class JourneyNativeWorker(NativeSandboxRunner):
+        async def call(self, operation, **params):
+            result = await super().call(operation, **params)
+            native_calls.append({
+                "root": str(self.policy.workspace_root), "operation": operation,
+                "pid": self._process.pid,
+            })
+            return result
+
+    def native_fixture_runner(policy, backend=None):
+        runner = JourneyNativeWorker(
+            policy, backend=backend, launcher=_unsandboxed_test_launcher,
+        )
+        native_workers.append(runner)
+        return runner
+
+    native_probe.detect_backend = native_fixture_probe
+    native_execution_module.NativeSandboxRunner = native_fixture_runner
 
     class JourneyProvider(FakeProvider):
         async def complete(self, request):
@@ -52,6 +95,7 @@ def main() -> None:
                                      usage={"input_tokens": 40, "output_tokens": 10})
             if any(label in self._prompt(request) for label in (
                 "交付修复场景", "检索交付场景", "文件操作编辑场景", "文件操作新建场景",
+                "原生文件场景",
             )):
                 async for event in self.stream(request):
                     if event.response is not None:
@@ -64,8 +108,23 @@ def main() -> None:
             usage = {"input_tokens": 100 + step, "output_tokens": 20}
             if "side-question investigator" in prompt:
                 response = await self.complete(request)
+
             elif "摘要对照场景" in prompt:
                 response = ModelResponse(text="摘要对照的原始任务已完成", usage=usage)
+
+            elif "原生文件场景" in prompt:
+                names = {tool["name"] for tool in request.tools}
+                if step == 1:
+                    response = ModelResponse(tool_calls=[self._call("read_file", {
+                        "path": "src/demo.py",
+                    })], stop_reason="tool_use", usage=usage)
+                elif step == 2 and "write_file" in names:
+                    response = ModelResponse(tool_calls=[self._call("write_file", {
+                        "path": "native/note.txt", "content": "native worker candidate\n",
+                    })], stop_reason="tool_use", usage=usage)
+                else:
+                    response = ModelResponse(text="原生文件检查完成", usage=usage)
+
             elif "命令日志场景" in prompt:
                 if step == 1:
                     response = ModelResponse(tool_calls=[self._call("bash", {
@@ -223,6 +282,7 @@ def main() -> None:
         app = create_app(runtime)
         held_index_locks: dict[str, asyncio.Lock] = {}
 
+
         @app.post("/api/__e2e/summary/{session_id}")
         async def prepare_summary(session_id: str):
             from eventide.context_builder import ContextBuilder
@@ -237,6 +297,36 @@ def main() -> None:
                 provider_name=settings.provider, model=settings.model, budget=20000, force=True,
             )
             return {"saved": len(runtime.store.checkpoints(session_id))}
+
+        @app.get("/api/__e2e/native-proof/{run_id}")
+        async def native_proof(run_id: str):
+            # Read only known fixture paths; this is evidence, never a tool fallback.
+            intent = runtime._admitted_intent(run_id)
+            assert intent["execution_profile_config"]["kind"] == "native"
+            binding = runtime._execution_binding(run_id)
+            assert binding["kind"] == "worktree"
+            candidate, working = runtime._execution_paths(binding)
+            source = Path(runtime.store.get_workspace(intent["workspace_id"]).path)
+            note = candidate / "native/note.txt"
+            from eventide.workspace import git
+
+            calls = [item for item in native_calls if item["root"] == str(working)]
+            workers = [worker for worker in native_workers
+                       if worker.policy.workspace_root == working]
+            return {
+                "fixture_launcher": "stdlib-worker-without-os-wrapper",
+                "verification": "unverified", "server_pid": os.getpid(),
+                "candidate_root": str(candidate), "source_root": str(source),
+                "source_status": git(source, "status", "--porcelain").decode(),
+                "source_note_exists": (source / "native/note.txt").exists(),
+                "candidate_note": note.read_text() if note.exists() else None,
+                "source_demo_sha256": hashlib.sha256(
+                    (source / "src/demo.py").read_bytes(),
+                ).hexdigest(),
+                "profile": intent["execution_profile_config"], "worker_calls": calls,
+                "workers_closed": all(worker._process is None for worker in workers),
+            }
+
 
         @app.post("/api/__e2e/retrieval-hold/{workspace_id}")
         async def hold_retrieval(workspace_id: str):

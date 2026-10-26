@@ -1346,6 +1346,7 @@ state_root若为执行副本祖先，不将其整根deny以免覆盖授权副本
 原生write_file与edit_file统一回执观察契约：write原子发布后，通过现有安全parent fd重开当前目标，核对发布inode、常规单链接文件与有界字节内容，再核对目录项/元数据版本；可观察到替换、原inode改字节或无法确认时返回path_changed并由既有工具结果映射outcome_unknown。已发布事实与当前状态不同须同时如实保留，不恢复或覆盖编辑器内容。此检查只约束本次回执观察点，不是永久稳定保证。定向5项（两种worker插入、两种Host unknown投影、正常新文件）与既有worker/runner23项通过，Ruff/Mypy1模块通过。
 
 
+
 ### MK08D内置文件未知结果核查（2026-10-26，ADR127）
 
 新内置write/edit在实际执行前，由FileOperations把原参数指纹、目标before/after和recovery_context一起保存在原恢复记录；context沿用workspace_checkpoint的Git可见范围，保留HEAD、全部index、目标外unstaged diff与untracked内容哈希，只排除该目标的工作树内容，Runtime产物排除规则不变。Git忽略文件、外部服务和同UID外部进程不在该证据保证内。旧记录无此证据时不从当前文件补造写前基线。
@@ -1361,4 +1362,7 @@ state_root若为执行副本祖先，不将其整根deny以免覆盖授权副本
 MK08D独立审查修正：核清目标必须由literal pathspec证明为Git真实可见（正常H tracked条目，或未被忽略的untracked）；ignored、assume-unchanged、skip-worktree目标明确requires_review。通用workspace_checkpoint新增index_visibility=SHA256(git ls-files -v -z)，使核清后新设隐藏标志也会被原恢复/接收/派发检查点比较拒绝，包含no_change目标原先没有diff的情形。当前目录项通过重新nofollow路径遍历并核对st_dev/st_ino，拒绝旧fd已稳定而当前目标或祖先已替换的读取证据。旧checkpoint不静默补字段，crash-gap也不能重新写当前基线来抹去缺失，旧任务需后续MK08E明确建基线；历史事实仍可读。此切片不冻结后续人工undo历史：核查事实只说明当次观察，后续Continue重新核对当前Git和index状态。
 
 索引可见性字段同时进入delivery._checkpoint，保持validate_delivery_source与ExecutionWorktrees.create的证据相等，不以忽略新字段解决兼容问题。旧交付证据同样不自动补造新索引状态，后续重新建立基线必须显式进行。
+
+
+原生文件Web接线新增单条真实API与打包页面旅程：验证可用性/未验证状态、真实POST、独立worker文件I/O、候选隔离与源不变、刷新冻结、只读两次消息不升级、拒绝升级及320px。探测与无OS包装的stdlib worker仅注入专用测试服务器，产品启动器未增加fallback；该证据证明接线，不证明OS隔离。原生UI构建资源由主集成统一生成，独立测试分支不提交临时产物。祖先目录替换观察点审查仍待处理。
 
