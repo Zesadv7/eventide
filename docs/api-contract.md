@@ -753,3 +753,5 @@ MK05集成补充：现有read_tool_result新增普通命令stdout/stderr分流�
 - `GET /api/sessions/{id}/context-summaries?before=&limit=`：新到旧checkpoint元数据，limit 1–50（默认20），next_before游标；未知Session404。没有摘要返回空列表，不补造。
 - `GET /api/sessions/{id}/context-summaries/{checkpoint_id}`：严格同Session；返回覆盖位置、原历史/摘要指纹、policy/provider/model，结构化摘要或保留的旧文本。`source_verified`仅代表事件前缀/终态/策略能核对，`input_verification=matched|claim_missing|projection_changed|unavailable`单独说明原请求输入。`citations_problem`保留不匹配原因，不把失败解析为正常摘要。summary最多24,000字符，summary_truncated和原字符数显式；不改变数据库原文。
 - `GET /api/sessions/{id}/context-summaries/{checkpoint_id}/messages/{index}?offset=&limit=`：原摘要消息投影的JSON文本分页，offset≥0，limit 1–12,000（默认8,000）；返回history_hash/输入核对状态和next_offset。不是原文件正文，也可能包含生成摘要前已裁剪的工具预览。来源不可核对409，越Session/未知消息404，分页越界422。GET不写事件、不调用模型、不读取当前源码。
+
+MK09页面范围接线（2026-10-26）：待处理页`#/attention?project=<project_id>`调用既有项目attention端点，无query时调用全局端点。刷新/直接打开保持范围；切换中不展示旧项目动作，404/网络失败不自动改成全局结果。未新增或修改HTTP契约。

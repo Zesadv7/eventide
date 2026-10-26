@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { createRouter, createMemoryHistory } from "vue-router";
 import AttentionView from "../src/views/AttentionView.vue";
 import { attentionApi, type AttentionSnapshot } from "../src/api/attention";
+import { useWorkbench } from "../src/stores/workbench";
 import { api } from "../src/api/client";
 
 const snapshot: AttentionSnapshot = {
@@ -215,5 +216,115 @@ describe("attention center", () => {
     expect(wrapper.text()).toContain("当前没有待审批请求");
     expect(wrapper.text()).toContain("当前没有失败或停驻的运行");
     expect(wrapper.text()).toContain("当前没有通过验收、等待人工采纳的候选");
+  });
+});
+
+describe("attention project scope", () => {
+  beforeEach(() => {
+    useWorkbench().workspaces = [
+      {
+        workspace_id: "workspace-1",
+        project_id: "project-1",
+        name: "项目甲",
+        path: "/a",
+      },
+      {
+        workspace_id: "workspace-2",
+        project_id: "project-2",
+        name: "项目乙",
+        path: "/b",
+      },
+    ];
+  });
+
+  it("keeps the scope in the URL and ignores a late global response", async () => {
+    let finish!: (value: AttentionSnapshot) => void;
+    vi.spyOn(attentionApi, "global").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const project = vi
+      .spyOn(attentionApi, "project")
+      .mockResolvedValue({
+        ...snapshot,
+        project_id: "project-1",
+        approvals: [],
+      });
+    const { wrapper, router } = await render();
+    await wrapper
+      .get('select[aria-label="待处理项目范围"]')
+      .setValue("project-1");
+    await flushPromises();
+    expect(router.currentRoute.value.query.project).toBe("project-1");
+    expect(project).toHaveBeenCalledWith("project-1");
+    expect(wrapper.text()).not.toContain("rm -rf build");
+    finish(snapshot);
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("rm -rf build");
+    wrapper.unmount();
+    const reopened = mount(AttentionView, { global: { plugins: [router] } });
+    await flushPromises();
+    expect((reopened.get("select").element as HTMLSelectElement).value).toBe(
+      "project-1",
+    );
+    expect(project).toHaveBeenCalledTimes(2);
+    reopened.unmount();
+  });
+
+  it("clears the previous project's actions immediately and does not fall back on errors", async () => {
+    vi.spyOn(attentionApi, "global").mockResolvedValue(snapshot);
+    let reject!: (reason: Error) => void;
+    vi.spyOn(attentionApi, "project").mockImplementation(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    const { wrapper } = await render();
+    await flushPromises();
+    expect(wrapper.text()).toContain("rm -rf build");
+    await wrapper.get("select").setValue("project-2");
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("rm -rf build");
+    reject(new Error("项目已不可用"));
+    await flushPromises();
+    expect(wrapper.text()).toContain("项目已不可用");
+    expect(wrapper.text()).not.toContain("正在读取");
+    expect(wrapper.text()).not.toContain("rm -rf build");
+    expect(attentionApi.global).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("does not report an old approval failure in the newly selected project", async () => {
+    vi.spyOn(attentionApi, "global").mockResolvedValue(snapshot);
+    const project = vi
+      .spyOn(attentionApi, "project")
+      .mockResolvedValue({
+        ...snapshot,
+        project_id: "project-2",
+        approvals: [],
+      });
+    let reject!: (reason: Error) => void;
+    vi.spyOn(api, "approve").mockImplementation(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    const { wrapper } = await render();
+    await flushPromises();
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "批准")!
+      .trigger("click");
+    await wrapper.get("select").setValue("project-2");
+    await flushPromises();
+    reject(new Error("旧项目审批失败"));
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("旧项目审批失败");
+    expect(project).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
   });
 });

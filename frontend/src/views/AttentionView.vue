@@ -1,39 +1,74 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { attentionApi, type AttentionSnapshot } from "../api/attention";
 import { api, ApiError } from "../api/client";
 import { useWorkbench } from "../stores/workbench";
 
 const store = useWorkbench(),
-  router = useRouter();
+  router = useRouter(),
+  route = useRoute();
+const project = computed(() =>
+  typeof route.query.project === "string" ? route.query.project : "",
+);
+const projects = computed(() => {
+  const result = new Map<string, string>();
+  for (const workspace of store.workspaces) {
+    if (workspace.project_id && !result.has(workspace.project_id))
+      result.set(workspace.project_id, workspace.name);
+  }
+  return [...result].map(([id, name]) => ({ id, name }));
+});
+function selectProject(event: Event) {
+  const value = (event.target as HTMLSelectElement).value;
+  void router.replace({
+    query: { ...route.query, project: value || undefined },
+  });
+}
 const state = ref<AttentionSnapshot | null>(null),
   error = ref(""),
   loading = ref(false);
 const deciding = ref<Record<string, boolean>>({});
 const expanded = ref<Record<string, boolean>>({});
 const actionError = ref<Record<string, string>>({});
+let revision = 0;
 let mounted = true,
   timer: ReturnType<typeof setInterval> | undefined;
 
 async function load() {
   if (loading.value) return;
   loading.value = true;
+  const version = revision;
+  const selected = project.value;
   try {
-    const value = await attentionApi.global();
-    if (mounted) {
+    const value = await (selected
+      ? attentionApi.project(selected)
+      : attentionApi.global());
+    if (mounted && version === revision) {
       state.value = value;
       error.value = "";
     }
   } catch (e) {
-    if (mounted)
+    if (mounted && version === revision)
       error.value = e instanceof Error ? e.message : "待处理读取失败";
   } finally {
-    if (mounted) loading.value = false;
+    if (mounted && version === revision) loading.value = false;
   }
 }
+watch(
+  project,
+  () => {
+    revision += 1;
+    state.value = null;
+    error.value = "";
+    expanded.value = {};
+    actionError.value = {};
+    loading.value = false;
+    void load();
+  },
+  { immediate: true },
+);
 onMounted(() => {
-  void load();
   timer = setInterval(() => void load(), 5000);
 });
 onUnmounted(() => {
@@ -55,11 +90,12 @@ async function decide(approvalId: string, runId: string, approved: boolean) {
   if (deciding.value[key]) return;
   deciding.value[key] = true;
   actionError.value[key] = "";
+  const version = revision;
   try {
     await api.approve(runId, approvalId, approved);
-    await load();
+    if (mounted && version === revision) await load();
   } catch (e) {
-    if (mounted)
+    if (mounted && version === revision)
       actionError.value[key] =
         e instanceof ApiError && e.status === 409
           ? "审批已失效或运行已结束，请刷新列表"
@@ -107,6 +143,25 @@ function formatTool(summary: {
       </div>
       <button :disabled="loading" @click="load">刷新</button>
     </header>
+    <label class="project-filter">
+      查看范围
+      <select
+        aria-label="待处理项目范围"
+        :value="project"
+        @change="selectProject"
+      >
+        <option value="">所有项目</option>
+        <option v-for="item in projects" :key="item.id" :value="item.id">
+          {{ item.name }}
+        </option>
+        <option
+          v-if="project && !projects.some((item) => item.id === project)"
+          :value="project"
+        >
+          项目 {{ project }}（当前目录未列出）
+        </option>
+      </select>
+    </label>
     <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
     <template v-if="state">
       <p v-if="state.limits" class="muted">
@@ -275,11 +330,25 @@ function formatTool(summary: {
         {{ note }}
       </p>
     </template>
-    <p v-else class="empty-state">正在读取待处理事项…</p>
+    <p v-else-if="loading" class="empty-state">正在读取待处理事项…</p>
   </section>
 </template>
 
 <style scoped>
+.project-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.project-filter select {
+  max-width: 100%;
+}
+.attention-page {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .attention-item {
   border: 1px solid var(--border, #ddd);
   border-radius: 8px;

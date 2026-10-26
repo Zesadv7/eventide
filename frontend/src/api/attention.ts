@@ -74,6 +74,10 @@ export interface AttentionSnapshot {
 }
 
 export const attentionApi = {
+  project: (project: string, approvalsLimit = 50, runsLimit = 20) =>
+    request<AttentionSnapshot>(
+      `/api/projects/${encodeURIComponent(project)}/attention?approvals_limit=${approvalsLimit}&runs_limit=${runsLimit}`,
+    ),
   global: (approvalsLimit = 50, runsLimit = 20) =>
     request<AttentionSnapshot>(
       `/api/attention?approvals_limit=${approvalsLimit}&runs_limit=${runsLimit}`,

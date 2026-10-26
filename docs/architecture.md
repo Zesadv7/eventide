@@ -1285,3 +1285,5 @@ MK08F集成复核：继续按钮使用持久幂等请求与expected_run_id，将
 MK05主代理复核：捕获密钥在实际执行器组装时更新为已加载/当前Provider配置，修复持久密钥加载晚于日志对象构造的问题；模型经同Session read_tool_result读取完整流，UI用请求代次隔离stdout/stderr和切调用迟到结果。capture_state=complete表示已排空的输出采集完成，真实命令是否超时/成功仍看原timed_out/exit_code。44项后端通过、1项显式容器跳过；7项前端、Ruff/Mypy6模块/vue-tsc和1条built分页/切流/刷新/320px旅程通过。普通日志落盘不等于后台命令或容器日志已完成。
 
 MK08C正常关闭恢复（ADR-118）：host.shutdown_started绑定确切Run及一次关服身份；取消终态只在该标记存在且无用户停止时记service_shutdown。Run关闭后不再追加Run事件，恢复claim及用户停止以精确关联的Session事实持久化；恢复页将其计入同一high_water。新Host复用安全边界、唯一后继与父根预算，接收时绑定source Run，等待检查期间收到停止也在实际派发前取消后继。代码初稿由ZCode提供，主代理补接收竞态与恢复投影；32项初始专项、101项关联及22项最终复验通过。正常关服可恢复不代表任意未知工具可重放，MK08D/E继续待实施。
+
+MK09项目筛选（2026-10-26）：AttentionView复用`GET /api/projects/{id}/attention`，筛选身份保存在路由query.project；选项使用已注册Workspace的稳定project_id去重，不通过显示名称或目录名推断身份。切范围立即移除旧列表/动作，按请求代次拒绝晚到读取与审批结果；项目不可用显示真实错误，不回退全局列表。轮询仍每5秒读取选定范围，审批继续由原Run端点复验；六项组件及built实际API筛选/刷新/原审批旅程通过，尚未补全待回答与核查不明类别。

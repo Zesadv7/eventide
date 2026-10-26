@@ -33,6 +33,20 @@ test("supplement is saved during approval and attention action stays attached to
   await page.goto("./#/attention");
   await expect(page.getByRole("heading", { name: "待处理中心" })).toBeVisible();
   await expect(page.getByText("rm scratch.txt", { exact: true })).toBeVisible();
+  const activeSession = await (
+    await page.request.get(`/api/sessions/${session}`)
+  ).json();
+  const workspaces = await (await page.request.get("/api/workspaces")).json();
+  const project = workspaces.find(
+    (item: { workspace_id: string }) =>
+      item.workspace_id === activeSession.workspace_id,
+  ).project_id;
+  await page.getByLabel("待处理项目范围").selectOption(project);
+  await expect(page).toHaveURL(new RegExp(`project=${project}`));
+  await expect(page.getByText("rm scratch.txt", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("待处理项目范围")).toHaveValue(project);
+  await expect(page.getByText("rm scratch.txt", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "拒绝", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "拒绝", exact: true }),

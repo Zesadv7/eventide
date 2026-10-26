@@ -558,3 +558,7 @@ MK20独立ZCode实现启动（Coding/max/yolo，codex/maka-agent-graph基线5378
 MK14主代理复核集成：修正无依据的逐项实测日期、端点query/auth身份碰撞及IPv6展示，冻结引用损坏明确拒绝。53项恢复/生成组合、补充12项目录专项、18项前端、11项分发及1条built实际API页面/刷新/320px旅程通过；Ruff/Mypy4模块/vue-tsc通过，OpenAPI/types/页面产物已同步。日志model-capabilities-review，失败已登记。真实工具/流式验证、目录过期和声明编辑仍未完成，MK14保持进行中。
 
 2026-10-26用户再次确认额度重置：Graph/结构化提问已恢复实际工具调用，独立native-runtime/readonly-parallel分支从6ab4029补位，共4路Coding/max/yolo。主代理开始MK03摘要与原始证据对照（ADR126），所有子结果继续独立复核；历史1308不删除，未把新进程当旧会话恢复。
+
+MK09项目筛选补齐开始（2026-10-26，主代理）：复用既有项目attention端点，筛选写入URL，刷新保持；切换项目立即清空旧动作，晚到读取和审批结果不得覆盖当前项目。成功标准为组件并发响应与built实际API筛选/刷新旅程通过，不改任务权限。
+
+MK09项目筛选验证：6项前端组件（迟到全局响应、范围切换立即移除动作、失败无回退、旧审批失败隔离）、built实际API筛选/刷新/同Run审批与补充旅程1条、11项分发、vue-tsc/build/格式通过；日志attention-filter，本切片无测试失败。待回答类别与整体MK09/MK22仍进行中。
