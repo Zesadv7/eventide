@@ -84,7 +84,8 @@ async def test_source_changes_are_not_hidden_by_runtime_exclusions(isolated_work
         await host.close()
 
 
-@pytest.mark.parametrize("name", ["runtime.sqlite-wal", "host.lock", "attachments/source.txt"])
+@pytest.mark.parametrize("name", ["runtime.sqlite-wal", "host.lock", "attachments/source.txt",
+                                   "command-logs/source.txt"])
 def test_tracked_runtime_named_files_still_affect_checkpoint_and_recovery(
     isolated_workspace, name,
 ):
@@ -105,11 +106,15 @@ def test_tracked_runtime_named_files_still_affect_checkpoint_and_recovery(
     )
 
 
-def test_untracked_artifact_changes_and_links_have_precise_recovery_semantics(isolated_workspace):
+@pytest.mark.parametrize("name", ["runtime.sqlite-wal", "command-logs/output.log"])
+def test_untracked_artifact_changes_and_links_have_precise_recovery_semantics(
+    isolated_workspace, name,
+):
     repo = make_repo(isolated_workspace / "repo")
     state = repo / "var/state"
     state.mkdir(parents=True)
-    artifact = state / "runtime.sqlite-wal"
+    artifact = state / name
+    artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("initial")
     before = workspace_checkpoint(repo, **policy(repo, state))
     artifact.write_text("additional runtime data")
@@ -120,7 +125,7 @@ def test_untracked_artifact_changes_and_links_have_precise_recovery_semantics(is
     after = workspace_checkpoint(repo, **policy(repo, state))
     assert after != before
     assert changed_since(repo, 0, **policy(repo, state)) == (
-        ["var/state/runtime.sqlite-wal"], False,
+        [artifact.relative_to(repo).as_posix()], False,
     )
 
 

@@ -147,6 +147,7 @@ def runtime_checkpoint_directories(state_dir: Path) -> tuple[Path, ...]:
     root = state_dir.resolve()
     return tuple(root / name for name in (
         "attachments", "skill-packages", "execution-snapshots", "evaluations", "acceptance-output",
+        "command-logs",
     ))
 
 

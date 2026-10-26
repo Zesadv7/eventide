@@ -75,6 +75,15 @@ def main() -> None:
                     })], stop_reason="tool_use", usage=usage)
                 else:
                     response = ModelResponse(text="命令日志检查完成", usage=usage)
+            elif "只读并发场景" in prompt:
+                if step == 1:
+                    response = ModelResponse(tool_calls=[
+                        self._call("read_file", {"path": "src/demo.py"}),
+                        self._call("glob", {"pattern": "src/*.py"}),
+                        self._call("search_text", {"query": "source", "pattern": "src/*.py"}),
+                    ], stop_reason="tool_use", usage=usage)
+                else:
+                    response = ModelResponse(text="并发读取检查完成", usage=usage)
             elif "源码证据场景" in prompt:
                 if step == 1:
                     response = ModelResponse(tool_calls=[self._call("read_file", {

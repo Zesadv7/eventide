@@ -1322,3 +1322,5 @@ Host先保存每项tool.prepared及Run内batch身份，取得槽后保存tool.st
 
 Run/API/SSE投影展示各项prepared/running/completed/abandoned/outcome_unknown；Vue工具活动显示批次位置和真实状态。排队/运行读取数由原队列查询按当前调度所有权提供，批次历史仍只有runtime_events一个事实源。此切片只验证机制，不宣称模型质量或耗时提升；最终浏览器/平台/模型与整仓收口按MK22。
 
+
+MK11集成（2026-10-26）：新批次与已有Graph/提问共存，真实页面显示准备/执行/完成/未执行与稳定位置，刷新保留事实。source checkpoint的Runtime排除目录补精确command-logs namespace，避免日志新增伪造源码进展；tracked文件和替换为链接仍检测，checkpoint_policy保留真实目录列表、旧事实不重写。51项调度、51项失败链/日志/指纹、15项Graph分发、15项组件及2条built浏览器与静态检查通过；详见MK11-INTEGRATION。

@@ -1072,3 +1072,9 @@ MK20-CURRENT最终：prestart-red复现后3项Green通过；持久完成结果�
 
 - MK11-CURRENT切片收口：新13场景逐项通过，关联首次59通过中的既有5失败已在原HEAD复现保留；其余失败均按上述装置/静态/格式或原样等待复验闭环。最后Ruff-final、Mypy2、types-final、format-final3及前端15项+最后受影响1项通过；未重复整批/全仓、浏览器、真实模型或平台。当前窗口模型审查并修正ZCode草稿，实际参与限于此切片；未知结果保守规则/原失败窗口未放宽，不宣称性能或模型效果收益。对应本地提交主题为feat: schedule trusted read-only tools in bounded ordered batches；原基线5失败交主集成继续处理。
 
+
+### MK11-INTEGRATION — 只读并发主集成核对
+
+- 基线00dd4c3，候选afe2524合入d9e1b65。13项新场景及原Scheduler/派发共51项通过（readonly-review/backend.log）；子agent报告的5项原6ab4029失败另核对。代码审查发现command-logs未列入既有Runtime产物排除目录，在状态目录位于Git可见源码内时，每次失败命令新增日志会被误作源码进展，可能清掉原三次失败停驻窗口；另两项read断言尚按无版本头的旧契约比较。先保留原6ab4029五项失败证据，定向修正排除精确日志namespace及读取测试的正文断言，不改失败阈值、命令或冻结评测结果。
+
+MK11-INTEGRATION复验完成：原五项中三项Shell失败链的根因已确认是新增command-logs进入源码checkpoint，精确排除该Runtime命名空间后原冻结三次失败窗口恢复；两项读取断言仅按当前版本头契约核正文，不改成功/错误判定。失败循环+产物保护+日志51项通过，包括command-logs已跟踪文件仍算源码变化、符号链接不忽略。主调度/并发51项、Graph/分发15项、前端15项及built真实API批次顺序/刷新/320px和任务图两条均通过；Ruff/Mypy4/Vue类型/build通过。候选原基线失败已全部复验闭环，完整门禁与真实模型另列，未改阈值/冻结历史结果。主代理审查、集成并修复此日志指纹缺口；子agent负责原并发实现及确定性机制测试。相关候选afe2524→d9e1b65，本条收口提交包含精确指纹修正与资源。
