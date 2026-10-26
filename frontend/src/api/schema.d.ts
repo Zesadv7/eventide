@@ -38,6 +38,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/runtime/native-capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Native Capabilities
+     * @description Read-only platform probe; availability never proves isolation (MK-21).
+     */
+    get: operations["get_native_capabilities_api_runtime_native_capabilities_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/projects": {
     parameters: {
       query?: never;
@@ -2827,6 +2847,36 @@ export interface components {
       /** Status */
       status?: ("active" | "paused" | "revoked") | null;
     };
+    /** NativeBackendStatus */
+    NativeBackendStatus: {
+      /** Kind */
+      kind: string;
+      /** Available */
+      available: boolean;
+      /** Binary */
+      binary: string | null;
+      /** Detail */
+      detail: string;
+      /** Support */
+      support: {
+        [key: string]: string;
+      };
+    };
+    /** NativeCapabilitiesResponse */
+    NativeCapabilitiesResponse: {
+      /** Platform */
+      platform: string;
+      /** Backends */
+      backends: components["schemas"]["NativeBackendStatus"][];
+      /** Default Backend */
+      default_backend: string | null;
+      /** Profiles */
+      profiles: string[];
+      /** Verification */
+      verification: string;
+      /** Verification Detail */
+      verification_detail: string;
+    };
     /** PackageBody */
     PackageBody: {
       /** Directory */
@@ -2969,7 +3019,7 @@ export interface components {
        * @default local
        * @enum {string}
        */
-      execution_profile: "local" | "sandbox";
+      execution_profile: "local" | "sandbox" | "native";
       /**
        * Knowledge Index
        * @default existing
@@ -2989,6 +3039,10 @@ export interface components {
       source_scope: "code" | "all";
       /** Sandbox Image */
       sandbox_image?: string | null;
+      /** Native Profile */
+      native_profile?: ("read-only" | "workspace-write") | null;
+      /** Native Backend */
+      native_backend?: ("seatbelt" | "bubblewrap") | null;
       /** Attachment Ids */
       attachment_ids?: string[];
       /** Model */
@@ -3701,6 +3755,125 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RuntimeContractResponse"];
+        };
+      };
+      /** @description bad request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description method not allowed */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description rate limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  get_native_capabilities_api_runtime_native_capabilities_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NativeCapabilitiesResponse"];
         };
       };
       /** @description bad request */

@@ -34,7 +34,7 @@ def test_seatbelt_profile_deny_write_and_network(tmp_path: Path) -> None:
     assert "(deny network*)" in text
     assert "(deny process-exec*)" in text
     assert f'(allow process-exec (literal "{INTERPRETER}"))' in text
-    assert "(allow process-fork)" in text
+    assert "(deny process-fork)" in text
     assert "(deny file-write*)" in text
     assert f'(allow file-write* (subpath "{tmp_path / "scratch"}"))' in text
     assert f'(allow file-write* (subpath "{tmp_path / "ws"}"))' not in text

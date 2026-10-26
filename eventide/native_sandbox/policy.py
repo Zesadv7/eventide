@@ -142,8 +142,10 @@ def default_protected_paths(
     explicitly works on both backends (Seatbelt carve-out, bubblewrap shadow
     mount), so it is always included.
     """
-    roots: list[Path] = [workspace_root / ".eventide"]
-    if state_root is not None:
+    roots: list[Path] = [workspace_root / ".eventide", workspace_root / ".git"]
+    # Execution copies may live below state_root. The worker and OS only grant
+    # the exact copy, so denying its ancestor would also deny the granted copy.
+    if state_root is not None and not _is_within(workspace_root.resolve(), state_root.resolve()):
         roots.append(state_root)
     if git_common_dir is not None:
         roots.append(git_common_dir)
@@ -154,7 +156,7 @@ def default_protected_paths(
 
 
 # Capability matrix for the current slice. Values are honest support levels:
-# "full" (expressed and enforced by the platform mechanism), "partial"
+# "full" (policy expression available; kernel verification remains separate), "partial"
 # (approximation, documented limitation) and "unsupported" (explicit refusal).
 SUPPORT_MATRIX: dict[tuple[NativeBackendKind, str], str] = {
     (NativeBackendKind.SEATBELT, "write_allowlist"): "full",

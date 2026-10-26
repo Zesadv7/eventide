@@ -139,6 +139,10 @@ def create_router(context: ApiContext) -> APIRouter:
             # Preserve outstanding legacy local request identities across this upgrade.
             payload.pop("execution_profile")
             payload.pop("sandbox_image")
+        if body.native_profile is None:
+            payload.pop("native_profile")
+        if body.native_backend is None:
+            payload.pop("native_backend")
         receipt = run_receipt(agent_runtime, request, session_id, "run", payload)
         if receipt.existing:
             return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
@@ -159,6 +163,8 @@ def create_router(context: ApiContext) -> APIRouter:
                     code_structure=body.code_structure, source_scope=body.source_scope,
                     execution_profile=body.execution_profile,
                     sandbox_image=body.sandbox_image,
+                    native_profile=body.native_profile,
+                    native_backend=body.native_backend,
                     attachment_ids=list(body.attachment_ids),
                     model=body.model,
                     generation=body.generation.patch(),

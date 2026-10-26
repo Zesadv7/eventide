@@ -207,15 +207,23 @@ class NativeSandboxRunner:
             check_backend_support(self._policy, self._backend)
             self._policy.tmp_root.mkdir(parents=True, exist_ok=True)
             spec = self._launcher(self._policy, interpreter)
-        try:
-            self._process = await asyncio.create_subprocess_exec(
+        spawn = asyncio.create_task(asyncio.create_subprocess_exec(
                 *spec.argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=spec.env,
                 limit=MAX_MESSAGE_BYTES + 1024,
-            )
+            ))
+        try:
+            self._process = await asyncio.shield(spawn)
+        except asyncio.CancelledError:
+            while not spawn.done():
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.shield(spawn)
+            self._process = spawn.result()
+            await self.aclose()
+            raise
         except OSError as error:
             raise NativeSandboxUnavailableError(
                 f"Failed to spawn sandbox worker: {error}"
@@ -323,7 +331,11 @@ class NativeSandboxRunner:
             prefix="eventide-seatbelt-", suffix=".sb", dir=self._policy.tmp_root
         )
         path = Path(name)
-        text = build_seatbelt_profile(self._policy, interpreter.executable)
+        text = build_seatbelt_profile(
+            self._policy, interpreter.executable,
+            runtime_roots=(interpreter.base_prefix, interpreter.prefix),
+            worker_path=interpreter.package_parent / "eventide/native_sandbox/worker.py",
+        )
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(text)
         os.chmod(path, 0o600)
@@ -340,8 +352,8 @@ class NativeSandboxRunner:
                 if not chunk:
                     break
                 chunks.append(chunk)
-        except (ConnectionResetError, OSError):
-            pass
+        except (ConnectionResetError, OSError) as error:
+            chunks.append(f"[stderr capture failed: {error}]".encode())
         return b"".join(chunks)[-STDERR_TAIL_BYTES:]
 
     async def _stderr_tail(self) -> bytes:

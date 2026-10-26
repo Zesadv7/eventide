@@ -1151,7 +1151,7 @@ API/UI 增加“已记住：内容/作用域/来源/撤销”和建议卡，保�
 
 <a id="native-sandbox-slice"></a>
 
-### MK-21 切片 1：原生隔离平台后端库（2026-10-26，进行中）
+### MK-21 切片 1：原生隔离平台后端库（2026-10-26，历史切片；后续接线见ADR-124）
 
 新增集中库 `eventide/native_sandbox/`（policy/probe/seatbelt/bubblewrap/worker/runner），严格类型、离线可用、无网络与可选依赖。设计取舍见 [ADR-105](decisions.md#adr-105)。当前边界：
 
@@ -1287,6 +1287,7 @@ MK05主代理复核：捕获密钥在实际执行器组装时更新为已加载/
 MK08C正常关闭恢复（ADR-118）：host.shutdown_started绑定确切Run及一次关服身份；取消终态只在该标记存在且无用户停止时记service_shutdown。Run关闭后不再追加Run事件，恢复claim及用户停止以精确关联的Session事实持久化；恢复页将其计入同一high_water。新Host复用安全边界、唯一后继与父根预算，接收时绑定source Run，等待检查期间收到停止也在实际派发前取消后继。代码初稿由ZCode提供，主代理补接收竞态与恢复投影；32项初始专项、101项关联及22项最终复验通过。正常关服可恢复不代表任意未知工具可重放，MK08D/E继续待实施。
 
 
+
 MK09项目筛选（2026-10-26）：AttentionView复用`GET /api/projects/{id}/attention`，筛选身份保存在路由query.project；选项使用已注册Workspace的稳定project_id去重，不通过显示名称或目录名推断身份。切范围立即移除旧列表/动作，按请求代次拒绝晚到读取与审批结果；项目不可用显示真实错误，不回退全局列表。轮询仍每5秒读取选定范围，审批继续由原Run端点复验；六项组件及built实际API筛选/刷新/原审批旅程通过，尚未补全待回答与核查不明类别。
 
 
@@ -1324,3 +1325,14 @@ Run/API/SSE投影展示各项prepared/running/completed/abandoned/outcome_unknow
 
 
 MK11集成（2026-10-26）：新批次与已有Graph/提问共存，真实页面显示准备/执行/完成/未执行与稳定位置，刷新保留事实。source checkpoint的Runtime排除目录补精确command-logs namespace，避免日志新增伪造源码进展；tracked文件和替换为链接仍检测，checkpoint_policy保留真实目录列表、旧事实不重写。51项调度、51项失败链/日志/指纹、15项Graph分发、15项组件及2条built浏览器与静态检查通过；详见MK11-INTEGRATION。
+
+### MK-21 切片 2：原生文件工具接线（ADR-124）
+
+RunRequest/HTTP显式选择native，接收前解析可用平台后端并保存具体backend/profile，要求独立worktree；Session后续消息省略native权限时复用原值，显式改变拒绝，Continue按原配置复核。不改默认local与Docker路径。Worker缺失或失败没有宿主执行回退；工具仍由ToolExecutor/PolicyEngine校验，readonly权限在目录与worker两层拒写。
+
+原生仅开放read_file/glob/write_file/edit_file及Runtime元数据工具。Skills/MCP/检索在宿主准备前禁用；旁枝明确拒绝，防止另建宿主执行子任务。Shell/Skill脚本/网络/后台/Graph原生节点仍待后续同边界接线。文件读取在worker取字节，宿主仅调用共享纯渲染器生成原有行号/版本token/长行页和source_evidence；token仍绑定真实工作副本，内容变化后拒绝混页。精确编辑在同一worker请求/描述符中检查版本和重叠唯一匹配再写入，新文件由worker创建父目录并原子发布；OS并不提供跨任意外部写入者的通用CAS保证。未知写结果写入既有unknown停驻链，不当作可重放失败。
+
+state_root若为执行副本祖先，不将其整根deny以免覆盖授权副本；worker只授权确切workspace/tmp，OS也不开放整个state。副本内.git/.eventide和共享Git目录显式受保护。固定worker由runpy直接载入，OS只需读取worker.py，不挂整个项目包目录；Seatbelt改deny-default，仅允许实际副本、tmp、显式只读根、Python运行时及必要系统库读取，替代此前读默认放行设计。Linux使用相同worker协议与挂载白名单，受保护文件通过只读空设备遮蔽，目录通过空tmpfs遮蔽。
+
+取消启动和重复取消均等待worker真实收尾；清理失败持久化native.cleanup_failed Session事实并返回失败，不静默吞掉，也不把失败清理当完成。页面可选择权限/后端，显示平台不可用原因、未验证状态、固定环境和明确支持范围；OpenAPI/TS同步。真实内核/浏览器分发与完整门禁仍须主集成完成，Linux没有环境时保持待外部验证。
+

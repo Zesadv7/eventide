@@ -72,7 +72,8 @@ def build_bubblewrap_launch(
     argv.extend(["--ro-bind", str(base_prefix), str(base_prefix)])
     if prefix != base_prefix:
         argv.extend(["--ro-bind", str(prefix), str(prefix)])
-    argv.extend(["--ro-bind", str(package_parent), str(package_parent)])
+    worker_path = package_parent / "eventide/native_sandbox/worker.py"
+    argv.extend(["--ro-bind", str(worker_path), str(worker_path)])
     for root in policy.read_only_roots:
         argv.extend(["--ro-bind", str(root), str(root)])
     argv.extend(["--bind", str(policy.tmp_root), str(policy.tmp_root)])
@@ -88,7 +89,7 @@ def build_bubblewrap_launch(
         *policy.read_only_roots,
         base_prefix,
         prefix,
-        package_parent,
+        worker_path,
     ]
     shadows = [
         root
@@ -97,7 +98,10 @@ def build_bubblewrap_launch(
     ]
     shadows.sort(key=lambda path: len(path.parts), reverse=True)
     for root in shadows:
-        argv.extend(["--tmpfs", str(root)])
+        if root.is_file():
+            argv.extend(["--ro-bind", "/dev/null", str(root)])
+        else:
+            argv.extend(["--tmpfs", str(root)])
     argv.extend(["--chdir", str(policy.workspace_root)])
     argv.extend([str(interpreter), "-I", "-c", WORKER_BOOTSTRAP, str(package_parent)])
     return argv

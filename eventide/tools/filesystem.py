@@ -558,6 +558,24 @@ def read_file_output(
     pages are never silently stitched across different file states. A plain
     line offset still works for a first read without a token.
     """
+    base = (cwd or Path.cwd()).resolve()
+    try:
+        file_path = resolve_scoped_path(base, path)
+        raw = file_path.read_bytes()
+    except (OSError, ValueError) as exc:
+        return ToolOutput(f"Error: {exc}", True, {
+            "source_evidence": {"kind": "file", "path": path, "status": "error"},
+            "code": "read_failed",
+        })
+    return render_read_file(raw, base, file_path.relative_to(base).as_posix(), path,
+                            limit=limit, offset=offset, continuation=continuation)
+
+
+def render_read_file(
+    raw: bytes, base: Path, relative: str, path: str, *,
+    limit: int | None = None, offset: int = 0, continuation: str | None = None,
+) -> ToolOutput:
+    """Render the same version-bound page from bytes read by any file backend."""
     evidence: dict[str, Any] = {"kind": "file", "path": path}
 
     def result(content: str, code: str | None = None, **page: Any) -> ToolOutput:
@@ -567,12 +585,8 @@ def read_file_output(
         })
 
     try:
-        base = (cwd or Path.cwd()).resolve()
-        file_path = resolve_scoped_path(base, path)
-        raw = file_path.read_bytes()
         sha = content_sha256(raw)
         text = raw.decode("utf-8")
-        relative = file_path.relative_to(base).as_posix()
         lines = text.splitlines()
         total = len(lines)
         evidence.update(path=relative, sha256=sha, total_lines=total)

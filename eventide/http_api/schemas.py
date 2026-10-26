@@ -13,11 +13,13 @@ class RunBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=100_000)
     mode: str = "auto"
     execution_target: Literal["source", "snapshot", "worktree"] = "source"
-    execution_profile: Literal["local", "sandbox"] = "local"
+    execution_profile: Literal["local", "sandbox", "native"] = "local"
     knowledge_index: Literal["existing", "prepare"] = "existing"
     code_structure: bool = Field(default=False, strict=True)
     source_scope: Literal["code", "all"] = "code"
     sandbox_image: str | None = Field(default=None, min_length=1, max_length=256)
+    native_profile: Literal["read-only", "workspace-write"] | None = None
+    native_backend: Literal["seatbelt", "bubblewrap"] | None = None
     attachment_ids: list[str] = Field(default_factory=list)
     model: str | None = Field(default=None, max_length=256)
     generation: GenerationPatch = Field(default_factory=GenerationPatch)
@@ -29,6 +31,23 @@ class GenerationBody(BaseModel):
     model: str = Field(min_length=1, max_length=256)
     generation: GenerationPatch = Field(default_factory=GenerationPatch)
     capabilities: GenerationCapabilities | None = None
+
+
+class NativeBackendStatus(BaseModel):
+    kind: str
+    available: bool
+    binary: str | None
+    detail: str
+    support: dict[str, str]
+
+
+class NativeCapabilitiesResponse(BaseModel):
+    platform: str
+    backends: list[NativeBackendStatus]
+    default_backend: str | None
+    profiles: list[str]
+    verification: str
+    verification_detail: str
 
 
 class AttachmentBody(BaseModel):

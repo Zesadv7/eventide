@@ -269,6 +269,138 @@
         }
       }
     },
+    "/api/runtime/native-capabilities": {
+      "get": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Get Native Capabilities",
+        "description": "Read-only platform probe; availability never proves isolation (MK-21).",
+        "operationId": "get_native_capabilities_api_runtime_native_capabilities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCapabilitiesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "payload too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects": {
       "get": {
         "tags": [
@@ -22499,6 +22631,100 @@
         ],
         "title": "MemoryUpdate"
       },
+      "NativeBackendStatus": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "binary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binary"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "support": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Support"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "available",
+          "binary",
+          "detail",
+          "support"
+        ],
+        "title": "NativeBackendStatus"
+      },
+      "NativeCapabilitiesResponse": {
+        "properties": {
+          "platform": {
+            "type": "string",
+            "title": "Platform"
+          },
+          "backends": {
+            "items": {
+              "$ref": "#/components/schemas/NativeBackendStatus"
+            },
+            "type": "array",
+            "title": "Backends"
+          },
+          "default_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Backend"
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Profiles"
+          },
+          "verification": {
+            "type": "string",
+            "title": "Verification"
+          },
+          "verification_detail": {
+            "type": "string",
+            "title": "Verification Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "platform",
+          "backends",
+          "default_backend",
+          "profiles",
+          "verification",
+          "verification_detail"
+        ],
+        "title": "NativeCapabilitiesResponse"
+      },
       "PackageBody": {
         "properties": {
           "directory": {
@@ -22881,7 +23107,8 @@
             "type": "string",
             "enum": [
               "local",
-              "sandbox"
+              "sandbox",
+              "native"
             ],
             "title": "Execution Profile",
             "default": "local"
@@ -22921,6 +23148,36 @@
               }
             ],
             "title": "Sandbox Image"
+          },
+          "native_profile": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "read-only",
+                  "workspace-write"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Profile"
+          },
+          "native_backend": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "seatbelt",
+                  "bubblewrap"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Backend"
           },
           "attachment_ids": {
             "items": {

@@ -9,7 +9,7 @@ export type RunInput = Omit<
   | "code_structure"
   | "source_scope"
 > & {
-  execution_profile?: "local" | "sandbox";
+  execution_profile?: "local" | "sandbox" | "native";
   sandbox_image?: string | null;
   knowledge_index?: "existing" | "prepare";
   code_structure?: boolean;
@@ -106,7 +106,12 @@ export interface SandboxProfile {
   output_limit: number;
 }
 export interface Session {
-  execution_profile?: "local" | "sandbox" | null;
+  execution_profile?: "local" | "sandbox" | "native" | null;
+  native_profile?: {
+    kind: "native";
+    profile: "read-only" | "workspace-write";
+    backend: "seatbelt" | "bubblewrap";
+  } | null;
   sandbox_profile?: SandboxProfile | null;
   metadata_hash?: string;
   managed?: boolean;

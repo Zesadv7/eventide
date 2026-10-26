@@ -16,8 +16,13 @@ acceptance step.
 from __future__ import annotations
 
 import base64
+import binascii
+import contextlib
+import fnmatch
+import hashlib
 import json
 import os
+import re
 import secrets
 import stat
 import sys
@@ -27,11 +32,8 @@ from typing import Any, BinaryIO
 PROTOCOL_VERSION = 1
 GRANT_ENV_VAR = "EVENTIDE_NATIVE_WORKER_GRANT"
 WORKER_BOOTSTRAP = (
-    "import sys\n"
-    "sys.path[:] = [entry for entry in sys.path if entry not in ('', '.')]\n"
-    "sys.path.insert(0, sys.argv[1])\n"
-    "from eventide.native_sandbox.worker import run_worker\n"
-    "raise SystemExit(run_worker())\n"
+    "import runpy, sys\n"
+    "runpy.run_path(sys.argv[1] + '/eventide/native_sandbox/worker.py', run_name='__main__')\n"
 )
 
 # Request lines carry base64 file content, so the cap must exceed the largest
@@ -72,7 +74,7 @@ class WorkerGrant:
     def parse(cls, raw: str) -> WorkerGrant:
         try:
             payload = json.loads(base64.b64decode(raw.encode("ascii")).decode("utf-8"))
-        except Exception as error:  # noqa: BLE001 - protocol boundary, always fatal
+        except (ValueError, UnicodeError, binascii.Error) as error:
             raise ValueError(f"Invalid worker grant encoding: {type(error).__name__}") from error
         if not isinstance(payload, dict) or payload.get("v") != PROTOCOL_VERSION:
             raise ValueError("Unsupported worker grant version")
@@ -136,7 +138,14 @@ class WorkerGrant:
                 "invalid_request", "Path must be an absolute string without control characters"
             )
         assert isinstance(raw, str)
-        resolved = os.path.realpath(raw)
+        resolved = os.path.abspath(raw)
+        # Reject links at every component, including links that remain inside
+        # the grant. Operations also open components with O_NOFOLLOW below.
+        current = os.path.sep
+        for part in resolved.split(os.path.sep)[1:]:
+            current = os.path.join(current, part)
+            if os.path.islink(current):
+                raise WorkerError("path_denied", "Symbolic links are not file resources")
         for protected in self.protected_roots:
             if self._is_within(resolved, protected):
                 raise WorkerError("path_denied", "Path is inside a protected runtime root")
@@ -216,6 +225,8 @@ class FileWorker:
             "ping": self._op_ping,
             "stat": self._op_stat,
             "list_dir": self._op_list_dir,
+            "glob": self._op_glob,
+            "edit_file": self._op_edit_file,
             "read_file": self._op_read_file,
             "open_read": self._op_open_read,
             "read_page": self._op_read_page,
@@ -266,8 +277,19 @@ class FileWorker:
             raise WorkerError("not_found", "Path is not a regular file")
         if metadata.st_size > MAX_READ_FILE_BYTES:
             raise WorkerError("too_large", "File exceeds the whole-read limit")
-        with open(path, "rb") as handle:
-            content = handle.read(MAX_READ_FILE_BYTES)
+        parent = self._open_parent(path, create=False)
+        try:
+            descriptor = os.open(os.path.basename(path),
+                                 os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        finally:
+            os.close(parent)
+        with os.fdopen(descriptor, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+                raise WorkerError("path_denied", "Path is not a regular file with one link")
+            content = handle.read(MAX_READ_FILE_BYTES + 1)
+        if len(content) > MAX_READ_FILE_BYTES:
+            raise WorkerError("too_large", "File exceeds the whole-read limit")
         return {"content_b64": base64.b64encode(content).decode("ascii"), "size": len(content)}
 
     def _op_open_read(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -277,7 +299,17 @@ class FileWorker:
             raise WorkerError("not_found", "Path is not a regular file")
         if len(self._handles) >= MAX_OPEN_HANDLES:
             raise WorkerError("too_large", "Too many open read handles")
-        handle = open(path, "rb")  # noqa: SIM115 - handle stays open for paging
+        parent = self._open_parent(path, create=False)
+        try:
+            descriptor = os.open(os.path.basename(path),
+                                 os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        finally:
+            os.close(parent)
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+            os.close(descriptor)
+            raise WorkerError("path_denied", "Path is not a regular file with one link")
+        handle = os.fdopen(descriptor, "rb")
         token = secrets.token_hex(8)
         self._handles[token] = (handle, int(metadata.st_size))
         return {"handle": token, "size": int(metadata.st_size)}
@@ -314,6 +346,22 @@ class FileWorker:
         entry[0].close()
         return {}
 
+    def _open_parent(self, path: str, *, create: bool) -> int:
+        descriptor = os.open(os.path.sep, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for part in os.path.dirname(path).split(os.path.sep)[1:]:
+                if create:
+                    with contextlib.suppress(FileExistsError):
+                        os.mkdir(part, mode=0o755, dir_fd=descriptor)
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = child
+            return descriptor
+        except BaseException:
+            os.close(descriptor)
+            raise
+
     def _op_write_file(self, params: dict[str, Any]) -> dict[str, Any]:
         path = self._grant.authorize(params.get("path"), need_write=True)
         encoded = params.get("content_b64")
@@ -322,18 +370,142 @@ class FileWorker:
             raise WorkerError("invalid_request", "content_b64 and boolean overwrite are required")
         try:
             content = base64.b64decode(encoded.encode("ascii"), validate=True)
-        except Exception as error:  # noqa: BLE001 - protocol boundary
+        except (ValueError, UnicodeError, binascii.Error) as error:
             raise WorkerError("invalid_request", "content_b64 is not valid base64") from error
         if len(content) > MAX_WRITE_FILE_BYTES:
             raise WorkerError("too_large", "Write exceeds the size limit")
-        flags = os.O_WRONLY | os.O_NOFOLLOW
-        flags |= os.O_TRUNC if overwrite else os.O_CREAT | os.O_EXCL
-        descriptor = os.open(path, flags, 0o600)
+        parent = self._open_parent(path, create=True)
+        name = os.path.basename(path)
+        temporary = ".eventide-write-" + secrets.token_hex(8)
         try:
-            os.write(descriptor, content)
+            try:
+                existing = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                existing = None
+            if existing is not None:
+                if not overwrite:
+                    raise WorkerError("already_exists", "File already exists")
+                if not stat.S_ISREG(existing.st_mode) or existing.st_nlink != 1:
+                    raise WorkerError("path_denied", "File is not a regular file with one link")
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                 0o600, dir_fd=parent)
+            try:
+                if existing is not None:
+                    os.fchmod(descriptor, stat.S_IMODE(existing.st_mode))
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(content)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(temporary, dir_fd=parent)
         finally:
-            os.close(descriptor)
+            os.close(parent)
         return {"size": len(content)}
+
+    def _op_edit_file(self, params: dict[str, Any]) -> dict[str, Any]:
+        path = self._grant.authorize(params.get("path"), need_write=True)
+        old, new = params.get("old_text"), params.get("new_text")
+        if not isinstance(old, str) or not old or not isinstance(new, str):
+            raise WorkerError(
+                    "invalid_request", "old_text must not be empty; edit text is required",
+                )
+        expected = params.get("expected_sha256")
+        if expected is not None and (
+            not isinstance(expected, str) or re.fullmatch(r"[0-9a-fA-F]{64}", expected) is None
+        ):
+            raise WorkerError("invalid_request", "expected_sha256 must be a 64-character sha256")
+        parent = self._open_parent(path, create=False)
+        try:
+            descriptor = os.open(os.path.basename(path), os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                 dir_fd=parent)
+        finally:
+            os.close(parent)
+        with os.fdopen(descriptor, "r+b") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise WorkerError("path_denied", "File is not a regular file with one link")
+            raw = handle.read(MAX_READ_FILE_BYTES + 1)
+            if len(raw) > MAX_READ_FILE_BYTES:
+                raise WorkerError("too_large", "File exceeds the edit byte limit")
+            actual = hashlib.sha256(raw).hexdigest()
+            if expected is not None and expected.lower() != actual:
+                raise WorkerError(
+                    "hash_mismatch", "Content hash mismatch; re-read the changed file",
+                )
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise WorkerError("not_text", "File is not valid UTF-8") from error
+            first = text.find(old)
+            if first < 0:
+                raise WorkerError("not_found", "old_text not found; file unchanged")
+            if text.find(old, first + 1) >= 0:
+                raise WorkerError(
+                    "ambiguous", "old_text matches multiple locations; file unchanged",
+                )
+            updated = (text[:first] + new + text[first + len(old):]).encode("utf-8")
+            if len(updated) > MAX_WRITE_FILE_BYTES:
+                raise WorkerError("too_large", "Edited file exceeds the size limit")
+            # Hash validation and mutation happen in the same worker operation,
+            # against the same descriptor, with no host read/write round trip.
+            handle.seek(0)
+            if handle.read(MAX_READ_FILE_BYTES + 1) != raw:
+                raise WorkerError("hash_mismatch", "File changed during edit; no write applied")
+            handle.seek(0)
+            handle.write(updated)
+            handle.truncate()
+            handle.flush()
+        return {"size": len(updated)}
+
+    def _op_glob(self, params: dict[str, Any]) -> dict[str, Any]:
+        base = self._grant.authorize(params.get("cwd"), need_write=False)
+        pattern = params.get("pattern")
+        if not isinstance(pattern, str) or os.path.isabs(pattern) or ".." in pattern.split("/"):
+            raise WorkerError("invalid_request", "glob pattern must stay inside the workspace")
+        parts = pattern.split("/")
+
+        def matches(names: list[str], patterns: list[str]) -> bool:
+            if not patterns:
+                return not names
+            if patterns[0] == "**":
+                return matches(names, patterns[1:]) or bool(
+                    names and not names[0].startswith(".") and matches(names[1:], patterns)
+                )
+            return bool(names and (not names[0].startswith(".") or patterns[0].startswith("."))
+                        and fnmatch.fnmatchcase(names[0], patterns[0])
+                        and matches(names[1:], patterns[1:]))
+
+        pending = [base]
+        found: list[str] = []
+        visited = 0
+        truncated = False
+        while pending and not truncated:
+            directory = pending.pop()
+            with os.scandir(directory) as scan:
+                for entry in scan:
+                    visited += 1
+                    if visited > 20_000 or len(found) >= 2_000:
+                        truncated = True
+                        break
+                    if entry.is_symlink():
+                        continue
+                    try:
+                        child = self._grant.authorize(entry.path, need_write=False)
+                    except WorkerError as error:
+                        if error.code == "path_denied":
+                            continue
+                        raise
+                    relative = os.path.relpath(child, base)
+                    if matches(relative.split(os.path.sep), parts):
+                        found.append(relative)
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(child)
+        content = "\n".join(sorted(found)) or "(no matches)"
+        if truncated:
+            content += "\n[results truncated: enumeration limit reached]"
+        return {"content": content}
 
     def _op_remove(self, params: dict[str, Any]) -> dict[str, Any]:
         path = self._grant.authorize(params.get("path"), need_write=True)
@@ -410,3 +582,7 @@ def run_worker(reader: BinaryIO | None = None, writer: BinaryIO | None = None) -
     )
     worker.serve()
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_worker())

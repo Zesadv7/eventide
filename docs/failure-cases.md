@@ -971,6 +971,7 @@ MK-CODING-1308再次触发：2026-10-26 14:22–14:23，恢复的四路中旁枝
 - MK17-REVIEW提交前diff检查检出子候选tests/test_side_questions.py末尾多余空行，已去除；提交未执行，随后重检。
 
 
+
 ### MK03-SUMMARY-VIEW — 摘要与原始证据对照
 
 - 基线6ab4029，主代理开始只读API/UI。首轮Ruff失败，日志summary-review/ruff.log；记录原结果，修复后定向复验。该功能只读取已保存checkpoint和原事件，不能用前端展示替代摘要语义正确性或模型效果验收。
@@ -1078,3 +1079,25 @@ MK20-CURRENT最终：prestart-red复现后3项Green通过；持久完成结果�
 - 基线00dd4c3，候选afe2524合入d9e1b65。13项新场景及原Scheduler/派发共51项通过（readonly-review/backend.log）；子agent报告的5项原6ab4029失败另核对。代码审查发现command-logs未列入既有Runtime产物排除目录，在状态目录位于Git可见源码内时，每次失败命令新增日志会被误作源码进展，可能清掉原三次失败停驻窗口；另两项read断言尚按无版本头的旧契约比较。先保留原6ab4029五项失败证据，定向修正排除精确日志namespace及读取测试的正文断言，不改失败阈值、命令或冻结评测结果。
 
 MK11-INTEGRATION复验完成：原五项中三项Shell失败链的根因已确认是新增command-logs进入源码checkpoint，精确排除该Runtime命名空间后原冻结三次失败窗口恢复；两项读取断言仅按当前版本头契约核正文，不改成功/错误判定。失败循环+产物保护+日志51项通过，包括command-logs已跟踪文件仍算源码变化、符号链接不忽略。主调度/并发51项、Graph/分发15项、前端15项及built真实API批次顺序/刷新/320px和任务图两条均通过；Ruff/Mypy4/Vue类型/build通过。候选原基线失败已全部复验闭环，完整门禁与真实模型另列，未改阈值/冻结历史结果。主代理审查、集成并修复此日志指纹缺口；子agent负责原并发实现及确定性机制测试。相关候选afe2524→d9e1b65，本条收口提交包含精确指纹修正与资源。
+
+### MK21-NATIVE-PRODUCTION — 原生文件接线复验（2026-10-26）
+
+- 基线6ab4029上的未提交ZCode草稿由当前Codex接手。首轮 `pytest tests/test_native_execution.py tests/test_native_sandbox_{worker,policy,launchers,runner}.py tests/test_native_review.py`：54通过、2失败，日志 `/tmp/eventide-native-first.log`（收口前转入忽略目录）。一项新增Session冻结测试在第二次调用未传原Session身份，实际创建新Session，未检验到被测边界；另一项旧worker测试只接受笼统io_error，而新实现对不允许覆盖已有文件给出already_exists。修正测试身份与明确错误契约后定向复验；此时不宣称通过。
+
+- MK21-NATIVE-PRODUCTION 静态首轮：Ruff检出12项（导入顺序、6处长行、两处只捕获文件系统预期异常的try/pass建议及无用导入），日志 `/tmp/eventide-native-ruff.log`；均属本切片新增/遗留草稿代码，按检查建议修正后复验。
+
+- MK21-NATIVE-PRODUCTION 契约生成：OpenAPI导出完成，TS生成因独立工作副本尚无frontend/node_modules退出1（MODULE_NOT_FOUND），属于开发依赖环境问题。按仓库既有方式链接原项目已安装依赖后再执行；不安装新版本，不修改锁文件。首轮两项测试修正后56项通过，随后新增分页/版本/硬链接/状态根/丢失写结果/重复取消/权限冻结16项通过，原日志保留。
+
+- MK21-NATIVE-PRODUCTION 第二次Ruff仅新增权限冻结断言105字符超长（`/tmp/eventide-native-ruff2.log`），拆行后复验；运行行为不受影响。一次写入/验证脚本误在frontend目录使用仓库根相对路径，写入失败（FileNotFoundError），没有改写目标文件；改用正确工作目录后继续，原输出保留。
+
+- MK21-NATIVE-PRODUCTION Mypy首轮3项错误：worker遍历列表缺注解、NativeExecutionError动态赋code未声明（`/tmp/eventide-native-mypy.log`）；补真实字段注解，不放宽类型检查。前端13项中12通过、1失败：延迟响应测试在unmount后读取VTU已清除的emitted缓存，改用外部事件spy核验没有新增ready；既有Chat组件未mock的读取产生localhost连接拒绝日志，其12项断言仍通过，后续新增原生发送用例显式stub环境读取。
+
+- MK21-NATIVE-PRODUCTION 新增聊天发送测试失败（`/tmp/eventide-native-chat.log`）：复用fixture含已完成Run，环境已冻结，测试却当新对话修改环境；泛化fetch响应又缺supplements导致子组件渲染异常。给setup显式fresh参数使用无历史会话，避免伪造不适用的历史响应，再复验。另一次追加测试仍误用frontend前缀导致写入失败，已改绝对路径；只统计真正执行的断言。
+
+- MK21-NATIVE-PRODUCTION 关联回归31通过/1失败（`/tmp/eventide-native-related.log`）：本地旧幂等指纹fixture用当前RunBody生成“历史请求”，新增native_profile/native_backend的空默认值也被算入预期；真实接收端已按兼容契约剔除未指定的新字段。修正fixture显式排除新增字段，保留原接收指纹不变，并复验该精确用例。Mypy14模块第二轮通过。
+
+- MK21-NATIVE-PRODUCTION 收口：相关测试和静态失败均已修复。最终原生64项通过；最后原子覆盖保留权限的新增断言单项复验通过。关联本地/Docker32项已分别通过（31首轮、失败精确用例修正后复验）；前端13项及新增聊天提交/冻结恢复1项分别通过，Vue类型、Vite构建、Ruff、Mypy14模块及最后2模块复验通过。原始日志已从/tmp归档至忽略目录 `.task_outputs/maka-upgrade/native-current-model/`，具体文件同原名。未做真实内核/真实模型/完整门禁，不宣称隔离效力或MK21整体完成。
+- 此切片关闭了原生草稿提前审查的分页、精确编辑、状态根误保护、后端未传入、宿主预准备与清理吞错问题；Shell/后台/Skill/Graph原生覆盖与真实OS边界仍待。实际工作为当前Codex接手旧ZCode草稿、补代码与验证；没有线上事故或用户影响证据，不虚构收益。相关commit以本次原生文件接线提交为准。
+
+- MK21-NATIVE-PRODUCTION 补充：共享纯分页渲染器影响的原有版本续页/文件证据/Host源码证据20项通过。没有新增失败，未重复全仓门禁；最后格式/差异检查通过。
+

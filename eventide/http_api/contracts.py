@@ -18,7 +18,11 @@ from fastapi import APIRouter, HTTPException
 
 from eventide import __version__
 from eventide.http_api.context import ApiContext
-from eventide.http_api.schemas import RuntimeContractResponse
+from eventide.http_api.schemas import (
+    NativeBackendStatus,
+    NativeCapabilitiesResponse,
+    RuntimeContractResponse,
+)
 
 CONTRACT_VERSION = 1
 
@@ -84,6 +88,46 @@ def create_router(context: ApiContext) -> APIRouter:
             schema_version=schema_version,
             runtime_version=__version__,
             capabilities=list(IMPLEMENTED_CAPABILITIES),
+        )
+
+    @router.get(
+        "/api/runtime/native-capabilities",
+        response_model=NativeCapabilitiesResponse,
+    )
+    async def get_native_capabilities() -> NativeCapabilitiesResponse:
+        """Read-only platform probe; availability never proves isolation (MK-21)."""
+        from eventide.native_sandbox.policy import SUPPORT_MATRIX
+        from eventide.native_sandbox.probe import detect_native_backends, preferred_backend
+
+        detections = detect_native_backends()
+        backends = [
+            NativeBackendStatus(
+                kind=detection.kind.value,
+                available=detection.available,
+                binary=str(detection.binary_path) if detection.binary_path else None,
+                detail=detection.detail,
+                support={
+                    capability: level
+                    for (kind, capability), level in SUPPORT_MATRIX.items()
+                    if kind is detection.kind
+                },
+            )
+            for detection in detections.values()
+        ]
+        preferred = preferred_backend()
+        return NativeCapabilitiesResponse(
+            platform=next(iter(detections.values())).platform,
+            backends=backends,
+            default_backend=preferred[0].value if preferred else None,
+            profiles=["read-only", "workspace-write"],
+            verification="unverified",
+            verification_detail=(
+                "检测仅确认平台和可执行文件存在；真实内核越界验证（写/网络/子进程/"
+                "符号链接/受保护目录/取消清理）尚未执行（MK-22）。原生执行默认关闭，"
+                "启用即为实验特性；后端缺失或策略不支持时明确失败，不回退宿主执行；"
+                "文件worker不提供网络或子进程工具；这些权限暂不开放，"
+                "平台的子进程限制仍仅部分支持。"
+            ),
         )
 
     return router

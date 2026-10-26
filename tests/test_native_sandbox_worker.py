@@ -166,7 +166,7 @@ def test_write_file_overwrite_semantics(tmp_path: Path) -> None:
     first = call(worker, "write_file", path=target, content_b64="YQ==")  # "a"
     assert first["ok"] is True
     clash = call(worker, "write_file", path=target, content_b64="Yg==")
-    assert clash["error"]["code"] == "io_error"
+    assert clash["error"]["code"] == "already_exists"
     replace = call(worker, "write_file", path=target, content_b64="Yg==", overwrite=True)
     assert replace["ok"] is True
     content = call(worker, "read_file", path=target)

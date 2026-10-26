@@ -10,7 +10,7 @@ beforeEach(() => {
   sessionStorage.clear();
   setActivePinia(createPinia());
 });
-async function setup(bound = true) {
+async function setup(bound = true, fresh = false) {
   const store = useWorkbench();
   store.provider = provider;
   store.selectedWorkspace = session.workspace_id;
@@ -18,6 +18,7 @@ async function setup(bound = true) {
   store.sessions[session.workspace_id] = [
     {
       ...session,
+      latest_run: fresh ? null : session.latest_run,
       execution: { kind: bound ? "worktree" : "source", name: "session-copy" },
     },
   ];
@@ -224,4 +225,68 @@ describe("task knowledge preparation", () => {
     );
     wrapper.unmount();
   });
+});
+
+it("submits native permissions to a worktree and restores the frozen environment", async () => {
+  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify({
+          platform: "Darwin",
+          default_backend: "seatbelt",
+          profiles: ["read-only", "workspace-write"],
+          verification: "unverified",
+          verification_detail: "内核尚未验证",
+          backends: [
+            {
+              kind: "seatbelt",
+              available: true,
+              detail: "已找到",
+              support: {},
+            },
+          ],
+          models: [],
+          skills: [],
+        }),
+        { status: 200 },
+      ),
+  );
+  const { wrapper, store } = await setup(false, true);
+  try {
+    const submit = vi.spyOn(store, "submit").mockResolvedValue(undefined);
+    await wrapper.get('[aria-label="执行环境"]').setValue("native");
+    await flushPromises();
+    await wrapper.get('[aria-label="原生文件权限"]').setValue("read-only");
+    await wrapper.get('textarea[aria-label="任务输入"]').setValue("只读调查");
+    await wrapper.get("form.composer").trigger("submit");
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        execution_profile: "native",
+        execution_target: "worktree",
+        native_profile: "read-only",
+      }),
+    );
+    store.sessions[session.workspace_id]![0] = {
+      ...session,
+      latest_run: null,
+      execution_profile: "native",
+      native_profile: {
+        kind: "native",
+        profile: "read-only",
+        backend: "seatbelt",
+      },
+      execution: { kind: "worktree", name: "candidate" },
+    };
+    await flushPromises();
+    expect(
+      (wrapper.get('[aria-label="执行环境"]').element as HTMLSelectElement)
+        .value,
+    ).toBe("native");
+    expect(
+      wrapper.get('[aria-label="原生文件权限"]').attributes("disabled"),
+    ).toBeDefined();
+  } finally {
+    wrapper.unmount();
+    fetch.mockRestore();
+  }
 });

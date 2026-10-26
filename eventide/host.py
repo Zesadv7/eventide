@@ -72,6 +72,14 @@ from eventide.models import (
     WorkspaceRecord,
     WorkspaceTarget,
 )
+from eventide.native_execution import (
+    NATIVE_PROFILE_KIND,
+    NativeFileTools,
+    build_native_policy,
+    cleanup_native_tmp,
+    validate_native_profile,
+)
+from eventide.native_sandbox.runner import NativeSandboxError
 from eventide.normalization import normalize, redact
 from eventide.policy import PolicyDecision, PolicyEngine
 from eventide.preference_memory import PreferenceMemory
@@ -414,6 +422,10 @@ class RuntimeHost:
                 if (self._closed or self._configuring or self._provider_cleanup_required
                         or self._configuration_uncertain):
                     raise ValueError("Runtime configuration is unavailable")
+                source_intent = self._admitted_intent(source_run_id) or {}
+                if (source_intent.get("execution_profile_config", {}).get("kind")
+                        == NATIVE_PROFILE_KIND):
+                    raise ValueError("Side questions are unavailable for native execution")
                 active = sum(
                     (self._admitted_intent(run_id) or {}).get("worker_role") == "side_question"
                     for run_id in self._run_tasks
@@ -616,8 +628,10 @@ class RuntimeHost:
             "latest_run": run,
             "execution_profile": (
                 "sandbox" if self.session_execution_target(session_id) == "sandbox"
+                else "native" if run and self._session_native_profile(session_id)
                 else "local" if run else None
             ),
+            "native_profile": self._session_native_profile(session_id),
             "sandbox_profile": self._session_sandbox_profile(session_id),
             "execution": self.run_execution(run["id"]) if run else {"kind": "source"},
             "task_plan": self.store.task_plan(session_id) or [],
@@ -1471,7 +1485,15 @@ class RuntimeHost:
         return next((event["payload"]["execution_profile_config"]
                      for event in self.store.session_events(session_id)
                      if event["type"] == "run.admitted"
-                     and "execution_profile_config" in event["payload"]), None)
+                     and event["payload"].get("execution_profile_config", {}).get(
+                         "kind") == "sandbox"), None)
+
+    def _session_native_profile(self, session_id: str) -> dict[str, Any] | None:
+        return next((event["payload"]["execution_profile_config"]
+                     for event in self.store.session_events(session_id)
+                     if event["type"] == "run.admitted"
+                     and event["payload"].get("execution_profile_config", {}).get(
+                         "kind") == NATIVE_PROFILE_KIND), None)
 
     def _session_worktree(self, session_id: str) -> dict[str, Any] | None:
         return next((event["payload"]["execution_binding"]
@@ -2065,7 +2087,12 @@ class RuntimeHost:
                 except ValueError as exc:
                     raise ValueError(f"{exc}; Continue refused") from exc
             if old_intent.get("execution_profile_config"):
-                execution_config = validate_sandbox_profile(old_intent["execution_profile_config"])
+                frozen_profile = old_intent["execution_profile_config"]
+                execution_config = (
+                    validate_native_profile(frozen_profile)
+                    if frozen_profile.get("kind") == NATIVE_PROFILE_KIND
+                    else validate_sandbox_profile(frozen_profile)
+                )
             skill_snapshot = old_intent.get("skill_snapshot") or next((
                 e["payload"] for e in self.store.run_events(source_id)
                 if e["type"] == "skills.snapshot"
@@ -2076,6 +2103,13 @@ class RuntimeHost:
                 code_structure=request.code_structure if request else False,
                 source_scope=request.source_scope if request else "code",
             )
+            if request is not None and request.execution_profile == "native":
+                existing_native = self._session_native_profile(session_id) if session_id else None
+                execution_config = validate_native_profile(existing_native or {
+                    "kind": NATIVE_PROFILE_KIND,
+                    "profile": request.native_profile or "workspace-write",
+                    "backend": request.native_backend,
+                })
         if not isinstance(model, str) or len(model) > 256:
             raise ValueError("Model name cannot exceed 256 characters")
         state = self.generation_settings(
@@ -2140,7 +2174,7 @@ class RuntimeHost:
             **({"skill_snapshot": skill_snapshot} if skill_snapshot is not None else {}),
             **({"execution_config": execution_config} if execution_config else {}),
             **({"execution_profile_config": execution_config}
-               if execution_config.get("kind") == "sandbox" else {}),
+               if execution_config.get("kind") in {"sandbox", NATIVE_PROFILE_KIND} else {}),
         }
 
     async def admit_run(self, request: RunRequest) -> str:
@@ -2246,16 +2280,25 @@ class RuntimeHost:
             raise ValueError("Session is busy")
         previous_run = self.store.latest_run_summary(session_id)
         was_sandbox = self.session_execution_target(session_id) == "sandbox"
+        was_native = self._session_native_profile(session_id) is not None
         if request:
+            if request.execution_profile != "native" and (
+                request.native_profile is not None or request.native_backend is not None
+            ):
+                raise ValueError("Native profile/backend requires native execution")
             if request.knowledge_index not in {"existing", "prepare"}:
                 raise ValueError("knowledge_index must be existing or prepare")
             if request.knowledge_index == "prepare" and (
-                request.execution_target == "snapshot" or request.execution_profile == "sandbox"
+                request.execution_target == "snapshot"
+                or request.execution_profile in {"sandbox", "native"}
             ):
                 raise ValueError("Index preparation is unavailable for snapshot or sandbox")
-            if request.execution_profile not in {"local", "sandbox"}:
+            if request.execution_profile not in {"local", "sandbox", "native"}:
                 raise ValueError("Unknown execution profile")
-            if previous_run and (request.execution_profile == "sandbox") != was_sandbox:
+            if previous_run and (
+                (request.execution_profile == "sandbox") != was_sandbox
+                or (request.execution_profile == "native") != was_native
+            ):
                 raise ValueError(
                     "Execution profile is fixed for this Session; create a new Session"
                 )
@@ -2266,6 +2309,29 @@ class RuntimeHost:
                     )
                 if request.selected_skills:
                     raise ValueError("Skills are disabled in sandbox execution")
+            elif request.execution_profile == "native":
+                if request.execution_target != "worktree":
+                    raise ValueError(
+                        "Native execution requires a real execution worktree; "
+                        "it never runs on the source checkout"
+                    )
+                if request.selected_skills:
+                    raise ValueError("Skills are disabled in native execution")
+                if request.sandbox_image is not None:
+                    raise ValueError("Sandbox image requires the sandbox execution profile")
+                frozen_native = self._session_native_profile(session_id)
+                if frozen_native and (
+                    (request.native_profile is not None
+                     and request.native_profile != frozen_native["profile"])
+                    or (request.native_backend is not None
+                        and request.native_backend != frozen_native["backend"])
+                ):
+                    raise ValueError("Native permissions are fixed for this Session")
+                validate_native_profile(frozen_native or {
+                    "kind": NATIVE_PROFILE_KIND,
+                    "profile": request.native_profile or "workspace-write",
+                    "backend": request.native_backend,
+                })
             elif request.sandbox_image is not None:
                 raise ValueError("Sandbox image requires the sandbox execution profile")
         if ((request and request.execution_profile == "sandbox")
@@ -2465,9 +2531,11 @@ class RuntimeHost:
                                     "Execution worktree has an unresolved tool outcome"
                                 )
                             root, _ = await self._admission_check(self._execution_paths, binding)
-                            intent["skill_snapshot"] = await self._freeze_skills(
-                                workspace, request, root=root,
-                            )
+                            if (intent.get("execution_profile_config", {}).get("kind")
+                                    != NATIVE_PROFILE_KIND):
+                                intent["skill_snapshot"] = await self._freeze_skills(
+                                    workspace, request, root=root,
+                                )
                     else:
                         if (self.workspace_busy(workspace.workspace_id)
                                 and workspace.workspace_id not in self._snapshot_preparing):
@@ -2502,7 +2570,9 @@ class RuntimeHost:
                                     self._admissions[copy.workspace_id] = run_id
                                 else:
                                     copy_root = root
-                                if target != "sandbox":
+                                if (target != "sandbox"
+                                        and intent.get("execution_profile_config", {}).get("kind")
+                                        != NATIVE_PROFILE_KIND):
                                     intent["skill_snapshot"] = await self._freeze_skills(
                                         workspace, request, root=copy_root,
                                     )
@@ -3358,6 +3428,8 @@ class RuntimeHost:
         execution_config: dict[str, Any] | None = None,
     ) -> RunResult:
         started = time.perf_counter()
+        native_tools: NativeFileTools | None = None
+        native_policy = None
         turn_id = existing_turn_id or self.store.create_run(
             run_id,
             session_id,
@@ -3409,6 +3481,19 @@ class RuntimeHost:
                     or {}
                 )
             )
+            frozen_native = intent.get("execution_profile_config") or None
+            if frozen_native is not None and frozen_native.get("kind") == NATIVE_PROFILE_KIND:
+                if not execution_binding or execution_binding["kind"] != "worktree":
+                    raise ValueError("Native execution requires its frozen execution worktree")
+                frozen_native = validate_native_profile(frozen_native)
+                native_policy = build_native_policy(
+                    working_root,
+                    profile=frozen_native["profile"],
+                    state_root=self.state_dir,
+                    backend=frozen_native["backend"],
+                    git_common_dir=Path(execution_binding["worktree"]["git_common_dir"]),
+                )
+                native_tools = NativeFileTools(native_policy, backend=frozen_native["backend"])
             sandbox_execution = bool(execution_binding and execution_binding["kind"] == "sandbox")
             if sandbox_execution:
                 execution_config = validate_sandbox_profile(
@@ -3417,7 +3502,7 @@ class RuntimeHost:
                 checked = await resolve_sandbox_profile(execution_config["image"], workspace_root)
                 if checked["image"] != execution_config["image"]:
                     raise ValueError("Sandbox image identity changed")
-            elif intent.get("execution_profile_config"):
+            elif intent.get("execution_profile_config") and native_tools is None:
                 raise ValueError("Sandbox profile is missing its execution binding")
             command_executor: CommandExecutor = self.executor.command_executor
             if execution_config.get("kind") in {"container", "sandbox"}:
@@ -3534,7 +3619,7 @@ class RuntimeHost:
                 },
                 sink,
             )
-            if readonly_profile or sandbox_execution:
+            if readonly_profile or sandbox_execution or native_tools is not None:
                 skills = SkillCatalog(workspace_root, ())
             else:
                 frozen_skills = intent.get("skill_snapshot")
@@ -3576,6 +3661,7 @@ class RuntimeHost:
                 self._enable_mcp
                 and not readonly_profile
                 and not execution_binding
+                and native_tools is None
                 and not execution_config.get("disable_mcp")
             ):
                 configs = manager.load_configs(
@@ -3613,7 +3699,8 @@ class RuntimeHost:
                 skill_tools.append(script_tool(skills))
             rag_tools, rag_handlers = await configure_run_retrieval(
                 self, run_id, execution_workspace, intent,
-                supported=not (sandbox_execution or snapshot_execution or readonly_profile),
+                supported=not (sandbox_execution or snapshot_execution or readonly_profile
+                               or native_tools is not None),
                 sink=sink,
             )
 
@@ -3893,6 +3980,7 @@ class RuntimeHost:
                 [READONLY_WORKER_TOOL]
                 if self.settings.workers_enabled and workspace.git_root
                 and not readonly_profile and not snapshot_execution and not sandbox_execution
+                and native_tools is None
                 else []
             )
             # Structured questions are a main-agent surface: writers/workers and
@@ -3964,6 +4052,29 @@ class RuntimeHost:
                             self.store, session_id, command_logs=self.command_logs,
                         ),
                             "todo_write": write_task_plan}
+            if native_tools is not None:
+                names = {"read_file", "glob", "write_file", "edit_file", "compact",
+                         "read_tool_result", "todo_write"}
+                tools = [dict(tool) for tool in [*TOOLS, READ_TOOL_RESULT_TOOL, TODO_WRITE_TOOL]
+                         if tool["name"] in names]
+                tools = run_policy.filter_tool_catalog(tools, mode)
+                if native_tools.policy.profile.value == "read-only":
+                    tools = [tool for tool in tools
+                             if tool["name"] not in {"write_file", "edit_file"}]
+                for tool in tools:
+                    if tool["name"] == "read_file":
+                        tool["description"] = (
+                            "Read a file inside the native sandbox worker "
+                            "(experimental, kernel verification pending)."
+                        )
+                handlers = {
+                    **native_tools.handlers,
+                    "compact": HANDLERS["compact"],
+                    "read_tool_result": tool_result_reader(
+                        self.store, session_id, command_logs=self.command_logs,
+                    ),
+                    "todo_write": write_task_plan,
+                }
             if readonly_profile:
                 names = {"read_file", "glob", "search_text", "compact", "read_tool_result"}
                 tools = [tool for tool in [*TOOLS, READ_TOOL_RESULT_TOOL] if tool["name"] in names]
@@ -4001,7 +4112,10 @@ class RuntimeHost:
                 },
                 command_executor,
                 tools=tools,
-                file_operations=self.file_operations if not sandbox_execution else None,
+                file_operations=(
+                    self.file_operations
+                    if not (sandbox_execution or native_tools is not None) else None
+                ),
                 workspace_id=execution_workspace.workspace_id,
                 # Container/sandbox backends have no local stream observer wired;
                 # claiming command-log coverage there would be dishonest (MK05).
@@ -4030,7 +4144,10 @@ class RuntimeHost:
                 discovery.catalog if discovery else ToolCatalog(
                     tools, [],
                     readonly_names=BASE_RUNTIME_READONLY_TOOLS | executor.readonly_tools,
-                    environment="docker" if sandbox_execution else "local",
+                    environment=(
+                        "docker" if sandbox_execution
+                        else "native" if native_tools is not None else "local"
+                    ),
                 )
             )
             await self._emit(
@@ -4057,6 +4174,15 @@ class RuntimeHost:
                     "Dependencies must be preinstalled in the image. Changes are candidates; "
                     "the user must export and review the patch before manually applying it. "
                     "Never claim changes were applied to the source project."
+                )
+            if native_tools is not None:
+                mode_note += (
+                    " Native sandbox task copy (experimental; OS-level isolation is NOT yet "
+                    "kernel-verified): file tools run in the isolated worker and never on the "
+                    "host. Shell, Skills, text search, and network access are unavailable; "
+                    "do not claim isolation guarantees beyond reading and writing files in "
+                    "the task copy. Changes are candidates; the user must review and adopt "
+                    "them before they reach the source project."
                 )
             base_system = (
                 "You are Eventide. Use tools to finish work, respect permissions, and never "
@@ -4803,6 +4929,24 @@ class RuntimeHost:
         except Exception as exc:
             status, error = "failed", self._clean(f"{type(exc).__name__}: {exc}")
         finally:
+            if native_tools is not None:
+                # The worker must shut down even when the run is cancelled; its
+                # tmp root never outlives the run that created it.
+                try:
+                    await native_tools.aclose()
+                    if native_policy is not None:
+                        cleanup_native_tmp(native_policy)
+                except (OSError, NativeSandboxError) as exc:
+                    detail = self._clean(f"Native cleanup failed: {type(exc).__name__}: {exc}")
+                    self.store.transact_facts(
+                        session_id, (), lambda _: (None, [(
+                            "native.cleanup_failed", {"run_id": run_id, "error": detail},
+                        )]),
+                    )
+                    if not self.store.run_is_terminal(run_id):
+                        status, error = "failed", detail
+                    else:
+                        raise
             try:
                 await manager.close()
             except Exception as exc:

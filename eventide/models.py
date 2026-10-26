@@ -66,6 +66,8 @@ class RunRequest:
     execution_target: str = "source"
     execution_profile: str = "local"
     sandbox_image: str | None = None
+    native_profile: str | None = None
+    native_backend: str | None = None
     knowledge_index: str = "existing"
     code_structure: bool = False
     source_scope: str = "code"

@@ -10,6 +10,7 @@ import type { Generation, Message } from "../api/types";
 import GenerationEditor from "../components/GenerationEditor.vue";
 import SafeContent from "../components/SafeContent.vue";
 import SandboxEvidence from "../components/SandboxEvidence.vue";
+import NativeExecutionOptions from "../components/NativeExecutionOptions.vue";
 import RunMemoryPanel from "../components/RunMemoryPanel.vue";
 import ContextSummaryPanel from "../components/ContextSummaryPanel.vue";
 import InputManifestPanel from "../components/InputManifestPanel.vue";
@@ -27,7 +28,10 @@ const store = useWorkbench(),
   route = useRoute(),
   mode = ref("auto"),
   executionTarget = ref<"source" | "snapshot" | "worktree">("source"),
-  executionProfile = ref<"local" | "sandbox">("local"),
+  executionProfile = ref<"local" | "sandbox" | "native">("local"),
+  nativeProfile = ref<"read-only" | "workspace-write">("workspace-write"),
+  nativeBackend = ref(""),
+  nativeReady = ref(false),
   sandboxImage = ref(""),
   prepareIndex = ref(false),
   structuredIndex = ref(false),
@@ -52,6 +56,9 @@ const boundSandbox = computed(
     session.value?.execution?.kind === "sandbox" ||
     run.value?.execution?.kind === "sandbox",
 );
+const boundNative = computed(
+  () => session.value?.execution_profile === "native",
+);
 const profileFrozen = computed(
   () =>
     !!session.value?.execution_profile ||
@@ -61,14 +68,26 @@ const profileFrozen = computed(
     boundSandbox.value,
 );
 watch(
-  [() => store.selectedSession, boundSandbox, profileFrozen],
+  [() => store.selectedSession, boundSandbox, boundNative, profileFrozen],
   () => {
     const pendingBody = store.pending[store.selectedSession]?.body;
     executionProfile.value =
       boundSandbox.value ||
       (!profileFrozen.value && pendingBody?.execution_profile === "sandbox")
         ? "sandbox"
-        : "local";
+        : boundNative.value ||
+            (!profileFrozen.value &&
+              pendingBody?.execution_profile === "native")
+          ? "native"
+          : "local";
+    nativeProfile.value =
+      session.value?.native_profile?.profile ||
+      pendingBody?.native_profile ||
+      "workspace-write";
+    nativeBackend.value =
+      session.value?.native_profile?.backend ||
+      pendingBody?.native_backend ||
+      "";
     sandboxImage.value = boundSandbox.value
       ? session.value?.sandbox_profile?.requested_image ||
         session.value?.execution?.profile?.requested_image ||
@@ -187,6 +206,7 @@ const canSubmit = computed(
     (executionProfile.value !== "sandbox" ||
       boundSandbox.value ||
       !!sandboxImage.value.trim()) &&
+    (executionProfile.value !== "native" || nativeReady.value) &&
     !!session.value &&
     !evaluationRun.value &&
     !isActive.value &&
@@ -286,11 +306,18 @@ async function submit() {
               ? null
               : sandboxImage.value.trim(),
           }
-        : {}),
+        : executionProfile.value === "native"
+          ? {
+              execution_profile: "native" as const,
+              native_profile: nativeProfile.value,
+              native_backend: (nativeBackend.value || null) as
+                "seatbelt" | "bubblewrap" | null,
+            }
+          : {}),
       execution_target:
         executionProfile.value === "sandbox"
           ? "source"
-          : boundWorktree.value
+          : executionProfile.value === "native" || boundWorktree.value
             ? "worktree"
             : executionTarget.value,
       model: model.value || null,
@@ -491,7 +518,7 @@ async function abandon() {
         />
         <ContextSummaryPanel :session-id="store.selectedSession" />
         <SideQuestionPanel
-          v-if="run"
+          v-if="run && !boundNative"
           :run-id="run.run_id"
           :session-id="store.selectedSession"
           :run-status="run.status"
@@ -687,6 +714,7 @@ async function abandon() {
             >
               <option value="local">本机执行</option>
               <option value="sandbox">Docker 沙箱 · 离线</option>
+              <option value="native">原生隔离 · 实验性文件工具</option>
             </select>
             <select
               v-if="executionProfile === 'local'"
@@ -772,6 +800,14 @@ async function abandon() {
               : "固定快照与 Docker 任务沙箱暂不支持知识索引准备。"
           }}
         </p>
+        <NativeExecutionOptions
+          v-if="executionProfile === 'native'"
+          v-model:profile="nativeProfile"
+          v-model:backend="nativeBackend"
+          :key="store.selectedSession"
+          :frozen="profileFrozen"
+          @ready="nativeReady = $event"
+        />
         <div v-if="executionProfile === 'sandbox'" class="sandbox-options">
           <label v-if="!boundSandbox"
             >预装依赖的本地 Docker 镜像
@@ -798,7 +834,7 @@ async function abandon() {
           </p>
         </div>
         <p v-if="profileFrozen" class="muted">
-          执行环境已随首轮固定；切换本机或沙箱请新建对话。
+          执行环境已随首轮固定；调整环境请新建对话。
         </p>
         <details class="generation-panel">
           <summary>本次生成设置</summary>

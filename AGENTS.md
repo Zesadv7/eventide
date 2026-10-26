@@ -495,7 +495,7 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-18 | 进行中 | 2026-10-26 纵向切片已落地：新增 eventide/memory_intake.py 确定性有限语法（声明支持：意图开头 记住/remember + 长期标记 以后/永久/长期/每次/always 等才直接保存；裸“记住X”仅观察、同会话重复才成 pending 建议；“这次/本次/this time”给拒绝回执不保存；否定/引文/反引号/尖括号/多行/非开头意图一律不记；全局需原话明确 全局/global 词且后随分隔符，否则默认项目并在回执标 scope_defaulted）。经 PreferenceMemory.observe_run 可信接收路径接线（仅 user 作者、无附件、非控制/子 Run），来源含 span:{start,end} 精确绑定原文偏移，自然语句 key 为 nl_<sha256前缀> 稳定派生；同事件重复投递与撤销后原来源均不重复保存，同内容新投递命中冲突回执。RunMemoryPanel 新增已记住卡片（内容/作用域/默认说明/来源/撤销按钮），memory.ts 回执类型扩充，vue-tsc 通过。定向验证：test_memory_intake.py 18 项 + test_preference_memory.py 38 项通过（旧用例“记住：以后用中文回答”按新语法迁为正例），Ruff/Mypy 2 模块通过，前端 memory.test.ts 14 项通过。主代理补齐直接“以后这个项目都用中文”、已知语言偏好冲突键及撤销后的当前状态。聊天流内已显示卡片；29项前端关联及1条built实际API浏览器保存/撤销/刷新旅程通过，类型/构建与资源同步；全量及付费模型未做。证据 .task_outputs/maka-upgrade/integration/memory-*。|
 | MK-19 | 进行中 | 2026-10-26切片一：`eventide/diagnostics.py`事实投影+`GET /api/runs/{id}/diagnostics`及`download?format=json\|markdown`，报告绑定`(run_id, high_water)`、`report_version=1`，旧版本不随后续事件漂移；中文五段摘要（发生/停驻/完成/未知/下一步）、已知原因与待查分列、事件文本有界脱敏、缺事件明确不可用；生成不调用模型、不执行工具、不追加事件、不自动外发。Vue报告页`/runs/:runId/diagnostics`+历史页运行详情入口，覆盖加载/错误/缺事实/重新生成与高水位绑定下载。后端12项、前端6项定向、vue-tsc/Vite构建/OpenAPI/schema重生成/4资源打包、Ruff、3.10目标Mypy通过；验证失败已登记MK19-ZCODE。ADR-107、api-contract/architecture切片小节同步；恢复动作入口、证据跳转、Graph/恢复关系、产物化导出未实现，不宣称故障报告完成。 |
 | MK-20 | 进行中 | 只读图运行切片：唯一EventLog定义/显式开始/依赖/事务领取/全图与旁枝共享4名额/取消与重启真实收尾；16节点、实际副本、父预算、同源幂等API均有定向证据（graph-review）。页面/生成契约/分发与built真实API旅程已集成验证；写副本/模型自主拆图/候选整合/Verifier/人工采纳以及最终真实验收仍待，未标整体完成。 |
-| MK-21 | 进行中 | 2026-10-26切片1：`eventide/native_sandbox/`集中库落地（严格类型policy与能力矩阵、probe只读探测、Seatbelt profile/argv、bubblewrap挂载白名单argv、纯stdlib有界JSON行协议文件worker、无回退runner及测试注入点声明）；allow_network/allow_subprocess本切片显式拒绝，探测存在≠隔离有效。44项离线定向（策略/路径边界、矩阵、argv文本、协议与输入边界、真子进程握手/写读/shutdown、显式失败）、Ruff、Mypy(py310目标)7模块通过，无网络无模型。宿主接线（executor/policy/HTTP/前端/Skill与Shell同边界/Docker并存）及真实OS越界验证未做，清单见architecture#native-sandbox-slice与ADR-105；完整MK-21仍含网络/环境/后台/Skills/Graph矩阵、环境页/扩权审批和实机证据。 |
+| MK-21 | 进行中 | 原生文件工具纵向切片已接Host/ToolExecutor/Policy/API/Vue，显式native+worktree、冻结profile/backend，保留分页/长行/版本、唯一编辑、新文件与证据；禁用不支持的Shell/Skills/MCP/检索/旁枝。修复state祖先保护、读取白名单和真实清理，未知写结果停驻。最终原生64项、关联本地/Docker32项已分别通过；前端13+新增聊天1项分别通过，Vue类型/Vite构建/Ruff/Mypy14及末次2模块通过，日志native-current-model、ADR124。发布资源由主集成统一重建；真实macOS/Linux内核、Shell/后台/Graph、完整环境矩阵与MK22仍未完成。 |
 | MK-22 | 待开始 | API/Vue/分发统一、一次全量收口、真实浏览器与本机平台边界、最终真实模型比较；缺平台/额度与效果未达标分开记录。 |
 
 依赖批次：A MK-00及原生能力预检 → B MK-08/19基础/07/09 → C MK-01/02/05/10/11/15/16/14/21 → D MK-03/04/06/17/18及07/09完善 → E MK-20/12/19完善 → F MK-13真实比较/MK-22。MK-13离线数据与比较器可提前准备；前端随每批实现，不集中拖到最后。
@@ -558,6 +558,7 @@ MK20独立ZCode实现启动（Coding/max/yolo，codex/maka-agent-graph基线5378
 MK14主代理复核集成：修正无依据的逐项实测日期、端点query/auth身份碰撞及IPv6展示，冻结引用损坏明确拒绝。53项恢复/生成组合、补充12项目录专项、18项前端、11项分发及1条built实际API页面/刷新/320px旅程通过；Ruff/Mypy4模块/vue-tsc通过，OpenAPI/types/页面产物已同步。日志model-capabilities-review，失败已登记。真实工具/流式验证、目录过期和声明编辑仍未完成，MK14保持进行中。
 
 
+
 2026-10-26用户再次确认额度重置：Graph/结构化提问已恢复实际工具调用，独立native-runtime/readonly-parallel分支从6ab4029补位，共4路Coding/max/yolo。主代理开始MK03摘要与原始证据对照（ADR126），所有子结果继续独立复核；历史1308不删除，未把新进程当旧会话恢复。
 
 MK09项目筛选补齐开始（2026-10-26，主代理）：复用既有项目attention端点，筛选写入URL，刷新保持；切换项目立即清空旧动作，晚到读取和审批结果不得覆盖当前项目。成功标准为组件并发响应与built实际API筛选/刷新旅程通过，不改任务权限。
@@ -587,3 +588,10 @@ MK11 当前切片验收（2026-10-26）：13个新增场景均有通过证据（
 
 
 MK11主集成收口（2026-10-26）：d9e1b65接入后，51项原调度/新并发通过；独立旧基线5失败中，三项为command-logs未精确排除造成假源码进展，两项为读取版本头的旧断言，修正后51项日志/指纹/失败循环全部通过。只排除真实未跟踪Runtime日志目录，已跟踪与链接替换仍参与源码指纹；旧policy记录不静默改写。15项Graph/分发、15项前端、built真实API只读批次/刷新/320px与Graph依赖两条通过，Ruff/Mypy4/Vue类型/构建及manifest同步。原失败见MK11-INTEGRATION均已闭环，真实模型与全量最终门禁未运行；原项目未采纳。
+
+MK21原生文件接线切片（当前模型接手，2026-10-26）：Host/API/Vue显式native环境与会话固定权限/后端已实现，独立副本文件工具进入worker，保留版本续页、长行、唯一编辑、新文件与source_evidence契约。Seatbelt改deny-default，Linux收紧代码挂载；修复state祖先保护、未知写结果、重复取消与清理失败事实。Skills/MCP/检索/旁枝在不支持组合下明确禁用。离线定向与类型检查收口证据随后追加；MK21仍进行中，Shell/后台/Skills/Graph、完整环境矩阵、真实macOS/Linux内核边界及MK22未完成。
+
+MK21文件切片收口证据：原生64项通过，最后覆盖写入权限断言单项通过；本地/Docker32项已分别通过，原失败的历史指纹fixture已修正并精确复验；前端13项与新增原生发送/冻结恢复1项分别通过。Ruff、Mypy14模块及最后Host/worker2模块、vue-tsc/Vite构建通过。失败和修复见MK21-NATIVE-PRODUCTION，原始日志忽略目录native-current-model。未跑真实浏览器/内核/模型或整仓最终门禁；不能标整个MK21完成，原项目未采纳。
+
+MK21共享分页渲染器补充复核：原有文件版本续页、文件证据边界、Host源码证据共20项通过（native-current-model/eventide-native-pages-related.log）；只读/本地/容器已有读取事实未改写。
+

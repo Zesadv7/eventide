@@ -20,7 +20,8 @@ def test_linux_launch_retains_worker_grant_and_installed_code(tmp_path):
     )
     triples = [argv[i : i + 3] for i in range(len(argv) - 2)]
     assert ["--setenv", GRANT_ENV_VAR, policy.grant().encode_env()] in triples
-    assert ["--ro-bind", "/opt/eventide", "/opt/eventide"] in triples
+    assert ["--ro-bind", "/opt/eventide/eventide/native_sandbox/worker.py",
+            "/opt/eventide/eventide/native_sandbox/worker.py"] in triples
 
 
 def test_seatbelt_readonly_dependency_stays_readonly_inside_workspace(tmp_path):

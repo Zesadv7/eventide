@@ -1,11 +1,9 @@
 """macOS Seatbelt (sandbox-exec) profile text and argv construction.
 
-The profile uses a targeted-deny style: writes, network and process execution
-are allowlisted, reads are default-allowed except for protected roots. Seatbelt
-gives precedence to the most specific path filter, so protected carve-outs win
-over broader allows. The generated text is deterministic and covered by offline
-tests; whether a real kernel enforces it is verified in the separate MK-21
-real-machine acceptance step, not here.
+The profile denies operations by default and grants read access only to the
+execution copy, scratch, explicit dependencies, and Python runtime resources.
+Protected paths remain explicit carve-outs. Kernel verification is a separate
+acceptance step; generated text alone is not proof of enforcement.
 """
 
 from __future__ import annotations
@@ -31,23 +29,35 @@ def _literal(path: Path) -> str:
     return f"(literal {_quote(str(path))})"
 
 
-def build_seatbelt_profile(policy: NativeSandboxPolicy, interpreter: Path) -> str:
+def build_seatbelt_profile(
+    policy: NativeSandboxPolicy, interpreter: Path, *,
+    runtime_roots: tuple[Path, ...] = (), worker_path: Path | None = None,
+) -> str:
     lines = [
         "(version 1)",
-        "; Eventide native sandbox worker profile (targeted-deny).",
+        "; Eventide native sandbox worker profile (deny-default).",
         f"; profile={policy.profile.value} network={'allow' if policy.allow_network else 'deny'}",
         "; Seatbelt gives precedence to the most specific path filter, so explicit",
         "; denies below carve protected roots out of broader allows.",
         "; Generated offline; enforcement on a real kernel is verified separately.",
         "",
-        "(allow default)",
+        "(deny default)",
+        "(allow signal (target self))",
+        "(allow sysctl-read)",
+        "(allow file-read-metadata)",
         "(deny network*)",
         "(deny process-exec*)",
         f"(allow process-exec {_literal(interpreter)})",
-        "(allow process-fork)",
+        "(deny process-fork)",
         "(deny file-write*)",
         f"(allow file-write* {_subpath(policy.tmp_root)})",
     ]
+    for root in (policy.workspace_root, policy.tmp_root, *policy.read_only_roots,
+                 *runtime_roots, Path("/System/Library"), Path("/usr/lib")):
+        lines.append(f"(allow file-read* {_subpath(root)})")
+    for path in (interpreter, Path("/dev/null"), Path("/dev/urandom"), Path("/dev/random"),
+                 *((worker_path,) if worker_path else ())):
+        lines.append(f"(allow file-read* {_literal(path)})")
     if policy.profile.value == "workspace-write":
         lines.append(f"(allow file-write* {_subpath(policy.workspace_root)})")
     for root in policy.read_only_roots:
