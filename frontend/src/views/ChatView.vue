@@ -14,6 +14,7 @@ import RunMemoryPanel from "../components/RunMemoryPanel.vue";
 import ContextSummaryPanel from "../components/ContextSummaryPanel.vue";
 import InputManifestPanel from "../components/InputManifestPanel.vue";
 import RunSupplementPanel from "../components/RunSupplementPanel.vue";
+import RunQuestionPanel from "../components/RunQuestionPanel.vue";
 import RunToolsPanel from "../components/RunToolsPanel.vue";
 import SideQuestionPanel from "../components/SideQuestionPanel.vue";
 import EventideLogo from "../components/EventideLogo.vue";
@@ -474,6 +475,12 @@ async function abandon() {
         <ModelRetryNotice
           v-if="isActive && run?.model_retry"
           :retry="run.model_retry"
+        />
+        <RunQuestionPanel
+          v-if="run"
+          :run-id="run.run_id"
+          :run-status="run.status"
+          :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
         />
         <RunSupplementPanel
           v-if="run"

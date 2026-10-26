@@ -61,7 +61,9 @@ def test_attention_projects_readable_approval(isolated_workspace):
         assert summary["impact"] == "写入源工作区（未隔离）"
         assert summary["network_access"] is None
         assert summary["privilege_elevation"] is None
-        assert snapshot["unsupported"]["awaiting_answers"]
+        assert snapshot["counts"]["questions"] == 0
+        assert snapshot["questions"] == []
+        assert "awaiting_answers" not in snapshot["unsupported"]
 
         resolved = client.post(
             f"/api/runs/{run_id}/approvals/{approval_id}",

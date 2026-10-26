@@ -79,6 +79,7 @@ async def test_runtime_exposes_and_audits_workspace_skill_loading(isolated_works
             "compact",
             "read_tool_result",
             "todo_write",
+            "ask_user",
             "load_skill",
         }
         assert provider.requests[1].messages[-1]["content"][0]["content"] == content

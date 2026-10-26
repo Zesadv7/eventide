@@ -12,6 +12,7 @@ import subprocess
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -35,6 +36,8 @@ from eventide.tool_contracts import (
 )
 from eventide.tools.filesystem import run_edit, run_write
 from eventide.utils import decode_output
+
+CURRENT_TOOL_CALL: ContextVar[ToolCall] = ContextVar("eventide_tool_call")
 
 ApprovalHandler = Callable[[str, ToolCall, str], Awaitable[bool]]
 
@@ -348,6 +351,7 @@ class ToolExecutor:
     async def execute(self, call: ToolCall, context: ToolContext) -> ToolResult:
         capture, start_error = self._start_command_log(call, context)
         token = activate_capture(capture) if capture is not None else None
+        call_token = CURRENT_TOOL_CALL.set(call)
         try:
             try:
                 result = await self._dispatch(call, context)
@@ -381,6 +385,7 @@ class ToolExecutor:
                 ))
             return result
         finally:
+            CURRENT_TOOL_CALL.reset(call_token)
             deactivate_capture(token)
 
     def _start_command_log(

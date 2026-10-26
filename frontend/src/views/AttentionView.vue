@@ -138,7 +138,7 @@ function formatTool(summary: {
         <p class="eyebrow">ATTENTION / INBOX</p>
         <h1>待处理中心</h1>
         <p class="muted">
-          汇总待审批、失败运行与待采纳候选，来源于任务的实际记录。你可以处理审批、查看失败原因，或检查待采纳的修改。
+          汇总待回答、待审批、失败运行与待采纳候选，来源于任务的实际记录。你可以处理审批、查看失败原因，或检查待采纳的修改。
         </p>
       </div>
       <button :disabled="loading" @click="load">刷新</button>
@@ -169,10 +169,39 @@ function formatTool(summary: {
         {{ state.limits.runs }} 条最近失败或停驻记录；下列数字是本页显示数量。
       </p>
       <p class="muted">
-        待审批 {{ state.counts.approvals }} · 失败/停驻运行
-        {{ state.counts.runs }} · 待采纳候选
+        待回答 {{ state.counts.questions }} · 待审批
+        {{ state.counts.approvals }} · 失败/停驻运行 {{ state.counts.runs }} ·
+        待采纳候选
         {{ state.counts.delivery_candidates }}
       </p>
+
+      <section class="panel">
+        <h2>待回答</h2>
+        <p v-if="!state.questions.length" class="muted">
+          当前没有待回答的问题。
+        </p>
+        <article
+          v-for="item in state.questions"
+          :key="item.dedup_key"
+          class="attention-item"
+        >
+          <header class="attention-head">
+            <strong>{{
+              item.actionable ? "等待你的回答" : "等待已中断"
+            }}</strong>
+            <small>{{ projectName(item.workspace_id) }}</small>
+          </header>
+          <ul>
+            <li v-for="(question, index) in item.questions" :key="index">
+              {{ question.text }}
+            </li>
+          </ul>
+          <p class="muted">回答只交给提出问题的任务，不代表批准工具操作。</p>
+          <button @click="openSession(item.session_id, item.workspace_id)">
+            打开提问对话
+          </button>
+        </article>
+      </section>
 
       <section class="panel">
         <h2>待审批</h2>

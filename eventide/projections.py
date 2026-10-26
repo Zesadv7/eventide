@@ -66,6 +66,7 @@ class RuntimeStateProjection:
             "usage": {},
             "error": None,
             "pending_approvals": {},
+            "pending_questions": {},
             "tools": {},
             "checkpoint": None,
             "reason": None,
@@ -128,7 +129,16 @@ class RuntimeStateProjection:
                     state["status"] = "waiting_for_user"
             if kind == "approval.resolved":
                 state["pending_approvals"].pop(payload["approval_id"], None)
+                if not terminal and not state["pending_questions"]:
+                    state["status"] = "running"
+            if kind == "interaction.question.opened":
+                state["pending_questions"][payload["question_id"]] = payload
                 if not terminal:
+                    state["status"] = "waiting_for_user"
+            if kind in {"interaction.question.answered", "interaction.question.closed"}:
+                state["pending_questions"].pop(payload.get("question_id"), None)
+                if (not terminal and not state["pending_approvals"]
+                        and not state["pending_questions"]):
                     state["status"] = "running"
             if kind in TERMINALS and not terminal:
                 terminal = True

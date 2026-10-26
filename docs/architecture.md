@@ -1287,3 +1287,12 @@ MK05主代理复核：捕获密钥在实际执行器组装时更新为已加载/
 MK08C正常关闭恢复（ADR-118）：host.shutdown_started绑定确切Run及一次关服身份；取消终态只在该标记存在且无用户停止时记service_shutdown。Run关闭后不再追加Run事件，恢复claim及用户停止以精确关联的Session事实持久化；恢复页将其计入同一high_water。新Host复用安全边界、唯一后继与父根预算，接收时绑定source Run，等待检查期间收到停止也在实际派发前取消后继。代码初稿由ZCode提供，主代理补接收竞态与恢复投影；32项初始专项、101项关联及22项最终复验通过。正常关服可恢复不代表任意未知工具可重放，MK08D/E继续待实施。
 
 MK09项目筛选（2026-10-26）：AttentionView复用`GET /api/projects/{id}/attention`，筛选身份保存在路由query.project；选项使用已注册Workspace的稳定project_id去重，不通过显示名称或目录名推断身份。切范围立即移除旧列表/动作，按请求代次拒绝晚到读取与审批结果；项目不可用显示真实错误，不回退全局列表。轮询仍每5秒读取选定范围，审批继续由原Run端点复验；六项组件及built实际API筛选/刷新/原审批旅程通过，尚未补全待回答与核查不明类别。
+
+
+### MK06结构化提问与MK09待回答切片（2026-10-26，ADR-123）
+
+主Agent目录增加ask_user（最多3题，每题500字符、最多6个不同选择、回答文本4000字符）；源/工作副本及Plan可用，ReadonlyProfile、Docker、交付Writer不提供。调用仍经ToolExecutor与PolicyEngine，可信调用身份由ContextVar在execute范围内绑定/重置，不把隐藏参数塞入普通工具签名。Host在唯一EventLog写interaction.question.opened（question_id/Run/Session/call_id/revision/脱敏问题）再等待，模型请求已结算并释放模型槽，必要的工作区所有权保留。
+
+回答接收先验证冻结问题，再由Store同一写事务复核revision、原问题、相同答案摘要、终态、关闭及run.cancel_requested，写入answered后才唤醒该问题的Event。相同内容返回原回执，不同内容409，旧revision409，跨Run问题404；当前Run没有活跃等待者时拒绝，不把答案存成无人消费的“已送达”。原终态孤立问题可留late Session事实，但绝不新建/恢复Run。重复HTTP回执也可重新唤醒同一等待者。答案由原ask_user工具结果进入消息投影，不追加用户审批或改变权限；答案先脱敏保存，接收不等于模型已消费。
+
+取消在finally移除等待者并持久关闭问题；关闭错误不被静默忽略。服务关闭后重开保留原问题/答案/调用身份，未答问题关闭或过期；本切片不重建跨进程等待，不声称MK06恢复已完成。Run导航与完整投影均显示waiting_for_user。待处理查询在数据库按项目筛选未答/未闭合、无终态/无停止请求的问题，再有界取最近50条；页面显示并跳回原对话回答，刷新和切Run迟到响应隔离。Vue提交沿用durableMutation，未知结果保留原请求身份，文本不执行HTML。

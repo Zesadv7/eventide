@@ -62,14 +62,42 @@ export interface AttentionDelivery {
   links: { page: string };
 }
 
+export interface AttentionQuestionItem {
+  text: string;
+  choices: string[];
+  allow_free_text: boolean;
+}
+
+export interface AttentionQuestion {
+  kind: "question";
+  dedup_key: string;
+  question_id: string;
+  run_id: string;
+  session_id: string;
+  workspace_id: string;
+  ts: number;
+  revision: number | null;
+  questions: AttentionQuestionItem[] | null;
+  run_status: string;
+  actionable: boolean;
+  action: { method: string; url: string };
+  links: { session: string };
+}
+
 export interface AttentionSnapshot {
   generated_at: number;
   project_id: string | null;
-  limits?: { approvals: number; runs: number };
-  counts: { approvals: number; runs: number; delivery_candidates: number };
+  limits?: { approvals: number; runs: number; questions?: number };
+  counts: {
+    approvals: number;
+    runs: number;
+    delivery_candidates: number;
+    questions: number;
+  };
   approvals: AttentionApproval[];
   runs: AttentionRun[];
   delivery_candidates: AttentionDelivery[];
+  questions: AttentionQuestion[];
   unsupported: Record<string, string>;
 }
 

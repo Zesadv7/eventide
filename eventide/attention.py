@@ -33,9 +33,7 @@ EXECUTION_LABELS = {
 DEFAULT_LIMIT = 50
 RUN_LIMIT = 20
 
-UNSUPPORTED_KINDS = {
-    "awaiting_answers": "运行时没有待回答类事件事实，此类别暂不支持，不做推测",
-}
+UNSUPPORTED_KINDS: dict[str, str] = {}
 
 
 def _text(arguments: dict[str, Any], *keys: str) -> list[str]:
@@ -158,6 +156,41 @@ def _approval_items(
     return items
 
 
+def _question_items(
+    runtime: RuntimeHost, limit: int, project_id: str | None,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for fact in runtime.store.pending_question_facts(limit, project_id):
+        payload = fact["payload"] if isinstance(fact["payload"], dict) else {}
+        run = runtime.store.get_run_summary(fact["run_id"])
+        if run is None:
+            continue
+        question_id = payload.get("question_id")
+        if not isinstance(question_id, str) or not question_id:
+            continue
+        run_status = run.get("status")
+        items.append({
+            "kind": "question",
+            "dedup_key": f"question:{question_id}",
+            "question_id": question_id,
+            "run_id": fact["run_id"],
+            "session_id": fact["session_id"],
+            "workspace_id": fact["workspace_id"],
+            "ts": fact["ts"],
+            "revision": payload.get("revision"),
+            "questions": payload.get("questions"),
+            "run_status": run_status,
+            "actionable": (run_status in {"running", "waiting_for_user"}
+                           and runtime.has_question_waiter(question_id)),
+            "action": {
+                "method": "POST",
+                "url": f"/api/runs/{fact['run_id']}/questions/{question_id}/answers",
+            },
+            "links": {"session": f"/chat/{fact['session_id']}"},
+        })
+    return items
+
+
 def _run_items(runtime: RuntimeHost, limit: int, project_id: str | None) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for run_id in runtime.store.recent_failed_run_ids(limit, project_id):
@@ -230,17 +263,20 @@ def collect_attention(
     approvals = _approval_items(runtime, approval_limit, project_id)
     runs = _run_items(runtime, run_limit, project_id)
     deliveries = _delivery_items(runtime, project_id)
+    questions = _question_items(runtime, approval_limit, project_id)
     return {
         "generated_at": time.time(),
         "project_id": project_id,
-        "limits": {"approvals": approval_limit, "runs": run_limit},
+        "limits": {"approvals": approval_limit, "runs": run_limit, "questions": approval_limit},
         "counts": {
             "approvals": len(approvals),
             "runs": len(runs),
             "delivery_candidates": len(deliveries),
+            "questions": len(questions),
         },
         "approvals": approvals,
         "runs": runs,
         "delivery_candidates": deliveries,
+        "questions": questions,
         "unsupported": UNSUPPORTED_KINDS,
     }

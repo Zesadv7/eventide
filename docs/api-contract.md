@@ -755,3 +755,12 @@ MK05集成补充：现有read_tool_result新增普通命令stdout/stderr分流�
 - `GET /api/sessions/{id}/context-summaries/{checkpoint_id}/messages/{index}?offset=&limit=`：原摘要消息投影的JSON文本分页，offset≥0，limit 1–12,000（默认8,000）；返回history_hash/输入核对状态和next_offset。不是原文件正文，也可能包含生成摘要前已裁剪的工具预览。来源不可核对409，越Session/未知消息404，分页越界422。GET不写事件、不调用模型、不读取当前源码。
 
 MK09页面范围接线（2026-10-26）：待处理页`#/attention?project=<project_id>`调用既有项目attention端点，无query时调用全局端点。刷新/直接打开保持范围；切换中不展示旧项目动作，404/网络失败不自动改成全局结果。未新增或修改HTTP契约。
+
+
+### MK06结构化问题API（2026-10-26）
+
+- `GET /api/runs/{run_id}/questions`：返回run_id、questions、waiting。每组含question_id、session_id、run_id、call_id、revision、冻结questions以及waiting/answered/closed/expired/late；已接收答案含answers。读取不生成问题，不自动续跑；进程内等待不存在时不呈现为可提交等待。
+- `POST /api/runs/{run_id}/questions/{question_id}/answers`：本机同源+Idempotency-Key，严格body `{answers:[{choice?:string|null,text?:string|null}],question_revision:1}`；1–3条与冻结问题逐项对应。返回question_id/run_id/status(delivered或late)/duplicate；delivered仅表示接收，不证明已进入下一模型。相同内容可重放，不同内容/旧版本/关闭/明确停止/活跃事实却无等待者409，跨Run404、无效选项/字段/长度422。关闭问题不能答，已终态且未关闭的孤立问题仅存late，不重新派发。
+- `GET /api/attention`与项目attention新增questions和counts.questions，limits.questions与approvals_limit相同。每项稳定question:<id>身份、原Run/Session/问题版本、可操作状态与对话链接。回答页只调用上述端点，普通工具审批保持原独立协议。
+
+历史问题来自唯一事件记录；本阶段服务重启后不自动重建等待，不把问题卡的存在当仍可回答。OpenAPI与TS类型已同步。

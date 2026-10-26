@@ -480,10 +480,10 @@ RQ5检索留出已完成：12题仅一批，历史8/12→结构7/12，Recall下�
 | MK-03 | 进行中 | 结构化摘要已有来源校验；2026-10-26补已保存版本对照API/UI（ADR126）：按Session+checkpoint查询、原历史指纹/终态边界核对、摘要请求claim输入指纹对照、引用消息分页；旧记录缺事实/无效引用/投影变化/截断明示，读接口不生成或改写摘要。42项后端、6项前端、11项分发、built实际API页面1条含原文/刷新/320px及Ruff/Mypy4模块/vue-tsc通过。日志summary-review，静态失败已登记。轮内滚动压缩与最终模型保真效果仍待。 |
 | MK-04 | 进行中 | 规则来源/作用域/截断及attempt输入清单；请求诊断面板不串轮。 |
 | MK-05 | 进行中 | 普通本机Shell/Skill两流脱敏归档、配额/过期/缺失与HTTP/Vue分页已接通；模型read_tool_result同Session精确回读，持久密钥跨块保护。44项后端通过/1显式容器跳过，7项前端、静态检查、1条built页面通过；后台/容器及整体验收仍待。 |
-| MK-06 | 进行中 | 2026-10-26 切片1（自由文本运行中补充，基线0c86c75）：`interaction.supplement`/`consumed` 只落唯一EventLog（新interactions.py+Store三窄方法），Host仅每步context_builder.build前消费一次并同事务追加带前缀message.user，工具不倒带；POST/GET /api/runs/{id}/supplements复用本机来源+write receipts/origin幂等，终态后收据记late不自动续跑、不建Run、同Session其他Run不消费；Vue RunSupplementPanel挂ChatView。后端4项定向（边界单次消费/同键重放与409/迟到隔离/4xx）、前端4项组件+39项chat/memory/sandbox回归、vue-tsc、Ruff全仓、Mypy(py310)5模块通过；首轮测试迭代失败已记MK-06-SLICE1，日志.task_outputs/maka-upgrade/interactions/。ADR-112、architecture/api-contract同步。结构化提问持久等待/回答（切片2）未实现，OpenAPI/schema.d.ts未重新生成，不计整项完成。 |
+| MK-06 | 进行中 | 运行中补充已验收；2026-10-26增加结构化主动提问（ADR123）：最多3题，Run/call/revision绑定、唯一EventLog问题与回答、同事务停止/版本/幂等复核；网页选择/自由文本和待处理跳转，等待释放模型槽，答案不授权。42项上下文组合、恢复/分发组合51通过及1个fixture修复后所在37项目录/Plan/只读/快照组合通过；最终2项校验/独立审批、15项前端、2条built实际API浏览器、Ruff/Mypy8/vue-tsc/build通过（批次重叠不相加）。日志questions-review，失败已登记。服务重启只保留关闭/过期问题、不自动重建等待；排到下一轮等仍待，不标整项完成。 |
 | MK-07 | 进行中 | 2026-10-26 切片1：attention.py 从冻结参数+run_execution绑定派生命令/目标/cwd/执行位置/影响范围，网络与权限显示未声明；approval_id与原始参数原样透传，动作复用既有审批端点，取消后过期审批保留显示且仍被拒绝（404/409）。后端5项+test_api 25项、前端3项组件、Ruff/Mypy4模块/vue-tsc/Prettier通过，日志.task_outputs/maka-upgrade/attention/。ADR-113 Proposed；operation/revision绑定与批准前参数失效待后续切片，未跑全量/浏览器/真实平台。 |
 | MK-08 | 进行中 | 整体恢复重做：A连接与回执、B模型分类重试、C持久恢复、D未知结果只读核查、E源码变化重新建立基线、F恢复UI；故障注入矩阵。B首批主调用10次分类重试/Retry-After/等待释放槽/用量预算/尝试预览隔离实现，179项定向、Ruff和Mypy11模块通过，ADR-101及MK08B-REVIEW记录。已补等待页面及无终态Run的持久恢复。2026-10-26 F首批：`GET /api/runs/{id}/recovery`原子切面投影（`store.recovery_snapshot`+`recovery_center`，ADR-117）展示停止分类/已记录执行进度/未知与待审批/claim唯一后继实时状态/可信available_actions，旧历史缺冻结策略显式标注；动作仅复用既有cancel/continue端点，无自动重试与`POST recovery/actions`；Vue新增`/runs/:runId/recovery`页与Chat停驻入口。4项真实EventLog/HTTP定向、7项恢复回归、5项前端组件及33项受影响套件、Ruff/Mypy/vue-tsc/Prettier通过；日志.task_outputs/maka-upgrade/recovery-center/。正常服务关闭恢复已接入ADR-118，32项专项/101项关联/22项最终复验及静态通过；未知核查/源码重新建立基线/恢复动作端点仍待，不计整项完成，无真实模型验收。 |
-| MK-09 | 进行中 | 2026-10-26 切片1：GET /api/attention与/api/projects/{id}/attention纯事实投影（待审批/失败停驻运行/待采纳交付候选），去重键approval:{id}、run:{id}:{status}、delivery:{id}；Vue /attention独立页+导航，动作复用既有接口不自动采纳，待回答类别明示不支持。后端5项+前端3项定向通过（证据同MK-07），ADR-113 Proposed；待回答/核查不明类别、项目筛选UI与多标签旅程待后续切片。 |
+| MK-09 | 进行中 | 待审批、失败停驻、待采纳及待回答纯事实投影已接API/Vue；项目过滤在SQL取最近记录之前，页面URL保存范围、切项目清旧动作并拒绝迟到响应。筛选6项组件/1条built旅程/11项分发通过；提问接线15项前端与2条built实际API旅程及后端关联检查通过，细节见MK06和questions-review。人工采纳保持显式；核查不明类别、完整翻页及整体验收仍待。 |
 | MK-10 | 待开始 | 后台命令身份/日志/就绪/停止/重启核查；进程树清理与UI。 |
 | MK-11 | 进行中 | 可信无依赖只读工具并行、共享调度、稳定结果及部分失败；批次展示。 |
 | MK-12 | 待开始 | 有来源的产物列表、Markdown/图片/隔离HTML/报告预览；证据保护和访问校验。 |
@@ -562,3 +562,8 @@ MK14主代理复核集成：修正无依据的逐项实测日期、端点query/a
 MK09项目筛选补齐开始（2026-10-26，主代理）：复用既有项目attention端点，筛选写入URL，刷新保持；切换项目立即清空旧动作，晚到读取和审批结果不得覆盖当前项目。成功标准为组件并发响应与built实际API筛选/刷新旅程通过，不改任务权限。
 
 MK09项目筛选验证：6项前端组件（迟到全局响应、范围切换立即移除动作、失败无回退、旧审批失败隔离）、built实际API筛选/刷新/同Run审批与补充旅程1条、11项分发、vue-tsc/build/格式通过；日志attention-filter，本切片无测试失败。待回答类别与整体MK09/MK22仍进行中。
+
+
+MK06/MK09提问切片主代理接手（2026-10-26）：ZCode四路于15:30–15:31再次返回Coding Plan HTTP429/1308，重置19:54:35；Graph/native/readonly草稿保留未集成，结构化问题由主代理接手修正。ask_user现在经真实工具调用身份、持久问题/答案、事务内停止/版本/幂等复验及精确唤醒接线，Plan主任务可提问、子任务不越界；API/OpenAPI/TS/聊天问题卡与待处理类别同步。服务重启不自动恢复等待，仍作为未完成项；验证收口与失败证据见下条，整体MK06/09保持进行中。
+
+MK06/MK09提问切片收口：原问题身份刷新/服务关闭后保留、同问题重复回执重新唤醒、明确停止阻止答案接收、Plan可提问且ReadonlyWorker不可、回答内容脱敏、后续危险工具仍需独立审批均有定向证据；类型/契约/打包同步。真实供应商与全量最终门禁仍按MK22，原项目未采纳。

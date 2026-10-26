@@ -10,7 +10,8 @@ import { api } from "../src/api/client";
 const snapshot: AttentionSnapshot = {
   generated_at: 1000,
   project_id: null,
-  counts: { approvals: 2, runs: 1, delivery_candidates: 1 },
+  counts: { approvals: 2, runs: 1, delivery_candidates: 1, questions: 0 },
+  questions: [],
   approvals: [
     {
       kind: "approval",
@@ -119,9 +120,7 @@ const snapshot: AttentionSnapshot = {
       links: { page: "/deliveries" },
     },
   ],
-  unsupported: {
-    awaiting_answers: "运行时没有待回答类事件事实，此类别暂不支持，不做推测",
-  },
+  unsupported: {},
 };
 
 beforeEach(() => {
@@ -179,7 +178,7 @@ describe("attention center", () => {
       .filter((b) => b.text().includes("JSON"))[0]
       .trigger("click");
     expect(live.text()).toContain("rm -rf build");
-    expect(wrapper.text()).toContain("此类别暂不支持");
+    expect(wrapper.text()).toContain("当前没有待回答的问题");
   });
 
   it("reuses the original approval endpoint and surfaces rejection", async () => {
@@ -206,7 +205,7 @@ describe("attention center", () => {
   it("shows empty sections without fabricating categories", async () => {
     vi.spyOn(attentionApi, "global").mockResolvedValue({
       ...snapshot,
-      counts: { approvals: 0, runs: 0, delivery_candidates: 0 },
+      counts: { approvals: 0, runs: 0, delivery_candidates: 0, questions: 0 },
       approvals: [],
       runs: [],
       delivery_candidates: [],
@@ -245,13 +244,11 @@ describe("attention project scope", () => {
           finish = resolve;
         }),
     );
-    const project = vi
-      .spyOn(attentionApi, "project")
-      .mockResolvedValue({
-        ...snapshot,
-        project_id: "project-1",
-        approvals: [],
-      });
+    const project = vi.spyOn(attentionApi, "project").mockResolvedValue({
+      ...snapshot,
+      project_id: "project-1",
+      approvals: [],
+    });
     const { wrapper, router } = await render();
     await wrapper
       .get('select[aria-label="待处理项目范围"]')
@@ -299,13 +296,11 @@ describe("attention project scope", () => {
 
   it("does not report an old approval failure in the newly selected project", async () => {
     vi.spyOn(attentionApi, "global").mockResolvedValue(snapshot);
-    const project = vi
-      .spyOn(attentionApi, "project")
-      .mockResolvedValue({
-        ...snapshot,
-        project_id: "project-2",
-        approvals: [],
-      });
+    const project = vi.spyOn(attentionApi, "project").mockResolvedValue({
+      ...snapshot,
+      project_id: "project-2",
+      approvals: [],
+    });
     let reject!: (reason: Error) => void;
     vi.spyOn(api, "approve").mockImplementation(
       () =>

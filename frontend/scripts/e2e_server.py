@@ -157,6 +157,13 @@ def main() -> None:
                 yield ModelStreamEvent("text_delta", text="正在分析独立只读快照。" * 50)
                 await asyncio.sleep(8)
                 response = ModelResponse(text="快照已完成：" + prompt, usage=usage)
+            elif "主动提问场景" in prompt:
+                response = ModelResponse(
+                    tool_calls=[self._call("ask_user", {"questions": [{
+                        "text": "这个项目以后使用哪种语言？", "choices": ["中文", "英文"],
+                        "allow_free_text": True,
+                    }]})], stop_reason="tool_use", usage=usage,
+                ) if step == 1 else ModelResponse(text="已收到你的回答，继续原任务。", usage=usage)
             elif "审批场景" in prompt:
                 response = self._approval(step, usage)
             elif "停驻场景" in prompt:

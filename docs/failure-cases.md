@@ -984,3 +984,29 @@ MK-CODING-1308再次触发：2026-10-26 14:22–14:23，恢复的四路中旁枝
 
 - 基线：结构化提问377c30f、原生后端6ab4029。集成前审查发现提问答案校验可绕过禁止自由输入，Run终态读取在答案事务外、问题尚无精确调用身份；原生后端草稿存在清理异常静默忽略、受保护状态根可能覆盖授权worktree、文件分页/重叠编辑/新文件契约不一致。属于未集成草稿审查，不宣称线上事故或已通过故障测试。
 - 主代理于2026-10-26主动停止structured-questions-resume2/native-runtime-zcode，保留文件并以具体修正任务接续；不是额度或网络故障。相关修复、定向验证及最终提交仍待核验，原日志保存在各自工作副本.task_outputs/maka-upgrade/。
+
+### MK11-ZCODE-TIMEBOX — 只读并发草稿超时与取消审查
+
+- 基线6ab4029，readonly-parallel-zcode桥接返回ok:false / ZCode task exceeded 30 minutes，退出1；并非额度耗尽，Host/scheduler草稿保留未集成。主代理发现取消按顺序先等待已运行项、后取消排队项，会使排队项在等待期间取得释放槽并启动；另有完成后记账中取消窗口和不可哈希自定义handler判定问题，尚待确定性测试及修复。以具体反馈交新会话接续，原日志各自工作副本.task_outputs/maka-upgrade/readonly-parallel-zcode。
+
+MK-CODING-1308于2026-10-26 15:30–15:31再次出现：Graph review1、native review1、readonly review1、questions review1四路均返回HTTP429/code1308五小时上限，明确下一重置19:54:35，wrapper均ok:false/退出1。已经恢复实际开发后再次耗尽，保留各自工作副本与日志，不当网络故障、不切回Start。主代理继续可独立完成的候选审查；未完成草稿不标完成。
+
+### MK06-QUESTIONS-REVIEW — 主代理接手结构化提问
+
+- 外部未验证草稿以三方补丁接入d77164b后继续修正，未当作已验收。定向首批21项通过；扩展验证backend2中24通过、2失败，均为主代理新增测试调用了不存在的scheduler.snapshot与错误的PolicyEngine构造参数，生产路径尚无该批回归证据。命令pytest tests/test_structured_questions.py tests/test_interactions.py tests/test_attention_api.py，日志.task_outputs/maka-upgrade/questions-review/backend2.log。按真实接口修正fixture后复验，原失败保留。
+
+- MK06-QUESTIONS-REVIEW：backend3未收集测试（主代理误写不存在的tests/test_run_modes.py，退出4），改为仓库实际test_runtime.py；ruff1退出1，8项为新增代码长行、zip缺strict、测试未await任务及导入顺序。15项前端定向已通过（frontend1）。按实际文件修复检查后复验，不将未收集计通过。
+
+- backend4：36通过/2失败。重开Host测试新增await后正确收到CancelledError，fixture须显式断言取消；另test_runtime_retries_and_compacts的机制预算6250已低于新增ask_user后的实测固定请求6631字符，压缩无法压缩常驻系统/工具。只调整共享机制fixture底座5850→7000（保留同一400字符尾部空间），生产配置、冻结模型评测预算和历史结果不改；复验上下文相关测试。Mypy8模块和Ruff修正通过。
+
+- MK06-QUESTIONS-REVIEW：backend5含上下文压缩相关42项通过。browser1两条中审批/补充通过，新增提问旅程失败于读取runs[0]：测试在新建对话路由完成前保存了旧URL，按旧Session取回空列表；页面提问实际已出现。补新建完成的URL等待，只复验该失败旅程，日志browser1原样保留。
+
+- 最后关联批次首次未收集（主代理将已有tests/test_graceful_shutdown_recovery.py误写成test_graceful_recovery.py，退出4，final-directed.log），按rg返回的实际文件重跑该批；这两次文件名错误均不属于产品回归，也不计通过。
+
+- final-directed2：51通过/1失败，新服务关闭测试误把store.latest_run返回的记录字典当作Run ID传给查询；修正为明确id字段后仅复验失败场景及新增工具相关目录/Plan/Skills边界。browser2提问页面旅程通过，包含刷新、待处理跳转、选择+文本回答、原Run唯一和320px布局。
+
+- ruff-final仅测试顶部pytest与fastapi导入之间的多余空行失败，按Ruff排序修正；保留该静态失败日志。未改变运行逻辑。
+
+- format-final仅新增questions.test.ts格式检查失败，Prettier重排后复核。最终2项（重复选项拒绝、回答后危险工具仍独立审批）通过，Ruff全涉及文件通过。此前关服fixture修正后，含目录/Plan/Skills/只读Worker/快照的37项通过；恢复/分发组合其余51项已通过，未为补记录重复整批。15项前端与2条built浏览器分别通过，vue-tsc/build/Mypy8模块通过。所有失败均为开发期fixture/格式或新增目录导致机制预算底座过低，修正过程与原日志保留；不代表真实模型效果。主代理接手并验证，Graph/原生/并发草稿仍未集成。
+
+MK06-MK21-EARLY-REVIEW后续：提问草稿的问题已由主代理按ADR123修复，并在questions-review验证；原生草稿的清理、权限和文件契约问题仍未修复/验收，不能把本条当MK21闭环。MK20与MK11提前审查项仍待后续候选验证。

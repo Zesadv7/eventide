@@ -1233,7 +1233,9 @@ class RuntimeStore:
                 for event in self._connection.execute(
                     "SELECT * FROM runtime_events WHERE run_id=? AND type IN "
                     "('run.admitted','run.started','approval.required','approval.resolved','run.completed',"
-                    "'run.failed','run.interrupted') ORDER BY session_seq",
+                    "'run.failed','run.interrupted','interaction.question.opened',"
+                    "'interaction.question.answered','interaction.question.closed') "
+                    "ORDER BY session_seq",
                     (run_id,),
                 )
             ]
@@ -1564,6 +1566,162 @@ class RuntimeStore:
                 run_id=run_id,
             )
         return True
+
+    def interaction_questions(self, run_id: str) -> list[dict[str, Any]]:
+        """Question projection scoped to one run's own session facts."""
+        run = self.get_run_identity(run_id)
+        if not run:
+            raise ValueError("Run not found")
+        opened: dict[str, dict[str, Any]] = {}
+        answered: dict[str, dict[str, Any]] = {}
+        closed: dict[str, dict[str, Any]] = {}
+        for event in self.session_events(run["session_id"]):
+            payload = event["payload"]
+            if payload.get("run_id") != run_id:
+                continue
+            if event["type"] == interactions.QUESTION_OPENED_EVENT:
+                opened[payload["question_id"]] = payload
+            elif event["type"] == interactions.QUESTION_ANSWERED_EVENT:
+                answered[payload["question_id"]] = payload
+            elif event["type"] == interactions.QUESTION_CLOSED_EVENT:
+                closed[payload["question_id"]] = payload
+        records: list[dict[str, Any]] = []
+        for question_id, record in opened.items():
+            merged = {**record}
+            answer = answered.get(question_id)
+            if answer:
+                merged["answers"] = answer.get("answers")
+                merged["answer_digest"] = answer.get("digest")
+                merged["answer_status"] = (
+                    "late" if answer.get("receive_status") == "late" else "answered"
+                )
+            reason = closed.get(question_id, {}).get("reason")
+            if reason:
+                merged["closed_reason"] = reason
+            records.append(merged)
+        active = not self.run_is_terminal(run_id)
+        return interactions.merge_questions(
+            records, "running" if active else "terminal",
+        )
+
+    def answer_question(
+        self, run_id: str, question_id: str, *, answers: list[dict[str, Any]],
+        digest: str, answer_version: int, waiter_present: bool,
+    ) -> dict[str, Any]:
+        """Append exactly one answer, atomically checking the frozen question and stop facts."""
+        run = self.get_run_identity(run_id)
+        if not run:
+            raise ValueError("Run not found")
+        session_id = run["session_id"]
+        identity = {"question_id": question_id, "run_id": run_id}
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            rows = self._connection.execute(
+                "SELECT type, payload_json FROM runtime_events WHERE session_id=? "
+                "AND json_extract(payload_json,'$.question_id')=? "
+                "AND json_extract(payload_json,'$.run_id')=? ORDER BY session_seq",
+                (session_id, question_id, run_id),
+            ).fetchall()
+            facts = {row["type"]: json.loads(row["payload_json"]) for row in rows}
+            opened = facts.get(interactions.QUESTION_OPENED_EVENT)
+            if opened is None:
+                return {**identity, "outcome": "unknown_question"}
+            if opened["revision"] != answer_version:
+                return {**identity, "outcome": "stale_revision"}
+            normalized = interactions.normalize_answers(opened, answers)
+            answered = facts.get(interactions.QUESTION_ANSWERED_EVENT)
+            if answered is not None:
+                if answered["digest"] != digest:
+                    return {**identity, "outcome": "conflict"}
+                return {**identity, "status": answered["receive_status"], "duplicate": True}
+            closed = facts.get(interactions.QUESTION_CLOSED_EVENT)
+            if closed is not None:
+                return {**identity, "outcome": "closed", "reason": closed["reason"]}
+            stopped = self._connection.execute(
+                "SELECT 1 FROM runtime_events WHERE session_id=? AND type='run.cancel_requested' "
+                "AND json_extract(payload_json,'$.run_id')=? LIMIT 1",
+                (session_id, run_id),
+            ).fetchone()
+            if stopped:
+                return {**identity, "outcome": "closed", "reason": "user_cancelled"}
+            active = not self.run_is_terminal(run_id)
+            if active and not waiter_present:
+                return {**identity, "outcome": "not_waiting"}
+            status = "delivered" if active else "late"
+            self._append_fact_locked(
+                session_id, interactions.QUESTION_ANSWERED_EVENT,
+                {**identity, "answers": normalized, "digest": digest,
+                 "answer_version": answer_version, "receive_status": status,
+                 "call_id": opened["call_id"]},
+                run_id=run_id if active else None, role="user", author="user",
+            )
+        return {**identity, "status": status, "duplicate": False}
+
+    def record_question_close(
+        self, run_id: str, question_id: str, reason: str,
+    ) -> bool:
+        """Close an unanswered question once; an accepted answer is never overwritten."""
+        run = self.get_run_identity(run_id)
+        if not run:
+            raise ValueError("Run not found")
+        session_id = run["session_id"]
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            for event_type in (
+                interactions.QUESTION_ANSWERED_EVENT, interactions.QUESTION_CLOSED_EVENT,
+            ):
+                exists = self._connection.execute(
+                    "SELECT COUNT(*) FROM runtime_events WHERE session_id=? AND type=? "
+                    "AND json_extract(payload_json,'$.question_id')=? "
+                    "AND json_extract(payload_json,'$.run_id')=?",
+                    (session_id, event_type, question_id, run_id),
+                ).fetchone()[0]
+                if exists:
+                    return False
+            self._append_fact_locked(
+                session_id, interactions.QUESTION_CLOSED_EVENT,
+                {"question_id": question_id, "run_id": run_id, "reason": reason},
+                run_id=run_id,
+            )
+        return True
+
+    def pending_question_facts(
+        self, limit: int = 50, project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Opened questions without an answer or close in the same run, newest first."""
+        if not 1 <= limit <= 200:
+            raise ValueError("Attention question limit must be between 1 and 200")
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT e.event_id, e.run_id, e.session_id, e.ts, e.payload_json, "
+                "s.workspace_id FROM runtime_events e "
+                "JOIN sessions s ON s.id=e.session_id "
+                "JOIN workspace_projects wp ON wp.workspace_id=s.workspace_id "
+                "WHERE (? IS NULL OR wp.project_id=?) "
+                "AND e.type=? AND e.partial=0 "
+                "AND NOT EXISTS (SELECT 1 FROM runtime_events t WHERE t.run_id=e.run_id "
+                "AND t.type IN ('run.completed','run.failed','run.interrupted')) "
+                "AND NOT EXISTS (SELECT 1 FROM runtime_events t WHERE t.session_id=e.session_id "
+                "AND t.type='run.cancel_requested' AND json_extract(t.payload_json,'$.run_id') "
+                "=e.run_id) "
+                "AND NOT EXISTS (SELECT 1 FROM runtime_events x WHERE x.run_id=e.run_id "
+                "AND x.type IN (?, ?) AND x.session_seq>e.session_seq "
+                "AND json_extract(x.payload_json,'$.question_id')"
+                "=json_extract(e.payload_json,'$.question_id')) "
+                "ORDER BY e.ts DESC, e.rowid DESC LIMIT ?",
+                (project_id, project_id, interactions.QUESTION_OPENED_EVENT,
+                 interactions.QUESTION_ANSWERED_EVENT, interactions.QUESTION_CLOSED_EVENT,
+                 limit),
+            ).fetchall()
+        facts: list[dict[str, Any]] = []
+        for row in rows:
+            event_id, run_id, session_id, ts, payload_json, workspace_id = row
+            facts.append({
+                "event_id": event_id, "run_id": run_id, "session_id": session_id,
+                "ts": ts, "workspace_id": workspace_id,
+                "payload": json.loads(payload_json),
+            })
+        return facts
 
     def get_events(self, run_id: str, after: int = 0) -> list[dict[str, Any]]:
         # Compatibility presentation; canonical names remain in run_events().

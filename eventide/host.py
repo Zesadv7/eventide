@@ -31,6 +31,7 @@ from eventide.execution_sandbox import SandboxFileTools, SandboxWorkspaces
 from eventide.execution_snapshots import ExecutionSnapshots
 from eventide.execution_worktrees import ExecutionWorktrees
 from eventide.executor import (
+    CURRENT_TOOL_CALL,
     ApprovalHandler,
     CommandExecutor,
     CoordinatedCommandExecutor,
@@ -279,6 +280,7 @@ class RuntimeHost:
         self._active_tasks: set[asyncio.Task[Any]] = set()
         self._evaluation_bridge: EvaluationCallBridge | None = None
         self._run_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._question_waiters: dict[str, asyncio.Event] = {}
         self._closed = False
         self._configuring = False
         self._provider_cleanup_required = False
@@ -1326,6 +1328,18 @@ class RuntimeHost:
         if record is None:
             raise RuntimeError("Cancelled run was not persisted")
         return record
+
+    def resolve_question(self, question_id: str) -> bool:
+        """Wake the in-process ask_user waiter after its answer fact is durable."""
+        waiter = self._question_waiters.get(question_id)
+        if waiter is None:
+            return False
+        waiter.set()
+        return True
+
+    def has_question_waiter(self, question_id: str) -> bool:
+        """Whether this process still owns the live ask_user wait."""
+        return question_id in self._question_waiters
 
     async def run(
         self,
@@ -3602,6 +3616,53 @@ class RuntimeHost:
                 )
                 return plan_summary(normalized)
 
+            async def ask_user(questions: object) -> str:
+                """Pause the run until the user answers on this exact question.
+
+                The opened fact is committed before waiting and binds the real
+                tool-call identity, so a restart or a terminal outcome projects
+                the question honestly; silence is never an answer and the
+                answer is only ever a tool result of this call.
+                """
+                call_id = CURRENT_TOOL_CALL.get().id
+                normalized = self._semantic(interactions.normalize_questions(questions))
+                question_id = f"q_{uuid.uuid4().hex[:16]}"
+                waiter = asyncio.Event()
+                self._question_waiters[question_id] = waiter
+                try:
+                    try:
+                        await self._emit(
+                            run_id,
+                            interactions.QUESTION_OPENED_EVENT,
+                            {
+                                "question_id": question_id,
+                                "run_id": run_id,
+                                "session_id": session_id,
+                                "revision": interactions.QUESTION_REVISION,
+                                "call_id": call_id,
+                                "questions": normalized,
+                            },
+                            sink,
+                        )
+                        await waiter.wait()
+                    except asyncio.CancelledError:
+                        self.store.record_question_close(run_id, question_id, "cancelled")
+                        raise
+                finally:
+                    self._question_waiters.pop(question_id, None)
+                record = next(
+                    (item for item in self.store.interaction_questions(run_id)
+                     if item["question_id"] == question_id),
+                    None,
+                )
+                if record is None or not record.get("answers"):
+                    raise RuntimeError(
+                        f"Question {question_id} woke without a durable answer"
+                    )
+                return json.dumps(
+                    {"answers": record["answers"]}, ensure_ascii=False,
+                )
+
             delegated_count = 0
 
             async def delegate_readonly(tasks: object) -> str:
@@ -3815,6 +3876,15 @@ class RuntimeHost:
                 and not readonly_profile and not snapshot_execution and not sandbox_execution
                 else []
             )
+            # Structured questions are a main-agent surface: writers/workers and
+            # container or read-only profiles never pause on the user (MK06).
+            clarifying_tools = (
+                [] if (
+                    sandbox_execution or readonly_profile
+                    or execution_config.get("writer_delivery_id")
+                )
+                else [dict(interactions.ASK_USER_TOOL)]
+            )
             base_tools = [
                 *self.tools,
                 READ_TOOL_RESULT_TOOL,
@@ -3822,14 +3892,17 @@ class RuntimeHost:
                 *skill_tools,
                 *rag_tools,
                 *worker_tools,
+                *clarifying_tools,
             ]
             discovery = (
                 ToolDiscovery(
                     base_tools,
                     manager.tools,
                     manager.handlers,
-                    readonly_names=(BASE_RUNTIME_READONLY_TOOLS | manager.readonly_tools
-                                    | {"load_skill", "read_skill_resource", "delegate_readonly"}),
+                    readonly_names=(
+                        BASE_RUNTIME_READONLY_TOOLS | manager.readonly_tools
+                        | {"load_skill", "read_skill_resource", "delegate_readonly", "ask_user"}
+                    ),
                 )
                 if (manager.tools and mode != "plan"
                     and not sandbox_execution and not readonly_profile)
@@ -3848,6 +3921,7 @@ class RuntimeHost:
                     outputs=self.acceptance_output, command_logs=self.command_logs,
                 ),
                 "todo_write": write_task_plan,
+                **({"ask_user": ask_user} if clarifying_tools else {}),
                 **({"load_skill": load_skill, "read_skill_resource": read_skill_resource,
                     "run_skill_script": run_skill_script} if skills else {}),
                 **rag_handlers,
@@ -3899,6 +3973,7 @@ class RuntimeHost:
                 {
                     "read_tool_result",
                     "todo_write",
+                    *({"ask_user"} if clarifying_tools else set()),
                     *({"delegate_readonly"} if worker_tools else set()),
                     *({"search_knowledge"} if rag_tools else set()),
                     *manager.readonly_tools,
@@ -3944,6 +4019,8 @@ class RuntimeHost:
             )
             runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)
             runtime_readonly_tools.update(manager.readonly_tools)
+            if clarifying_tools:
+                runtime_readonly_tools.add("ask_user")
             if discovery:
                 runtime_readonly_tools.update({"tool_discover", "tool_load"})
             if worker_tools:

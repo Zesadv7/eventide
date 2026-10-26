@@ -19,6 +19,7 @@ PLAN_READONLY_TOOLS = frozenset(
         "compact",
         "read_tool_result",
         "todo_write",
+        "ask_user",
         "load_skill",
         "read_skill_resource",
         "search_knowledge",
