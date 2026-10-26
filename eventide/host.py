@@ -1933,9 +1933,11 @@ class RuntimeHost:
 
     async def admit_continue(
         self, session_id: str, run_id: str, *, request_fingerprint: str | None = None,
+        expected_run_id: str | None = None,
     ) -> str:
         return await self._reserve_run(
             session_id, run_id, None, request_fingerprint=request_fingerprint,
+            expected_run_id=expected_run_id,
         )
 
     async def _admission_check(self, function: Any, *args: Any) -> Any:
@@ -1966,6 +1968,7 @@ class RuntimeHost:
         self, session_id: str, run_id: str, request: RunRequest | None, *,
         execution_config: dict[str, Any] | None = None,
         request_fingerprint: str | None = None,
+        expected_run_id: str | None = None,
     ) -> str:
         """Reserve capacity before preparation; acknowledge only a durable intent."""
         if self.session_busy(session_id):
@@ -1976,6 +1979,7 @@ class RuntimeHost:
                 session_id, run_id, request, execution_config=execution_config,
                 request_fingerprint=request_fingerprint,
                 require_checkpoint=ticket.lane == "waiting",
+                expected_run_id=expected_run_id,
             )
             self.dispatch.admitted(ticket)
             return result
@@ -1999,6 +2003,7 @@ class RuntimeHost:
         request_fingerprint: str | None = None,
         require_checkpoint: bool = False,
         parent_run_id: str | None = None,
+        expected_run_id: str | None = None,
     ) -> str:
         """Own a Workspace and atomically persist the request before transport acceptance."""
         await self.initialize()
@@ -2049,6 +2054,7 @@ class RuntimeHost:
                 or (request is None and was_sandbox)):
             return await self._reserve_copy_run(
                 session_id, run_id, request, workspace, request_fingerprint,
+                expected_run_id=expected_run_id,
             )
         if (request and self._session_worktree(session_id)
                 and request.execution_target != "worktree"):
@@ -2060,6 +2066,7 @@ class RuntimeHost:
         ):
             return await self._reserve_copy_run(
                 session_id, run_id, request, workspace, request_fingerprint,
+                expected_run_id=expected_run_id,
             )
         if self.workspace_busy(workspace.workspace_id):
             raise ValueError("Workspace is busy")
@@ -2081,6 +2088,10 @@ class RuntimeHost:
                 self._admission_done[run_id] = _Admission(session_id, asyncio.Event())
                 try:
                     previous = self.store.latest_run(session_id)
+                    if expected_run_id is not None and (
+                        not previous or previous["id"] != expected_run_id
+                    ):
+                        raise ValueError("Interrupted Run changed; refresh before continuing")
                     if request is None:
                         await self._admission_check(self._validate_continue, workspace, previous)
                     elif previous and previous["status"] == "interrupted":
@@ -2157,6 +2168,7 @@ class RuntimeHost:
     async def _reserve_copy_run(
         self, session_id: str, run_id: str, request: RunRequest | None,
         workspace: WorkspaceRecord, request_fingerprint: str | None,
+        *, expected_run_id: str | None = None,
     ) -> str:
         target = ("sandbox" if request and request.execution_profile == "sandbox" else
                   request.execution_target if request
@@ -2170,6 +2182,10 @@ class RuntimeHost:
         try:
             async with self._session_locks[session_id]:
                 previous = self.store.latest_run(session_id)
+                if expected_run_id is not None and (
+                    not previous or previous["id"] != expected_run_id
+                ):
+                    raise ValueError("Interrupted Run changed; refresh before continuing")
                 if request and previous and previous["status"] == "interrupted":
                     raise ValueError("Session is parked; use Continue")
                 source_id = previous["id"] if previous and request is None else None

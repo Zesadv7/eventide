@@ -118,6 +118,13 @@ export const api = {
     post<Receipt>(`/api/sessions/${id(session)}/runs`, body, key),
   continue: (session: string, key: string) =>
     post<Receipt>(`/api/sessions/${id(session)}/continue`, undefined, key),
+  continueFrom: (session: string, run: string) =>
+    durableMutation<Receipt>(
+      "run-continue-from",
+      `/api/sessions/${id(session)}/continue`,
+      "POST",
+      { expected_run_id: run },
+    ),
   abandon: (session: string, run: string) =>
     durableMutation<Run>(
       "run-abandon",

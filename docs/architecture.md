@@ -1270,3 +1270,6 @@ MK08C API集成：FastAPI lifespan通过initialize(recovery_approval_handler=App
 规则加载现在只读一次 `instructions_record`，context.configured附工作区根AGENTS.md来源、加载字符/文件字节/截断/上限和实际注入指纹。HTTP按Run与事件位置分页读取，Vue聊天内“模型输入记录”按需展开、显式刷新、较早记录分页，切换Run丢弃迟到结果。旧历史没有清单时说明未记录。子目录规则继承、摘要内容对照和引用自动跳转仍待后续，不宣称MK-03/04整项完成。ADR-121。
 
 MK16目录补充：冻结发生在执行器和目录组装后、首次模型请求之前；普通无MCP、Plan、Docker也保存实际目录，Plan排除写工具，Docker声明自己的环境。按需目录包含常驻工具与可加载工具，两个发现控制工具由独立模型工具定义提供；其目录版本不等同整份模型request.tools指纹。历史投影不重新枚举当前MCP；MCP连接重新建立后的实现身份复核、接收阶段真正冻结仍待后续。Vue切Run立即清空旧数据、契约读取与列表刷新使用独立代次，刷新不关闭阅读中的参数详情。
+MK08F恢复详情切片（2026-10-26，ADR-117）：`GET /api/runs/{id}/recovery`从`store.recovery_snapshot`原子切面（身份+Run事件+按source绑定的`recovery.blocked`/`recovery.claimed` session事实）投影停止分类、已记录执行进度、未知工具/待审批、claim唯一后继及其当前状态和可信`available_actions`；admission早于冻结恢复策略的旧历史显式`history_available=false`。动作仅复用既有cancel/continue端点并由服务端计算可用性，无自动重试、无`POST recovery/actions`。Vue新增`/runs/:runId/recovery`恢复详情页与Chat停驻卡片入口，历史切面与后继实时状态分开呈现，切换Run丢弃迟到响应。4项真实EventLog/HTTP定向（重复读取纯查询、唯一后继、blocked绑定、缺历史/停止/预算/未知分类）、7项既有恢复回归、5项前端组件及33项受影响套件通过；Ruff/Mypy/vue-tsc/Prettier通过。未知工具只读核查（08D）、正常关闭恢复、`POST recovery/actions`及真实模型/平台验收仍待，MK-08整体仍进行中。
+
+MK08F集成复核：继续按钮使用持久幂等请求与expected_run_id，将用户意图绑定到页面所见原运行；源/副本接收锁内拒绝过期目标，先回放既有202回执。Session级claim/blocked纳入同一high_water，已领取与实际派发分开。页面有接收后继链接及晚到响应隔离；步骤/调用次数仅称执行进度，不称完成成果。新增源/worktree/snapshot真实接收用例和built实际API停止→继续→刷新→320px旅程通过；完整重连及未知核查仍按MK08后续验收。

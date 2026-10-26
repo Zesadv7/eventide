@@ -1098,6 +1098,36 @@ class RuntimeStore:
                 "state": {**identity, **RuntimeStateProjection.project(events)},
             }
 
+    def recovery_snapshot(self, run_id: str) -> dict[str, Any] | None:
+        """One-lock cut of identity, run events and session recovery facts.
+
+        The recovery center must not mix events from before a claim with
+        blocked facts appended after it, so everything the projection reads is
+        selected here instead of across separate lock acquisitions.
+        """
+        with self._lock:
+            identity = self.get_run_identity(run_id)
+            if identity is None:
+                return None
+            events = self.run_events(run_id)
+            recovery_facts = [
+                self._decode(row)
+                for row in self._connection.execute(
+                    "SELECT * FROM runtime_events WHERE session_id=? AND partial=0 "
+                    "AND type IN ('recovery.blocked','recovery.claimed') AND run_id IS NULL "
+                    "AND json_extract(payload_json, '$.source_run_id')=? "
+                    "ORDER BY session_seq",
+                    (identity["session_id"], run_id),
+                )
+            ]
+            all_events = sorted([*events, *recovery_facts], key=lambda event: event["session_seq"])
+            return {
+                "high_water": all_events[-1]["session_seq"] if all_events else 0,
+                "identity": identity,
+                "events": all_events,
+                "blocked_facts": [e for e in all_events if e["type"] == "recovery.blocked"],
+            }
+
     def get_run_summary(self, run_id: str) -> dict[str, Any] | None:
         """Project only state needed by navigation and history indexes."""
         row = self.get_run_identity(run_id)

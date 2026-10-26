@@ -721,3 +721,12 @@ MK07/09当前注意：attention的counts是本次返回数量，limits声明审�
 `GET /api/runs/{run_id}/input-manifests?before=<exclusive session_seq>&limit=50`：只读，limit为1–100；未知Run404、无效分页422。返回run_id、entries（页内时间正序）、next_before（可空，供较早页查询）、recorded_count（当前before范围内条数）、high_water（读取的Run事件上界）。不读取当前源码重建旧清单，不触发模型或工具。
 
 每条带manifest_version=1、request_id/attempt_id/kind/model、seq/at、system_hash/messages_hash/tools_hash、message_count/tool_count、tool_names、tool_result_ids、composition（serialized_unicode_characters_v1字符计数）、可空instructions与instruction_hash。instructions只对agent调用关联同Run该事件之前最近的context.configured规则加载记录；摘要等辅助请求不继承此记录，不凭当前配置填补旧历史。清单在适配器入口落库，不能当成网络到达回执；使用量仍以原attempt账本为准。OpenAPI与前端类型同步生成。
+### MK-08F/MK-19 接线：恢复详情投影（2026-10-26，切片）
+
+`GET /api/runs/{id}/recovery` 返回只读恢复详情，Run 不存在返回 404。内容来自 `store.recovery_snapshot` 的同一锁原子切面（身份、Run 事件、该 Run 为 source 的 `recovery.blocked`/`recovery.claimed` session 事实）加显式传入的当前调度事实：`projection_version`、`status`、`is_terminal`、`high_water`、`continuation_of`、已记录执行进度摘要（steps/tool_calls/checkpoint/usage）、`model_retry` 当前等待、停止分类 `stop.kind`（模型重试等待/服务自动续跑/用户停止/预算/未知结果/连续失败/服务重启停驻/失败/完成等）、未知工具与待审批清单、恢复关系（冻结 `recovery_policy`、`recovery.claimed` 唯一后继及其当前实时状态、`recovery.blocked` 列表、`recovery_of` 原运行）。 admission 早于持久恢复策略的旧历史返回 `history_available=false` 并附注，不推断其可恢复性。
+
+`available_actions` 由服务端按当前事实计算：`stop` 仅非终态且非控制会话可用（复用既有 `POST /api/runs/{id}/cancel`）；`continue` 仅该 Run 是会话最新运行、状态为 interrupted、会话空闲且无未知工具结果时可用（复用既有 `POST /api/sessions/{id}/continue`，端点自身复核）。没有自动重试动作，也没有"忽略风险重跑"；失败与未知结果不会被告知可恢复。本端点纯查询，不写事件、不领取恢复、不派发模型。
+
+Vue 新增 `/runs/:runId/recovery` 页面与 `RecoveryPanel`（历史 cut 与后继实时状态分开呈现，切换 Run 丢弃迟到响应），Chat 停驻卡片新增"查看恢复详情"入口；停止/继续按钮只在服务端判定可用时出现，动作后重新读取事实。页面纯查询 + 导航到既有受控操作，旧事实页不触发模型、文件或审批。`POST recovery/actions` 未实现，不伪造。
+
+恢复详情的 high_water 包含按 source_run_id 绑定的 Session 级恢复事实；当前后继状态单独标明实时读取。claim 只表示领取后继，不能当作已派发或已成功。恢复中心继续操作发送 `POST /api/sessions/{id}/continue`、`{"expected_run_id":"原运行ID"}`，服务在源/副本实际接收锁内核对最新Run，过期返回409 rejected；省略body仍兼容既有开发接口。相同内容的未知请求保留持久幂等键，已接收回执先回放，不因后续最新Run改变而二次派发；变更内容不能复用旧键。available_actions只给出当前动作入口，执行时仍复核源码、配置、预算及审批条件。

@@ -1390,3 +1390,16 @@ ADR-111补充：恢复领取后、initialize前再次退出时，下一进程从
 **取舍：** 冻结进事件而非独立表，保持唯一事实源且重启/迁移天然携带；代价是快照占事件体积（已按条目有界）。不把"已加载"提升为权限——它是模型可见性状态，授权仍按逐次调用判定。旧 Run 不补冻结事实，宁可显示缺失也不伪造。
 
 **验证：** 新增 `tests/test_run_tools_directory.py` 4 项端到端（真实 Host + 假 MCP 管理器）：首轮请求不含未加载 schema、`tool_load` 后下一请求携带冻结 schema、冻结事件与加载事实绑定同一目录版本、重开 Store 且 MCP 换catalog 后旧 Run 投影与详情不变而新 Run 冻结新目录、未加载调用被拒且 auto 模式下加载后的写工具仍经审批拒绝不执行、无目录 Run 明确缺失。既有 discovery/tools 共 10 项通过；前端 6 项组件测试（状态徽标/契约展开/筛选/缺失与失败明示/切 Run 晚到响应隔离/有界分页）通过；Ruff 全过、Mypy py3.10 三模块、vue-tsc、Prettier 通过；OpenAPI/TS 已再生成。开发期失败与复验见 failure-cases MK16-DIR-ZCODE。日志 `.task_outputs/maka-upgrade/coding-resume/`。无付费模型调用。
+## ADR-117：恢复详情是原子切面投影，动作只复用既有受控端点（MK-08F/MK-19 切片，2026-10-26）
+
+**状态：Proposed（离线定向验证通过；未做真实模型/浏览器全量旅程，不作为最终验收）。**
+
+**决策：** 恢复详情一律从已提交事实投影：`store.recovery_snapshot` 在同一把 Store 锁内取 Run 身份、Run 事件和以该 Run 为 source 的 `recovery.blocked`/`recovery.claimed` session 事实，保证 claim、终态与 blocked 不会跨版本混读；`recovery_center.build_recovery_view` 是纯函数，停止分类（模型重试等待/自动续跑/用户停止/预算/未知结果/连续失败/服务重启等）、已记录执行进度摘要、未知与待审批、原/后继关系全部由事件推导，不新增状态存储。admission 缺冻结 `recovery_policy` 的旧历史显式返回 `history_available=false`，不猜测可恢复性。后继当前状态用 `get_run_summary` 实时读取并在页面与历史切面（`high_water`）分开呈现。
+
+`available_actions` 由服务端按当前调度事实计算并给出原因；页面只渲染服务端判可用的按钮，动作仅复用既有 `POST /api/runs/{id}/cancel` 与 `POST /api/sessions/{id}/continue`（端点自身复核）。本切片不实现 `POST recovery/actions`，不提供自动重试或"忽略风险重跑"；未知工具结果与失败运行不宣称为可恢复。
+
+**取舍：** 唯一后继由既有 `recovery.claimed` 事务不变式保证，投影只如实展示（出现多条 claim 时标注异常注记）而不修复；blocked 事实按 `source_run_id` 绑定，同 session 其他运行不可见，避免恢复状态串线。不在诊断报告或恢复页触发模型、文件或审批。
+
+**验证：** `tests/test_recovery_center.py` 4 项真实 EventLog/HTTP：重启 claim 后唯一后继且重复读取不改事件数、blocked 为按 source 绑定的 session 事实、用户停止/预算/未知结果的分类与"无自动重试"断言、旧历史缺策略显式标注；既有恢复套件 7 项回归通过。前端 5 项组件测试（事实与后继链接纯查询、预算/用户停止无自动重试按钮、未知结果不可继续、服务端可用时才出现停止并在动作后重读、切 Run 丢弃迟到响应）；受影响 chat/navigation/diagnostics/model-retry 套件 33 项通过。Ruff、Mypy（py310 目标 3 模块）、vue-tsc、Prettier、git diff --check 通过。日志 `.task_outputs/maka-upgrade/recovery-center/`。无模型调用；MK-08 整项仍进行中。
+
+ADR-117集成补充：恢复页Continue必须携带expected_run_id并在实际接收锁内复核；未知网络结果复用sessionStorage中的原幂等键，不按每次点击新建意图。高水位包含按源绑定的Session恢复事实，服务正常关闭的claim也可展示。动作可用性不是源码/配置/预算的预先验收；这些仍在接收路径核查。built实际API恢复旅程已通过1条，真实模型/全平台和整仓门禁仍待。

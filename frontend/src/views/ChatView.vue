@@ -569,7 +569,12 @@ async function abandon() {
             >
               Continue · 检查并继续</button
             ><button v-if="!unknown" @click="abandon">放弃恢复</button
-            ><span v-else
+            ><RouterLink
+              v-if="run"
+              :to="`/runs/${run.run_id}/recovery`"
+              class="recovery-link"
+              >查看恢复详情</RouterLink
+            ><span v-if="unknown"
               >请检查原始工作副本；该状态不允许直接继续或采纳。</span
             >
           </div>

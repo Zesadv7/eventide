@@ -65,6 +65,11 @@ class ApprovalBody(BaseModel):
     approved: bool
 
 
+class ContinueBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_run_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 class AbandonBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     expected_run_id: str = Field(min_length=1, max_length=256)

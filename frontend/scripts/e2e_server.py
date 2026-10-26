@@ -105,6 +105,11 @@ def main() -> None:
                 yield ModelStreamEvent("text_delta", text="正在执行队列隔离验证。" * 50)
                 await asyncio.sleep(60)
                 response = ModelResponse(text="队列验证结束", usage=usage)
+            elif "恢复中心场景" in prompt:
+                if step == 1:
+                    yield ModelStreamEvent("text_delta", text="等待手动停止。" * 50)
+                    await asyncio.sleep(30)
+                response = ModelResponse(text="恢复中心续做完成", usage=usage)
             elif "停止场景" in prompt:
                 yield ModelStreamEvent("text_delta", text="正在等待工具准备。" * 50)
                 await asyncio.sleep(30)

@@ -15,6 +15,7 @@ import IndexesView from "./views/IndexesView.vue";
 import HistoryView from "./views/HistoryView.vue";
 import SessionsView from "./views/SessionsView.vue";
 import RunDiagnosticsView from "./views/RunDiagnosticsView.vue";
+import RecoveryView from "./views/RecoveryView.vue";
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
@@ -35,6 +36,11 @@ export const router = createRouter({
       path: "/runs/:runId/diagnostics",
       name: "run-diagnostics",
       component: RunDiagnosticsView,
+    },
+    {
+      path: "/runs/:runId/recovery",
+      name: "run-recovery",
+      component: RecoveryView,
     },
     {
       path: "/knowledge",

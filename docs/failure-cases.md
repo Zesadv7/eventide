@@ -874,3 +874,30 @@ MK-ZCODE-405后续（2026-10-26，用户明确指定Coding Plan）：原网关�
 - Coding恢复两路也达到30分钟：恢复中心sess_a21a4dde退出1，但已留下完整候选提交dce4f52及11项后端/33项前端日志，转主代理独立审查，不以提交代替验收；正常关闭恢复sess_3a464b0d留下未提交代码，继续交接。后者结束前还出现HTTP429/1302限频（graceful-recovery-zcode/progress.log），无额度耗尽证据。有效并发暂由5降为4，避免扩大限频；不将限频等同任务代码失败。
 
 - MK16-DIR-REVIEW复验：11项后端、23项前端、Ruff/Mypy4模块/vue-tsc、built实际API页面1条通过（browser.log），未调用付费模型。真实MCP服务器/连接重核及全量仍待，假MCP验证不冒充真实供应商联通。
+## MK08F-ZCODE：恢复详情切片开发期测试失败（2026-10-26）
+
+- 范围：MK-08F/MK-19 恢复详情切片，worktree `codex/maka-recovery-center`，基线 `b3f6aca`。命令：`node node_modules/vitest/vitest.mjs run tests/recovery.test.ts`、`node node_modules/vitest/vitest.mjs run tests/chat-experience.test.ts tests/navigation.test.ts tests/diagnostics.test.ts tests/model-retry.test.ts`、`node node_modules/vue-tsc/bin/vue-tsc.js --noEmit`。属于意外回归与测试问题，非预期 Red。
+- 已证实原因（逐项）：1) `RecoveryPanel` 模板直接用 `RouterLink`，组件测试裸挂载无路由上下文，`useLink` 抛 `Cannot read properties of undefined (reading 'resolve')`——测试问题，改用 `createMemoryHistory` 路由插件挂载；2) memory history 的链接 href 无 `#` 前缀，首轮断言写死 `#/runs/...` 失败——测试断言错误；3) 页面说明文字本身含"自动重试按钮"字样，`not.toContain` 误命中——改为只检查按钮文本不含"重试/忽略"；4) ChatView 停驻卡片插入 `RouterLink` 时把原 `v-else`（unknown 提示）接成 `v-else-if` 链，unknown 场景提示文案消失，`chat-experience` 1 项断言失败——真实回归，恢复为独立 `v-if="unknown"`；5) vue-tsc 首轮 3 处报错均为测试内 fetch mock 类型（无参 mock 取 `calls[0]`/`calls[1]`、Promise executor 内回调被收窄为 never）——测试类型问题，显式标注参数与回调类型后通过。后端首轮 Ruff 5 处（导入排序、未用变量）与 Mypy 2 处（`next` 默认值缺注解、视图函数可空返回）属静态检查问题，同轮修正。
+- 处理：仅改 `frontend/tests/recovery.test.ts`、`frontend/src/views/ChatView.vue` 模板条件与后端新文件注解；生产行为除恢复提示链接外未改。
+- 复验：`tests/recovery.test.ts` 5 项、受影响 4 套件共 33 项全部通过；`tests/test_recovery_center.py` 4 项与 `tests/test_run_recovery.py` 7 项通过；vue-tsc 退出 0、Prettier、git diff --check 通过。原始日志 `.task_outputs/maka-upgrade/recovery-center/`。
+- 经验：向既有 `v-if/v-else` 链插入新元素时必须检查链归属，不能依赖尾部 `v-else` 语义不变；带 `RouterLink` 的组件测试需显式路由插件。无遗留未验证项；全量、浏览器与真实平台验证按 MK-08 规划另行执行。
+
+### MK08F-REVIEW — 恢复中心精确继续与事实边界
+
+- 主代理基线5378e5b+dce4f52候选，审查修复恢复中心Continue每次生成新键、未绑定原Run可能继续到同Session别的停驻任务，以及Session级恢复事实晚于返回high_water的问题；新增expected_run_id在源/副本实际接收锁内核对，复用持久幂等请求。36项既有后端与19项前端通过。
+- 新增三目标接线用例首轮1失败/6通过（worktree接收422，尚未进入Continue），证据`.task_outputs/maka-upgrade/recovery-center-review/binding.log`；原因待查，保留环境。不是预期Red，不扩大测试批次代替定位。
+
+- MK08F-REVIEW定向复验仍在初次worktree接收失败；已证实fixture把Host状态目录放进Git源码且未忽略，触发“Source Workspace must be clean before delivery”。调整fixture把状态根置于源码外并显式注册repo，不放宽生产干净源要求。诊断日志binding-diagnosis.log。
+- MK08F-REVIEW：fixture状态根移出源码后3个接收目标全部通过；Ruff出现3处新增长行（runs.py两处、fixture一处），日志ruff.log，已定位并缩行复验。前端未知Continue重试绑定原Run且同键的新增用例通过（recovery组件6项）。
+- MK08F-REVIEW：增加续做接收链接后前端关联27项中1失败/26通过（frontend-final.log），已保留诊断，原因待查；未将shell后续导出成功当成前端通过。
+
+- MK08F-REVIEW前端失败已定位为新增测试只等一个flushPromises，无法保证异步WebCrypto请求指纹已算完；单文件曾通过、组合运行时按钮仍在等待。改成等待实际错误/第二次网络请求出现，不使用固定睡眠，不改生产请求语义。
+
+- MK08F-REVIEW组合复验 frontend-final2.log 的停止按钮测试同样过早检查请求（1失败/26通过）；同根因合并登记。改为等待取消后的事实刷新完成，再断言精确POST；built真实API恢复页面已1条通过（browser.log），未用页面通过掩盖组件失败。
+
+### MK-CODING-1308 — Coding Plan 五小时使用上限
+
+- 2026-10-26 11:41（本机Asia/Shanghai），集成基线5378e5b及恢复中心候选；旁枝、正常关闭恢复、模型能力与任务图四路均退出1，供应商HTTP429/code1308明确提示五小时使用上限，重置时间2026-10-26 15:37:36。不同于此前1302并发限频或Start网关405，不误称登录/网络故障，不继续扩并发。
+- 证据：各独立worktree `.task_outputs/maka-upgrade/{coding-resume2,graceful-recovery-resume2,model-capabilities-coding-retry1,agent-graph-zcode}/{result.jsonl,progress.log}`；调度记录dispatch.json已标外部受阻。未提交代码完整保留，外部失败不代表代码已验收；主代理继续验证已有候选。用户明确指定Coding，本次不擅自回落Start，也不创建定时任务。恢复时间仅引用服务端，不承诺届时任务自动运行。
+
+MK08F-REVIEW收口：上述测试等待与fixture问题修复后，56项后端（恢复/精确接收/副本/分发）、25项前端组合、Ruff/Mypy5模块/vue-tsc以及1条built真实API恢复旅程通过。日志recovery-center-review/{backend-final.log,frontend-final4.log,ruff-final.log,mypy.log,typecheck-final.log,browser.log}。本切片未执行真实模型；源码变化/未知工具核查等后续能力不列完成。

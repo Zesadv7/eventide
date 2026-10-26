@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse, Response
 
 from eventide.http_api.context import ApiContext, require_local_request
 from eventide.http_api.run_mutations import mutate_run_action
-from eventide.http_api.schemas import AbandonBody, ApprovalBody, RunBody
+from eventide.http_api.schemas import AbandonBody, ApprovalBody, ContinueBody, RunBody
 from eventide.http_control import (
     MUTATION_OUTCOME_HEADER,
     check_mutation_origin,
@@ -18,6 +18,7 @@ from eventide.http_control import (
     run_receipt,
 )
 from eventide.models import RunRequest
+from eventide.recovery_center import build_recovery_view, recovery_successor_id
 from eventide.scheduler import QueueFull
 from eventide.usage import build_usage_ledger
 
@@ -60,13 +61,18 @@ def create_router(context: ApiContext) -> APIRouter:
         "/api/sessions/{session_id}/continue",
         status_code=status.HTTP_202_ACCEPTED,
     )
-    async def continue_session(session_id: str, request: Request) -> dict[str, str]:
+    async def continue_session(
+        session_id: str, request: Request, body: ContinueBody | None = None,
+    ) -> dict[str, str]:
         require_local_request(request)
         mutation_key(request)
         # Continue validation is part of admission; a rejected request returns 409,
         # without creating a run that could hide the parked source run.
         await get_session(session_id)
-        receipt = run_receipt(agent_runtime, request, session_id, "continue", {})
+        receipt = run_receipt(
+            agent_runtime, request, session_id, "continue",
+            body.model_dump(exclude_none=True) if body else {},
+        )
         if receipt.existing:
             return {"run_id": receipt.run_id, "session_id": session_id, "status": "accepted"}
         run_id = receipt.run_id
@@ -75,6 +81,8 @@ def create_router(context: ApiContext) -> APIRouter:
                 session_id,
                 run_id,
                 **({"request_fingerprint": receipt.fingerprint} if receipt.fingerprint else {}),
+                **({"expected_run_id": body.expected_run_id}
+                   if body and body.expected_run_id else {}),
             )
             agent_runtime.start_admitted_run(run_id, approval_handler=broker.request)
         except Exception as exc:
@@ -171,6 +179,28 @@ def create_router(context: ApiContext) -> APIRouter:
         if not record:
             raise HTTPException(status_code=404, detail="Run not found")
         return {**record, "execution": agent_runtime.run_execution(run_id)}
+
+    @router.get("/api/runs/{run_id}/recovery")
+    async def run_recovery(run_id: str) -> dict[str, Any]:
+        """Read-only recovery projection; never schedules, claims or writes facts."""
+        cut = agent_runtime.store.recovery_snapshot(run_id)
+        if cut is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        session_id = cut["identity"]["session_id"]
+        successor = recovery_successor_id(cut)
+        latest = agent_runtime.store.latest_run_summary(session_id)
+        return build_recovery_view(
+            cut,
+            {
+                "session_busy": agent_runtime.session_busy(session_id),
+                "control_session": agent_runtime.is_control_session(session_id),
+                "worker_session": agent_runtime.is_worker_session(session_id),
+                "latest_run_id": latest["id"] if latest else None,
+                "successor_summary": (
+                    agent_runtime.store.get_run_summary(successor) if successor else None
+                ),
+            },
+        )
 
     @router.get(
         "/api/runs/{run_id}/sandbox-diff", response_class=Response,
