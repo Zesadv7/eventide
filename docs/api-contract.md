@@ -772,4 +772,4 @@ MK09页面范围接线（2026-10-26）：待处理页`#/attention?project=<proje
 - `POST /api/graphs/{graph_id}/advance`显式开始，依赖完成后自动派发；`POST .../cancel`冻结新增派发并等待真实收尾。图有active节点时显示cancelling，终态取消不改写已完成图。
 - 写接口要求本机同源和内容绑定Idempotency-Key，绑定精确root/graph路径身份；重复创建保留原图、同键异内容409。未知Run/图404。结果包含nodes[].claim.run_id及已完成result.child_session_id，不能在准备期猜Session；output_truncated/output_length说明节选。unknown请求保留原键，查询图不引发执行。
 
-契约类型与网页产物由任务图页面集成时统一生成，不能以新增API代替UI/真实浏览器验收。
+任务图OpenAPI/TS类型与网页产物已统一生成，12项HTTP/契约/分发及built真实API页面旅程通过；配置不可用在派发前明确409 rejected，不留下未知接收。此证据不等于完整MK20或真实模型效果验收。

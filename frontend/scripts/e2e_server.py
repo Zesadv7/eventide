@@ -42,6 +42,8 @@ def main() -> None:
     class JourneyProvider(FakeProvider):
         async def complete(self, request):
             if "side-question investigator" in self._prompt(request):
+                if "图等待场景" in self._prompt(request):
+                    await asyncio.Event().wait()
                 if len(request.messages) == 1:
                     return ModelResponse(tool_calls=[self._call("read_file", {
                         "path": "src/demo.py",

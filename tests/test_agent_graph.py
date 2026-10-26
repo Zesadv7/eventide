@@ -256,6 +256,15 @@ def test_graph_http_binding_origin_and_idempotency(isolated_workspace):
             == 422
         )
         graph_id = graph["graph_id"]
+        host._configuring = True
+        blocked = client.post(
+            f"/api/graphs/{graph_id}/advance",
+            headers={"Idempotency-Key": "configuration-rejection"},
+        )
+        assert blocked.status_code == 409
+        assert blocked.headers["X-Eventide-Mutation-Outcome"] == "rejected"
+        assert host.agent_graphs.get(graph_id)["nodes"][0]["claim"] is None
+        host._configuring = False
         assert (
             client.post(
                 f"/api/graphs/{graph_id}/advance", headers={"Idempotency-Key": uuid.uuid4().hex}
@@ -442,4 +451,59 @@ async def test_waiting_graph_refills_when_side_questions_finish(isolated_workspa
         assert (await wait_graph(host, graph["graph_id"], "completed"))["counts"]["completed"] == 1
     finally:
         provider.release.set()
+        await host.close()
+
+
+async def test_cancel_before_first_instruction_refills_other_started_graph(isolated_workspace):
+    provider = GraphProvider(hold=True)
+    host = worker_host(isolated_workspace, provider)
+    try:
+        root, first = await root_graph(host, definition(*[(f"a{i}", []) for i in range(4)]))
+        second = host.agent_graphs.create(root.run_id, definition(("b", [])), "second-prestart")
+        await host.agent_graphs.advance(first["graph_id"])
+        await host.agent_graphs.advance(second["graph_id"])
+        await host.agent_graphs.cancel(first["graph_id"])
+        assert host.agent_graphs.get(second["graph_id"])["state"] == "running"
+    finally:
+        provider.release.set()
+        await host.close()
+
+
+@pytest.mark.parametrize("action", ["cancel", "shutdown"])
+async def test_completed_child_result_survives_graph_settlement_cancel(
+    isolated_workspace, monkeypatch, action
+):
+    from eventide import side_questions
+
+    host = worker_host(isolated_workspace, GraphProvider())
+    settings = host.settings
+    completed = asyncio.Event()
+    original = side_questions.create_side_question
+
+    async def paused_settlement(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        await host._run_tasks[kwargs["run_id"]]
+        completed.set()
+        await asyncio.Event().wait()
+        return result
+
+    monkeypatch.setattr(side_questions, "create_side_question", paused_settlement)
+    try:
+        _, graph = await root_graph(host)
+        graph_id = graph["graph_id"]
+        await host.agent_graphs.advance(graph_id)
+        await asyncio.wait_for(completed.wait(), 3)
+        if action == "cancel":
+            await host.agent_graphs.cancel(graph_id)
+            result = host.agent_graphs.get(graph_id)
+        else:
+            await host.close()
+            host = RuntimeHost(settings, GraphProvider())
+            await host.initialize()
+            result = host.agent_graphs.get(graph_id)
+        node = result["nodes"][0]
+        assert node["state"] == "completed"
+        assert node["result"]["output"] == "found value = 1"
+        assert node["result"]["child_session_id"]
+    finally:
         await host.close()

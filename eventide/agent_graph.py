@@ -305,6 +305,8 @@ class AgentGraphs:
                 output="",
                 error="Node cancelled before execution",
             )
+            if not self.host._closed:
+                self.refill()
         elif task.exception() is not None:
             asyncio.get_running_loop().call_exception_handler(
                 {
@@ -313,6 +315,47 @@ class AgentGraphs:
                     "task": task,
                 }
             )
+
+    def _settle_run(
+        self,
+        graph_id: str,
+        node_id: str,
+        run_id: str,
+        *,
+        fallback: str,
+        error: str | None,
+    ) -> None:
+        record = self.host.store.get_run(run_id)
+        status, output = fallback, ""
+        details: dict[str, Any] = {}
+        if record is not None:
+            details["child_session_id"] = record["session_id"]
+            if record["status"] in {"completed", "failed"}:
+                status = record["status"]
+            output = record["output"]
+            error = record.get("error") or (None if status == "completed" else error)
+            cleanup_error = next(
+                (
+                    f["payload"]["error"]
+                    for f in self.host.store.session_events(record["session_id"])
+                    if f["type"] == "side_question.cleanup_failed"
+                    and f["payload"].get("side_run_id") == run_id
+                ),
+                None,
+            )
+            if cleanup_error:
+                status, error = "failed", cleanup_error
+        self._finish(
+            graph_id,
+            node_id,
+            run_id,
+            status,
+            output=output[:8000],
+            output_truncated=len(output) > 8000,
+            output_length=len(output),
+            error=error,
+            **details,
+        )
 
     async def _stop_child(self, run_id: str, *, user_stop: bool) -> None:
         child = self.host._run_tasks.get(run_id)
@@ -367,40 +410,19 @@ class AgentGraphs:
                 await asyncio.wait_for(asyncio.shield(child), 60)
             except asyncio.TimeoutError:
                 await self._stop_child(run_id, user_stop=False)
-            record = self.host.store.get_run(run_id)
-            assert record is not None
-            status = "completed" if record["status"] == "completed" else "failed"
-            cleanup_error = next(
-                (
-                    f["payload"]["error"]
-                    for f in self.host.store.session_events(record["session_id"])
-                    if f["type"] == "side_question.cleanup_failed"
-                    and f["payload"].get("side_run_id") == run_id
-                ),
-                None,
-            )
-            self._finish(
-                graph_id,
-                node_id,
-                run_id,
-                "failed" if cleanup_error else status,
-                child_session_id=record["session_id"],
-                output=record["output"][:8000],
-                output_truncated=len(record["output"]) > 8000,
-                output_length=len(record["output"]),
-                error=cleanup_error or record.get("error"),
+            self._settle_run(
+                graph_id, node_id, run_id, fallback="failed", error="Node did not complete"
             )
         except BaseException as exc:
             await self._stop_child(
                 run_id,
                 user_stop=self.get(graph_id)["cancelled"],
             )
-            self._finish(
+            self._settle_run(
                 graph_id,
                 node_id,
                 run_id,
-                "interrupted" if isinstance(exc, asyncio.CancelledError) else "failed",
-                output="",
+                fallback="interrupted" if isinstance(exc, asyncio.CancelledError) else "failed",
                 error=str(exc)[:800] or "Node execution cancelled",
             )
             if not isinstance(exc, (asyncio.CancelledError, ValueError, OSError)):
@@ -452,13 +474,10 @@ class AgentGraphs:
                 claim = node["claim"]
                 if node["result"] or claim is None or claim["run_id"] in self.tasks:
                     continue
-                record = self.host.store.get_run(claim["run_id"])
-                completed = record is not None and record["status"] == "completed"
-                self._finish(
+                self._settle_run(
                     graph["graph_id"],
                     node["id"],
                     claim["run_id"],
-                    "completed" if completed else "interrupted",
-                    output=record["output"][:8000] if record and completed else "",
-                    error=None if completed else "Service restarted; node not replayed",
+                    fallback="interrupted",
+                    error="Service restarted; node not replayed",
                 )

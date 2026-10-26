@@ -61,6 +61,8 @@ def create_router(context: ApiContext) -> APIRouter:
                 return await host.agent_graphs.advance(graph_id)
             except LookupError as exc:
                 raise HTTPException(404, str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
 
         return await mutate_run_action(
             host, request, "graph_advance", {"graph_id": graph_id}, execute

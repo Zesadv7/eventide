@@ -1036,3 +1036,13 @@ MK20-CURRENT当前复验：测试账本接口/Settings字段/未提交临时fixt
 
 - MK20-GRAPH-UI最终：补节选字段后truncated-output中对应展示用例1通过/9未运行（非全量10重跑），types-output退出0、format-output通过，diff检查通过。前两次相同定位问题均已修复，不存在未登记的验证失败。提交为本切片feat: add explicit-start read-only task graphs to chat；commit hash以Git记录为准。
 
+
+- MK20-CURRENT独立审查补充（基线f39beb4/767afe2）：当前模型协作代理发现“图A占满4槽、图B已开始等槽、在A协程首条语句前取消A”不触发refill。新增受控缺陷复现prestart-red.log，1失败/退出1，实际B保持ready；不是线上事故。补节点首次执行前取消完成回调的统一补位，随后复验原复现及关联容量/停止用例。
+
+- MK20-CURRENT同次只读审查又发现：子Run已持久completed但Graph尚未收尾时取消，会把Graph节点写成interrupted/空结果；配置守卫ValueError也被HTTP通用包装误当未知接收。均为开发期审查发现、尚未上传任务图候选；补精确窗口用例并修正为按持久Run终态收尾、接收前明确4xx拒绝。原已验收6873d21已按用户授权上传，未将这些问题混作已验收上传。
+
+- MK20-CURRENT首条built真实API浏览器旅程失败：开始图后5秒内未找到“2 / 2 个任务已完成”，退出1；日志graph-review/browser.log及frontend/test-results/graphs-*/error-context.md保留。原因待查，不以组件通过替代真实API闭环；先检查页面实际状态和节点事实，再决定修复范围。
+
+- MK20-CURRENT浏览器失败已定位为测试定位：保存的error-context显示两节点均已完成、历史链接正确，计数与“已完成”状态徽标共处同一段落，exact文字匹配错误。改为定位包含计数的实际段落后仅复验该旅程，不延长等待、不改产品执行行为。组件24项、类型与生产构建已通过，均不冒充浏览器已通过。
+
+MK20-CURRENT最终：prestart-red复现后3项Green通过；持久完成结果取消/关服窗口与恢复/API4项通过，最终HTTP配置拒绝/契约/分发12项通过。browser2真实页面旅程通过（4.8秒场景），首轮已证实仅exact定位错误，无延长等待。24项集成组件、Ruff/Mypy5、Vue类型/build/生成资源通过；前端组件未mock面板的localhost日志仍只属测试装置，真实API验证独立记录。测试夹具/格式/类型、受控并发缺陷均已修正复验，未遗留未登记失败；真实供应商、全量、写协作和重启自动续接不作已完成声明。主代理负责后端/集成与修复，当前模型协作代理负责UI/独立代码审查，ZCode仅遗留草稿；相关提交f39beb4/767afe2及本次集成收口。
