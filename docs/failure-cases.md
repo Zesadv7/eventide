@@ -1219,3 +1219,11 @@ MK21-INTEGRATION当前复验：89项原生worker/协议/路径/取消主集成�
 - MK-INTEGRATION-FINAL三个失败精确复验退出0、3通过/3.23秒（full-failed-targeted.log）。序列化目录5390字符，较6064减少674，原5400上限与长轮次16900预算均未改变；目录回归和长轮次失败同根，最近三条工具结果保护保持。交付按精确身份无用量/后代及无Writer接收事实通过；未删除普通排队任务的自动恢复。Graph独立built复验1条通过，文档尾空行修复后diff检查通过。待补受影响上下文/问答关联和静态，原全量失败事实保留，不虚报重新全量全绿。
 
 - MK-INTEGRATION-FINAL收口：原3失败精确3通过后，上下文构建/结构化提问/补充26项关联通过（final-context-questions.log）；最终Ruff涉及4文件通过，Mypy两生产模块通过，先前全仓166模块/前端318项/服务/help/smoke12及类型构建仍有效，没有其他生产实现变化。Prettier检查通过，diff尾空行问题复验通过；最终待提交差异再次检查。对应修复与生成资源在本次“fix: close accepted upgrade checks and synchronize workbench contracts”集成提交，前置功能提交c454ad5/7d51389/925d099/6c338fe/03eb82f保留。当前模型root实施，readonly_finish独立检查工具说明关键语义保留，其他当前模型子agent负责此前原生/核查切片；无线上故障/用户影响/速度收益证据。12项跳过为可选依赖/环境测试，不算通过；真实内核、付费模型与剩余功能未验收，不因本次上传改判。
+
+### MK19-NAV-MAINT — 故障报告恢复入口维护命令（2026-10-27，55ffd45）
+
+首次编辑命令在frontend目录使用带frontend前缀的相对路径，FileNotFoundError，文件尚未修改；同一shell随后旧诊断组件测试退出0，不能算新增入口已验证。原因是维护命令工作目录选择错误；改为显式绝对项目根编辑，编辑与验证分开执行。原测试日志2026-10-27/diagnostics-navigation.log仅为未修改基线，后续复验另存。
+
+MK19-NAV-MAINT修正后：编辑单独在显式项目根执行成功，再独立运行诊断6项全部通过（diagnostics-navigation2.log）、Vue类型退出0（diagnostics-types.log）。原失败没有修改任何文件，属于维护命令目录错误；无产品回归或用户影响证据。相关入口与稳定文档随本次可执行分支提交，打包/服务验证后补齐。
+
+MK19-NAV-MAINT收口：新增入口6项组件、类型/格式/生产构建及4项资源打包通过；最终分发/契约11项、独立实际服务启动和help均通过，未再出现失败。日志2026-10-27/executable-*.log。对应本次“feat: link diagnostics to live recovery and package runnable workbench”提交；root实施与核验，无生产事故或模型质量验证，四路ZCode候选不作为本提交已完成功能。

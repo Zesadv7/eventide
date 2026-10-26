@@ -221,6 +221,11 @@ it("exposes the diagnostics page route and renders the selected run", async () =
         path: "/runs/:runId/diagnostics",
         component: RunDiagnosticsView,
       },
+      {
+        path: "/runs/:runId/recovery",
+        name: "run-recovery",
+        component: { template: "<div>当前恢复状态</div>" },
+      },
     ],
   });
   await local.push("/runs/r-9/diagnostics");
@@ -231,5 +236,10 @@ it("exposes the diagnostics page route and renders the selected run", async () =
   await flushPromises();
   expect(wrapper.text()).toContain("运行故障报告");
   expect(wrapper.text()).toContain("发生了什么");
+  const recovery = wrapper.find('a[href="/runs/r-9/recovery"]');
+  await recovery.trigger("click");
+  await flushPromises();
+  expect(local.currentRoute.value.name).toBe("run-recovery");
+  expect(local.currentRoute.value.params.runId).toBe("r-9");
   wrapper.unmount();
 });
