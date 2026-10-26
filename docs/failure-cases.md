@@ -590,6 +590,11 @@ RQ-INTEGRATION收口：legacy属性修正后单项通过（legacy-recheck.log）
 
 - recovery后续：主代理完成独立核验并修正候选，179项后端定向及Ruff/Mypy通过，本地候选提交d75cd93；细节随集成保留MK08B-REVIEW。桥接超时日志仍保留，不改称ZCode调用成功。context/native按三路队列重发后均进入工具执行；没有再次出现并发拒绝，但任务最终验收仍待完成。
 
+### Coding链路续接（同类时限，2026-10-26）
+
+- 2026-10-26：命令日志sess_ce4f61c4与旁枝sess_9df78542实际wrapper退出1，result.jsonl为ok:false、ZCode task exceeded 30 minutes。各独立副本`.task_outputs/maka-upgrade/coding-resume/`保留现场和日志；未提交改动不回滚，未将部分实现当成功。
+- 分类：执行器时限，不是登录/网络/额度耗尽；固定Coding/yolo/max不切模型。原runner没有恢复已退出会话入口，通过新的UTF-8交接任务和原工作副本续做，明确是新会话；旁枝交接附父代理快照清理/主任务已提交证据/身份边界审查要求。
+
 ## MK08B-REVIEW：重试候选独立复核未通过（2026-10-26）
 
 - 分类：受控缺陷复现/待查。基线5acba20加ZCode未提交候选，主代理接手后运行共享Python `-m pytest -q tests/test_model_failure_review.py tests/test_model_retry.py`，退出1。
@@ -852,3 +857,20 @@ MK-ZCODE-405后续（2026-10-26，用户明确指定Coding Plan）：原网关�
 
 - 页面失败已证实是新增E2E用原始GET Run的不存在`run_id`字段发出`/runs/undefined/input-manifests`（原API身份字段为id，页面正常收到3条）；测试改用创建回执的精确runId。生产接口/页面逻辑不改，不把404当空清单，复验见browser-final.log。
 - 已完成修复复验：Ruff通过、Mypy4模块通过；输入/记忆/流式42项以及最终定向13项通过，16项前端和built页面复验1条通过。页面失败来自测试身份字段误用，生产清单仍只记录适配器入口事实、不代表网络到达。实际参与：主代理实现、复核及修复；相关提交为本切片提交，整体验收仍待MK-22。
+## MK16-DIR-ZCODE — Run 冻结工具目录切片开发期定向失败（2026-10-26）
+
+- 类型：新增测试首轮迭代失败（一处投影真 bug、其余为测试作者错误），无既有生产回归；基线 b3f6aca（含上一切片未提交草稿，已审查复用）。
+- 命令：`python -m pytest tests/test_run_tools_directory.py -x -q` 及前端 `vitest run tests/run-tools.test.ts`、`vue-tsc --noEmit`；原始逐轮输出见 `.task_outputs/maka-upgrade/coding-resume/backend-test-failures.log`（同目录含最终通过证据）。
+- 已证实原因（逐项）：1) `filter_run_tools` 的 `status=unloaded` 把 provided 基础工具也计入"未加载"——投影语义 bug，已改为未加载仅适用按需工具；2) 测试用 `list_workspaces()[0]["workspace_id"]` 下标访问 `WorkspaceRecord`（应属性访问）；3) HTTP 创建的 Run 无审批处理器，ASK 按生产语义停驻 `waiting_for_user`，测试改为 `host.run(..., approval_handler=...)` 直连；4) 测试误期待 agent 模式审批，实际 `should_auto_approve("agent")` 按既有设计自动批准，改用默认 auto 模式验证加载后写工具仍走审批且拒绝后不执行；5) 前端晚到响应测试先挂属性到 `vi.fn()` 触发 TS2339，改闭包后又因收窄报 TS2349，最终用显式对象属性持有 release 函数；6) 组件测试期望的"常驻"徽标与权限声明未渲染，属测试数据缺 provided 项及声明只在展开详情内，补数据并在面板级常驻权限声明。
+- 复验：后端 4 项端到端（冻结/加载后下一请求携带 schema/重开 Store 历史不因 MCP 变化被改写/未加载不可执行与权限不升级/无目录 Run 明确缺失）加既有 discovery/tools 共 10 项通过；Ruff 全过，Mypy py3.10 三模块通过；前端 6 项通过、vue-tsc 0 错误；OpenAPI/TS 已再生成。
+- 经验：状态过滤器必须区分"常驻 provided"与"按需未加载"两类目录事实；approval 断言要选对模式（agent 自动批准、auto 走处理器）；宿主对象是 dataclass 时测试不能用 dict 下标。无遗留未验证项；整仓全量、浏览器与真实平台验收由主代理集成统一执行。
+
+
+### MK16-DIR-REVIEW — 工具目录集成复核
+
+- 2026-10-26，子提交7ce2959/集成eb011ba：代码检查发现无MCP的新Run缺少冻结目录，不能展示常规工具；UI切Run保留旧列表、SSE刷新关闭正在读的契约。修复所有执行模式按真实暴露目录冻结（Plan不包含写工具，Docker标明环境）；分页/详情采用独立请求代次，切Run立即清空旧内容，事件刷新保留阅读状态。冻结发生在执行目录组装、首模型请求之前，修正文档的admission误称；接收阶段冻结与MCP连接重核不冒充完成。
+- 定向11项后端、23项前端通过；后续静态/浏览器验证待下文补齐。审查发现并修正，非已发生用户故障；原始日志`.task_outputs/maka-upgrade/tool-directory-review/`。
+
+- Coding恢复两路也达到30分钟：恢复中心sess_a21a4dde退出1，但已留下完整候选提交dce4f52及11项后端/33项前端日志，转主代理独立审查，不以提交代替验收；正常关闭恢复sess_3a464b0d留下未提交代码，继续交接。后者结束前还出现HTTP429/1302限频（graceful-recovery-zcode/progress.log），无额度耗尽证据。有效并发暂由5降为4，避免扩大限频；不将限频等同任务代码失败。
+
+- MK16-DIR-REVIEW复验：11项后端、23项前端、Ruff/Mypy4模块/vue-tsc、built实际API页面1条通过（browser.log），未调用付费模型。真实MCP服务器/连接重核及全量仍待，假MCP验证不冒充真实供应商联通。

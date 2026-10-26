@@ -1571,6 +1571,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/runs/{run_id}/tools": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Run Tool Catalog */
+    get: operations["run_tool_catalog_api_runs__run_id__tools_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/runs/{run_id}/tools/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Run Tool Entry */
+    get: operations["run_tool_entry_api_runs__run_id__tools__name__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/runs/{run_id}/supplements": {
     parameters: {
       query?: never;
@@ -2712,6 +2746,107 @@ export interface components {
       unknowns: string[];
       /** Next Steps */
       next_steps: string[];
+    };
+    /** RunToolCatalogResponse */
+    RunToolCatalogResponse: {
+      /** Run Id */
+      run_id: string;
+      /** Catalog Frozen */
+      catalog_frozen: boolean;
+      /** Catalog Version */
+      catalog_version: string | null;
+      /** Frozen Seq */
+      frozen_seq: number | null;
+      /** Total */
+      total: number;
+      /** Catalog Total */
+      catalog_total: number;
+      /** Offset */
+      offset: number;
+      /** Limit */
+      limit: number;
+      /** Items */
+      items: components["schemas"]["RunToolItem"][];
+      /** Loaded Count */
+      loaded_count: number;
+      /** Failed Loads */
+      failed_loads: {
+        [key: string]: unknown;
+      }[];
+      /** Stale Receipts */
+      stale_receipts: number;
+      /** Notes */
+      notes?: string[];
+    };
+    /** RunToolDetailResponse */
+    RunToolDetailResponse: {
+      /** Name */
+      name: string;
+      /** Source */
+      source: string;
+      /** Version */
+      version: string;
+      /** Description */
+      description: string;
+      /** Effect */
+      effect: string;
+      /** Environment */
+      environment: string;
+      /** Status */
+      status: string;
+      /** Disabled Reason */
+      disabled_reason: string | null;
+      /** Provided */
+      provided: boolean;
+      /** Schema Status */
+      schema_status: string;
+      /** Schema Chars */
+      schema_chars: number | null;
+      /** Loaded */
+      loaded: boolean;
+      /** Loaded Seq */
+      loaded_seq: number | null;
+      /** Load Record */
+      load_record: {
+        [key: string]: unknown;
+      } | null;
+      /** Input Schema */
+      input_schema: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /** RunToolItem */
+    RunToolItem: {
+      /** Name */
+      name: string;
+      /** Source */
+      source: string;
+      /** Version */
+      version: string;
+      /** Description */
+      description: string;
+      /** Effect */
+      effect: string;
+      /** Environment */
+      environment: string;
+      /** Status */
+      status: string;
+      /** Disabled Reason */
+      disabled_reason: string | null;
+      /** Provided */
+      provided: boolean;
+      /** Schema Status */
+      schema_status: string;
+      /** Schema Chars */
+      schema_chars: number | null;
+      /** Loaded */
+      loaded: boolean;
+      /** Loaded Seq */
+      loaded_seq: number | null;
+      /** Load Record */
+      load_record: {
+        [key: string]: unknown;
+      } | null;
     };
     /**
      * RuntimeContractResponse
@@ -16652,6 +16787,255 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ToolCatalogResponse"];
+        };
+      };
+      /** @description bad request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description method not allowed */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description rate limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  run_tool_catalog_api_runs__run_id__tools_get: {
+    parameters: {
+      query?: {
+        query?: string;
+        source?: string;
+        status?: string;
+        offset?: number;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RunToolCatalogResponse"];
+        };
+      };
+      /** @description bad request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description method not allowed */
+      405: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description rate limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description internal error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  run_tool_entry_api_runs__run_id__tools__name__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RunToolDetailResponse"];
         };
       };
       /** @description bad request */

@@ -93,7 +93,7 @@ from eventide.task_plan import plan_update
 from eventide.task_plan import prompt as task_plan_prompt
 from eventide.task_plan import summary as plan_summary
 from eventide.tool_contracts import production_tool_catalog
-from eventide.tool_discovery import ToolDiscovery
+from eventide.tool_discovery import ToolCatalog, ToolDiscovery
 from eventide.tool_loops import failure_fingerprint, failure_loop_candidate
 from eventide.tool_results import TOOL as READ_TOOL_RESULT_TOOL
 from eventide.tool_results import reader as tool_result_reader
@@ -3533,7 +3533,8 @@ class RuntimeHost:
                     base_tools,
                     manager.tools,
                     manager.handlers,
-                    readonly_names=BASE_RUNTIME_READONLY_TOOLS | manager.readonly_tools,
+                    readonly_names=(BASE_RUNTIME_READONLY_TOOLS | manager.readonly_tools
+                                    | {"load_skill", "read_skill_resource", "delegate_readonly"}),
                 )
                 if (manager.tools and mode != "plan"
                     and not sandbox_execution and not readonly_profile)
@@ -3609,6 +3610,30 @@ class RuntimeHost:
             )
             if discovery is not None:
                 discovery.bind_executor(executor)
+
+                async def record_load_fact(fact: dict[str, Any]) -> None:
+                    # Trusted load facts come only from ToolDiscovery's own load
+                    # path, never from MCP-reported metadata.
+                    await self._emit(
+                        run_id,
+                        "tool.loaded"
+                        if fact.get("outcome") == "loaded"
+                        else "tool.load_failed",
+                        {key: value for key, value in fact.items() if key != "outcome"},
+                        sink,
+                    )
+
+                discovery.load_recorder = record_load_fact
+            catalog_snapshot = (
+                discovery.catalog if discovery else ToolCatalog(
+                    tools, [],
+                    readonly_names=BASE_RUNTIME_READONLY_TOOLS | executor.readonly_tools,
+                    environment="docker" if sandbox_execution else "local",
+                )
+            )
+            await self._emit(
+                run_id, "tool.catalog.frozen", catalog_snapshot.catalog_snapshot(), sink,
+            )
             runtime_readonly_tools = set(BASE_RUNTIME_READONLY_TOOLS)
             runtime_readonly_tools.update(manager.readonly_tools)
             if discovery:

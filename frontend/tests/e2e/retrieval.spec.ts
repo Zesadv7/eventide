@@ -400,6 +400,17 @@ test("source tools expose exact historical versions and page boundaries after re
   await expect(page.locator(".input-manifests article").last()).toContainText(
     manifest.entries.at(-1).attempt_id,
   );
+  const directory = page.getByRole("region", { name: "本 Run 工具目录" });
+  await expect(directory).toContainText("常驻");
+  await directory.getByLabel("搜索工具").fill("read_file");
+  await directory
+    .locator(".run-tool-row")
+    .filter({ hasText: "read_file" })
+    .click();
+  await expect(directory.locator(".run-tool-schema")).toContainText(
+    "continuation",
+  );
+  await expect(directory).toContainText("展示与发现不等于授权");
   await page.setViewportSize({ width: 320, height: 844 });
   expect(
     await page.evaluate(

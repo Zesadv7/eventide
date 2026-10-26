@@ -1085,7 +1085,7 @@ API 只按受授权的产物身份读取，支持有界文本分页及类型正�
 
 固定目录快照与加载回执，同一模型步骤使用同一版本；MCP 重连后目录变更必须显式复核，不能同名换实现。发现不等于授权，执行仍过严格 schema/Policy。模型不能加载不可用环境工具绕过沙箱；旧历史所需工具可解释但不会因此重新启用。API/UI 提供目录搜索、详情、已加载列表和失败诊断。验收百级工具、同名来源、动态变更、未授权发现、分页和找不到时的明确反馈；最终比较成功率和增加的查找步骤。
 
-**当前实现（2026-10-26，纵向最小切片，进行中）：** `eventide/tool_discovery.py` 提供 `ToolCatalog` 冻结快照（名称/来源/schema SHA256/效果/环境/状态，目录版本指纹为全部条目身份哈希）与确定性四级排序分页搜索；`ToolDiscovery` 提供 `tool_discover`/`tool_load` 两个模型工具，加载回执绑定目录版本、可选 `expected_catalog_version` 前置校验，经 `ToolExecutor.register_discovered_tool` 只解锁同快照内 schema。Host 工具投影（host.py 工具组装块）在存在 MCP 工具且非沙箱/只读时把 MCP 工具改为按需投影，未加载工具无目录项也无 handler，幻觉调用被 Unknown tool 拒绝；加载不改变 PolicyEngine 审批语义。`GET /api/workspaces/{id}/tools` 提供常备基础目录搜索，run-scoped 加载回执未持久化、不伪造已加载。详见 ADR-109。
+**当前实现（2026-10-26，切片 2，进行中）：** `eventide/tool_discovery.py` 提供 `ToolCatalog` 冻结快照（名称/来源/schema SHA256/效果/环境/状态，目录版本指纹为全部条目身份哈希）与确定性四级排序分页搜索；`ToolDiscovery` 提供 `tool_discover`/`tool_load` 两个模型工具，加载回执绑定目录版本、可选 `expected_catalog_version` 前置校验，经 `ToolExecutor.register_discovered_tool` 只解锁同快照内 schema。Host 工具投影（host.py 工具组装块）在存在 MCP 工具且非沙箱/只读时把 MCP 工具改为按需投影，未加载工具无目录项也无 handler，幻觉调用被 Unknown tool 拒绝；加载不改变 PolicyEngine 审批语义。`GET /api/workspaces/{id}/tools` 提供常备基础目录搜索。切片 2 起目录事实持久化：执行目录组装时 Host 把精确快照（含每项 schema，超 32k 字符仅留摘要标记）写入同 Run EventLog 的 `tool.catalog.frozen`；加载成功/失败由 ToolDiscovery 自身路径经 Host 写入 `tool.loaded`/`tool.load_failed`，MCP 汇报的 metadata 不作为可信来源。`GET /api/runs/{run_id}/tools`（及 `/tools/{name}`）只读投影冻结事实：回执须同时绑定目录版本与 schema 摘要才计为已加载，不匹配保留为事实并显式计数；无冻结事实的旧 Run 明确说明，不重新枚举当前 MCP 伪造历史。Vue 聊天流 `RunToolsPanel` 提供搜索/来源/状态、精确参数契约、版本与失败展示，面板常驻"展示不等于授权"，无执行入口。详见 ADR-109 与 ADR-114。
 
 ### MK-17：不打断主任务的旁枝提问
 
@@ -1268,3 +1268,5 @@ MK08C API集成：FastAPI lifespan通过initialize(recovery_approval_handler=App
 `RuntimeHost._complete_request` 在记忆最后资格检查后同步写入 `model.input_manifest`，再进入 provider 的 complete/stream；记录每次 attempt 的系统/消息/工具目录指纹、工具名称、实际输入中工具结果call_id、消息/工具数量与已有序列化字符组成。实际请求正文不在清单重复保存，包含附件时也只有摘要和计数。model.request仍代表逻辑步骤；attempt_started中的预算估算不被清单改写，清单不成为第二账本，也不保证供应商已接收。
 
 规则加载现在只读一次 `instructions_record`，context.configured附工作区根AGENTS.md来源、加载字符/文件字节/截断/上限和实际注入指纹。HTTP按Run与事件位置分页读取，Vue聊天内“模型输入记录”按需展开、显式刷新、较早记录分页，切换Run丢弃迟到结果。旧历史没有清单时说明未记录。子目录规则继承、摘要内容对照和引用自动跳转仍待后续，不宣称MK-03/04整项完成。ADR-121。
+
+MK16目录补充：冻结发生在执行器和目录组装后、首次模型请求之前；普通无MCP、Plan、Docker也保存实际目录，Plan排除写工具，Docker声明自己的环境。按需目录包含常驻工具与可加载工具，两个发现控制工具由独立模型工具定义提供；其目录版本不等同整份模型request.tools指纹。历史投影不重新枚举当前MCP；MCP连接重新建立后的实现身份复核、接收阶段真正冻结仍待后续。Vue切Run立即清空旧数据、契约读取与列表刷新使用独立代次，刷新不关闭阅读中的参数详情。

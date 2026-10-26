@@ -27,6 +27,10 @@ DISCOVER_TOOL = "tool_discover"
 LOAD_TOOL = "tool_load"
 
 _PAGE_LIMIT_MAX = 50
+# Bound for one frozen input schema persisted in the run EventLog. Oversized
+# schemas keep their digest and an explicit marker; they are never silently
+# truncated into something that looks complete.
+FROZEN_SCHEMA_CHAR_LIMIT = 32_000
 
 
 class ToolDiscoveryError(ValueError):
@@ -177,6 +181,32 @@ class ToolCatalog:
     def schema_for(self, name: str) -> dict[str, Any] | None:
         return self._schemas.get(name)
 
+    def frozen_entry(self, name: str) -> dict[str, Any] | None:
+        """One directory entry with its frozen schema or explicit oversize marker."""
+        if name not in self._entries:
+            return None
+        entry = dict(self._entries[name])
+        schema = self._schemas[name]
+        serialized = _canonical(schema)
+        if len(serialized) <= FROZEN_SCHEMA_CHAR_LIMIT:
+            entry["input_schema"] = copy.deepcopy(schema)
+            entry["schema_status"] = "full"
+        else:
+            entry["input_schema"] = None
+            entry["schema_status"] = "oversize"
+            entry["schema_chars"] = len(serialized)
+        return entry
+
+    def catalog_snapshot(self) -> dict[str, Any]:
+        """The exact frozen snapshot the Host persists into the run EventLog."""
+        entries = [self.frozen_entry(item["name"]) for item in self._ordered]
+        return {
+            "catalog_version": self.catalog_version,
+            "environment": self._ordered[0]["environment"] if self._ordered else "local",
+            "total": len(entries),
+            "entries": entries,
+        }
+
 
 class ToolDiscovery:
     """Run-scoped discovery binding: frozen catalog plus loaded receipts."""
@@ -199,6 +229,10 @@ class ToolDiscovery:
         self._on_demand_handlers = dict(on_demand_handlers)
         self.loaded: dict[str, dict[str, Any]] = {}
         self._executor: Any = None
+        # Optional async hook the Host sets to persist trusted load facts into
+        # the same run EventLog as the frozen catalog. Never fed from MCP
+        # metadata: only this module's own load outcomes reach the recorder.
+        self.load_recorder: Callable[[dict[str, Any]], Any] | None = None
 
     # -- host wiring -------------------------------------------------------
     def bind_executor(self, executor: Any) -> None:
@@ -266,11 +300,27 @@ class ToolDiscovery:
             receipt = self.load(name, expected_catalog_version)
         except ToolDiscoveryError as exc:
             payload: dict[str, Any] = {"code": exc.code, "reason": str(exc), **exc.extra}
+            await self._record(
+                {
+                    "outcome": "failed",
+                    "tool": name,
+                    "catalog_version": self.catalog.catalog_version,
+                    **payload,
+                }
+            )
             return ToolOutput(
                 json.dumps({"error": payload}, ensure_ascii=False, indent=2),
                 True,
                 payload,
             )
+        # The frozen catalog already carries the schema; the load fact binds to
+        # it by digest instead of duplicating it in the EventLog.
+        await self._record(
+            {
+                "outcome": "loaded",
+                **{k: v for k, v in receipt.items() if k != "input_schema"},
+            }
+        )
         return ToolOutput(
             json.dumps(receipt, ensure_ascii=False, indent=2),
             False,
@@ -281,6 +331,11 @@ class ToolDiscovery:
                 "schema_digest": receipt["schema_digest"],
             },
         )
+
+    async def _record(self, fact: dict[str, Any]) -> None:
+        if self.load_recorder is None:
+            return
+        await self.load_recorder(fact)
 
     # -- core load path ------------------------------------------------------
     def load(self, name: str, expected_catalog_version: str | None = None) -> dict[str, Any]:

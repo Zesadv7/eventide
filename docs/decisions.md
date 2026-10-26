@@ -1379,3 +1379,14 @@ ADR-111补充：恢复领取后、initialize前再次退出时，下一进程从
 - 决策：在最后一次记忆资格检查之后、调用 provider adapter 之前，同步追加 model.input_manifest；期间没有 await，不打破“撤销后不再注入”的保证。绑定 request_id/attempt_id，记录系统/消息/目录指纹、工具名称、结果调用引用、字符组成；规则加载来源及截断摘要随 context.configured 记录。复用 Event Log，不复制原始提示词/源码/附件/工具参数。
 - 取舍：这是交给适配器的 provider-neutral 输入，不能宣称供应商已接收、适配器最终HTTP字节完全一致或模型已理解；字符组成不等于Token归因。辅助请求没有对应根规则配置时显示未记录。目录规则继承、摘要正文前后对照仍待后续。
 - 验证：实际 Provider 捕获与每次清单的 hash/组成一致；重试身份分离、记忆撤销导致系统指纹变化；分页无重叠、未知Run和边界参数；页面按需加载/错误重试/迟到响应隔离与built真实API旅程。见 AGENTS.md 和 `.task_outputs/maka-upgrade/input-manifests/`。
+## ADR-114：Run 工具目录以冻结事件为唯一投影事实（MK-16 切片 2，2026-10-26）
+
+**状态：Proposed（离线定向与端到端替身验证通过；真实 MCP 旅程、浏览器与完整门禁未做，不作为整项验收）。**
+
+**决策：** 一个 Run 的工具目录在该 Run 的 执行目录组装时由 Host 冻结为同一 EventLog 中的 `tool.catalog.frozen` 事件：来源/名称/描述/目录版本/每项 schema 版本/只读或副作用/环境/可用状态与精确 input_schema（超 32k 字符的 schema 只留摘要标记与字符数，不静默截断成看似完整）。`tool_load` 的成功与失败由 ToolDiscovery 自己的加载路径经 Host 回调写入 `tool.loaded`/`tool.load_failed` 事实；MCP 汇报的任何同名 metadata 不是可信来源，永远不进入这两个事件。
+
+`GET /api/runs/{run_id}/tools` 与 `/tools/{name}` 是纯只读投影：仅折叠上述持久事实，高水位取最后一条冻结事件；回执必须同时绑定目录版本与条目 schema 摘要才算已加载，不匹配的回执保留为事实但不套用，并显式计数提示。没有冻结事实的 Run（旧历史或无按需目录）返回 `catalog_frozen=false` 加说明，绝不重新枚举当前 MCP 伪造历史；重开 Store 或 MCP 已变化时旧 Run 的投影逐字节不变。分页/过滤在投影层完成，列表不内联 schema，精确契约由详情端点按需提供。Vue 聊天流内 `RunToolsPanel` 提供搜索/来源/状态筛选、精确参数契约、版本与失败记录展示，并在面板级常驻"展示与发现不等于授权"；不提供任何执行入口，加载/执行语义与权限全部仍由 ToolExecutor/PolicyEngine 既有边界决定。
+
+**取舍：** 冻结进事件而非独立表，保持唯一事实源且重启/迁移天然携带；代价是快照占事件体积（已按条目有界）。不把"已加载"提升为权限——它是模型可见性状态，授权仍按逐次调用判定。旧 Run 不补冻结事实，宁可显示缺失也不伪造。
+
+**验证：** 新增 `tests/test_run_tools_directory.py` 4 项端到端（真实 Host + 假 MCP 管理器）：首轮请求不含未加载 schema、`tool_load` 后下一请求携带冻结 schema、冻结事件与加载事实绑定同一目录版本、重开 Store 且 MCP 换catalog 后旧 Run 投影与详情不变而新 Run 冻结新目录、未加载调用被拒且 auto 模式下加载后的写工具仍经审批拒绝不执行、无目录 Run 明确缺失。既有 discovery/tools 共 10 项通过；前端 6 项组件测试（状态徽标/契约展开/筛选/缺失与失败明示/切 Run 晚到响应隔离/有界分页）通过；Ruff 全过、Mypy py3.10 三模块、vue-tsc、Prettier 通过；OpenAPI/TS 已再生成。开发期失败与复验见 failure-cases MK16-DIR-ZCODE。日志 `.task_outputs/maka-upgrade/coding-resume/`。无付费模型调用。
