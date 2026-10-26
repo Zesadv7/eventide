@@ -915,3 +915,13 @@ MK08F-REVIEW收口：上述测试等待与fixture问题修复后，56项后端�
 - MK05-REVIEW built浏览器首轮45秒超时（browser.log）；页面上下文显示命令已完成，但测试只展开工具总览、未展开内层bash调用详情，日志按钮不可见。修复E2E逐层展开，不修改生产权限或延长超时。44项后端通过/1显式容器跳过，Mypy6模块通过，保持页面失败单列。
 
 - MK05-REVIEW修复复验：44项后端通过/1项显式容器跳过（backend-final.log）、7项前端、Ruff（ruff-final2.log）/Mypy6模块（mypy-final.log）/vue-tsc、1条built真实API日志分页切流刷新及320px旅程（browser2.log）通过。父代理修复模型回读、密钥更新、UI竞态与自己引入的冲突/不可变结果错误；无模型付费调用。整体MK05/MK10仍有后台与容器接线未完成。
+
+### MK08C-GRACEFUL-REVIEW — 正常关闭恢复候选复核
+
+- ZCode因Coding Plan1308退出后主代理继续审查，候选基线b3f6aca；17项初次定向中1失败/16通过，日志该工作副本.task_outputs/maka-upgrade/graceful-review/backend.log。已证实为用例误要求用户停止后删除既有recovery.claimed事实；追加式Event Log必须保留唯一claim，只阻止后继派发。修正断言保留原claim且无后继，不删除历史、不放宽停止语义。原外部代理同断言失败留在graceful-recovery-resume2/test-file-round2.log，现一并登记。
+
+MK-CODING-1308后续：用户报告额度重置并授权继续后，四路Coding/max/yolo新调用均有实际工具执行，未再出现原1308。保留原失败及工作区，未自动切Start。新日志为side/coding-resume3、contract/model-capabilities-resume3、attention/agent-graph-resume3、interactions/structured-questions-zcode。
+
+- MK08C-GRACEFUL-REVIEW：集成32项恢复专项与101项Host/队列/副本/worker关联通过；补显式停止的恢复页投影后Ruff检出一处101字符SQL长行（graceful-review/ruff-final.log），Mypy因&&未运行。缩行后单独复验，不将未运行计为通过。
+
+- MK08C-GRACEFUL-REVIEW完成复验：原claim历史断言已修正；32项恢复专项、101项关联通过，随后停止投影与接收竞态最终22项通过，Ruff/Mypy4模块通过。主代理同时修正接收等待时停止可能丢失、旧Run已生后继仍假报取消成功，以及恢复投影遗漏Session停止事实。相关实现为本切片提交，原ZCode初稿/失败日志均保留；未宣称未知工具核查或控制任务自动恢复完成。

@@ -1417,3 +1417,15 @@ ADR-117集成补充：恢复页Continue必须携带expected_run_id并在实际�
 **验证：** 后端 11 项定向（中段标记分页回读、跨块密钥不落盘、取消中断收尾、超时诚实事实、流配额显式截断、重启恢复、Skill argv 路径、拒绝调用 not_started、过期显式不可用、HTTP 全栈分页/404/422）通过；前端 4 项组件测试（按需分页、诚实事实、显式不可用、请求错误与迟到响应隔离）通过；Ruff、Mypy（py310 目标 6 模块）、vue-tsc、Prettier 通过。日志 `.task_outputs/maka-upgrade/command-logs/` 及 `coding-resume*/`。无模型调用、无真实浏览器或完整门禁。
 
 ADR-115集成补充：普通命令流回读进入既有read_tool_result，同Session权限不变；返回真实availability/capture_state，不因日志缺失重放命令。每Run执行器组装时取当前冻结Provider密钥，跨块脱敏包含从持久配置加载的密钥；错误处理只捕获磁盘/SQLite边界异常，未知程序错误保留。已补真实Host长输出→模型中段回读、持久密钥分片、跨Session拒绝与磁盘故障不改退出码，built页面1条通过。
+
+## ADR-118：区分正常关服与用户停止，恢复领取不改写旧终态（2026-10-26）
+
+**状态：Accepted（本切片定向验证通过；整体验收与真实模型仍待MK22）。**
+
+Host.close在取消执行前为每个未结束Run写入绑定确切run_id/shutdown_id的host.shutdown_started事实；正常关服记录service_shutdown终态。用户cancel_run先持久化run.cancel_requested，再取消实际所有者；持久化失败明确返回错误，不能假装停止成功。停止事实优先于关服，未知工具结果仍保持未知，不因关服被当成可恢复。
+
+下一Host扫描关服终态，复用已有恢复判定与源码checkpoint、配置/Skill/预算边界；安全时在单事务写Session级recovery.claimed，保留原Run终态。唯一后继与连续重启沿用原claim；不重置父根预算。领取后、接收前及接收等待期间的用户停止都在首模型派发前复核；已创建后继的旧Run取消请求拒绝并要求使用后继身份，不把停止旧记录宣称为停止新执行。恢复接收携带expected_run_id，避免继续到被用户替换的新任务。
+
+关服记录写入异常仍完成任务取消与资源清理，随后向调用者报告异常；不会吞掉磁盘失败。恢复中心原子切面包含精确绑定的用户停止事实，仍保留已领取记录及其高水位，展示用户停止而不是继续显示自动恢复。
+
+验证：32项恢复/接收/投影组合和101项Host/队列/副本/Worker关联通过；补充停止投影后的22项复验、Ruff/Mypy4模块通过。覆盖真实Host关闭/重开、连续恢复、领取后再次退出、用户停止竞态、不同Session、新Run不继承旧关服标记、持久化失败、原预算归属和Web审批处理器。日志.task_outputs/maka-upgrade/graceful-review；外部ZCode实现初稿，主代理修正历史断言、接收竞态与页面事实范围。未知工具核查与控制任务恢复不在本切片冒充完成。

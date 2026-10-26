@@ -627,8 +627,9 @@ class RuntimeStore:
         old_run_id: str,
         new_run_id: str,
         *,
-        finalize_payload: dict[str, Any],
+        finalize_payload: dict[str, Any] | None = None,
         claim_payload: dict[str, Any],
+        terminal_claim: bool = False,
     ) -> bool:
         """Finalize a crashed Run and freeze its successor identity in one transaction.
 
@@ -636,6 +637,13 @@ class RuntimeStore:
         initialization or consecutive restarts cannot mint a second successor,
         because the old Run is terminal and the claimed identity is durable
         before any successor admission is attempted.
+
+        With ``terminal_claim`` the old Run already carries a terminal from a
+        graceful service shutdown; the transaction then requires exactly the
+        ``run.interrupted``/``reason=service_shutdown``/``resumable`` fact,
+        keeps it untouched, and records the claim as a session fact bound
+        precisely to ``source_run_id`` and ``resumed_as``. A durable user stop
+        (``run.cancel_requested``) refuses the claim in both modes.
         """
         with self._lock, self._connection:
             self._connection.execute("BEGIN IMMEDIATE")
@@ -644,15 +652,24 @@ class RuntimeStore:
             ).fetchone()
             if old is None or old["session_id"] != session_id:
                 return False
-            if self._connection.execute(
-                "SELECT 1 FROM runtime_events WHERE run_id=? AND type IN "
-                "('run.completed','run.failed','run.interrupted')",
+            terminal = self._connection.execute(
+                "SELECT type, payload_json FROM runtime_events WHERE run_id=? AND partial=0 "
+                "AND type IN ('run.completed','run.failed','run.interrupted')",
                 (old_run_id,),
-            ).fetchone():
+            ).fetchone()
+            if terminal_claim and terminal is None:
                 return False
+            if terminal is not None:
+                if not terminal_claim or terminal["type"] != "run.interrupted":
+                    return False
+                payload = json.loads(terminal["payload_json"])
+                if (payload.get("reason") != "service_shutdown"
+                        or payload.get("resumable") is not True):
+                    return False
             if self._connection.execute(
-                "SELECT 1 FROM runtime_events WHERE run_id=? AND type='recovery.claimed'",
-                (old_run_id,),
+                "SELECT 1 FROM runtime_events WHERE partial=0 AND type='recovery.claimed' "
+                "AND (run_id=? OR json_extract(payload_json,'$.source_run_id')=?)",
+                (old_run_id, old_run_id),
             ).fetchone():
                 return False
             if self._connection.execute(
@@ -663,6 +680,21 @@ class RuntimeStore:
                 "SELECT 1 FROM runs WHERE id=?", (new_run_id,)
             ).fetchone():
                 return False
+            if self._connection.execute(
+                "SELECT 1 FROM runtime_events WHERE partial=0 AND type='run.cancel_requested' "
+                "AND json_extract(payload_json,'$.run_id')=?",
+                (old_run_id,),
+            ).fetchone():
+                return False
+            if terminal is not None:
+                # The original shutdown terminal stays untouched; the session
+                # fact freezes source and successor identities instead.
+                self._append_fact_locked(
+                    session_id, "recovery.claimed", claim_payload,
+                    role="system", author="runtime",
+                )
+                return True
+            assert finalize_payload is not None
             # The claim freezes the successor identity first: after the terminal
             # fact lands in the same transaction no further Run fact is accepted.
             self._append_fact_locked(
@@ -674,6 +706,57 @@ class RuntimeStore:
                 run_id=old_run_id, role="system", author="runtime",
             )
         return True
+
+    def mark_shutdown_started(self, session_id: str, run_id: str, shutdown_id: str) -> bool:
+        """Bind one graceful-shutdown intent to one still-unfinished Run.
+
+        The Run-bound fact names both this shutdown and this exact Run, so a
+        later cancel in the same session can never inherit an older shutdown's
+        identity. A Run that reached its terminal before the marker is skipped:
+        it finished on its own and needs no shutdown decision. Store failures
+        raise; the caller must not invent a successful shutdown from them.
+        """
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            run = self._connection.execute(
+                "SELECT session_id FROM runs WHERE id=?", (run_id,)
+            ).fetchone()
+            if run is None or run["session_id"] != session_id:
+                return False
+            terminal = self._connection.execute(
+                "SELECT 1 FROM runtime_events WHERE run_id=? AND partial=0 AND type IN "
+                "('run.completed','run.failed','run.interrupted')",
+                (run_id,),
+            ).fetchone()
+            if terminal is not None:
+                return False
+            self._append_fact_locked(
+                session_id, "host.shutdown_started",
+                {"shutdown_id": shutdown_id, "run_id": run_id},
+                run_id=run_id, role="system", author="runtime",
+            )
+            return True
+
+    def service_shutdown_runs(self) -> list[str]:
+        """Runs a graceful shutdown finalized as recoverable, unclaimed and uncontinued.
+
+        Listing a Run here proves nothing on its own: classification still
+        applies every safety rule, and a durable user stop keeps it parked.
+        """
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT r.id FROM runs r WHERE EXISTS ("
+                "SELECT 1 FROM runtime_events t WHERE t.run_id=r.id AND t.partial=0 "
+                "AND t.type='run.interrupted' "
+                "AND json_extract(t.payload_json,'$.reason')='service_shutdown' "
+                "AND json_extract(t.payload_json,'$.resumable')=1) "
+                "AND NOT EXISTS (SELECT 1 FROM turns c WHERE c.continuation_of=r.id) "
+                "AND NOT EXISTS (SELECT 1 FROM runtime_events k WHERE k.partial=0 "
+                "AND k.type='recovery.claimed' AND (k.run_id=r.id "
+                "OR json_extract(k.payload_json,'$.source_run_id')=r.id)) "
+                "ORDER BY r.started_at"
+            ).fetchall()
+        return [row["id"] for row in rows]
 
     def referenced_attachments(self, session_id: str) -> set[str]:
         """Canonical references protect attachments even when the used cache was not written."""
@@ -1123,10 +1206,12 @@ class RuntimeStore:
                 self._decode(row)
                 for row in self._connection.execute(
                     "SELECT * FROM runtime_events WHERE session_id=? AND partial=0 "
-                    "AND type IN ('recovery.blocked','recovery.claimed') AND run_id IS NULL "
-                    "AND json_extract(payload_json, '$.source_run_id')=? "
+                    "AND run_id IS NULL AND ((type IN ('recovery.blocked','recovery.claimed') "
+                    "AND json_extract(payload_json, '$.source_run_id')=?) "
+                    "OR (type='run.cancel_requested' "
+                    "AND json_extract(payload_json, '$.run_id')=?)) "
                     "ORDER BY session_seq",
-                    (identity["session_id"], run_id),
+                    (identity["session_id"], run_id, run_id),
                 )
             ]
             all_events = sorted([*events, *recovery_facts], key=lambda event: event["session_seq"])

@@ -1027,7 +1027,7 @@ Maka 提供参考，不作为效果保证：它会对可安全重放的模型步
 
 把现有独立验收归档能力扩展到普通 Shell、Skill 脚本和受管后台进程；统一按调用身份、流、偏移分页，保留退出码、超时和采集完整性。先脱敏再保存，有配额和保留期，超额继续排空进程输出，明确哪段已丢失。控制日志和模型正文分开，不能把所有 MCP 返回任意存盘当成默认权限。API/UI 显示短摘要并按需展开中段日志，缺失/过期不假装空输出。验收中段唯一错误可回读、跨块密钥、存储失败不改退出码和取消无泄漏。
 
-切片 1 已实现（2026-10-26，[ADR-115](decisions.md#adr-115)）：`eventide/command_logs.py` 在 `ToolExecutor` 内对 `bash`/`run_skill_script` 捕获完整两流，经既有 `LocalCommandExecutor` 观察口与 `SafeTextBuffer` 先脱敏再写入状态根 `command-logs/<run哈希>/<artifact>/`；配额（单流 1 MiB/Run 24 MiB/全局 256 MiB）超额只标记 `quota_exceeded` 并继续排空，不改变真实退出码，取消/超时以 `interrupted` 收尾并照常回收进程。事实（`command.log_started/recorded/expired/cleanup_failed`）只落唯一 Event Log，记录身份、字节、SHA-256 与诚实状态；脱敏正文不能从事件元数据重建，文件是独立有界备份，分页读取须校验摘要，越权/串 Run/越界分页显式拒绝。HTTP 为 `GET /api/runs/{run_id}/calls/{call_id}/command-log`，Vue `ToolActivity` 内 `CommandLogPanel` 按需分页、显示不可用原因并声明覆盖范围（仅本机 Shell/Skill；容器/沙箱不接入也不降级宿主采集）。重启恢复将中断捕获标为 `process_restart`，清理失败保留 `cleanup_failed` 事实。受管后台命令（MK-10）属后续切片，本切片未实现。
+切片 1 已实现（2026-10-26，[ADR-115](decisions.md#adr-115)）：`eventide/command_logs.py` 在 `ToolExecutor` 内对 `bash`/`run_skill_script` 捕获完整两流，经既有 `LocalCommandExecutor` 观察口与 `SafeTextBuffer` 先脱敏再写入状态根 `command-logs/<run哈希>/<artifact>/`；配额（单流 1 MiB/Run 24 MiB/全局 256 MiB）超额只标记 `quota_exceeded` 并继续排空，不改变真实退出码，取消以 `interrupted` 收尾并照常回收进程；超时由原命令timed_out/exit_code表示，采集完成不等于命令成功。事实（`command.log_started/recorded/expired/cleanup_failed`）只落唯一 Event Log，记录身份、字节、SHA-256 与诚实状态；脱敏正文不能从事件元数据重建，文件是独立有界备份，分页读取须校验摘要，越权/串 Run/越界分页显式拒绝。HTTP 为 `GET /api/runs/{run_id}/calls/{call_id}/command-log`，Vue `ToolActivity` 内 `CommandLogPanel` 按需分页、显示不可用原因并声明覆盖范围（仅本机 Shell/Skill；容器/沙箱不接入也不降级宿主采集）。重启恢复将中断捕获标为 `process_restart`，清理失败保留 `cleanup_failed` 事实。受管后台命令（MK-10）属后续切片，本切片未实现。
 
 ### MK-06：运行中补充与 Agent 主动提问
 
@@ -1257,7 +1257,7 @@ MK08C主代理复核补齐：每次构造从持久recovery.claimed重建尚未�
 
 MK07/09主代理复核：项目待处理查询在数据库先按project_id关联所有源/执行副本，再按时间取有界最近记录，避免其他项目挤掉目标事项。响应limits及页面文字明确展示范围，counts为本次返回数量；交付读取失败不静默显示为空。6项后端/3项前端、类型/静态检查通过；审批参数版本与全量待办翻页仍未完成。
 
-MK08C API集成：FastAPI lifespan通过initialize(recovery_approval_handler=ApprovalBroker.request)为自动后继接上原Web审批处理器，开发接口缺handler时保留拒绝。当前仅扫描无终态Run；正常关闭服务已写取消终态的恢复还未实现，应与用户明确停止区分后再接入。MK06聊天补充与MK07/09待处理页面集成后完成142项后端组合回归、32项恢复/API检查、59项前端及1条built真实API浏览器旅程；OpenAPI/类型/静态资源已同步，未做全仓最终门禁和付费模型效果验收。ZCode后续三路HTTP405外部阻断已在failure-cases登记，不能计为已完成工作。
+MK08C API集成：FastAPI lifespan通过initialize(recovery_approval_handler=ApprovalBroker.request)为自动后继接上原Web审批处理器，开发接口缺handler时保留拒绝。首批仅扫描无终态Run；正常关闭恢复现由ADR-118接入，显式用户停止仍不自动恢复。MK06聊天补充与MK07/09待处理页面集成后完成142项后端组合回归、32项恢复/API检查、59项前端及1条built真实API浏览器旅程；OpenAPI/类型/静态资源已同步，未做全仓最终门禁和付费模型效果验收。ZCode后续三路HTTP405外部阻断已在failure-cases登记，不能计为已完成工作。
 
 ### MK-02/15 源码证据展示（2026-10-26）
 
@@ -1277,3 +1277,5 @@ MK08F恢复详情切片（2026-10-26，ADR-117）：`GET /api/runs/{id}/recovery
 MK08F集成复核：继续按钮使用持久幂等请求与expected_run_id，将用户意图绑定到页面所见原运行；源/副本接收锁内拒绝过期目标，先回放既有202回执。Session级claim/blocked纳入同一high_water，已领取与实际派发分开。页面有接收后继链接及晚到响应隔离；步骤/调用次数仅称执行进度，不称完成成果。新增源/worktree/snapshot真实接收用例和built实际API停止→继续→刷新→320px旅程通过；完整重连及未知核查仍按MK08后续验收。
 
 MK05主代理复核：捕获密钥在实际执行器组装时更新为已加载/当前Provider配置，修复持久密钥加载晚于日志对象构造的问题；模型经同Session read_tool_result读取完整流，UI用请求代次隔离stdout/stderr和切调用迟到结果。capture_state=complete表示已排空的输出采集完成，真实命令是否超时/成功仍看原timed_out/exit_code。44项后端通过、1项显式容器跳过；7项前端、Ruff/Mypy6模块/vue-tsc和1条built分页/切流/刷新/320px旅程通过。普通日志落盘不等于后台命令或容器日志已完成。
+
+MK08C正常关闭恢复（ADR-118）：host.shutdown_started绑定确切Run及一次关服身份；取消终态只在该标记存在且无用户停止时记service_shutdown。Run关闭后不再追加Run事件，恢复claim及用户停止以精确关联的Session事实持久化；恢复页将其计入同一high_water。新Host复用安全边界、唯一后继与父根预算，接收时绑定source Run，等待检查期间收到停止也在实际派发前取消后继。代码初稿由ZCode提供，主代理补接收竞态与恢复投影；32项初始专项、101项关联及22项最终复验通过。正常关服可恢复不代表任意未知工具可重放，MK08D/E继续待实施。

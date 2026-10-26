@@ -8,11 +8,19 @@ admission froze ``recovery_policy.auto_resume`` and every committed fact still
 describes a safe boundary: no unknown tool outcomes, no unresolved tool
 protocol pairs, no pending approvals, and no side effect missing its
 post-tool checkpoint.
+
+A Run that a *graceful* service shutdown finalized as recoverable goes
+through the same safety boundary (``classify_shutdown_recovery``); only the
+terminal fact it starts from differs. A durable user stop
+(``run.cancel_requested``) beats service shutdown regardless of arrival
+order, so a stop racing a close can never be disguised as recoverable.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+
+from eventide.projections import TERMINALS
 
 if TYPE_CHECKING:
     from eventide.store import RuntimeStore
@@ -85,6 +93,16 @@ def pending_approvals(store: RuntimeStore, session_id: str) -> bool:
     return bool(open_ids)
 
 
+def user_cancel_requested(store: RuntimeStore, session_id: str, run_id: str) -> bool:
+    """Durable user stop beats service shutdown, whatever order they arrived in."""
+    return any(
+        event["type"] == "run.cancel_requested"
+        and event["payload"].get("run_id") == run_id
+        for event in store.session_events(session_id)
+        if not event["partial"]
+    )
+
+
 def classify_recovery_run(
     store: RuntimeStore, run_id: str,
 ) -> tuple[str, str]:
@@ -96,6 +114,45 @@ def classify_recovery_run(
     intents = [event["payload"] for event in events if event["type"] == "run.admitted"]
     if not intents:
         return FINALIZE, "admission_not_persisted"
+    return _safe_boundary(store, run_id, identity, events, intents)
+
+
+def classify_shutdown_recovery(
+    store: RuntimeStore, run_id: str,
+) -> tuple[str, str]:
+    """Verdict for a Run a graceful shutdown finalized as recoverable.
+
+    The original terminal fact must be exactly ``run.interrupted`` with
+    ``reason=service_shutdown`` and ``resumable=true``; everything else —
+    including every crash-park safety rule and a durable user stop — parks the
+    Run with its terminal untouched.
+    """
+    identity = store.get_run_identity(run_id)
+    if identity is None:
+        return FINALIZE, "admission_not_persisted"
+    events = store.run_events(run_id)
+    terminals = [event for event in events if event["type"] in TERMINALS]
+    if len(terminals) != 1 or terminals[0]["type"] != "run.interrupted":
+        return FINALIZE, "terminal_not_shutdown_recoverable"
+    payload = terminals[0]["payload"]
+    if payload.get("reason") != "service_shutdown" or payload.get("resumable") is not True:
+        return FINALIZE, "terminal_not_shutdown_recoverable"
+    intents = [event["payload"] for event in events if event["type"] == "run.admitted"]
+    if not intents:
+        return FINALIZE, "admission_not_persisted"
+    return _safe_boundary(store, run_id, identity, events, intents)
+
+
+def _safe_boundary(
+    store: RuntimeStore,
+    run_id: str,
+    identity: dict[str, Any],
+    events: list[dict[str, Any]],
+    intents: list[dict[str, Any]],
+) -> tuple[str, str]:
+    """Shared crash/shutdown safety rules over one Run's committed facts."""
+    if user_cancel_requested(store, identity["session_id"], run_id):
+        return FINALIZE, "user_cancelled"
     binding = next(
         (
             event["payload"]["execution_binding"]

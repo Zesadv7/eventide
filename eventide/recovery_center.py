@@ -58,7 +58,7 @@ def _classify_stop(
         reason = payload.get("reason")
         if payload.get("recovery", {}).get("resumed_as"):
             return "auto_recovered"
-        if reason == "cancelled":
+        if reason in {"cancelled", "user_cancelled"}:
             return "user_cancel"
         if reason in BUDGET_STOP_REASONS:
             return "budget"
@@ -141,7 +141,9 @@ def build_recovery_view(
         "error": state.get("error"),
     }
 
-    if blocked:
+    if not unknown_tools and any(e["type"] == "run.cancel_requested" for e in events):
+        stop["kind"] = "user_cancel"
+    elif blocked:
         stop["kind"] = "recovery_blocked"
     elif claims:
         stop["kind"] = "auto_recovered"

@@ -737,3 +737,5 @@ Vue 新增 `/runs/:runId/recovery` 页面与 `RecoveryPanel`（历史 cut 与后
 恢复详情的 high_water 包含按 source_run_id 绑定的 Session 级恢复事实；当前后继状态单独标明实时读取。claim 只表示领取后继，不能当作已派发或已成功。恢复中心继续操作发送 `POST /api/sessions/{id}/continue`、`{"expected_run_id":"原运行ID"}`，服务在源/副本实际接收锁内核对最新Run，过期返回409 rejected；省略body仍兼容既有开发接口。相同内容的未知请求保留持久幂等键，已接收回执先回放，不因后续最新Run改变而二次派发；变更内容不能复用旧键。available_actions只给出当前动作入口，执行时仍复核源码、配置、预算及审批条件。
 
 MK05集成补充：现有read_tool_result新增普通命令stdout/stderr分流回读，仍须同Session的精确Run/call身份；交付验收沿用原固定allowlist，不扩展任意跨会话读取。模型预览发生截断时附回读提示；日志过期/缺失返回明确错误，不用预览补成完整流。日志起始/回执存储故障在工具metadata中明确可见，取消时回执落库失败写错误诊断而不吞掉。
+
+正常关服恢复新增事实：Run级host.shutdown_started载明run_id/shutdown_id；run.interrupted.reason=service_shutdown及resumable=true表示待按恢复条件核查，并非跳过检查承诺。关服后的recovery.claimed为Session事实，绑定source_run_id/resumed_as；旧终态原样保留。用户停止记录Session级run.cancel_requested，其run_id精确对应原运行；GET recovery将该事实纳入高水位并优先显示用户停止（未知工具仍不伪装已解决）。若旧运行已有后继，POST旧Run/cancel返回409，调用者须选择后继Run，不能误报已停止新任务。

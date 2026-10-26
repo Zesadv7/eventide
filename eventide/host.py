@@ -679,6 +679,16 @@ class RuntimeHost:
             return
         self._closed = True
         pending = [t for t in self._active_tasks if t is not asyncio.current_task()]
+        # The durable service intent lands before anything is cancelled: the
+        # terminal writers and the next startup classify from these facts,
+        # never from this in-memory flag. A failed write still leaves every
+        # Run parked as a plain cancel, and the error surfaces to the caller
+        # after the real finalization below has completed.
+        shutdown_error: BaseException | None = None
+        try:
+            self._record_shutdown_intents()
+        except BaseException as exc:
+            shutdown_error = exc
         for task in pending:
             task.cancel()
         if pending:
@@ -693,6 +703,62 @@ class RuntimeHost:
             if self._owns_store:
                 self.store.close()
             self._lease.close()
+        if shutdown_error is not None:
+            raise shutdown_error
+
+    def _record_shutdown_intents(self) -> None:
+        """Persist the real service-shutdown intent for every unfinished Run.
+
+        Each intent is one Run-bound fact written before anything is cancelled;
+        the terminal writers read these facts when they finalise. A store
+        failure propagates to ``close()``: the affected Run then keeps a plain
+        ``cancelled`` terminal, and the caller sees the error instead of a
+        faked successful shutdown.
+        """
+        shutdown_id = f"shutdown_{uuid.uuid4().hex[:12]}"
+        for run_id in self.store.unfinished_runs():
+            identity = self.store.get_run_identity(run_id)
+            if identity is not None:
+                self.store.mark_shutdown_started(
+                    identity["session_id"], run_id, shutdown_id
+                )
+
+    def _session_user_cancel(self, session_id: str | None, run_id: str) -> bool:
+        if not session_id:
+            return False
+        return any(
+            event["type"] == "run.cancel_requested"
+            and event["payload"].get("run_id") == run_id
+            for event in self.store.session_events(session_id)
+            if not event["partial"]
+        )
+
+    def _run_shutdown_id(self, run_id: str) -> str | None:
+        """The shutdown this exact Run was marked for, or None for plain cancels."""
+        return next(
+            (
+                event["payload"].get("shutdown_id")
+                for event in reversed(self.store.run_events(run_id))
+                if event["type"] == "host.shutdown_started"
+            ),
+            None,
+        )
+
+    def _cancelled_payload(self, run_id: str, *, error: str) -> dict[str, Any]:
+        """Cancellation reason from durable facts: user stop beats service shutdown."""
+        identity = self.store.get_run_identity(run_id)
+        session_id = identity["session_id"] if identity else None
+        if self._session_user_cancel(session_id, run_id):
+            return {"error": error, "reason": "cancelled"}
+        shutdown_id = self._run_shutdown_id(run_id)
+        if shutdown_id is not None:
+            return {
+                "error": "Service stopped before terminal fact",
+                "reason": "service_shutdown",
+                "resumable": True,
+                "shutdown_id": shutdown_id,
+            }
+        return {"error": error, "reason": "cancelled"}
 
     async def _close_provider(self) -> None:
         if self.provider is None:
@@ -1183,6 +1249,18 @@ class RuntimeHost:
 
     async def cancel_run(self, run_id: str) -> dict[str, Any]:
         """Cancel one active run and wait until its interrupted fact is durable."""
+        # The user stop becomes durable before anything is cancelled. Even if a
+        # concurrent service shutdown finalizes the Run first, this fact keeps
+        # it parked instead of letting the shutdown resume it later. If the
+        # fact cannot be persisted, the error propagates and nothing is
+        # cancelled: an unrecorded stop must not look like a successful one.
+        if self._shutdown_parked(run_id):
+            identity = self.store.get_run_identity(run_id)
+            assert identity is not None
+            latest = self.store.latest_run_summary(identity["session_id"])
+            if latest is not None and latest["id"] != run_id:
+                raise ValueError("Run already has a successor; stop that Run by its identity")
+        self._record_user_cancel(run_id)
         task = self._run_tasks.get(run_id)
         intent = self._admitted_intent(run_id)
         if (
@@ -1201,6 +1279,14 @@ class RuntimeHost:
             record = self.store.get_run(run_id)
             if record is None:
                 raise ValueError(f"Run not found: {run_id}")
+            if (
+                record["status"] == "interrupted"
+                and self._shutdown_parked(run_id)
+                and self._session_user_cancel(record["session_id"], run_id)
+            ):
+                # The durable stop landed on a Run a graceful shutdown had
+                # parked: the stop keeps it parked and nothing is active.
+                return record
             raise ValueError(f"Run is not active: {run_id}")
         if task is asyncio.current_task():
             raise ValueError("A run cannot cancel itself")
@@ -2398,6 +2484,44 @@ class RuntimeHost:
                 approval_handler, existing_turn_id=admitted["turn_id"], execution_binding=binding,
             )
 
+    def _shutdown_parked(self, run_id: str) -> bool:
+        """The Run's terminal is exactly a graceful-shutdown recoverable interrupt.
+
+        Unlike ``service_shutdown_runs()`` this ignores claim state: between a
+        restart's claim and its dispatch the Run is claimed but still parked,
+        and a user stop in that window must stay recordable.
+        """
+        terminal = next(
+            (
+                event for event in reversed(self.store.run_events(run_id))
+                if event["type"] in {"run.completed", "run.failed", "run.interrupted"}
+            ),
+            None,
+        )
+        return bool(
+            terminal
+            and terminal["type"] == "run.interrupted"
+            and terminal["payload"].get("reason") == "service_shutdown"
+            and terminal["payload"].get("resumable") is True
+        )
+
+    def _record_user_cancel(self, run_id: str) -> None:
+        """Persist the user stop before anything is cancelled; facts decide revival.
+
+        A store failure raises to ``cancel_run`` so the caller never sees a
+        successful stop that the Event Log does not back: otherwise the next
+        startup could revive a Run the user had stopped.
+        """
+        identity = self.store.get_run_identity(run_id)
+        if identity is None:
+            return
+        if self.store.run_is_terminal(run_id) and not self._shutdown_parked(run_id):
+            return
+        self.store.append_fact(
+            identity["session_id"], "run.cancel_requested",
+            {"run_id": run_id, "reason": "user"}, role="user", author="user",
+        )
+
     def _finish_admitted(self, run_id: str, error: BaseException) -> None:
         """Close accepted work that stopped before its execution could write a terminal."""
         if (
@@ -2409,11 +2533,13 @@ class RuntimeHost:
             self.store.append_event(
                 run_id,
                 "run.interrupted" if cancelled else "run.failed",
-                {
-                    "error": "Run cancelled before execution; session parked"
-                    if cancelled
-                    else self._clean(f"{type(error).__name__}: {error}"),
-                    "reason": "cancelled" if cancelled else "admission_failed",
+                self._cancelled_payload(
+                    run_id, error="Run cancelled before execution; session parked",
+                )
+                if cancelled
+                else {
+                    "error": self._clean(f"{type(error).__name__}: {error}"),
+                    "reason": "admission_failed",
                 },
             )
 
@@ -2691,7 +2817,12 @@ class RuntimeHost:
         persisted provider configuration is loaded and frozen identities are
         re-verified before the existing scheduling path takes over.
         """
-        from eventide.run_recovery import FINALIZE, classify_recovery_run
+        from eventide.run_recovery import (
+            FINALIZE,
+            RESUME,
+            classify_recovery_run,
+            classify_shutdown_recovery,
+        )
 
         for run_id in self.store.unfinished_runs():
             binding = self._execution_binding(run_id)
@@ -2717,6 +2848,12 @@ class RuntimeHost:
                 self._finalize_interrupted_run(run_id, parked_reason)
             else:
                 self._claim_auto_recovery(run_id, reason)
+        for run_id in self.store.service_shutdown_runs():
+            verdict, reason = classify_shutdown_recovery(self.store, run_id)
+            if verdict == RESUME:
+                self._claim_shutdown_recovery(run_id, reason)
+            # A parked shutdown Run keeps its original terminal untouched; the
+            # user can still Continue it manually, which re-validates everything.
         self._restore_recovery_claims()
 
     def _restore_recovery_claims(self) -> None:
@@ -2839,6 +2976,37 @@ class RuntimeHost:
                 (identity["session_id"], run_id, resumed_as, intent)
             )
 
+    def _claim_shutdown_recovery(self, run_id: str, verdict_reason: str) -> None:
+        """Claim a graceful-shutdown terminal without touching the original fact.
+
+        The claim is a session fact bound precisely to source and successor
+        identities, so consecutive restarts keep rebuilding the same successor.
+        """
+        intent = self._admitted_intent(run_id)
+        identity = self.store.get_run_identity(run_id)
+        if intent is None or identity is None:
+            return
+        if not self._recovery_boundary_justified(run_id):
+            # The committed checkpoint no longer describes the workspace; the
+            # Run stays parked on its shutdown terminal for manual Continue.
+            return
+        resumed_as = f"run_{uuid.uuid4().hex[:16]}"
+        claimed = self.store.claim_run_recovery(
+            identity["session_id"], run_id, resumed_as,
+            claim_payload={
+                "resumed_as": resumed_as,
+                "source_run_id": run_id,
+                "verdict": verdict_reason,
+                "policy": intent.get("recovery_policy"),
+                "origin": "service_shutdown",
+            },
+            terminal_claim=True,
+        )
+        if claimed:
+            self._pending_recoveries.append(
+                (identity["session_id"], run_id, resumed_as, intent)
+            )
+
     async def _dispatch_pending_recoveries(
         self, approval_handler: ApprovalHandler | None,
     ) -> None:
@@ -2870,6 +3038,13 @@ class RuntimeHost:
         self, session_id: str, source_run_id: str, run_id: str, intent: dict[str, Any],
         approval_handler: ApprovalHandler | None,
     ) -> None:
+        # A stop recorded between the claim and this dispatch is the latest
+        # durable word: it parks the recovery, and nothing re-checks later.
+        from eventide.run_recovery import user_cancel_requested
+
+        if user_cancel_requested(self.store, session_id, source_run_id):
+            self._block_recovery(session_id, source_run_id, run_id, "user_cancelled")
+            return
         # Later configuration changes never expand the original frozen admission.
         if (
             intent.get("provider") != self.settings.provider
@@ -2885,7 +3060,7 @@ class RuntimeHost:
                 root = self._execution_paths(binding)[0] if binding else Path(workspace.path)
                 self.skills.restore(root, frozen_skills)
             self._recovery_markers[run_id] = source_run_id
-            await self.admit_continue(session_id, run_id)
+            await self.admit_continue(session_id, run_id, expected_run_id=source_run_id)
         except Exception as exc:
             self._recovery_markers.pop(run_id, None)
             self._block_recovery(
@@ -2893,8 +3068,13 @@ class RuntimeHost:
             )
             return
 
-        # This synchronous entry registers ownership before the task can run;
-        # its existing done callback persists failures and releases resources.
+        # Admission can await filesystem checks. A stop recorded during that
+        # interval must win before the successor gets its first model request.
+        if user_cancel_requested(self.store, session_id, source_run_id):
+            await self.cancel_run(run_id)
+            self._block_recovery(session_id, source_run_id, run_id, "user_cancelled")
+            return
+        # No await between the last stop check and registering the new owner.
         self.start_admitted_run(run_id, approval_handler=approval_handler)
 
     def _crash_gap_evidence(self, run_id: str) -> tuple[list[str], dict[str, Any] | None] | None:
@@ -4267,16 +4447,22 @@ class RuntimeHost:
                 if execution_binding else
                 self.store.workspace_has_unknown_outcome(execution_workspace.workspace_id)
             )
+            if unknown:
+                # An unknown outcome parks the Run no matter who cancelled it:
+                # neither the user stop nor a service shutdown may hide it.
+                interruption = {
+                    "error": "Run cancelled; tool outcome unknown, execution blocked",
+                    "reason": "unknown_tool_outcome",
+                }
+            else:
+                interruption = self._cancelled_payload(
+                    run_id, error="Run cancelled; session parked",
+                )
             await self._emit(
                 run_id,
                 "run.interrupted",
                 {
-                    "error": "Run cancelled; tool outcome unknown, execution blocked"
-                    if unknown
-                    else "Run cancelled; session parked",
-                    "reason": "unknown_tool_outcome"
-                    if unknown
-                    else "cancelled",
+                    **interruption,
                     "usage": usage,
                     "steps": steps,
                     "tool_calls": tool_count,
