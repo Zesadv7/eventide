@@ -518,13 +518,16 @@ async function abandon() {
         />
         <ContextSummaryPanel :session-id="store.selectedSession" />
         <SideQuestionPanel
-          v-if="run && !boundNative"
+          v-if="run && !boundNative && !boundSandbox"
           :run-id="run.run_id"
           :session-id="store.selectedSession"
           :run-status="run.status"
           :refresh-key="`${run.status}:${store.events[run.run_id]?.length || 0}`"
         />
-        <GraphPanel v-if="run" :run-id="run.run_id" />
+        <GraphPanel
+          v-if="run && !boundNative && !boundSandbox"
+          :run-id="run.run_id"
+        />
         <RunMemoryPanel
           v-if="run"
           :run-id="run.run_id"

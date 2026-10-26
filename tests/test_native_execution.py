@@ -491,6 +491,14 @@ async def test_native_readonly_catalog_and_session_permission_freeze(tmp_path, h
             native_profile="read-only",
         ))
         assert first.status == "completed"
+        from eventide.agent_graph import GraphDefinition, projections
+
+        with pytest.raises(ValueError, match="unavailable for native"):
+            host.agent_graphs.create(first.run_id, GraphDefinition.model_validate({
+                "title": "Must stay isolated", "nodes": [{"id": "read", "goal": "inspect"}],
+            }), "native-graph")
+        assert projections(host.store) == []
+        assert len(provider.requests) == 1
         with pytest.raises(ValueError, match="unavailable for native"):
             await host.create_side_question(first.run_id, "explain")
         from eventide.side_questions import create_side_question

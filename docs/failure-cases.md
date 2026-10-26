@@ -1127,3 +1127,10 @@ MK11-INTEGRATION复验完成：原五项中三项Shell失败链的根因已确�
 
 MK21-CANCELLED-WRITE/MK21-EDIT-PATH/MK21-NATIVE-CHILD收口：7项定向、15项runner/旁枝关联、Ruff、Mypy4模块全部通过。真实worker协议链已证明写可能完成时取消不会变成普通cancelled，原有预算、调用身份与恢复边界未放宽；清理失败也保留unknown，关闭标记延后到实际收尾。失败regex已按既有文案修正，静态问题已修复；当前代理实施、父代理及readonly_finish独立审查。没有真实OS/模型验证，不虚构线上用户影响。日志已归档 `.task_outputs/maka-upgrade/native-current-model/eventide-native-cancel-*.log`；对应本次原生审查修复提交，Graph集成验证另由父代理负责。
 
+
+### MK21-INTEGRATION — 当前窗口原生文件组合边界
+
+- 基线73de7ca，原生候选bae541e/1955b38/2184013依次接入9884ae6/4953a10/94b4c7b。独立审查发现Graph直接调用公共旁枝函数可绕过仅包装器的native拒绝；公共入口已修复，主集成另在Graph创建时拒绝原冻结native profile，3项native权限/Graph实际副本定向通过（native-review/graph-boundary.log）。本条不代表完整原生验收，发布后写入复核8da72ad仍待接入。
+- 首次主集成Vue类型命令误在仓库根执行且未指定frontend/tsconfig.json，退出1仅打印tsc帮助，没有实际类型检查（types-boundary.log）。属维护命令错误，改显式-p项目后复验，不计为产品类型失败或通过。
+
+MK21-INTEGRATION组合守卫复验：Graph创建/公共旁枝拒绝与普通Graph的source/worktree/Plan未回退共3项通过；Vue类型在指定正确项目后退出0。先前维护命令未查类型已纠正，不扩散为产品失败结论。此本地提交仅闭环跨候选守卫，完整原生部分尚未追加上传。

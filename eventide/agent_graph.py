@@ -156,8 +156,11 @@ class AgentGraphs:
         if identity is None:
             raise LookupError("Root Run not found")
         session_id = identity["session_id"]
-        if host._admitted_intent(root_run_id) is None:
+        intent = host._admitted_intent(root_run_id)
+        if intent is None:
             raise ValueError("Graph root lacks a frozen admitted intent")
+        if intent.get("execution_profile_config", {}).get("kind") == "native":
+            raise ValueError("Graphs are unavailable for native execution")
         if host.is_worker_session(session_id) or host.is_control_session(session_id):
             raise ValueError("Graphs require an ordinary main task")
         binding = host._execution_binding(root_run_id)
